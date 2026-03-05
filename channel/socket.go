@@ -13,12 +13,14 @@ const SocketPath = "/tmp/tclaw.sock"
 
 // SocketServer listens on a unix socket. Each connection is one turn:
 // the client sends a message, we process it, write the response, close.
-// Because the agent handles one message at a time, we track the active
-// connection so Send knows where to write.
+// Connections are paired with their messages so responses go to the
+// right client even when later messages queue behind an active turn.
 type SocketServer struct {
 	path string
-	mu   sync.Mutex
-	conn net.Conn // active connection for the current turn
+
+	mu      sync.Mutex
+	conn    net.Conn   // connection for the current turn's response
+	pending []net.Conn // queued connections waiting for their turn
 }
 
 func NewSocketServer(path string) *SocketServer {
@@ -77,9 +79,11 @@ func (s *SocketServer) Messages(ctx context.Context) <-chan string {
 
 			slog.Info("message received", "text", string(data))
 
-			// Store the connection so Send can write back to it.
+			// Queue the connection so it's paired with its message.
+			// Done will promote the next pending connection when a
+			// turn finishes.
 			s.mu.Lock()
-			s.conn = conn
+			s.pending = append(s.pending, conn)
 			s.mu.Unlock()
 
 			select {
@@ -104,11 +108,24 @@ func (s *SocketServer) Send(_ context.Context, text string) error {
 		return nil
 	}
 	_, err := io.WriteString(conn, text)
-	conn.Close()
+	return err
+}
 
+// Done closes the current turn's connection and promotes the next
+// pending connection so Send writes to the right client.
+func (s *SocketServer) Done(_ context.Context) error {
 	s.mu.Lock()
-	s.conn = nil
+	old := s.conn
+	if len(s.pending) > 0 {
+		s.conn = s.pending[0]
+		s.pending = s.pending[1:]
+	} else {
+		s.conn = nil
+	}
 	s.mu.Unlock()
 
-	return err
+	if old == nil {
+		return nil
+	}
+	return old.Close()
 }
