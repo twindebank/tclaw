@@ -9,7 +9,7 @@ import (
 	"sync"
 )
 
-const SocketPath = "/tmp/personal-agent.sock"
+const SocketPath = "/tmp/tclaw.sock"
 
 // SocketServer listens on a unix socket. Each connection is one turn:
 // the client sends a message, we process it, write the response, close.

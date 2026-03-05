@@ -7,7 +7,7 @@ import (
 	"net"
 	"os"
 
-	"personal-agent/channel"
+	"tclaw/channel"
 )
 
 // chat is a thin client that connects to the agent's unix socket.
