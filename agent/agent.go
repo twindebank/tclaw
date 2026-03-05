@@ -8,7 +8,7 @@ import (
 
 	claude "github.com/character-ai/claude-agent-sdk-go"
 
-	"personal-agent/channel"
+	"tclaw/channel"
 )
 
 // Agent wraps the Claude Code CLI binary and connects it to a channel.

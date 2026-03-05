@@ -9,8 +9,8 @@ import (
 
 	claude "github.com/character-ai/claude-agent-sdk-go"
 
-	"personal-agent/agent"
-	"personal-agent/channel"
+	"tclaw/agent"
+	"tclaw/channel"
 )
 
 func main() {
