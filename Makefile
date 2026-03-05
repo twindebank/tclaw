@@ -1,4 +1,4 @@
-.PHONY: agent chat agent-dev chat-dev build clean tidy
+.PHONY: agent chat agent-dev chat-dev build clean tidy docker docker-agent docker-chat docker-down
 
 # Run the agent daemon — logs appear here.
 agent:
@@ -8,7 +8,7 @@ agent:
 # Connect a chat session to the running agent.
 chat:
 	@echo "→ connecting to agent..."
-	@go run ./cmd/chat
+	@cd cmd/chat && go run .
 
 # Hot-reload versions — restart on any .go change.
 agent-dev:
@@ -20,12 +20,12 @@ agent-dev:
 # stdin through to child processes. Just build fresh and run directly.
 chat-dev:
 	@echo "→ connecting to agent..."
-	@go run ./cmd/chat
+	@cd cmd/chat && go run .
 
 build:
 	@echo "→ building..."
 	@go build -o bin/agent .
-	@go build -o bin/chat ./cmd/chat
+	@cd cmd/chat && go build -o ../../bin/chat .
 	@echo "✓ bin/agent  bin/chat"
 
 clean:
@@ -36,4 +36,20 @@ clean:
 tidy:
 	@echo "→ tidying dependencies..."
 	@go mod tidy
+	@cd cmd/chat && go mod tidy
 	@echo "✓ done"
+
+docker:
+	@echo "→ building docker image..."
+	@docker build -t tclaw .
+
+docker-agent:
+	@echo "→ starting container..."
+	@docker compose up --build -d
+
+docker-down:
+	@echo "→ stopping container..."
+	@docker compose down
+
+docker-chat:
+	@docker compose exec agent tclaw-chat

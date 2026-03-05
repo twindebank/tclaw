@@ -36,3 +36,7 @@ func (s *Stdio) Send(_ context.Context, text string) error {
 	fmt.Print(text)
 	return nil
 }
+
+func (s *Stdio) Done(_ context.Context) error {
+	return nil
+}

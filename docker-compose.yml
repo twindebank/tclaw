@@ -1,0 +1,15 @@
+services:
+  agent:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - TCLAW_STORE_PATH=/data/store
+    volumes:
+      - store-data:/data/store
+      - claude-config:/root/.claude
+
+volumes:
+  store-data:
+  claude-config:
