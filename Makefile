@@ -16,10 +16,11 @@ agent-dev:
 	@mkdir -p tmp
 	@air -c .air.agent.toml
 
+# chat is stateless so hot-reload via air isn't useful — air doesn't pass
+# stdin through to child processes. Just build fresh and run directly.
 chat-dev:
-	@echo "→ connecting to agent (hot reload)..."
-	@mkdir -p tmp
-	@air -c .air.chat.toml
+	@echo "→ connecting to agent..."
+	@go run ./cmd/chat
 
 build:
 	@echo "→ building..."

@@ -37,7 +37,9 @@ func (a *Agent) Run(ctx context.Context) error {
 			if err := a.handle(ctx, msg); err != nil {
 				slog.Error("handle failed", "err", err)
 			}
-			a.channel.Send(ctx, "\n> ") //nolint:errcheck
+			if err := a.channel.Send(ctx, "\n> "); err != nil {
+				slog.Error("failed to send prompt", "err", err)
+			}
 		}
 	}
 }
