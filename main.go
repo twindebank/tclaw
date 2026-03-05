@@ -14,6 +14,14 @@ import (
 )
 
 func main() {
+	// Set up logging first so everything below is captured.
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
+
+	// Claude Code sets CLAUDECODE=1 which blocks nested sessions.
+	// Unset it before we spawn any claude subprocess.
+	slog.Debug("unsetting CLAUDECODE", "was", os.Getenv("CLAUDECODE"))
+	os.Unsetenv("CLAUDECODE")
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -21,9 +29,8 @@ func main() {
 
 	ag := agent.New(claude.Options{
 		PermissionMode: claude.PermissionAcceptEdits,
+		Debug:          true, // logs claude subprocess stderr to our stderr
 	}, ch)
-
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
 	if err := ag.Run(ctx); err != nil {
 		slog.Error("agent exited", "err", err)

@@ -30,7 +30,9 @@ func (s *SocketServer) Messages(ctx context.Context) <-chan string {
 	go func() {
 		defer close(out)
 
-		os.Remove(s.path)
+		if err := os.Remove(s.path); err != nil && !os.IsNotExist(err) {
+			slog.Warn("failed to remove old socket", "err", err)
+		}
 		l, err := net.Listen("unix", s.path)
 		if err != nil {
 			slog.Error("socket listen failed", "err", err)
@@ -42,7 +44,9 @@ func (s *SocketServer) Messages(ctx context.Context) <-chan string {
 		// Close listener when ctx is cancelled so Accept unblocks.
 		go func() {
 			<-ctx.Done()
-			l.Close()
+			if err := l.Close(); err != nil {
+				slog.Warn("failed to close listener on shutdown", "err", err)
+			}
 		}()
 
 		for {
@@ -56,11 +60,18 @@ func (s *SocketServer) Messages(ctx context.Context) <-chan string {
 					continue
 				}
 			}
+			slog.Debug("connection accepted")
 
 			// Read the full message (client closes write side when done).
 			data, err := io.ReadAll(conn)
+			slog.Debug("read complete", "bytes", len(data), "err", err)
 			if err != nil || len(data) == 0 {
-				conn.Close()
+				if err != nil {
+					slog.Warn("failed to read from connection", "err", err)
+				}
+				if err := conn.Close(); err != nil {
+					slog.Warn("failed to close connection", "err", err)
+				}
 				continue
 			}
 
@@ -74,7 +85,9 @@ func (s *SocketServer) Messages(ctx context.Context) <-chan string {
 			select {
 			case out <- string(data):
 			case <-ctx.Done():
-				conn.Close()
+				if err := conn.Close(); err != nil {
+					slog.Warn("failed to close connection on shutdown", "err", err)
+				}
 				return
 			}
 		}
