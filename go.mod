@@ -1,0 +1,15 @@
+module personal-agent
+
+go 1.26
+
+require (
+	github.com/anthropics/anthropic-sdk-go v1.22.0 // indirect
+	github.com/character-ai/claude-agent-sdk-go v0.0.0-20260304185908-b7146f70f506 // indirect
+	github.com/hashicorp/go-immutable-radix v1.3.1 // indirect
+	github.com/hashicorp/go-memdb v1.3.5 // indirect
+	github.com/hashicorp/golang-lru v0.5.4 // indirect
+	github.com/tidwall/gjson v1.18.0 // indirect
+	github.com/tidwall/match v1.1.1 // indirect
+	github.com/tidwall/pretty v1.2.1 // indirect
+	github.com/tidwall/sjson v1.2.5 // indirect
+)

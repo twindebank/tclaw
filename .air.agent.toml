@@ -1,0 +1,10 @@
+[build]
+  cmd = "go build -o tmp/agent ."
+  bin = "tmp/agent"
+  include_ext = ["go"]
+  exclude_dir = ["cmd"]
+  kill_delay = "500ms"
+  rerun_delay = 500
+
+[log]
+  main_only = true
