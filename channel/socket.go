@@ -8,10 +8,15 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strings"
 	"sync"
 
 	"tclaw/id"
 )
+
+// maxMessageSize is the maximum bytes we'll read from a single socket
+// connection. Anything larger is truncated to prevent memory exhaustion.
+const maxMessageSize = 64 * 1024 // 64 KiB
 
 // SocketServer listens on a unix socket. Each connection is one turn:
 // the client sends a message, we process it, write the response, close.
@@ -77,9 +82,9 @@ func (s *SocketServer) Messages(ctx context.Context) <-chan string {
 			}
 			slog.Debug("connection accepted")
 
-			// Read the full message (client closes write side when done).
-			data, err := io.ReadAll(conn)
-			slog.Debug("read complete", "bytes", len(data), "err", err)
+			// Read the message (client closes write side when done).
+			// LimitReader caps at maxMessageSize to prevent memory exhaustion.
+			data, err := io.ReadAll(io.LimitReader(conn, maxMessageSize))
 			if err != nil || len(data) == 0 {
 				if err != nil {
 					slog.Warn("failed to read from connection", "err", err)
@@ -90,7 +95,16 @@ func (s *SocketServer) Messages(ctx context.Context) <-chan string {
 				continue
 			}
 
-			slog.Info("message received", "text", string(data))
+			text := strings.TrimSpace(string(data))
+			if text == "" {
+				slog.Debug("ignoring empty message")
+				if err := conn.Close(); err != nil {
+					slog.Warn("failed to close connection", "err", err)
+				}
+				continue
+			}
+
+			slog.Info("message received", "length", len(text))
 
 			// Pair the connection with its message. If no turn is
 			// active, promote it directly so Send writes to it.
@@ -104,7 +118,7 @@ func (s *SocketServer) Messages(ctx context.Context) <-chan string {
 			s.mu.Unlock()
 
 			select {
-			case out <- string(data):
+			case out <- text:
 			case <-ctx.Done():
 				if err := conn.Close(); err != nil {
 					slog.Warn("failed to close connection on shutdown", "err", err)
