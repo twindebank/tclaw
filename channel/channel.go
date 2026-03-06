@@ -2,12 +2,52 @@ package channel
 
 import "context"
 
+// MessageID identifies a sent message so it can be edited later.
+// The concrete value is transport-specific (e.g. telegram message ID,
+// slack timestamp, or an internal sequence number for sockets).
+type MessageID string
+
+// ChannelID uniquely identifies a channel. The value comes from the
+// transport itself (e.g. telegram bot ID, slack team ID, socket path).
+type ChannelID string
+
+// ChannelType identifies the transport kind so the agent can adapt
+// its formatting, message length, etc.
+type ChannelType string
+
+const (
+	TypeSocket   ChannelType = "socket"
+	TypeStdio    ChannelType = "stdio"
+	TypeTelegram ChannelType = "telegram"
+	TypeSlack    ChannelType = "slack"
+)
+
+// Info describes a channel's identity and transport type.
+type Info struct {
+	ID          ChannelID
+	Type        ChannelType
+	Name        string // human-readable label
+	Description string // explains the channel's purpose (e.g. "Desktop workstation", "Phone")
+}
+
+// TaggedMessage pairs an incoming message with the channel it arrived on
+// so the agent can route responses back to the correct transport.
+type TaggedMessage struct {
+	ChannelID ChannelID
+	Text      string
+}
+
 // Channel is the interface every transport must implement.
 type Channel interface {
+	// Info returns the channel's identity and transport type.
+	Info() Info
 	// Messages returns a channel of incoming user messages.
 	Messages(ctx context.Context) <-chan string
-	// Send delivers a chunk of response to the user.
-	Send(ctx context.Context, text string) error
+	// Send delivers a chunk of response to the user and returns an
+	// identifier that can be passed to Edit to update the message.
+	Send(ctx context.Context, text string) (MessageID, error)
+	// Edit replaces the content of a previously sent message.
+	Edit(ctx context.Context, id MessageID, text string) error
 	// Done signals the end of a response turn.
 	Done(ctx context.Context) error
 }

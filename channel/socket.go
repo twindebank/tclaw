@@ -2,29 +2,42 @@ package channel
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"os"
 	"sync"
-)
 
-const SocketPath = "/tmp/tclaw.sock"
+	"tclaw/id"
+)
 
 // SocketServer listens on a unix socket. Each connection is one turn:
 // the client sends a message, we process it, write the response, close.
 // Connections are paired with their messages so responses go to the
 // right client even when later messages queue behind an active turn.
 type SocketServer struct {
-	path string
+	path        string
+	name        string
+	description string
 
 	mu      sync.Mutex
 	conn    net.Conn   // connection for the current turn's response
 	pending []net.Conn // queued connections waiting for their turn
 }
 
-func NewSocketServer(path string) *SocketServer {
-	return &SocketServer{path: path}
+func NewSocketServer(path, name, description string) *SocketServer {
+	return &SocketServer{path: path, name: name, description: description}
+}
+
+func (s *SocketServer) Info() Info {
+	return Info{
+		ID:          ChannelID(s.path),
+		Type:        TypeSocket,
+		Name:        s.name,
+		Description: s.description,
+	}
 }
 
 func (s *SocketServer) Messages(ctx context.Context) <-chan string {
@@ -79,11 +92,15 @@ func (s *SocketServer) Messages(ctx context.Context) <-chan string {
 
 			slog.Info("message received", "text", string(data))
 
-			// Queue the connection so it's paired with its message.
-			// Done will promote the next pending connection when a
-			// turn finishes.
+			// Pair the connection with its message. If no turn is
+			// active, promote it directly so Send writes to it.
+			// Otherwise queue it for when the current turn finishes.
 			s.mu.Lock()
-			s.pending = append(s.pending, conn)
+			if s.conn == nil {
+				s.conn = conn
+			} else {
+				s.pending = append(s.pending, conn)
+			}
 			s.mu.Unlock()
 
 			select {
@@ -99,7 +116,19 @@ func (s *SocketServer) Messages(ctx context.Context) <-chan string {
 	return out
 }
 
-func (s *SocketServer) Send(_ context.Context, text string) error {
+func (s *SocketServer) Send(_ context.Context, text string) (MessageID, error) {
+	s.mu.Lock()
+	conn := s.conn
+	msgID := MessageID(id.Generate("message"))
+	s.mu.Unlock()
+
+	if conn == nil {
+		return msgID, nil
+	}
+	return msgID, s.writeWireMsg(conn, wireMsg{Op: "send", ID: string(msgID), Text: text})
+}
+
+func (s *SocketServer) Edit(_ context.Context, msgID MessageID, text string) error {
 	s.mu.Lock()
 	conn := s.conn
 	s.mu.Unlock()
@@ -107,7 +136,23 @@ func (s *SocketServer) Send(_ context.Context, text string) error {
 	if conn == nil {
 		return nil
 	}
-	_, err := io.WriteString(conn, text)
+	return s.writeWireMsg(conn, wireMsg{Op: "edit", ID: string(msgID), Text: text})
+}
+
+// wireMsg is the JSON-line protocol between socket server and client.
+type wireMsg struct {
+	Op   string `json:"op"`
+	ID   string `json:"id,omitempty"`
+	Text string `json:"text,omitempty"`
+}
+
+func (s *SocketServer) writeWireMsg(conn net.Conn, msg wireMsg) error {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("marshal wire msg: %w", err)
+	}
+	data = append(data, '\n')
+	_, err = conn.Write(data)
 	return err
 }
 

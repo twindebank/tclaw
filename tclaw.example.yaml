@@ -1,0 +1,53 @@
+# tclaw configuration
+#
+# System-derived paths (not configurable):
+#   Socket:  <base_dir>/<user_id>/<channel_name>.sock
+#   Home:    <base_dir>/<user_id>/home/
+#   Store:   <base_dir>/<user_id>/store/
+#
+# Secret references:
+#   ${secret:NAME}  — tries OS keychain first, falls back to env var
+#   ${NAME}         — env var only
+#
+# Store secrets locally:  go run ./cmd/secret set ANTHROPIC_API_KEY sk-ant-...
+
+base_dir: /tmp/tclaw
+
+users:
+  - id: default
+    api_key: ${secret:ANTHROPIC_API_KEY}
+    model: claude-sonnet-4-6
+    permission_mode: dontAsk
+    # Optional: custom system prompt appended after tclaw's default.
+    # system_prompt: |
+    #   You are Theo's personal assistant. Be concise and direct.
+    #   Prefer Go for code examples.
+    channels:
+      - type: socket
+        name: main
+        description: Primary desktop workstation
+    allowed_tools:
+      - Bash
+      - Read
+      - Edit
+      - Write
+      - Glob
+      - Grep
+      - LS
+      - LSP
+      - WebFetch
+      - WebSearch
+      - NotebookEdit
+      - Agent
+      - Task
+      - TaskOutput
+      - TaskStop
+      - TodoWrite
+      - ToolSearch
+      - Skill
+      - AskUserQuestion
+      - EnterPlanMode
+      - ExitPlanMode
+      - EnterWorktree
+      - ListMcpResources
+      - ReadMcpResource
