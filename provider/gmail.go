@@ -1,10 +1,6 @@
 package provider
 
-import (
-	"tclaw/connection"
-)
-
-const GmailProviderID connection.ProviderID = "gmail"
+const GmailProviderID ProviderID = "gmail"
 
 // NewGmailProvider creates the Gmail provider definition.
 // OAuth2 config is populated from the tclaw config file.

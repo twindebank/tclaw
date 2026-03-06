@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"tclaw/secret"
-	"tclaw/store"
+	"tclaw/libraries/secret"
+	"tclaw/libraries/store"
+	"tclaw/provider"
 )
 
 const connectionsStoreKey = "connections"
@@ -56,7 +57,7 @@ func (m *Manager) Get(ctx context.Context, id ConnectionID) (*Connection, error)
 }
 
 // Add creates a new connection. Returns an error if one with the same ID exists.
-func (m *Manager) Add(ctx context.Context, providerID ProviderID, label string) (*Connection, error) {
+func (m *Manager) Add(ctx context.Context, providerID provider.ProviderID, label string) (*Connection, error) {
 	conns, err := m.List(ctx)
 	if err != nil {
 		return nil, err

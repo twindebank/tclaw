@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"tclaw/secret"
+	"tclaw/libraries/secret"
 )
 
 const usage = `Usage: tclaw-secret <command> <name> [value]
