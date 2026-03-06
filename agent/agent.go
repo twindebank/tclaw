@@ -12,7 +12,18 @@ import (
 	"tclaw/claudecli"
 )
 
-const stopKeyword = "stop"
+const (
+	// CmdStop cancels the active turn. Typed directly by the user.
+	CmdStop = "stop"
+
+	// CmdReset clears the channel's session so the next message starts fresh.
+	// Sent by the chat client when the user types "new", "reset", "clear", or "delete".
+	CmdReset = "/tclaw:reset"
+
+	// "compact" is handled client-side — rewritten into a prompt asking Claude
+	// to compact its conversation context. Not defined here since the agent
+	// never sees it.
+)
 
 const defaultMaxTurns = 10
 const agentIdleTimeout = 10 * time.Minute
@@ -56,6 +67,11 @@ type Options struct {
 
 	// DisallowedTools are removed from the model's context entirely.
 	DisallowedTools []claudecli.Tool
+
+	// MCPConfigPath points to a JSON file for --mcp-config, connecting
+	// Claude to the local tclaw MCP server (and any remote MCPs).
+	// Empty means no MCP tools are available.
+	MCPConfigPath string
 
 	// SystemPrompt is appended to the default Claude system prompt via
 	// --append-system-prompt. Contains agent identity, channel context,
@@ -112,7 +128,27 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			}
 		}
 
-		if strings.EqualFold(msg.Text, stopKeyword) {
+		if strings.EqualFold(msg.Text, CmdStop) {
+			continue
+		}
+
+		// Control command: clear session so next message starts fresh.
+		if msg.Text == CmdReset {
+			old := sessions[msg.ChannelID]
+			delete(sessions, msg.ChannelID)
+			if opts.OnSessionUpdate != nil {
+				opts.OnSessionUpdate(msg.ChannelID, "")
+			}
+			slog.Info("session reset", "channel", msg.ChannelID, "old_session", old)
+			ch, ok := opts.Channels[msg.ChannelID]
+			if ok {
+				if _, err := ch.Send(ctx, "🗑️ session cleared — next message starts a fresh conversation."); err != nil {
+					slog.Error("failed to send reset confirmation", "err", err)
+				}
+				if err := ch.Done(ctx); err != nil {
+					slog.Error("failed to close turn after reset", "err", err)
+				}
+			}
 			continue
 		}
 
@@ -148,7 +184,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 					<-handleDone
 					goto done
 				}
-				if strings.EqualFold(newMsg.Text, stopKeyword) {
+				if strings.EqualFold(newMsg.Text, CmdStop) {
 					if !stopped {
 						slog.Info("turn interrupted by stop")
 						cancelTurn()
@@ -232,6 +268,9 @@ func buildArgs(opts Options, sessionID string, systemPrompt string, prompt strin
 	}
 	for _, t := range opts.DisallowedTools {
 		args = append(args, "--disallowedTools", string(t))
+	}
+	if opts.MCPConfigPath != "" {
+		args = append(args, "--mcp-config", opts.MCPConfigPath)
 	}
 	// "--" terminates flag parsing so prompts starting with "-" aren't
 	// mistaken for CLI options.
