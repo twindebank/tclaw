@@ -1,0 +1,26 @@
+package user
+
+import (
+	"tclaw/agent"
+)
+
+// ID uniquely identifies a user across the system.
+type ID string
+
+// Config holds per-user settings for the agent and Claude CLI.
+// System-derived values (home dir, store path, socket path) are not
+// included here — the Router derives them from the base data directory.
+type Config struct {
+	ID              ID
+	APIKey          string // ANTHROPIC_API_KEY for this user's claude sessions
+	Model           agent.Model
+	PermissionMode  agent.PermissionMode
+	AllowedTools    []agent.Tool
+	DisallowedTools []agent.Tool
+	MaxTurns        int
+	Debug           bool
+
+	// SystemPrompt is custom text appended after tclaw's default system prompt.
+	// Configured per-user in tclaw.yaml.
+	SystemPrompt string
+}

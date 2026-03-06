@@ -1,25 +1,29 @@
 package agent
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"os/exec"
 	"strings"
+	"time"
 
 	"tclaw/channel"
+	"tclaw/secret"
 	"tclaw/store"
 )
 
-const sessionKey = "session_id"
+const sessionKeyPrefix = "session:"
 const stopKeyword = "stop"
 
 const defaultMaxTurns = 10
+const agentIdleTimeout = 10 * time.Minute
 
-// Options configures the agent and provides its dependencies.
+// ErrIdleTimeout is returned by RunWithMessages when the agent shuts down
+// due to no messages arriving within the idle timeout.
+var ErrIdleTimeout = errors.New("agent idle timeout")
+
+// Options configures the agent. All fields are immutable after creation.
 type Options struct {
 	PermissionMode PermissionMode
 	Model          Model
@@ -27,58 +31,90 @@ type Options struct {
 	// MaxTurns limits agentic turns per invocation. Defaults to defaultMaxTurns.
 	MaxTurns int
 
-	Channel channel.Channel
-	Store   store.Store
+	// Debug logs raw CLI event JSON for troubleshooting.
+	Debug bool
+
+	// APIKey is set as ANTHROPIC_API_KEY when spawning the claude subprocess.
+	// If empty, the subprocess inherits the parent's environment.
+	APIKey string
+
+	// HomeDir is set as HOME for the claude subprocess, isolating all
+	// CLI state (~/.claude/) per user. If empty, inherits the parent's HOME.
+	HomeDir string
+
+	Channels map[channel.ChannelID]channel.Channel
+	Store    store.Store
+	Secrets  secret.Store
 
 	// AllowedTools are auto-approved without prompting (e.g. ToolRead, ToolBash.Scoped("git *")).
 	AllowedTools []Tool
 
 	// DisallowedTools are removed from the model's context entirely.
 	DisallowedTools []Tool
+
+	// SystemPrompt is appended to the default Claude system prompt via
+	// --append-system-prompt. Contains agent identity, channel context,
+	// and memory instructions.
+	SystemPrompt string
 }
 
-// Agent wraps the Claude Code CLI binary and connects it to a channel.
-type Agent struct {
-	opts Options
-
-	// sessionID is captured from the first CLI invocation and reused
-	// via --resume to maintain multi-turn conversation state.
-	sessionID string
+func sessionKey(chID channel.ChannelID) string {
+	return sessionKeyPrefix + string(chID)
 }
 
-func New(ctx context.Context, opts Options) *Agent {
-	a := &Agent{opts: opts}
-	a.loadSession(ctx)
-	return a
-}
-
-func (a *Agent) loadSession(ctx context.Context) {
-	data, err := a.opts.Store.Get(ctx, sessionKey)
+func loadSession(ctx context.Context, s store.Store, chID channel.ChannelID) (string, error) {
+	data, err := s.Get(ctx, sessionKey(chID))
 	if err != nil {
-		slog.Warn("failed to load session", "err", err)
-		return
+		return "", fmt.Errorf("load session: %w", err)
 	}
 	if len(data) > 0 {
-		a.sessionID = string(data)
-		slog.Info("resumed session", "session_id", a.sessionID)
+		slog.Info("resumed session", "channel", chID, "session_id", string(data))
+		return string(data), nil
 	}
+	return "", nil
 }
 
-func (a *Agent) saveSession(ctx context.Context, id string) {
-	if err := a.opts.Store.Set(ctx, sessionKey, []byte(id)); err != nil {
-		slog.Error("failed to save session", "err", err)
+func saveSession(ctx context.Context, s store.Store, chID channel.ChannelID, id string) error {
+	if err := s.Set(ctx, sessionKey(chID), []byte(id)); err != nil {
+		return fmt.Errorf("save session: %w", err)
 	}
+	return nil
 }
 
-// Run reads messages from the channel and responds until ctx is cancelled.
+type handleResult struct {
+	sessionID string
+	err       error
+}
+
+// Run reads messages from all channels and responds until ctx is cancelled.
+// Each channel gets its own Claude session for full isolation.
 // Sending "stop" interrupts the active turn. Other messages queue behind it.
-func (a *Agent) Run(ctx context.Context) error {
-	msgs := a.opts.Channel.Messages(ctx)
-	var queue []string
+func Run(ctx context.Context, opts Options) error {
+	return RunWithMessages(ctx, opts, channel.FanIn(ctx, opts.Channels))
+}
+
+// RunWithMessages is like Run but reads from a pre-existing message channel
+// instead of calling FanIn internally. Used by the Router for lazy startup
+// where the first message has already been consumed.
+func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.TaggedMessage) error {
+	// Per-channel session IDs — each channel is an independent conversation.
+	sessions := make(map[channel.ChannelID]string)
+	for chID := range opts.Channels {
+		sid, err := loadSession(ctx, opts.Store, chID)
+		if err != nil {
+			slog.Warn("failed to load session, starting fresh", "channel", chID, "err", err)
+		}
+		if sid != "" {
+			sessions[chID] = sid
+		}
+	}
+
+	var queue []channel.TaggedMessage
+	idle := newIdleTimer()
+	defer idle.Stop()
 
 	for {
-		// Drain the queue before waiting for new messages.
-		var msg string
+		var msg channel.TaggedMessage
 		if len(queue) > 0 {
 			msg = queue[0]
 			queue = queue[1:]
@@ -86,23 +122,29 @@ func (a *Agent) Run(ctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				return nil
+			case <-idle.C():
+				slog.Info("agent idle timeout, shutting down", "timeout", agentIdleTimeout)
+				return ErrIdleTimeout
 			case m, ok := <-msgs:
 				if !ok {
 					return nil
 				}
 				msg = m
+				idle.Reset()
 			}
 		}
 
-		if strings.EqualFold(msg, stopKeyword) {
+		if strings.EqualFold(msg.Text, stopKeyword) {
 			continue
 		}
 
+		sessionID := sessions[msg.ChannelID]
 		turnCtx, cancelTurn := context.WithCancel(ctx)
 
-		handleDone := make(chan error, 1)
+		handleDone := make(chan handleResult, 1)
 		go func() {
-			handleDone <- a.handle(turnCtx, msg)
+			newSessionID, err := handle(turnCtx, opts, sessionID, msg)
+			handleDone <- handleResult{sessionID: newSessionID, err: err}
 		}()
 
 		// While the turn runs, keep reading messages.
@@ -110,9 +152,16 @@ func (a *Agent) Run(ctx context.Context) error {
 		stopped := false
 		for {
 			select {
-			case err := <-handleDone:
-				if err != nil && turnCtx.Err() == nil {
-					slog.Error("handle failed", "err", err)
+			case result := <-handleDone:
+				if result.err != nil && turnCtx.Err() == nil {
+					slog.Error("handle failed", "err", result.err)
+				}
+				if result.sessionID != "" && result.sessionID != sessionID {
+					slog.Info("session started", "channel", msg.ChannelID, "session_id", result.sessionID)
+					sessions[msg.ChannelID] = result.sessionID
+					if err := saveSession(ctx, opts.Store, msg.ChannelID, result.sessionID); err != nil {
+						slog.Error("failed to save session", "err", err)
+					}
 				}
 				goto done
 			case newMsg, ok := <-msgs:
@@ -121,7 +170,7 @@ func (a *Agent) Run(ctx context.Context) error {
 					<-handleDone
 					goto done
 				}
-				if strings.EqualFold(newMsg, stopKeyword) {
+				if strings.EqualFold(newMsg.Text, stopKeyword) {
 					if !stopped {
 						slog.Info("turn interrupted by stop")
 						cancelTurn()
@@ -135,212 +184,76 @@ func (a *Agent) Run(ctx context.Context) error {
 
 	done:
 		cancelTurn()
-		if err := a.opts.Channel.Done(ctx); err != nil {
-			slog.Error("failed to close turn", "err", err)
+		idle.Reset()
+		ch, ok := opts.Channels[msg.ChannelID]
+		if ok {
+			if err := ch.Done(ctx); err != nil {
+				slog.Error("failed to close turn", "err", err)
+			}
 		}
 	}
 }
 
-func (a *Agent) handle(ctx context.Context, prompt string) error {
-	slog.Info("handling message", "prompt", prompt, "session_id", a.sessionID)
+// idleTimerT wraps a time.Timer for agent inactivity shutdown.
+type idleTimerT struct {
+	timer    *time.Timer
+	duration time.Duration
+}
 
+func newIdleTimer() *idleTimerT {
+	return &idleTimerT{timer: time.NewTimer(agentIdleTimeout), duration: agentIdleTimeout}
+}
+
+func (t *idleTimerT) C() <-chan time.Time {
+	if t.timer == nil {
+		return nil
+	}
+	return t.timer.C
+}
+
+func (t *idleTimerT) Reset() {
+	if t.timer != nil {
+		t.timer.Reset(t.duration)
+	}
+}
+
+func (t *idleTimerT) Stop() {
+	if t.timer != nil {
+		t.timer.Stop()
+	}
+}
+
+func maxTurns(opts Options) int {
+	if opts.MaxTurns > 0 {
+		return opts.MaxTurns
+	}
+	return defaultMaxTurns
+}
+
+func buildArgs(opts Options, sessionID string, systemPrompt string, prompt string) []string {
 	args := []string{
 		"--output-format", "stream-json",
 		"--verbose",
 		"--print", prompt,
 	}
-	if a.sessionID != "" {
-		args = append(args, "--resume", a.sessionID)
+	if sessionID != "" {
+		args = append(args, "--resume", sessionID)
 	}
-	if a.opts.PermissionMode != "" {
-		args = append(args, "--permission-mode", string(a.opts.PermissionMode))
+	if systemPrompt != "" {
+		args = append(args, "--append-system-prompt", systemPrompt)
 	}
-	if a.opts.Model != "" {
-		args = append(args, "--model", string(a.opts.Model))
+	if opts.PermissionMode != "" {
+		args = append(args, "--permission-mode", string(opts.PermissionMode))
 	}
-	maxTurns := a.opts.MaxTurns
-	if maxTurns == 0 {
-		maxTurns = defaultMaxTurns
+	if opts.Model != "" {
+		args = append(args, "--model", string(opts.Model))
 	}
-	args = append(args, "--max-turns", fmt.Sprintf("%d", maxTurns))
-	for _, t := range a.opts.AllowedTools {
+	args = append(args, "--max-turns", fmt.Sprintf("%d", maxTurns(opts)))
+	for _, t := range opts.AllowedTools {
 		args = append(args, "--allowedTools", string(t))
 	}
-	for _, t := range a.opts.DisallowedTools {
+	for _, t := range opts.DisallowedTools {
 		args = append(args, "--disallowedTools", string(t))
 	}
-
-	cmd := exec.CommandContext(ctx, "claude", args...)
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("stdout pipe: %w", err)
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("stderr pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start claude: %w", err)
-	}
-
-	// Drain stderr so the process doesn't block on it.
-	go func() {
-		data, _ := io.ReadAll(stderr)
-		if len(data) > 0 {
-			slog.Debug("claude stderr", "output", string(data))
-		}
-	}()
-
-	sessionID, err := a.streamResponse(ctx, stdout)
-	if err != nil {
-		return fmt.Errorf("stream response: %w", err)
-	}
-
-	if waitErr := cmd.Wait(); waitErr != nil {
-		slog.Warn("claude exited with error", "err", waitErr)
-	}
-
-	// Capture session ID from the first invocation so subsequent
-	// messages resume the same conversation.
-	if sessionID != "" && a.sessionID == "" {
-		slog.Info("session started", "session_id", sessionID)
-		a.sessionID = sessionID
-		a.saveSession(ctx, sessionID)
-	}
-
-	return nil
-}
-
-// streamResponse parses stream-json events and sends them to the channel in
-// real time. Returns the session ID captured from init/result events.
-func (a *Agent) streamResponse(ctx context.Context, r io.Reader) (string, error) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 256*1024), 10*1024*1024)
-
-	var sessionID string
-	var currentBlockType ContentBlockType
-
-	for scanner.Scan() {
-		if ctx.Err() != nil {
-			return sessionID, nil
-		}
-
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-
-		var ev Event
-		if err := json.Unmarshal(line, &ev); err != nil {
-			slog.Debug("skipping non-JSON line", "line", string(line))
-			continue
-		}
-		slog.Debug("cli event", "type", ev.Type)
-
-		switch ev.Type {
-		case EventSystem:
-			var sys SystemEvent
-			if err := json.Unmarshal(line, &sys); err != nil {
-				slog.Warn("failed to parse system event", "err", err)
-				continue
-			}
-			if sys.Subtype == SystemSubtypeInit && sys.SessionID != "" {
-				sessionID = sys.SessionID
-			}
-
-		case EventContentBlockStart:
-			var start ContentBlockStartEvent
-			if err := json.Unmarshal(line, &start); err != nil {
-				slog.Warn("failed to parse content_block_start", "err", err)
-				continue
-			}
-			currentBlockType = start.ContentBlock.Type
-			switch currentBlockType {
-			case ContentThinking:
-				a.send(ctx, "💭 ")
-			case ContentToolUse:
-				a.send(ctx, fmt.Sprintf("🔧 %s\n", start.ContentBlock.Name))
-			}
-
-		case EventContentBlockDelta:
-			var delta ContentDeltaEvent
-			if err := json.Unmarshal(line, &delta); err != nil {
-				slog.Warn("failed to parse content_block_delta", "err", err)
-				continue
-			}
-			switch delta.Delta.Type {
-			case DeltaText:
-				a.send(ctx, delta.Delta.Text)
-			case DeltaThinking:
-				a.send(ctx, delta.Delta.Thinking)
-			}
-
-		case EventContentBlockStop:
-			if currentBlockType == ContentThinking {
-				a.send(ctx, "\n")
-			}
-			currentBlockType = ""
-
-		case EventAssistant:
-			// Already handled via delta events; skip.
-
-		case EventUser:
-			var user UserEvent
-			if err := json.Unmarshal(line, &user); err != nil {
-				slog.Warn("failed to parse user event", "err", err)
-				continue
-			}
-			if user.ToolUseResult != nil {
-				text := a.formatToolResult(*user.ToolUseResult)
-				if text != "" {
-					a.send(ctx, text)
-				}
-			}
-
-		case EventResult:
-			var result ResultEvent
-			if err := json.Unmarshal(line, &result); err != nil {
-				slog.Warn("failed to parse result event", "err", err)
-				continue
-			}
-			if result.IsError {
-				return sessionID, fmt.Errorf("claude error: %s", result.Result)
-			}
-			if result.SessionID != "" && sessionID == "" {
-				sessionID = result.SessionID
-			}
-			slog.Info("turn complete",
-				"turns", result.NumTurns,
-				"duration_ms", result.DurationMs,
-				"cost_usd", result.CostUSD,
-			)
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return sessionID, fmt.Errorf("scanner: %w", err)
-	}
-	return sessionID, nil
-}
-
-func (a *Agent) send(ctx context.Context, text string) {
-	if err := a.opts.Channel.Send(ctx, text); err != nil {
-		slog.Error("failed to send", "err", err)
-	}
-}
-
-func (a *Agent) formatToolResult(result ToolUseResult) string {
-	out := result.Stdout
-	if result.Stderr != "" {
-		if out != "" {
-			out += "\n"
-		}
-		out += result.Stderr
-	}
-	if out == "" {
-		return ""
-	}
-	return "```\n" + out + "\n```\n"
+	return args
 }

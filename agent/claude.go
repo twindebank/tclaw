@@ -1,15 +1,19 @@
 package agent
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // PermissionMode controls how the Claude CLI handles tool permissions.
 type PermissionMode string
 
 const (
-	PermissionDefault     PermissionMode = "default"
-	PermissionAcceptEdits PermissionMode = "acceptEdits"
-	PermissionPlan        PermissionMode = "plan"
-	PermissionBypass      PermissionMode = "bypassPermissions"
+	PermissionDefault     PermissionMode = "default"          // prompts for approval on everything
+	PermissionAcceptEdits PermissionMode = "acceptEdits"      // auto-approves file edits, prompts for rest
+	PermissionPlan        PermissionMode = "plan"             // read-only, can't execute anything
+	PermissionDontAsk     PermissionMode = "dontAsk"          // auto-approves allowed tools, skips others
+	PermissionBypass      PermissionMode = "bypassPermissions" // auto-approves everything, ignores allowed list
 )
 
 // Model identifies a Claude model for the CLI.
@@ -67,9 +71,77 @@ const (
 	ToolEnterPlanMode    Tool = "EnterPlanMode"
 	ToolExitPlanMode     Tool = "ExitPlanMode"
 	ToolEnterWorktree    Tool = "EnterWorktree"
-	ToolListMcpResources Tool = "ListMcpResourcesTool"
-	ToolReadMcpResource  Tool = "ReadMcpResourceTool"
+	ToolListMcpResources Tool = "ListMcpResources"
+	ToolReadMcpResource  Tool = "ReadMcpResource"
 )
+
+// validModels is the set of known model identifiers.
+var validModels = map[Model]bool{
+	ModelOpus46: true, ModelSonnet46: true,
+	ModelHaiku45: true,
+	ModelOpus4: true, ModelSonnet4: true,
+	ModelSonnet37: true,
+	ModelSonnet35v2: true, ModelSonnet35: true, ModelHaiku35: true,
+	ModelOpus3: true, ModelHaiku3: true,
+}
+
+// ValidModel reports whether m is a known model identifier.
+func ValidModel(m Model) bool { return validModels[m] }
+
+// ValidModels returns the list of known model identifiers.
+func ValidModels() []Model {
+	out := make([]Model, 0, len(validModels))
+	for m := range validModels {
+		out = append(out, m)
+	}
+	return out
+}
+
+// validPermissionModes is the set of known permission modes.
+var validPermissionModes = map[PermissionMode]bool{
+	PermissionDefault:     true,
+	PermissionAcceptEdits: true,
+	PermissionPlan:        true,
+	PermissionDontAsk:     true,
+	PermissionBypass:      true,
+}
+
+// ValidPermissionMode reports whether p is a known permission mode.
+func ValidPermissionMode(p PermissionMode) bool { return validPermissionModes[p] }
+
+// ValidPermissionModes returns the list of known permission modes.
+func ValidPermissionModes() []PermissionMode {
+	out := make([]PermissionMode, 0, len(validPermissionModes))
+	for p := range validPermissionModes {
+		out = append(out, p)
+	}
+	return out
+}
+
+// validTools is the set of known base tool names (without scope patterns).
+var validTools = map[Tool]bool{
+	ToolBash: true, ToolRead: true, ToolEdit: true, ToolWrite: true,
+	ToolGlob: true, ToolGrep: true, ToolLS: true, ToolLSP: true,
+	ToolWebFetch: true, ToolWebSearch: true, ToolNotebookEdit: true,
+	ToolAgent: true, ToolTask: true, ToolTaskOutput: true, ToolTaskStop: true,
+	ToolTodoWrite: true, ToolToolSearch: true, ToolSkill: true,
+	ToolAskUserQuestion: true, ToolEnterPlanMode: true, ToolExitPlanMode: true,
+	ToolEnterWorktree: true, ToolListMcpResources: true, ToolReadMcpResource: true,
+}
+
+// ValidTool reports whether t is a known tool, including scoped patterns like Bash(git *).
+func ValidTool(t Tool) bool {
+	if validTools[t] {
+		return true
+	}
+	// Check for scoped pattern: BaseTool(pattern)
+	s := string(t)
+	if idx := strings.Index(s, "("); idx > 0 && strings.HasSuffix(s, ")") {
+		base := Tool(s[:idx])
+		return validTools[base]
+	}
+	return false
+}
 
 // Scoped returns a tool with a pattern restriction, e.g. Bash("git *").
 func (t Tool) Scoped(pattern string) Tool {
@@ -143,11 +215,17 @@ type ContentBlock struct {
 
 // UserEvent is emitted when Claude Code feeds a tool result back to the model.
 type UserEvent struct {
-	Type          EventType      `json:"type"`
-	ToolUseResult *ToolUseResult `json:"tool_use_result,omitempty"`
+	Type          EventType       `json:"type"`
+	ToolUseResult json.RawMessage `json:"tool_use_result,omitempty"`
 }
 
-type ToolUseResult struct {
+// ToolResultMeta captures common fields from the tool_use_result payload.
+// Different tools include different fields; we extract what we can.
+type ToolResultMeta struct {
+	DurationSeconds float64 `json:"durationSeconds,omitempty"`
+	Query           string  `json:"query,omitempty"`
+
+	// Bash/Read/Edit style results
 	Stdout string `json:"stdout,omitempty"`
 	Stderr string `json:"stderr,omitempty"`
 }
