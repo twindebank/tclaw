@@ -12,6 +12,14 @@ type Stdio struct{}
 
 func NewStdio() *Stdio { return &Stdio{} }
 
+func (s *Stdio) Info() Info {
+	return Info{
+		ID:   "stdio",
+		Type: TypeStdio,
+		Name: "stdio",
+	}
+}
+
 func (s *Stdio) Messages(ctx context.Context) <-chan string {
 	out := make(chan string)
 	go func() {
@@ -32,7 +40,12 @@ func (s *Stdio) Messages(ctx context.Context) <-chan string {
 	return out
 }
 
-func (s *Stdio) Send(_ context.Context, text string) error {
+func (s *Stdio) Send(_ context.Context, text string) (MessageID, error) {
+	fmt.Print(text)
+	return "", nil
+}
+
+func (s *Stdio) Edit(_ context.Context, _ MessageID, text string) error {
 	fmt.Print(text)
 	return nil
 }

@@ -1,4 +1,4 @@
-.PHONY: agent chat agent-dev chat-dev build clean tidy docker docker-agent docker-chat docker-down
+.PHONY: agent chat agent-dev chat-dev secret build clean tidy docker docker-agent docker-chat docker-down
 
 # Run the agent daemon — logs appear here.
 agent:
@@ -8,7 +8,7 @@ agent:
 # Connect a chat session to the running agent.
 chat:
 	@echo "→ connecting to agent..."
-	@cd cmd/chat && go run .
+	@cd cmd/chat && TCLAW_CONFIG=$(CURDIR)/tclaw.yaml go run .
 
 # Hot-reload versions — restart on any .go change.
 agent-dev:
@@ -20,13 +20,18 @@ agent-dev:
 # stdin through to child processes. Just build fresh and run directly.
 chat-dev:
 	@echo "→ connecting to agent..."
-	@cd cmd/chat && go run .
+	@cd cmd/chat && TCLAW_CONFIG=$(CURDIR)/tclaw.yaml go run .
+
+# Manage secrets in the OS keychain — e.g. make secret ARGS="set ANTHROPIC_API_KEY sk-ant-..."
+secret:
+	@go run ./cmd/secret $(ARGS)
 
 build:
 	@echo "→ building..."
 	@go build -o bin/agent .
 	@cd cmd/chat && go build -o ../../bin/chat .
-	@echo "✓ bin/agent  bin/chat"
+	@go build -o bin/secret ./cmd/secret
+	@echo "✓ bin/agent  bin/chat  bin/secret"
 
 clean:
 	@echo "→ cleaning..."
