@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"tclaw/channel"
-	"tclaw/store"
+	"tclaw/libraries/store"
 )
 
 const sessionKeyPrefix = "session_"

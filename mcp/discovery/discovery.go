@@ -1,4 +1,4 @@
-package mcp
+package discovery
 
 import (
 	"bytes"
@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"strings"
 )
+
+const protocolVersion = "2025-03-26"
 
 // AuthMetadata holds the combined OAuth 2.1 metadata discovered from
 // the MCP server's protected resource metadata and the authorization server's
@@ -352,6 +354,14 @@ func mustMarshal(v any) json.RawMessage {
 }
 
 // --- Wire types for JSON decoding ---
+
+// jsonRPCRequest is a minimal JSON-RPC request for probing MCP servers.
+type jsonRPCRequest struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id,omitempty"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
+}
 
 type protectedResourceMeta struct {
 	Resource             string   `json:"resource"`

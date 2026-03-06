@@ -1,4 +1,4 @@
-package tool
+package remotemcp
 
 import (
 	"context"
@@ -9,11 +9,12 @@ import (
 
 	"tclaw/connection"
 	"tclaw/mcp"
+	"tclaw/mcp/discovery"
 	"tclaw/oauth"
 )
 
-// RemoteMCPToolsDeps holds dependencies for remote MCP management tools.
-type RemoteMCPToolsDeps struct {
+// Deps holds dependencies for remote MCP management tools.
+type Deps struct {
 	Manager  *connection.Manager
 	Callback *oauth.CallbackServer // nil if OAuth callback is not configured
 
@@ -22,11 +23,16 @@ type RemoteMCPToolsDeps struct {
 	ConfigUpdater func(ctx context.Context) error
 }
 
-// RegisterRemoteMCPTools adds the remote MCP management tools to the MCP handler.
-func RegisterRemoteMCPTools(h *mcp.Handler, deps RemoteMCPToolsDeps) {
+// RegisterTools adds the remote MCP management tools to the MCP handler.
+func RegisterTools(h *mcp.Handler, deps Deps) {
 	h.Register(remoteMCPListDef(), remoteMCPListHandler(deps))
 	h.Register(remoteMCPAddDef(), remoteMCPAddHandler(deps))
 	h.Register(remoteMCPRemoveDef(), remoteMCPRemoveHandler(deps))
+}
+
+// RegisterAuthWaitTool adds the remote_mcp_auth_wait tool.
+func RegisterAuthWaitTool(h *mcp.Handler, deps Deps) {
+	h.Register(remoteMCPAuthWaitDef(), remoteMCPAuthWaitHandler(deps))
 }
 
 // --- remote_mcp_list ---
@@ -39,7 +45,7 @@ func remoteMCPListDef() mcp.ToolDef {
 	}
 }
 
-func remoteMCPListHandler(deps RemoteMCPToolsDeps) mcp.ToolHandler {
+func remoteMCPListHandler(deps Deps) mcp.ToolHandler {
 	return func(ctx context.Context, _ json.RawMessage) (json.RawMessage, error) {
 		mcps, err := deps.Manager.ListRemoteMCPs(ctx)
 		if err != nil {
@@ -58,7 +64,10 @@ func remoteMCPListHandler(deps RemoteMCPToolsDeps) mcp.ToolHandler {
 
 		var result []mcpInfo
 		for _, m := range mcps {
-			auth, _ := deps.Manager.GetRemoteMCPAuth(ctx, m.Name)
+			auth, err := deps.Manager.GetRemoteMCPAuth(ctx, m.Name)
+			if err != nil {
+				slog.Warn("failed to get auth for remote MCP", "name", m.Name, "err", err)
+			}
 			info := mcpInfo{
 				Name: m.Name,
 				URL:  m.URL,
@@ -102,7 +111,7 @@ type remoteMCPAddArgs struct {
 	Name string `json:"name"`
 }
 
-func remoteMCPAddHandler(deps RemoteMCPToolsDeps) mcp.ToolHandler {
+func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 		var a remoteMCPAddArgs
 		if err := json.Unmarshal(args, &a); err != nil {
@@ -118,7 +127,7 @@ func remoteMCPAddHandler(deps RemoteMCPToolsDeps) mcp.ToolHandler {
 		slog.Info("discovering auth for remote MCP", "name", a.Name, "url", a.URL)
 
 		// Discover whether OAuth is required.
-		authMeta, err := mcp.DiscoverAuth(ctx, a.URL)
+		authMeta, err := discovery.DiscoverAuth(ctx, a.URL)
 		if err != nil {
 			slog.Warn("auth discovery failed, adding without auth", "name", a.Name, "err", err)
 			if updateErr := deps.ConfigUpdater(ctx); updateErr != nil {
@@ -157,9 +166,9 @@ func remoteMCPAddHandler(deps RemoteMCPToolsDeps) mcp.ToolHandler {
 		callbackURL := deps.Callback.CallbackURL()
 
 		// Dynamic client registration if supported.
-		var reg *mcp.ClientRegistration
+		var reg *discovery.ClientRegistration
 		if authMeta.RegistrationEndpoint != "" {
-			reg, err = mcp.RegisterClient(ctx, authMeta, callbackURL)
+			reg, err = discovery.RegisterClient(ctx, authMeta, callbackURL)
 			if err != nil {
 				return nil, fmt.Errorf("dynamic client registration: %w", err)
 			}
@@ -182,33 +191,36 @@ func remoteMCPAddHandler(deps RemoteMCPToolsDeps) mcp.ToolHandler {
 			return nil, fmt.Errorf("store auth metadata: %w", err)
 		}
 
-		// Build a PendingFlow for the OAuth callback. We create a temporary
-		// provider.Provider with the discovered OAuth config so the existing
-		// callback infrastructure can handle the exchange.
-		flow := &oauth.PendingRemoteMCPFlow{
-			Name:          a.Name,
-			MCPURL:        a.URL,
-			AuthMeta:      authMeta,
-			ClientReg:     reg,
-			Manager:       deps.Manager,
-			ConfigUpdater: deps.ConfigUpdater,
+		// Build PKCE auth URL and create the pending flow.
+		_, codeVerifier := discovery.BuildAuthURLWithPKCE(authMeta, reg, "", callbackURL, a.URL)
+
+		flow := &pendingRemoteMCPFlow{
+			name:          a.Name,
+			mcpURL:        a.URL,
+			authMeta:      authMeta,
+			clientReg:     reg,
+			manager:       deps.Manager,
+			configUpdater: deps.ConfigUpdater,
+			codeVerifier:  codeVerifier,
+			done:          make(chan struct{}),
 		}
 
-		state, codeVerifier, authURL, err := deps.Callback.StartRemoteMCPFlow(flow, callbackURL, a.URL)
+		// Register with the callback server — it generates the state param
+		// and will call flow.Complete/Fail when the callback arrives.
+		state, err := deps.Callback.RegisterFlow(flow)
 		if err != nil {
-			return nil, fmt.Errorf("start oauth flow: %w", err)
+			return nil, fmt.Errorf("register oauth flow: %w", err)
 		}
 
-		// Store the PKCE verifier — it's needed for the token exchange.
-		_ = state
-		flow.CodeVerifier = codeVerifier
+		// Rebuild the auth URL with the actual state token.
+		authURL, _ := discovery.BuildAuthURLWithPKCE(authMeta, reg, state, callbackURL, a.URL)
 
 		result := map[string]any{
-			"name":    entry.Name,
-			"url":     entry.URL,
-			"status":  "pending_auth",
+			"name":     entry.Name,
+			"url":      entry.URL,
+			"status":   "pending_auth",
 			"auth_url": authURL,
-			"message": fmt.Sprintf("Send this authorization URL to the user. After they authorize, use connection_auth_wait with connection_id=%q to confirm completion. Once authorized, the remote MCP's tools will be available on the next message.", a.Name),
+			"message":  fmt.Sprintf("Send this authorization URL to the user. After they authorize, use connection_auth_wait with connection_id=%q to confirm completion. Once authorized, the remote MCP's tools will be available on the next message.", a.Name),
 		}
 		return json.Marshal(result)
 	}
@@ -237,7 +249,7 @@ type remoteMCPRemoveArgs struct {
 	Name string `json:"name"`
 }
 
-func remoteMCPRemoveHandler(deps RemoteMCPToolsDeps) mcp.ToolHandler {
+func remoteMCPRemoveHandler(deps Deps) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 		var a remoteMCPRemoveArgs
 		if err := json.Unmarshal(args, &a); err != nil {
@@ -257,15 +269,7 @@ func remoteMCPRemoveHandler(deps RemoteMCPToolsDeps) mcp.ToolHandler {
 	}
 }
 
-// --- auth wait tool for remote MCPs ---
-
-// RegisterRemoteMCPAuthWaitTool adds a wait tool that works for remote MCP
-// OAuth flows. It reuses connection_auth_wait's pattern but checks remote MCP auth.
-// Actually, connection_auth_wait already polls for credentials, but remote MCPs
-// store auth differently. We extend it here.
-func RegisterRemoteMCPAuthWaitTool(h *mcp.Handler, deps RemoteMCPToolsDeps) {
-	h.Register(remoteMCPAuthWaitDef(), remoteMCPAuthWaitHandler(deps))
-}
+// --- remote_mcp_auth_wait ---
 
 func remoteMCPAuthWaitDef() mcp.ToolDef {
 	return mcp.ToolDef{
@@ -288,7 +292,7 @@ type remoteMCPAuthWaitArgs struct {
 	Name string `json:"name"`
 }
 
-func remoteMCPAuthWaitHandler(deps RemoteMCPToolsDeps) mcp.ToolHandler {
+func remoteMCPAuthWaitHandler(deps Deps) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 		var a remoteMCPAuthWaitArgs
 		if err := json.Unmarshal(args, &a); err != nil {
@@ -322,7 +326,7 @@ func remoteMCPAuthWaitHandler(deps RemoteMCPToolsDeps) mcp.ToolHandler {
 				result := map[string]string{
 					"name":    a.Name,
 					"status":  "timeout",
-					"message": fmt.Sprintf("Authorization timed out. The user may not have completed the OAuth flow. Try remote_mcp_add again."),
+					"message": "Authorization timed out. The user may not have completed the OAuth flow. Try remote_mcp_add again.",
 				}
 				return json.Marshal(result)
 			case <-ticker.C:
@@ -341,4 +345,67 @@ func remoteMCPAuthWaitHandler(deps RemoteMCPToolsDeps) mcp.ToolHandler {
 			}
 		}
 	}
+}
+
+// --- pendingRemoteMCPFlow implements oauth.PendingOAuthFlow ---
+
+// pendingRemoteMCPFlow handles the OAuth callback for remote MCP servers.
+// It exchanges the authorization code using PKCE, stores the tokens, and
+// triggers the config updater so the remote MCP's tools become available.
+type pendingRemoteMCPFlow struct {
+	name          string
+	mcpURL        string
+	authMeta      *discovery.AuthMetadata
+	clientReg     *discovery.ClientRegistration
+	manager       *connection.Manager
+	configUpdater func(ctx context.Context) error
+	codeVerifier  string
+	done          chan struct{}
+	result        string
+	err           error
+}
+
+func (f *pendingRemoteMCPFlow) Complete(ctx context.Context, code string, callbackURL string) error {
+	// Exchange the authorization code for tokens using PKCE.
+	creds, err := discovery.ExchangeCodeWithPKCE(ctx, f.authMeta, f.clientReg, code, f.codeVerifier, callbackURL, f.mcpURL)
+	if err != nil {
+		return fmt.Errorf("code exchange failed: %w", err)
+	}
+
+	// Load existing auth data (has client registration info) and add tokens.
+	auth, err := f.manager.GetRemoteMCPAuth(ctx, f.name)
+	if err != nil {
+		return fmt.Errorf("load existing auth: %w", err)
+	}
+	if auth == nil {
+		return fmt.Errorf("no stored auth metadata for remote MCP %q", f.name)
+	}
+
+	auth.AccessToken = creds.AccessToken
+	auth.RefreshToken = creds.RefreshToken
+	if creds.ExpiresIn > 0 {
+		auth.TokenExpiry = time.Now().Add(time.Duration(creds.ExpiresIn) * time.Second)
+	}
+
+	if err := f.manager.SetRemoteMCPAuth(ctx, f.name, auth); err != nil {
+		return fmt.Errorf("store tokens: %w", err)
+	}
+
+	// Regenerate MCP config so the remote server's tools become available.
+	if err := f.configUpdater(ctx); err != nil {
+		slog.Error("failed to update mcp config after remote MCP auth", "name", f.name, "err", err)
+	}
+
+	f.result = fmt.Sprintf("Remote MCP %q authorized successfully", f.name)
+	close(f.done)
+	return nil
+}
+
+func (f *pendingRemoteMCPFlow) Fail(err error) {
+	f.err = err
+	close(f.done)
+}
+
+func (f *pendingRemoteMCPFlow) DoneChan() <-chan struct{} {
+	return f.done
 }

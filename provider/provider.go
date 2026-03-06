@@ -1,8 +1,7 @@
 package provider
 
-import (
-	"tclaw/connection"
-)
+// ProviderID identifies a service provider (e.g. "gmail", "linear").
+type ProviderID string
 
 // AuthType identifies how a provider authenticates.
 type AuthType string
@@ -25,7 +24,7 @@ type OAuth2Config struct {
 
 // Provider defines a service that tclaw can connect to.
 type Provider struct {
-	ID     connection.ProviderID
+	ID     ProviderID
 	Name   string // human-readable ("Gmail", "Linear")
 	Auth   AuthType
 	OAuth2 *OAuth2Config // nil if Auth != AuthOAuth2
@@ -33,12 +32,12 @@ type Provider struct {
 
 // Registry holds all known providers, keyed by ID.
 type Registry struct {
-	providers map[connection.ProviderID]*Provider
+	providers map[ProviderID]*Provider
 }
 
 // NewRegistry creates an empty provider registry.
 func NewRegistry() *Registry {
-	return &Registry{providers: make(map[connection.ProviderID]*Provider)}
+	return &Registry{providers: make(map[ProviderID]*Provider)}
 }
 
 // Register adds a provider to the registry.
@@ -47,13 +46,13 @@ func (r *Registry) Register(p *Provider) {
 }
 
 // Get returns a provider by ID, or nil if not found.
-func (r *Registry) Get(id connection.ProviderID) *Provider {
+func (r *Registry) Get(id ProviderID) *Provider {
 	return r.providers[id]
 }
 
 // List returns all registered provider IDs.
-func (r *Registry) List() []connection.ProviderID {
-	ids := make([]connection.ProviderID, 0, len(r.providers))
+func (r *Registry) List() []ProviderID {
+	ids := make([]ProviderID, 0, len(r.providers))
 	for id := range r.providers {
 		ids = append(ids, id)
 	}

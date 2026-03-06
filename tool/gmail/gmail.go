@@ -1,4 +1,4 @@
-package tool
+package gmail
 
 import (
 	"context"
@@ -13,20 +13,20 @@ import (
 	"tclaw/provider"
 
 	"golang.org/x/oauth2"
-	gmail "google.golang.org/api/gmail/v1"
+	gmailapi "google.golang.org/api/gmail/v1"
 	"google.golang.org/api/option"
 )
 
-// GmailToolsDeps holds dependencies for gmail tool handlers.
-type GmailToolsDeps struct {
+// Deps holds dependencies for gmail tool handlers.
+type Deps struct {
 	ConnID   connection.ConnectionID
 	Manager  *connection.Manager
 	Provider *provider.Provider
 }
 
-// GmailToolDefs returns the MCP tool definitions for a gmail connection.
+// ToolDefs returns the MCP tool definitions for a gmail connection.
 // Used by the provider's Tools func to advertise available tools.
-func GmailToolDefs(connID connection.ConnectionID) []mcp.ToolDef {
+func ToolDefs(connID connection.ConnectionID) []mcp.ToolDef {
 	connParam := fmt.Sprintf(`"connection": {"type": "string", "description": "Connection ID to use.", "const": %q}`, connID)
 
 	return []mcp.ToolDef{
@@ -98,20 +98,20 @@ func GmailToolDefs(connID connection.ConnectionID) []mcp.ToolDef {
 	}
 }
 
-// RegisterGmailTools adds all gmail tools for a specific connection to the MCP handler.
-func RegisterGmailTools(h *mcp.Handler, deps GmailToolsDeps) {
-	defs := GmailToolDefs(deps.ConnID)
+// RegisterTools adds all gmail tools for a specific connection to the MCP handler.
+func RegisterTools(h *mcp.Handler, deps Deps) {
+	defs := ToolDefs(deps.ConnID)
 	// defs order matches: search, read, send, reply, list_labels
-	h.Register(defs[0], gmailSearchHandler(deps))
-	h.Register(defs[1], gmailReadHandler(deps))
-	h.Register(defs[2], gmailSendHandler(deps))
-	h.Register(defs[3], gmailReplyHandler(deps))
-	h.Register(defs[4], gmailListLabelsHandler(deps))
+	h.Register(defs[0], searchHandler(deps))
+	h.Register(defs[1], readHandler(deps))
+	h.Register(defs[2], sendHandler(deps))
+	h.Register(defs[3], replyHandler(deps))
+	h.Register(defs[4], listLabelsHandler(deps))
 }
 
 // gmailClient builds an authenticated Gmail API client for the connection,
 // refreshing the token if needed.
-func gmailClient(ctx context.Context, deps GmailToolsDeps) (*gmail.Service, error) {
+func gmailClient(ctx context.Context, deps Deps) (*gmailapi.Service, error) {
 	refreshFn := func(ctx context.Context, refreshToken string) (*connection.Credentials, error) {
 		return oauth.RefreshToken(ctx, deps.Provider.OAuth2, refreshToken)
 	}
@@ -123,7 +123,7 @@ func gmailClient(ctx context.Context, deps GmailToolsDeps) (*gmail.Service, erro
 	tokenSrc := oauth2.StaticTokenSource(&oauth2.Token{
 		AccessToken: creds.AccessToken,
 	})
-	svc, err := gmail.NewService(ctx, option.WithHTTPClient(oauth2.NewClient(ctx, tokenSrc)))
+	svc, err := gmailapi.NewService(ctx, option.WithHTTPClient(oauth2.NewClient(ctx, tokenSrc)))
 	if err != nil {
 		return nil, fmt.Errorf("create gmail client: %w", err)
 	}
@@ -132,15 +132,15 @@ func gmailClient(ctx context.Context, deps GmailToolsDeps) (*gmail.Service, erro
 
 // --- gmail_search ---
 
-type gmailSearchArgs struct {
+type searchArgs struct {
 	Connection string `json:"connection"`
 	Query      string `json:"query"`
 	MaxResults int    `json:"max_results"`
 }
 
-func gmailSearchHandler(deps GmailToolsDeps) mcp.ToolHandler {
+func searchHandler(deps Deps) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
-		var a gmailSearchArgs
+		var a searchArgs
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
@@ -180,7 +180,7 @@ func gmailSearchHandler(deps GmailToolsDeps) mcp.ToolHandler {
 		for _, msg := range listRsp.Messages {
 			full, err := svc.Users.Messages.Get("me", msg.Id).Format("metadata").MetadataHeaders("From", "Subject", "Date").Do()
 			if err != nil {
-				continue
+				return nil, fmt.Errorf("gmail get message %s: %w", msg.Id, err)
 			}
 
 			summary := emailSummary{
@@ -206,14 +206,14 @@ func gmailSearchHandler(deps GmailToolsDeps) mcp.ToolHandler {
 
 // --- gmail_read ---
 
-type gmailReadArgs struct {
+type readArgs struct {
 	Connection string `json:"connection"`
 	MessageID  string `json:"message_id"`
 }
 
-func gmailReadHandler(deps GmailToolsDeps) mcp.ToolHandler {
+func readHandler(deps Deps) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
-		var a gmailReadArgs
+		var a readArgs
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
@@ -269,7 +269,7 @@ func gmailReadHandler(deps GmailToolsDeps) mcp.ToolHandler {
 
 // extractBody walks the MIME parts to find the plain text body.
 // Falls back to HTML if no plain text part exists.
-func extractBody(payload *gmail.MessagePart) string {
+func extractBody(payload *gmailapi.MessagePart) string {
 	if payload == nil {
 		return ""
 	}
@@ -305,6 +305,7 @@ func extractBody(payload *gmail.MessagePart) string {
 func decodeBase64URL(data string) string {
 	decoded, err := base64.URLEncoding.DecodeString(data)
 	if err != nil {
+		// Data is already readable text, return as-is.
 		return data
 	}
 	return string(decoded)
@@ -312,7 +313,7 @@ func decodeBase64URL(data string) string {
 
 // --- gmail_send ---
 
-type gmailSendArgs struct {
+type sendArgs struct {
 	Connection string `json:"connection"`
 	To         string `json:"to"`
 	Subject    string `json:"subject"`
@@ -321,9 +322,9 @@ type gmailSendArgs struct {
 	BCC        string `json:"bcc"`
 }
 
-func gmailSendHandler(deps GmailToolsDeps) mcp.ToolHandler {
+func sendHandler(deps Deps) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
-		var a gmailSendArgs
+		var a sendArgs
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
@@ -334,7 +335,7 @@ func gmailSendHandler(deps GmailToolsDeps) mcp.ToolHandler {
 		}
 
 		raw := buildRawEmail(a.To, a.Subject, a.Body, a.CC, a.BCC, "", "")
-		msg := &gmail.Message{
+		msg := &gmailapi.Message{
 			Raw: base64.URLEncoding.EncodeToString([]byte(raw)),
 		}
 
@@ -354,15 +355,15 @@ func gmailSendHandler(deps GmailToolsDeps) mcp.ToolHandler {
 
 // --- gmail_reply ---
 
-type gmailReplyArgs struct {
+type replyArgs struct {
 	Connection string `json:"connection"`
 	MessageID  string `json:"message_id"`
 	Body       string `json:"body"`
 }
 
-func gmailReplyHandler(deps GmailToolsDeps) mcp.ToolHandler {
+func replyHandler(deps Deps) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
-		var a gmailReplyArgs
+		var a replyArgs
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
@@ -407,7 +408,7 @@ func gmailReplyHandler(deps GmailToolsDeps) mcp.ToolHandler {
 		}
 
 		raw := buildRawEmail(replyTo, subject, a.Body, origCC, "", orig.ThreadId, origMessageID)
-		msg := &gmail.Message{
+		msg := &gmailapi.Message{
 			Raw:      base64.URLEncoding.EncodeToString([]byte(raw)),
 			ThreadId: orig.ThreadId,
 		}
@@ -428,7 +429,7 @@ func gmailReplyHandler(deps GmailToolsDeps) mcp.ToolHandler {
 
 // --- gmail_list_labels ---
 
-func gmailListLabelsHandler(deps GmailToolsDeps) mcp.ToolHandler {
+func listLabelsHandler(deps Deps) mcp.ToolHandler {
 	return func(ctx context.Context, _ json.RawMessage) (json.RawMessage, error) {
 		svc, err := gmailClient(ctx, deps)
 		if err != nil {
@@ -480,4 +481,3 @@ func buildRawEmail(to, subject, body, cc, bcc, threadID, inReplyTo string) strin
 	b.WriteString(body)
 	return b.String()
 }
-

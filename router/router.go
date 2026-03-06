@@ -17,9 +17,11 @@ import (
 	"tclaw/mcp"
 	"tclaw/oauth"
 	"tclaw/provider"
-	"tclaw/secret"
-	"tclaw/store"
-	"tclaw/tool"
+	"tclaw/libraries/secret"
+	"tclaw/libraries/store"
+	"tclaw/tool/connectiontools"
+	"tclaw/tool/gmail"
+	"tclaw/tool/remotemcp"
 	"tclaw/user"
 )
 
@@ -119,14 +121,21 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, chMap map[ch
 	// Set up connection manager and MCP server.
 	connMgr := connection.NewManager(s, secretStore)
 	mcpHandler := mcp.NewHandler()
-	tool.RegisterConnectionTools(mcpHandler, tool.ConnectionToolsDeps{
+	connectiontools.RegisterTools(mcpHandler, connectiontools.Deps{
 		Manager:  connMgr,
 		Registry: r.registry,
 		Callback: r.callback,
 		Handler:  mcpHandler,
+		OnGmailConnect: func(connID connection.ConnectionID, mgr *connection.Manager, p *provider.Provider) {
+			gmail.RegisterTools(mcpHandler, gmail.Deps{
+				ConnID:   connID,
+				Manager:  mgr,
+				Provider: p,
+			})
+		},
 	})
 	if r.callback != nil {
-		tool.RegisterAuthWaitTool(mcpHandler, connMgr)
+		connectiontools.RegisterAuthWaitTool(mcpHandler, connMgr)
 	}
 
 	// Register provider-specific tools for existing connections.
@@ -186,14 +195,14 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, chMap map[ch
 	}
 
 	// Register remote MCP management tools.
-	remoteMCPDeps := tool.RemoteMCPToolsDeps{
+	remoteMCPDeps := remotemcp.Deps{
 		Manager:       connMgr,
 		Callback:      r.callback,
 		ConfigUpdater: configUpdater,
 	}
-	tool.RegisterRemoteMCPTools(mcpHandler, remoteMCPDeps)
+	remotemcp.RegisterTools(mcpHandler, remoteMCPDeps)
 	if r.callback != nil {
-		tool.RegisterRemoteMCPAuthWaitTool(mcpHandler, remoteMCPDeps)
+		remotemcp.RegisterAuthWaitTool(mcpHandler, remoteMCPDeps)
 	}
 
 	// Generate the MCP config file for --mcp-config (includes existing remote MCPs).
@@ -361,7 +370,7 @@ func (r *Router) registerProviderTools(ctx context.Context, h *mcp.Handler, mgr 
 
 		switch conn.ProviderID {
 		case provider.GmailProviderID:
-			tool.RegisterGmailTools(h, tool.GmailToolsDeps{
+			gmail.RegisterTools(h, gmail.Deps{
 				ConnID:   conn.ID,
 				Manager:  mgr,
 				Provider: p,

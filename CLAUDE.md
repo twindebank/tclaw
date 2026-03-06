@@ -10,6 +10,7 @@
 - Prefer param structs over multiple parameters for both inputs and outputs — keeps signatures clean and extensible
 - **Prefer stateless functions over stateful structs** — avoid structs with methods that mutate shared state. Caller should own state and pass it to pure/stateless functions that return new values. Exceptions: I/O resources (net.Conn, os.File) and top-level orchestrators (Router) where someone must own goroutine lifecycles.
 - Use emojis in user-facing status messages (thinking, ready, tool use, etc.) for visual clarity
+- Don't shorten/abbreviate names — use full words for packages, variables, functions, etc. (e.g. `connectiontools` not `connmgmt`)
 
 ## Architecture
 - Spawns the `claude` CLI binary directly — does NOT use `claude-agent-sdk-go` (it has bugs: stdin pipe never closed causing hangs, assistant message text not emitted as events)

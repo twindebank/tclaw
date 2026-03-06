@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	"tclaw/id"
+	"tclaw/libraries/id"
 )
 
 // maxMessageSize is the maximum bytes we'll read from a single socket

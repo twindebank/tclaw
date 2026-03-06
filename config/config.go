@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"tclaw/claudecli"
-	"tclaw/secret"
+	"tclaw/libraries/secret"
 	"tclaw/user"
 
 	"gopkg.in/yaml.v3"

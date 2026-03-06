@@ -1,9 +1,10 @@
-package tool
+package connectiontools
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"tclaw/connection"
 	"tclaw/mcp"
@@ -11,24 +12,35 @@ import (
 	"tclaw/provider"
 )
 
-// ConnectionToolsDeps holds the dependencies for connection management tools.
-type ConnectionToolsDeps struct {
+// Deps holds the dependencies for connection management tools.
+type Deps struct {
 	Manager  *connection.Manager
 	Registry *provider.Registry
 	Callback *oauth.CallbackServer // nil if OAuth is not configured
 	Handler  *mcp.Handler          // MCP handler for dynamic tool registration
+
+	// OnGmailConnect is called when a Gmail OAuth flow completes so the
+	// caller can register Gmail tools dynamically. Avoids importing the
+	// gmail sub-package from here.
+	OnGmailConnect func(connID connection.ConnectionID, mgr *connection.Manager, p *provider.Provider)
 }
 
-// RegisterConnectionTools adds the connection management tools to the MCP handler.
+// RegisterTools adds the connection management tools to the MCP handler.
 // These are always available regardless of which providers are connected.
-func RegisterConnectionTools(h *mcp.Handler, deps ConnectionToolsDeps) {
+func RegisterTools(h *mcp.Handler, deps Deps) {
 	h.Register(connectionListDef(), connectionListHandler(deps.Manager))
 	h.Register(connectionProvidersDef(), connectionProvidersHandler(deps.Registry))
 	h.Register(connectionAddDef(), connectionAddHandler(deps))
 	h.Register(connectionRemoveDef(), connectionRemoveHandler(deps.Manager))
 }
 
-// connection_list
+// RegisterAuthWaitTool adds the connection_auth_wait tool. Separated from
+// RegisterTools because it's only useful when OAuth is configured.
+func RegisterAuthWaitTool(h *mcp.Handler, mgr *connection.Manager) {
+	h.Register(connectionAuthWaitDef(), connectionAuthWaitHandler(mgr))
+}
+
+// --- connection_list ---
 
 func connectionListDef() mcp.ToolDef {
 	return mcp.ToolDef{
@@ -50,14 +62,17 @@ func connectionListHandler(mgr *connection.Manager) mcp.ToolHandler {
 
 		type connInfo struct {
 			ID       connection.ConnectionID `json:"id"`
-			Provider connection.ProviderID   `json:"provider"`
+			Provider provider.ProviderID     `json:"provider"`
 			Label    string                  `json:"label"`
 			HasCreds bool                    `json:"has_credentials"`
 		}
 
 		var result []connInfo
 		for _, c := range conns {
-			creds, _ := mgr.GetCredentials(ctx, c.ID)
+			creds, err := mgr.GetCredentials(ctx, c.ID)
+			if err != nil {
+				return nil, fmt.Errorf("get credentials for %s: %w", c.ID, err)
+			}
 			result = append(result, connInfo{
 				ID:       c.ID,
 				Provider: c.ProviderID,
@@ -70,7 +85,7 @@ func connectionListHandler(mgr *connection.Manager) mcp.ToolHandler {
 	}
 }
 
-// connection_providers
+// --- connection_providers ---
 
 func connectionProvidersDef() mcp.ToolDef {
 	return mcp.ToolDef{
@@ -88,9 +103,9 @@ func connectionProvidersHandler(reg *provider.Registry) mcp.ToolHandler {
 		}
 
 		type providerInfo struct {
-			ID   connection.ProviderID `json:"id"`
-			Name string                `json:"name"`
-			Auth provider.AuthType     `json:"auth_type"`
+			ID   provider.ProviderID `json:"id"`
+			Name string              `json:"name"`
+			Auth provider.AuthType   `json:"auth_type"`
 		}
 
 		var result []providerInfo
@@ -107,7 +122,7 @@ func connectionProvidersHandler(reg *provider.Registry) mcp.ToolHandler {
 	}
 }
 
-// connection_add
+// --- connection_add ---
 
 func connectionAddDef() mcp.ToolDef {
 	return mcp.ToolDef{
@@ -135,14 +150,14 @@ type connectionAddArgs struct {
 	Label    string `json:"label"`
 }
 
-func connectionAddHandler(deps ConnectionToolsDeps) mcp.ToolHandler {
+func connectionAddHandler(deps Deps) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 		var a connectionAddArgs
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
-		providerID := connection.ProviderID(a.Provider)
+		providerID := provider.ProviderID(a.Provider)
 		p := deps.Registry.Get(providerID)
 		if p == nil {
 			return nil, fmt.Errorf("unknown provider %q — use connection_providers to see available options", a.Provider)
@@ -179,7 +194,7 @@ func connectionAddHandler(deps ConnectionToolsDeps) mcp.ToolHandler {
 	}
 }
 
-func handleOAuthAdd(ctx context.Context, deps ConnectionToolsDeps, p *provider.Provider, conn *connection.Connection) (json.RawMessage, error) {
+func handleOAuthAdd(ctx context.Context, deps Deps, p *provider.Provider, conn *connection.Connection) (json.RawMessage, error) {
 	if deps.Callback == nil {
 		return nil, fmt.Errorf("OAuth is not configured — set providers.%s.client_id and client_secret in tclaw.yaml", p.ID)
 	}
@@ -189,15 +204,8 @@ func handleOAuthAdd(ctx context.Context, deps ConnectionToolsDeps, p *provider.P
 		Provider: p,
 		Manager:  deps.Manager,
 		OnConnect: func() {
-			// Dynamically register provider tools when OAuth completes
-			// so they're available in the current session.
-			switch p.ID {
-			case provider.GmailProviderID:
-				RegisterGmailTools(deps.Handler, GmailToolsDeps{
-					ConnID:   conn.ID,
-					Manager:  deps.Manager,
-					Provider: p,
-				})
+			if deps.OnGmailConnect != nil && p.ID == provider.GmailProviderID {
+				deps.OnGmailConnect(conn.ID, deps.Manager, p)
 			}
 		},
 	}
@@ -209,21 +217,6 @@ func handleOAuthAdd(ctx context.Context, deps ConnectionToolsDeps, p *provider.P
 
 	authURL := oauth.BuildAuthURL(p.OAuth2, state, flow.CallbackURL)
 
-	// Return the auth URL immediately so Claude can show it to the user,
-	// then block until the callback completes or ctx is cancelled.
-	// The MCP tool result includes the URL for Claude to display.
-	// We use a goroutine-free approach: select on flow.Done vs ctx.Done.
-
-	// First, return the URL as the tool result. But we want to wait...
-	// Actually the MCP protocol is request-response, so we need to either:
-	// (a) return immediately with the URL and have a separate status check, or
-	// (b) block here until auth completes.
-	//
-	// Option (b) is cleaner UX — Claude gets the final result in one tool call.
-	// The tricky part is that Claude needs to show the URL before we return.
-	// Since MCP doesn't support streaming partial results, we return immediately
-	// with the URL and add a connection_auth_wait tool for checking completion.
-
 	result := map[string]any{
 		"connection_id": conn.ID,
 		"status":        "pending_auth",
@@ -233,7 +226,7 @@ func handleOAuthAdd(ctx context.Context, deps ConnectionToolsDeps, p *provider.P
 	return json.Marshal(result)
 }
 
-// connection_remove
+// --- connection_remove ---
 
 func connectionRemoveDef() mcp.ToolDef {
 	return mcp.ToolDef{
@@ -269,5 +262,89 @@ func connectionRemoveHandler(mgr *connection.Manager) mcp.ToolHandler {
 		}
 
 		return json.Marshal(fmt.Sprintf("Connection %s removed.", id))
+	}
+}
+
+// --- connection_auth_wait ---
+
+const authWaitTimeout = 5 * time.Minute
+
+func connectionAuthWaitDef() mcp.ToolDef {
+	return mcp.ToolDef{
+		Name:        "connection_auth_wait",
+		Description: "Wait for a pending OAuth authorization to complete. Call this after sending the auth URL to the user. Blocks until the user finishes authorizing (up to 5 minutes) or checks if credentials are already stored.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"connection_id": {
+					"type": "string",
+					"description": "The connection ID to wait for (e.g. 'gmail/work')."
+				}
+			},
+			"required": ["connection_id"]
+		}`),
+	}
+}
+
+type connectionAuthWaitArgs struct {
+	ConnectionID string `json:"connection_id"`
+}
+
+func connectionAuthWaitHandler(mgr *connection.Manager) mcp.ToolHandler {
+	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
+		var a connectionAuthWaitArgs
+		if err := json.Unmarshal(args, &a); err != nil {
+			return nil, fmt.Errorf("invalid arguments: %w", err)
+		}
+
+		connID := connection.ConnectionID(a.ConnectionID)
+
+		// Check if credentials already exist (callback already fired).
+		creds, err := mgr.GetCredentials(ctx, connID)
+		if err != nil {
+			return nil, fmt.Errorf("check credentials: %w", err)
+		}
+		if creds != nil && creds.AccessToken != "" {
+			result := map[string]string{
+				"connection_id": string(connID),
+				"status":        "authorized",
+				"message":       fmt.Sprintf("Connection %s is authorized and ready to use.", connID),
+			}
+			return json.Marshal(result)
+		}
+
+		// Poll for credentials until timeout or ctx cancellation.
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		deadline := time.After(authWaitTimeout)
+
+		for {
+			select {
+			case <-ctx.Done():
+				return nil, fmt.Errorf("authorization wait cancelled")
+
+			case <-deadline:
+				result := map[string]string{
+					"connection_id": string(connID),
+					"status":        "timeout",
+					"message":       fmt.Sprintf("Authorization timed out after %s. The user may not have completed the OAuth flow. They can try again with connection_add.", authWaitTimeout),
+				}
+				return json.Marshal(result)
+
+			case <-ticker.C:
+				creds, err := mgr.GetCredentials(ctx, connID)
+				if err != nil {
+					return nil, fmt.Errorf("check credentials: %w", err)
+				}
+				if creds != nil && creds.AccessToken != "" {
+					result := map[string]string{
+						"connection_id": string(connID),
+						"status":        "authorized",
+						"message":       fmt.Sprintf("Connection %s is now authorized and ready to use!", connID),
+					}
+					return json.Marshal(result)
+				}
+			}
+		}
 	}
 }
