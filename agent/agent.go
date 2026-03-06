@@ -9,11 +9,9 @@ import (
 	"time"
 
 	"tclaw/channel"
-	"tclaw/secret"
-	"tclaw/store"
+	"tclaw/claudecli"
 )
 
-const sessionKeyPrefix = "session:"
 const stopKeyword = "stop"
 
 const defaultMaxTurns = 10
@@ -25,8 +23,8 @@ var ErrIdleTimeout = errors.New("agent idle timeout")
 
 // Options configures the agent. All fields are immutable after creation.
 type Options struct {
-	PermissionMode PermissionMode
-	Model          Model
+	PermissionMode claudecli.PermissionMode
+	Model          claudecli.Model
 
 	// MaxTurns limits agentic turns per invocation. Defaults to defaultMaxTurns.
 	MaxTurns int
@@ -43,42 +41,26 @@ type Options struct {
 	HomeDir string
 
 	Channels map[channel.ChannelID]channel.Channel
-	Store    store.Store
-	Secrets  secret.Store
+
+	// Sessions maps channel IDs to their last-known CLI session IDs.
+	// Loaded by the caller (e.g. router) from persistent storage.
+	Sessions map[channel.ChannelID]string
+
+	// OnSessionUpdate is called when a channel's session ID changes.
+	// The caller (e.g. router) uses this to persist session state.
+	// May be nil if persistence is not needed.
+	OnSessionUpdate func(chID channel.ChannelID, sessionID string)
 
 	// AllowedTools are auto-approved without prompting (e.g. ToolRead, ToolBash.Scoped("git *")).
-	AllowedTools []Tool
+	AllowedTools []claudecli.Tool
 
 	// DisallowedTools are removed from the model's context entirely.
-	DisallowedTools []Tool
+	DisallowedTools []claudecli.Tool
 
 	// SystemPrompt is appended to the default Claude system prompt via
 	// --append-system-prompt. Contains agent identity, channel context,
 	// and memory instructions.
 	SystemPrompt string
-}
-
-func sessionKey(chID channel.ChannelID) string {
-	return sessionKeyPrefix + string(chID)
-}
-
-func loadSession(ctx context.Context, s store.Store, chID channel.ChannelID) (string, error) {
-	data, err := s.Get(ctx, sessionKey(chID))
-	if err != nil {
-		return "", fmt.Errorf("load session: %w", err)
-	}
-	if len(data) > 0 {
-		slog.Info("resumed session", "channel", chID, "session_id", string(data))
-		return string(data), nil
-	}
-	return "", nil
-}
-
-func saveSession(ctx context.Context, s store.Store, chID channel.ChannelID, id string) error {
-	if err := s.Set(ctx, sessionKey(chID), []byte(id)); err != nil {
-		return fmt.Errorf("save session: %w", err)
-	}
-	return nil
 }
 
 type handleResult struct {
@@ -97,13 +79,9 @@ func Run(ctx context.Context, opts Options) error {
 // instead of calling FanIn internally. Used by the Router for lazy startup
 // where the first message has already been consumed.
 func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.TaggedMessage) error {
-	// Per-channel session IDs — each channel is an independent conversation.
+	// Per-channel session IDs — seeded from opts, updated as sessions change.
 	sessions := make(map[channel.ChannelID]string)
-	for chID := range opts.Channels {
-		sid, err := loadSession(ctx, opts.Store, chID)
-		if err != nil {
-			slog.Warn("failed to load session, starting fresh", "channel", chID, "err", err)
-		}
+	for chID, sid := range opts.Sessions {
 		if sid != "" {
 			sessions[chID] = sid
 		}
@@ -159,8 +137,8 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				if result.sessionID != "" && result.sessionID != sessionID {
 					slog.Info("session started", "channel", msg.ChannelID, "session_id", result.sessionID)
 					sessions[msg.ChannelID] = result.sessionID
-					if err := saveSession(ctx, opts.Store, msg.ChannelID, result.sessionID); err != nil {
-						slog.Error("failed to save session", "err", err)
+					if opts.OnSessionUpdate != nil {
+						opts.OnSessionUpdate(msg.ChannelID, result.sessionID)
 					}
 				}
 				goto done
@@ -234,7 +212,7 @@ func buildArgs(opts Options, sessionID string, systemPrompt string, prompt strin
 	args := []string{
 		"--output-format", "stream-json",
 		"--verbose",
-		"--print", prompt,
+		"--print",
 	}
 	if sessionID != "" {
 		args = append(args, "--resume", sessionID)
@@ -255,5 +233,8 @@ func buildArgs(opts Options, sessionID string, systemPrompt string, prompt strin
 	for _, t := range opts.DisallowedTools {
 		args = append(args, "--disallowedTools", string(t))
 	}
+	// "--" terminates flag parsing so prompts starting with "-" aren't
+	// mistaken for CLI options.
+	args = append(args, "--", prompt)
 	return args
 }
