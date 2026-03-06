@@ -25,9 +25,10 @@ func formatBlock(block claudecli.ContentBlock) string {
 }
 
 // formatToolUse renders a tool invocation with its arguments.
+// Prefixed with a newline so it doesn't run into preceding text.
 func formatToolUse(block claudecli.ContentBlock) string {
 	if len(block.Input) == 0 || string(block.Input) == "{}" {
-		return fmt.Sprintf("🔧 %s\n", block.Name)
+		return fmt.Sprintf("\n🔧 %s\n", block.Name)
 	}
 
 	var args map[string]json.RawMessage
@@ -52,7 +53,7 @@ func formatToolUse(block claudecli.ContentBlock) string {
 		parts = append(parts, fmt.Sprintf("%s=%s", k, s))
 	}
 
-	return fmt.Sprintf("🔧 %s(%s)\n", block.Name, strings.Join(parts, ", "))
+	return fmt.Sprintf("\n🔧 %s(%s)\n", block.Name, strings.Join(parts, ", "))
 }
 
 // formatToolResult renders execution stats from a tool result event.

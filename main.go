@@ -9,8 +9,9 @@ import (
 	"syscall"
 
 	"tclaw/config"
+	"tclaw/oauth"
+	"tclaw/provider"
 	"tclaw/router"
-	"tclaw/secret"
 )
 
 func main() {
@@ -28,7 +29,27 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	r := router.New(cfg.BaseDir, os.Getenv(secret.MasterKeyEnv))
+	// Build provider registry from config.
+	reg := provider.NewRegistry()
+	if cfg.Providers.Gmail != nil {
+		reg.Register(provider.NewGmailProvider(
+			cfg.Providers.Gmail.ClientID,
+			cfg.Providers.Gmail.ClientSecret,
+		))
+	}
+
+	// Start OAuth callback server if any OAuth providers are configured.
+	var callback *oauth.CallbackServer
+	if cfg.Providers.Gmail != nil {
+		callback = oauth.NewCallbackServer(cfg.OAuth.CallbackAddr)
+		if err := callback.Start(); err != nil {
+			slog.Error("failed to start oauth callback server", "err", err)
+			os.Exit(1)
+		}
+		defer callback.Stop(context.Background())
+	}
+
+	r := router.New(cfg.BaseDir, reg, callback)
 	defer r.StopAll()
 
 	for _, u := range cfg.Users {

@@ -1,7 +1,7 @@
 package user
 
 import (
-	"tclaw/agent"
+	"tclaw/claudecli"
 )
 
 // ID uniquely identifies a user across the system.
@@ -13,10 +13,10 @@ type ID string
 type Config struct {
 	ID              ID
 	APIKey          string // ANTHROPIC_API_KEY for this user's claude sessions
-	Model           agent.Model
-	PermissionMode  agent.PermissionMode
-	AllowedTools    []agent.Tool
-	DisallowedTools []agent.Tool
+	Model           claudecli.Model
+	PermissionMode  claudecli.PermissionMode
+	AllowedTools    []claudecli.Tool
+	DisallowedTools []claudecli.Tool
 	MaxTurns        int
 	Debug           bool
 

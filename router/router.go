@@ -13,8 +13,13 @@ import (
 	"tclaw/agent"
 	"tclaw/channel"
 	"tclaw/config"
+	"tclaw/connection"
+	"tclaw/mcp"
+	"tclaw/oauth"
+	"tclaw/provider"
 	"tclaw/secret"
 	"tclaw/store"
+	"tclaw/tool"
 	"tclaw/user"
 )
 
@@ -22,10 +27,14 @@ import (
 // channels, store, and Claude session. Agents start lazily on
 // the first message, not at registration time.
 type Router struct {
-	mu        sync.Mutex
-	users     map[user.ID]*managedUser
-	baseDir   string // root for per-user data (home dirs, stores)
-	masterKey string // TCLAW_SECRET_KEY for encrypted FS fallback (may be empty if keychain available)
+	mu       sync.Mutex
+	users    map[user.ID]*managedUser
+	baseDir  string // root for per-user data (home dirs, stores)
+	registry *provider.Registry
+	callback *oauth.CallbackServer // nil if OAuth is not configured
+
+	// Per-user MCP servers, keyed by user ID.
+	mcpServers map[user.ID]*mcp.Server
 }
 
 type managedUser struct {
@@ -44,11 +53,15 @@ type managedUser struct {
 //	  <user-id>/
 //	    home/       -> HOME for claude subprocess (~/.claude/ lives here)
 //	    store/      -> key-value store for agent state (session IDs, etc.)
-func New(baseDir string, masterKey string) *Router {
+//	    secrets/    -> encrypted credentials for connections
+// callback may be nil if OAuth is not configured.
+func New(baseDir string, registry *provider.Registry, callback *oauth.CallbackServer) *Router {
 	return &Router{
-		users:     make(map[user.ID]*managedUser),
-		baseDir:   baseDir,
-		masterKey: masterKey,
+		users:      make(map[user.ID]*managedUser),
+		mcpServers: make(map[user.ID]*mcp.Server),
+		baseDir:    baseDir,
+		registry:   registry,
+		callback:   callback,
 	}
 }
 
@@ -88,7 +101,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, chMap map[ch
 	userDir := filepath.Join(r.baseDir, string(mu.cfg.ID))
 	homeDir := filepath.Join(userDir, "home")
 	storeDir := filepath.Join(userDir, "store")
-	secretDir := filepath.Join(userDir, "secrets")
+	secretsDir := filepath.Join(userDir, "secrets")
 
 	s, err := store.NewFS(storeDir)
 	if err != nil {
@@ -96,11 +109,101 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, chMap map[ch
 		return
 	}
 
-	secrets, err := secret.Resolve(string(mu.cfg.ID), secretDir, r.masterKey)
+	// Set up secret store for connection credentials.
+	secretStore, err := secret.Resolve(string(mu.cfg.ID), secretsDir, os.Getenv(secret.MasterKeyEnv))
 	if err != nil {
 		slog.Error("failed to create secret store", "user", mu.cfg.ID, "err", err)
 		return
 	}
+
+	// Set up connection manager and MCP server.
+	connMgr := connection.NewManager(s, secretStore)
+	mcpHandler := mcp.NewHandler()
+	tool.RegisterConnectionTools(mcpHandler, tool.ConnectionToolsDeps{
+		Manager:  connMgr,
+		Registry: r.registry,
+		Callback: r.callback,
+		Handler:  mcpHandler,
+	})
+	if r.callback != nil {
+		tool.RegisterAuthWaitTool(mcpHandler, connMgr)
+	}
+
+	// Register provider-specific tools for existing connections.
+	r.registerProviderTools(ctx, mcpHandler, connMgr)
+
+	mcpServer := mcp.NewServer(mcpHandler)
+	// Bind to a random port on localhost.
+	mcpAddr, err := mcpServer.Start("127.0.0.1:0")
+	if err != nil {
+		slog.Error("failed to start mcp server", "user", mu.cfg.ID, "err", err)
+		return
+	}
+	defer mcpServer.Stop(context.Background())
+
+	r.mu.Lock()
+	r.mcpServers[mu.cfg.ID] = mcpServer
+	r.mu.Unlock()
+	defer func() {
+		r.mu.Lock()
+		delete(r.mcpServers, mu.cfg.ID)
+		r.mu.Unlock()
+	}()
+
+	// buildRemoteMCPEntries loads remote MCPs and their auth tokens from
+	// the connection manager and returns config entries for the MCP config file.
+	buildRemoteMCPEntries := func(ctx context.Context) []mcp.RemoteMCPEntry {
+		mcps, listErr := connMgr.ListRemoteMCPs(ctx)
+		if listErr != nil {
+			slog.Error("failed to list remote mcps for config", "err", listErr)
+			return nil
+		}
+		var entries []mcp.RemoteMCPEntry
+		for _, m := range mcps {
+			entry := mcp.RemoteMCPEntry{Name: m.Name, URL: m.URL}
+			auth, authErr := connMgr.GetRemoteMCPAuth(ctx, m.Name)
+			if authErr != nil {
+				slog.Warn("failed to load remote mcp auth", "name", m.Name, "err", authErr)
+			}
+			if auth != nil && auth.AccessToken != "" {
+				entry.BearerToken = auth.AccessToken
+			}
+			entries = append(entries, entry)
+		}
+		return entries
+	}
+
+	// configUpdater regenerates the MCP config file with current remote MCPs.
+	// Called after remote MCPs are added/removed/authorized.
+	configUpdater := func(ctx context.Context) error {
+		remotes := buildRemoteMCPEntries(ctx)
+		_, genErr := mcp.GenerateConfigFile(userDir, mcpAddr, remotes)
+		if genErr != nil {
+			return fmt.Errorf("regenerate mcp config: %w", genErr)
+		}
+		slog.Info("mcp config regenerated", "user", mu.cfg.ID, "remote_count", len(remotes))
+		return nil
+	}
+
+	// Register remote MCP management tools.
+	remoteMCPDeps := tool.RemoteMCPToolsDeps{
+		Manager:       connMgr,
+		Callback:      r.callback,
+		ConfigUpdater: configUpdater,
+	}
+	tool.RegisterRemoteMCPTools(mcpHandler, remoteMCPDeps)
+	if r.callback != nil {
+		tool.RegisterRemoteMCPAuthWaitTool(mcpHandler, remoteMCPDeps)
+	}
+
+	// Generate the MCP config file for --mcp-config (includes existing remote MCPs).
+	remotes := buildRemoteMCPEntries(ctx)
+	mcpConfigPath, err := mcp.GenerateConfigFile(userDir, mcpAddr, remotes)
+	if err != nil {
+		slog.Error("failed to generate mcp config", "user", mu.cfg.ID, "err", err)
+		return
+	}
+	slog.Info("mcp config ready", "user", mu.cfg.ID, "addr", mcpAddr, "config", mcpConfigPath, "remotes", len(remotes))
 
 	// Seed the user's CLAUDE.md memory file if it doesn't exist yet.
 	// The Claude CLI auto-loads ~/.claude/CLAUDE.md as global instructions.
@@ -116,10 +219,21 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, chMap map[ch
 		}
 	}
 
+	// Convert channel.Info → agent.ChannelInfo for the system prompt.
+	var chInfos []agent.ChannelInfo
+	for _, ch := range chMap {
+		info := ch.Info()
+		chInfos = append(chInfos, agent.ChannelInfo{
+			Name:        info.Name,
+			Type:        string(info.Type),
+			Description: info.Description,
+		})
+	}
+
 	// Build the system prompt once — it's static for this user's lifecycle.
 	// Channel list and identity don't change; per-turn current-channel
 	// info is prepended to each prompt in handle().
-	systemPrompt := agent.BuildSystemPrompt(chMap, mu.cfg.SystemPrompt)
+	systemPrompt := agent.BuildSystemPrompt(chInfos, mu.cfg.SystemPrompt)
 
 	for {
 		// Wait for a message or shutdown.
@@ -143,6 +257,18 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, chMap map[ch
 		mu.cancel = cancel
 		mu.done = done
 		r.mu.Unlock()
+
+		// Load sessions from store for each channel.
+		sessions := make(map[channel.ChannelID]string)
+		for chID := range chMap {
+			sid, loadErr := loadSession(ctx, s, chID)
+			if loadErr != nil {
+				slog.Warn("failed to load session, starting fresh", "channel", chID, "err", loadErr)
+			}
+			if sid != "" {
+				sessions[chID] = sid
+			}
+		}
 
 		// Bridge: re-emit the first message plus remaining fan-in messages
 		// into a channel that agent.RunWithMessages reads from.
@@ -168,10 +294,15 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, chMap map[ch
 			APIKey:          mu.cfg.APIKey,
 			HomeDir:         homeDir,
 			Channels:        chMap,
-			Store:           s,
-			Secrets:         secrets,
+			Sessions:        sessions,
+			OnSessionUpdate: func(chID channel.ChannelID, sessionID string) {
+				if saveErr := saveSession(ctx, s, chID, sessionID); saveErr != nil {
+					slog.Error("failed to save session", "err", saveErr)
+				}
+			},
 			AllowedTools:    mu.cfg.AllowedTools,
 			DisallowedTools: mu.cfg.DisallowedTools,
+			MCPConfigPath:   mcpConfigPath,
 			SystemPrompt:    systemPrompt,
 		}
 
@@ -199,6 +330,44 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, chMap map[ch
 			slog.Error("agent exited with error", "user", mu.cfg.ID, "err", err)
 		}
 		return
+	}
+}
+
+// registerProviderTools loads existing connections and registers
+// provider-specific MCP tools (e.g. gmail tools) for connections
+// that already have credentials stored.
+func (r *Router) registerProviderTools(ctx context.Context, h *mcp.Handler, mgr *connection.Manager) {
+	conns, err := mgr.List(ctx)
+	if err != nil {
+		slog.Error("failed to list connections for tool registration", "err", err)
+		return
+	}
+
+	for _, conn := range conns {
+		p := r.registry.Get(conn.ProviderID)
+		if p == nil {
+			continue
+		}
+
+		// Only register tools if the connection has valid credentials.
+		creds, err := mgr.GetCredentials(ctx, conn.ID)
+		if err != nil {
+			slog.Warn("failed to check credentials", "connection", conn.ID, "err", err)
+			continue
+		}
+		if creds == nil || creds.AccessToken == "" {
+			continue
+		}
+
+		switch conn.ProviderID {
+		case provider.GmailProviderID:
+			tool.RegisterGmailTools(h, tool.GmailToolsDeps{
+				ConnID:   conn.ID,
+				Manager:  mgr,
+				Provider: p,
+			})
+			slog.Info("registered gmail tools", "connection", conn.ID)
+		}
 	}
 }
 

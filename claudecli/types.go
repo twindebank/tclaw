@@ -1,9 +1,6 @@
-package agent
+package claudecli
 
-import (
-	"encoding/json"
-	"strings"
-)
+import "strings"
 
 // PermissionMode controls how the Claude CLI handles tool permissions.
 type PermissionMode string
@@ -75,6 +72,11 @@ const (
 	ToolReadMcpResource  Tool = "ReadMcpResource"
 )
 
+// Scoped returns a tool with a pattern restriction, e.g. Bash("git *").
+func (t Tool) Scoped(pattern string) Tool {
+	return Tool(string(t) + "(" + pattern + ")")
+}
+
 // validModels is the set of known model identifiers.
 var validModels = map[Model]bool{
 	ModelOpus46: true, ModelSonnet46: true,
@@ -129,141 +131,21 @@ var validTools = map[Tool]bool{
 	ToolEnterWorktree: true, ToolListMcpResources: true, ToolReadMcpResource: true,
 }
 
-// ValidTool reports whether t is a known tool, including scoped patterns like Bash(git *).
+// ValidTool reports whether t is a known tool, including scoped patterns like Bash(git *)
+// and MCP tool patterns like mcp__server__* or mcp__server__tool_name.
 func ValidTool(t Tool) bool {
 	if validTools[t] {
 		return true
 	}
-	// Check for scoped pattern: BaseTool(pattern)
 	s := string(t)
+	// MCP tool patterns: mcp__<server>__<tool_or_glob>
+	if strings.HasPrefix(s, "mcp__") {
+		return true
+	}
+	// Scoped pattern: BaseTool(pattern)
 	if idx := strings.Index(s, "("); idx > 0 && strings.HasSuffix(s, ")") {
 		base := Tool(s[:idx])
 		return validTools[base]
 	}
 	return false
-}
-
-// Scoped returns a tool with a pattern restriction, e.g. Bash("git *").
-func (t Tool) Scoped(pattern string) Tool {
-	return Tool(string(t) + "(" + pattern + ")")
-}
-
-// EventType identifies the kind of streaming event from the CLI.
-type EventType string
-
-const (
-	EventSystem            EventType = "system"
-	EventAssistant         EventType = "assistant"
-	EventUser              EventType = "user"
-	EventContentBlockStart EventType = "content_block_start"
-	EventContentBlockDelta EventType = "content_block_delta"
-	EventContentBlockStop  EventType = "content_block_stop"
-	EventRateLimit         EventType = "rate_limit_event"
-	EventResult            EventType = "result"
-)
-
-// ContentBlockType identifies the kind of content within a message.
-type ContentBlockType string
-
-const (
-	ContentText     ContentBlockType = "text"
-	ContentToolUse  ContentBlockType = "tool_use"
-	ContentThinking ContentBlockType = "thinking"
-)
-
-// SystemEventSubtype identifies the kind of system event.
-type SystemEventSubtype string
-
-const (
-	SystemSubtypeInit SystemEventSubtype = "init"
-)
-
-// Event is a single parsed line from the CLI's stream-json output.
-type Event struct {
-	Type EventType `json:"type"`
-}
-
-// SystemEvent is emitted at the start of a session with metadata like session_id.
-type SystemEvent struct {
-	Type      EventType          `json:"type"`
-	Subtype   SystemEventSubtype `json:"subtype"`
-	SessionID string             `json:"session_id"`
-}
-
-// AssistantEvent is the complete assistant message returned by --print mode.
-type AssistantEvent struct {
-	Type    EventType        `json:"type"`
-	Message AssistantMessage `json:"message"`
-}
-
-type AssistantMessage struct {
-	Content []ContentBlock `json:"content"`
-}
-
-type ContentBlock struct {
-	Type ContentBlockType `json:"type"`
-	Text string           `json:"text,omitempty"`
-
-	// tool_use fields
-	ID    string          `json:"id,omitempty"`
-	Name  string          `json:"name,omitempty"`
-	Input json.RawMessage `json:"input,omitempty"`
-
-	// thinking fields
-	Thinking string `json:"thinking,omitempty"`
-}
-
-// UserEvent is emitted when Claude Code feeds a tool result back to the model.
-type UserEvent struct {
-	Type          EventType       `json:"type"`
-	ToolUseResult json.RawMessage `json:"tool_use_result,omitempty"`
-}
-
-// ToolResultMeta captures common fields from the tool_use_result payload.
-// Different tools include different fields; we extract what we can.
-type ToolResultMeta struct {
-	DurationSeconds float64 `json:"durationSeconds,omitempty"`
-	Query           string  `json:"query,omitempty"`
-
-	// Bash/Read/Edit style results
-	Stdout string `json:"stdout,omitempty"`
-	Stderr string `json:"stderr,omitempty"`
-}
-
-// ContentBlockStartEvent marks the beginning of a new content block.
-type ContentBlockStartEvent struct {
-	Type         EventType    `json:"type"`
-	ContentBlock ContentBlock `json:"content_block"`
-}
-
-// ContentDeltaEvent is a streaming text chunk.
-type ContentDeltaEvent struct {
-	Type  EventType `json:"type"`
-	Delta Delta     `json:"delta"`
-}
-
-// DeltaType identifies the kind of streaming delta.
-type DeltaType string
-
-const (
-	DeltaText     DeltaType = "text_delta"
-	DeltaThinking DeltaType = "thinking_delta"
-	DeltaInputJSON DeltaType = "input_json_delta"
-)
-
-type Delta struct {
-	Type     DeltaType `json:"type"`
-	Text     string    `json:"text,omitempty"`
-	Thinking string    `json:"thinking,omitempty"`
-}
-
-// ResultEvent is the final summary emitted when the CLI finishes.
-type ResultEvent struct {
-	Type       EventType `json:"type"`
-	IsError    bool      `json:"is_error"`
-	Result     string    `json:"result"`
-	DurationMs float64   `json:"duration_ms"`
-	NumTurns   int       `json:"num_turns"`
-	SessionID  string    `json:"session_id"`
-	CostUSD    float64   `json:"total_cost_usd"`
 }

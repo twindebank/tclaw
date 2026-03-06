@@ -6,8 +6,6 @@ import (
 	"log/slog"
 	"text/template"
 	"time"
-
-	"tclaw/channel"
 )
 
 //go:embed system_prompt.md
@@ -17,32 +15,25 @@ var systemPromptTmpl = template.Must(template.New("system_prompt").Parse(systemP
 
 type systemPromptData struct {
 	Date       string
-	Channels   []channelInfo
+	Channels   []ChannelInfo
 	UserPrompt string
 }
 
-type channelInfo struct {
+// ChannelInfo describes a channel for the system prompt template.
+// Plain struct with no transport dependencies — the caller converts
+// from channel.Info before calling BuildSystemPrompt.
+type ChannelInfo struct {
 	Name        string
-	Type        channel.ChannelType
+	Type        string
 	Description string
 }
 
 // BuildSystemPrompt executes the system_prompt.md template with runtime
 // state and user config. The result is passed to --append-system-prompt.
-func BuildSystemPrompt(channels map[channel.ChannelID]channel.Channel, userPrompt string) string {
-	var chInfos []channelInfo
-	for _, ch := range channels {
-		info := ch.Info()
-		chInfos = append(chInfos, channelInfo{
-			Name:        info.Name,
-			Type:        info.Type,
-			Description: info.Description,
-		})
-	}
-
+func BuildSystemPrompt(channels []ChannelInfo, userPrompt string) string {
 	data := systemPromptData{
 		Date:       time.Now().Format("Monday, January 2, 2006"),
-		Channels:   chInfos,
+		Channels:   channels,
 		UserPrompt: userPrompt,
 	}
 

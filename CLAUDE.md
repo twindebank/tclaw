@@ -2,6 +2,7 @@
 
 ## Code Style
 - Comment code that isn't obvious, prefer readability over clever code
+- Prefer inline docs on individual items over big block comments at the top of a group — each const/var/field should carry its own explanation
 - Errors must never be silently ignored — return errors up the call stack. Only log+swallow at the highest level (Run loop, Router) where recovery is clear. Low-level helpers must return errors, not swallow them.
 - Never return data alongside an error — on error paths, return zero values for all non-error returns. The caller should not trust data when err != nil.
 - Use proper typed consts and enums — never raw strings for known value sets (permission modes, event types, content block types, tools, etc.)

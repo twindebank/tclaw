@@ -12,12 +12,15 @@
 
 ## Memory & Context
 - [x] System and agent memories — system prompt (--append-system-prompt) for identity/rules, CLAUDE.md for persistent per-user memory, seeded on first startup
-- [ ] Custom MCPs can be built in — register Go-native MCP servers alongside the agent
+- [x] Custom MCPs can be built in — register Go-native MCP servers alongside the agent
 
 ## Permissions & Security
 - [x] Secret management — OS keychain (local) + encrypted FS (deployed), per-user isolation, ${secret:NAME} config syntax
 - [x] Channel descriptions — agent aware of current and other channels via config descriptions
 - [ ] Tool permissions / 2FA — approve or deny tool calls via the chat channel
+- [ ] Privileged sessions — temporary elevated permissions with a timeout (e.g. user grants write access for 30 min)
+- [ ] Permission matching rules — expressive rules for tool permissions based on provider, read/write, resource scope, etc.
+- [ ] Per-channel tool allowlists — restrict which tools are available on each channel independently
 
 ## UX
 - [ ] Typing indicator — show typing state in the interface while agent is working
@@ -38,6 +41,7 @@
 
 ## Channel
 - [x] Edit message — allow the channel to update/edit previously sent messages (e.g. for streaming edits in place)
+- [ ] Channel-specific config in system prompt — inject per-channel context (capabilities, restrictions, description) into the agent's system prompt
 
 ## Connectivity
 - [ ] Remote MCP support & OAuth over chat channel — proxy MCP auth flows through the user's channel
