@@ -7,14 +7,15 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"gopkg.in/yaml.v3"
 )
 
@@ -42,8 +43,8 @@ type wireMsg struct {
 
 // chatMsg is a single message in the conversation (user or agent).
 type chatMsg struct {
-	isUser    bool
-	text      string
+	isUser bool
+	text   string
 	timestamp string
 }
 
@@ -83,6 +84,7 @@ func (ms *messages) addUser(text string) {
 	ms.byID[id] = msg
 }
 
+
 func (ms *messages) send(id, text string) {
 	msg := &chatMsg{text: text, timestamp: time.Now().Format("15:04:05")}
 	ms.order = append(ms.order, id)
@@ -106,11 +108,15 @@ func (ms *messages) render() string {
 		if msg.isUser {
 			b.WriteString(ts + " " + userStyle.Render("> "+msg.text) + "\n")
 		} else {
-			b.WriteString(ts + " " + msg.text)
+			// Extract bare URLs from markdown links so they're on their
+			// own line — clickable and copyable in the terminal.
+			text := flattenMarkdownLinks(msg.text)
+			b.WriteString(ts + " " + text)
 		}
 	}
 	return b.String()
 }
+
 
 type model struct {
 	input    textinput.Model
@@ -121,6 +127,7 @@ type model struct {
 
 	// incoming receives wire protocol messages from background socket readers.
 	incoming chan wireMsg
+
 }
 
 func initialModel() model {
@@ -137,7 +144,7 @@ func initialModel() model {
 
 func (m model) Init() tea.Cmd {
 	return tea.Batch(
-		textinput.Blink,
+		func() tea.Msg { return textinput.Blink() },
 		waitForWireMsg(m.incoming),
 	)
 }
@@ -146,16 +153,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyCtrlC:
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "ctrl+c":
 			return m, tea.Quit
-		case tea.KeyEnter:
+		case "enter":
 			text := strings.TrimSpace(m.input.Value())
 			if text == "" {
 				break
 			}
 			m.input.Reset()
+
+			// Client-side commands.
+			if handled := m.handleCommand(text); handled {
+				m.viewport.SetContent(m.msgs.render())
+				m.viewport.GotoBottom()
+				break
+			}
+
 			m.msgs.addUser(text)
 			m.viewport.SetContent(m.msgs.render())
 			m.viewport.GotoBottom()
@@ -182,14 +197,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		inputHeight := 3 // input + divider + padding
 		if !m.ready {
-			m.viewport = viewport.New(msg.Width, msg.Height-inputHeight)
+			m.viewport = viewport.New(
+				viewport.WithWidth(msg.Width),
+				viewport.WithHeight(msg.Height-inputHeight),
+			)
+			m.viewport.SoftWrap = true
 			m.viewport.SetContent(m.msgs.render())
 			m.ready = true
 		} else {
-			m.viewport.Width = msg.Width
-			m.viewport.Height = msg.Height - inputHeight
+			m.viewport.SetWidth(msg.Width)
+			m.viewport.SetHeight(msg.Height - inputHeight)
 		}
-		m.input.Width = msg.Width - 4
+		m.input.SetWidth(msg.Width - 4)
 	}
 
 	var inputCmd tea.Cmd
@@ -203,18 +222,48 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m model) View() string {
+func (m model) View() tea.View {
+	var content string
 	if !m.ready {
-		return "connecting..."
+		content = "connecting..."
+	} else {
+		divider := dimStyle.Render(strings.Repeat(dividerChar, m.width))
+		content = fmt.Sprintf("%s\n%s\n%s",
+			m.viewport.View(),
+			divider,
+			m.input.View(),
+		)
 	}
 
-	divider := dimStyle.Render(strings.Repeat(dividerChar, m.width))
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
+}
 
-	return fmt.Sprintf("%s\n%s\n%s",
-		m.viewport.View(),
-		divider,
-		m.input.View(),
-	)
+var markdownLinkRe = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
+
+// flattenMarkdownLinks replaces [text](url) with "text:\n  url\n"
+// so URLs land on their own line — clickable and copyable in terminals.
+func flattenMarkdownLinks(s string) string {
+	return markdownLinkRe.ReplaceAllString(s, "$1:\n  $2\n")
+}
+
+// handleCommand checks for client-side commands and executes them.
+// Returns true if the input was a command (caller should not send it to agent).
+func (m model) handleCommand(text string) bool {
+	switch strings.ToLower(text) {
+	case "delete", "new", "reset", "clear":
+		// Send control command to the agent to clear the in-memory session.
+		// The agent also persists the change and sends back a confirmation.
+		go sendMessage(m.incoming, "/tclaw:reset")
+		return true
+	case "compact":
+		m.msgs.addUser(text)
+		go sendMessage(m.incoming, "Please compact your conversation context now. Summarize the key points and discard verbose history.")
+		return true
+	default:
+		return false
+	}
 }
 
 // sendMessage dials the agent socket, sends the message, and streams
@@ -275,9 +324,9 @@ func loadMinimalConfig(path string) (*minimalConfig, error) {
 
 // socketEntry is a connectable socket channel from config.
 type socketEntry struct {
-	userID  string
-	channel string
-	socket  string
+	userID    string
+	channel   string
+	socket    string
 	listening bool // socket file exists (channel is up, agent starts on first message)
 }
 
@@ -425,11 +474,7 @@ func main() {
 	}
 
 run:
-	p := tea.NewProgram(
-		initialModel(),
-		tea.WithAltScreen(),
-		tea.WithMouseAllMotion(),
-	)
+	p := tea.NewProgram(initialModel())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
