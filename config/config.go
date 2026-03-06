@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"tclaw/agent"
+	"tclaw/claudecli"
 	"tclaw/secret"
 	"tclaw/user"
 
@@ -20,20 +20,44 @@ type File struct {
 	// Defaults to /tmp/tclaw if not set.
 	BaseDir string `yaml:"base_dir"`
 
+	// OAuth configures the OAuth callback server for provider authorization.
+	OAuth OAuthConfig `yaml:"oauth"`
+
+	// Providers configures external service providers (Gmail, etc.).
+	Providers ProvidersConfig `yaml:"providers"`
+
 	Users []User `yaml:"users"`
+}
+
+// OAuthConfig holds settings for the OAuth callback server.
+type OAuthConfig struct {
+	// CallbackAddr is the address for the OAuth callback HTTP server.
+	// Defaults to "127.0.0.1:9876".
+	CallbackAddr string `yaml:"callback_addr"`
+}
+
+// ProvidersConfig holds per-provider configuration.
+type ProvidersConfig struct {
+	Gmail *ProviderCredentials `yaml:"gmail"`
+}
+
+// ProviderCredentials holds OAuth client credentials for a provider.
+type ProviderCredentials struct {
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
 }
 
 // User defines per-user agent configuration.
 type User struct {
-	ID             user.ID              `yaml:"id"`
-	APIKey         string               `yaml:"api_key"`
-	Model          agent.Model          `yaml:"model"`
-	PermissionMode agent.PermissionMode `yaml:"permission_mode"`
-	MaxTurns       int                  `yaml:"max_turns"`
-	Debug          bool                 `yaml:"debug"`
-	AllowedTools   []agent.Tool         `yaml:"allowed_tools"`
-	DisallowedTools []agent.Tool        `yaml:"disallowed_tools"`
-	SystemPrompt   string               `yaml:"system_prompt"`
+	ID             user.ID                  `yaml:"id"`
+	APIKey         string                   `yaml:"api_key"`
+	Model          claudecli.Model          `yaml:"model"`
+	PermissionMode claudecli.PermissionMode `yaml:"permission_mode"`
+	MaxTurns       int                      `yaml:"max_turns"`
+	Debug          bool                     `yaml:"debug"`
+	AllowedTools   []claudecli.Tool         `yaml:"allowed_tools"`
+	DisallowedTools []claudecli.Tool        `yaml:"disallowed_tools"`
+	SystemPrompt   string                   `yaml:"system_prompt"`
 
 	Channels []Channel `yaml:"channels"`
 }
@@ -72,6 +96,9 @@ func Load(path string) (*File, error) {
 	if cfg.BaseDir == "" {
 		cfg.BaseDir = "/tmp/tclaw"
 	}
+	if cfg.OAuth.CallbackAddr == "" {
+		cfg.OAuth.CallbackAddr = "127.0.0.1:9876"
+	}
 
 	if err := resolveSecrets(&cfg); err != nil {
 		return nil, fmt.Errorf("resolve secrets: %w", err)
@@ -99,21 +126,21 @@ func validate(cfg *File) error {
 		}
 		seen[u.ID] = true
 
-		if u.Model != "" && !agent.ValidModel(u.Model) {
-			return fmt.Errorf("user %q: unknown model %q (known: %v)", u.ID, u.Model, agent.ValidModels())
+		if u.Model != "" && !claudecli.ValidModel(u.Model) {
+			return fmt.Errorf("user %q: unknown model %q (known: %v)", u.ID, u.Model, claudecli.ValidModels())
 		}
 
-		if u.PermissionMode != "" && !agent.ValidPermissionMode(u.PermissionMode) {
-			return fmt.Errorf("user %q: unknown permission_mode %q (known: %v)", u.ID, u.PermissionMode, agent.ValidPermissionModes())
+		if u.PermissionMode != "" && !claudecli.ValidPermissionMode(u.PermissionMode) {
+			return fmt.Errorf("user %q: unknown permission_mode %q (known: %v)", u.ID, u.PermissionMode, claudecli.ValidPermissionModes())
 		}
 
 		for j, t := range u.AllowedTools {
-			if !agent.ValidTool(t) {
+			if !claudecli.ValidTool(t) {
 				return fmt.Errorf("user %q allowed_tools[%d]: unknown tool %q", u.ID, j, t)
 			}
 		}
 		for j, t := range u.DisallowedTools {
-			if !agent.ValidTool(t) {
+			if !claudecli.ValidTool(t) {
 				return fmt.Errorf("user %q disallowed_tools[%d]: unknown tool %q", u.ID, j, t)
 			}
 		}
@@ -171,6 +198,22 @@ func resolveSecrets(cfg *File) error {
 		}
 		cfg.Users[i].APIKey = val
 	}
+
+	// Resolve provider credentials.
+	if cfg.Providers.Gmail != nil {
+		val, err := resolveRef(cfg.Providers.Gmail.ClientID)
+		if err != nil {
+			return fmt.Errorf("providers.gmail.client_id: %w", err)
+		}
+		cfg.Providers.Gmail.ClientID = val
+
+		val, err = resolveRef(cfg.Providers.Gmail.ClientSecret)
+		if err != nil {
+			return fmt.Errorf("providers.gmail.client_secret: %w", err)
+		}
+		cfg.Providers.Gmail.ClientSecret = val
+	}
+
 	return nil
 }
 
