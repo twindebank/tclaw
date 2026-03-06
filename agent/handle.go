@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"tclaw/channel"
+	"tclaw/claudecli"
 )
 
 // turnWriter accumulates all output for a single turn into one channel
@@ -143,7 +144,7 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 	scanner.Buffer(make([]byte, 0, 256*1024), 10*1024*1024)
 
 	var sessionID string
-	var currentBlockType ContentBlockType
+	var currentBlockType claudecli.ContentBlockType
 	// Track whether we received text/thinking deltas for the current
 	// assistant message. Reset on each assistant event so we always
 	// extract content that wasn't streamed via deltas.
@@ -158,24 +159,23 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			continue
 		}
 
-		var ev Event
+		var ev claudecli.Event
 		if err := json.Unmarshal(line, &ev); err != nil {
 			slog.Debug("skipping non-JSON line", "line", string(line))
 			continue
 		}
-		slog.Debug("cli event", "type", ev.Type)
 		if opts.Debug {
-			slog.Debug("cli event raw", "json", string(line))
+			slog.Debug("cli event", "type", ev.Type, "json", string(line))
 		}
 
 		switch ev.Type {
-		case EventSystem:
-			var sys SystemEvent
+		case claudecli.EventSystem:
+			var sys claudecli.SystemEvent
 			if err := json.Unmarshal(line, &sys); err != nil {
 				slog.Warn("failed to parse system event", "err", err)
 				continue
 			}
-			if sys.Subtype == SystemSubtypeInit {
+			if sys.Subtype == claudecli.SystemSubtypeInit {
 				if sys.SessionID != "" {
 					sessionID = sys.SessionID
 				}
@@ -184,65 +184,65 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				}
 			}
 
-		case EventContentBlockStart:
-			var start ContentBlockStartEvent
+		case claudecli.EventContentBlockStart:
+			var start claudecli.ContentBlockStartEvent
 			if err := json.Unmarshal(line, &start); err != nil {
 				slog.Warn("failed to parse content_block_start", "err", err)
 				continue
 			}
 			currentBlockType = start.ContentBlock.Type
 			switch currentBlockType {
-			case ContentThinking:
+			case claudecli.ContentThinking:
 				if err := tw.write("💭 "); err != nil {
 					return "", err
 				}
-			case ContentToolUse:
+			case claudecli.ContentToolUse:
 				if err := tw.write(formatToolUse(start.ContentBlock)); err != nil {
 					return "", err
 				}
 			}
 
-		case EventContentBlockDelta:
-			var delta ContentDeltaEvent
+		case claudecli.EventContentBlockDelta:
+			var delta claudecli.ContentDeltaEvent
 			if err := json.Unmarshal(line, &delta); err != nil {
 				slog.Warn("failed to parse content_block_delta", "err", err)
 				continue
 			}
 			switch delta.Delta.Type {
-			case DeltaText:
+			case claudecli.DeltaText:
 				gotTextDeltas = true
 				if err := tw.write(delta.Delta.Text); err != nil {
 					return "", err
 				}
-			case DeltaThinking:
+			case claudecli.DeltaThinking:
 				gotTextDeltas = true
 				if err := tw.write(delta.Delta.Thinking); err != nil {
 					return "", err
 				}
 			}
 
-		case EventContentBlockStop:
-			if currentBlockType == ContentThinking {
+		case claudecli.EventContentBlockStop:
+			if currentBlockType == claudecli.ContentThinking {
 				if err := tw.write("\n"); err != nil {
 					return "", err
 				}
 			}
 			currentBlockType = ""
 
-		case EventAssistant:
+		case claudecli.EventAssistant:
 			// The assistant event carries the complete message. Extract
 			// any text/thinking that wasn't already streamed via deltas.
-			var msg AssistantEvent
+			var msg claudecli.AssistantEvent
 			if err := json.Unmarshal(line, &msg); err != nil {
 				slog.Warn("failed to parse assistant event", "err", err)
 				continue
 			}
 			for _, block := range msg.Message.Content {
 				switch block.Type {
-				case ContentToolUse:
+				case claudecli.ContentToolUse:
 					// Already sent via content_block_start if available;
 					// send anyway since it's idempotent for display.
-				case ContentText, ContentThinking:
+				case claudecli.ContentText, claudecli.ContentThinking:
 					if gotTextDeltas {
 						continue
 					}
@@ -256,9 +256,8 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			}
 			gotTextDeltas = false
 
-		case EventUser:
-			slog.Debug("user event raw", "json", string(line))
-			var user UserEvent
+		case claudecli.EventUser:
+			var user claudecli.UserEvent
 			if err := json.Unmarshal(line, &user); err != nil {
 				slog.Warn("failed to parse user event", "err", err)
 				continue
@@ -267,8 +266,8 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				return "", err
 			}
 
-		case EventResult:
-			var result ResultEvent
+		case claudecli.EventResult:
+			var result claudecli.ResultEvent
 			if err := json.Unmarshal(line, &result); err != nil {
 				slog.Warn("failed to parse result event", "err", err)
 				continue
