@@ -1,29 +1,31 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
+
+	"tclaw/claudecli"
 )
 
-func formatBlock(block ContentBlock) string {
+func formatBlock(block claudecli.ContentBlock) string {
 	switch block.Type {
-	case ContentText:
+	case claudecli.ContentText:
 		return block.Text
-	case ContentThinking:
+	case claudecli.ContentThinking:
 		if block.Thinking == "" {
 			return ""
 		}
 		return "💭 " + block.Thinking + "\n"
-	case ContentToolUse:
+	case claudecli.ContentToolUse:
 		return formatToolUse(block)
 	}
 	return ""
 }
 
 // formatToolUse renders a tool invocation with its arguments.
-func formatToolUse(block ContentBlock) string {
+func formatToolUse(block claudecli.ContentBlock) string {
 	if len(block.Input) == 0 || string(block.Input) == "{}" {
 		return fmt.Sprintf("🔧 %s\n", block.Name)
 	}
@@ -59,10 +61,16 @@ func formatToolResult(raw json.RawMessage) string {
 		return "  ↳ Done\n"
 	}
 
-	var meta ToolResultMeta
+	// Tool results can be JSON strings, objects, or other types.
+	// Only attempt to extract meta from objects.
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return fmt.Sprintf("  ↳ Done (%s)\n", formatBytes(len(raw)))
+	}
+
+	var meta claudecli.ToolResultMeta
 	if err := json.Unmarshal(raw, &meta); err != nil {
-		slog.Debug("could not parse tool result meta", "err", err)
-		return "  ↳ Done\n"
+		return fmt.Sprintf("  ↳ Done (%s)\n", formatBytes(len(raw)))
 	}
 
 	var parts []string
