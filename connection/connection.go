@@ -3,17 +3,16 @@ package connection
 import (
 	"fmt"
 	"time"
-)
 
-// ProviderID identifies a service provider (e.g. "gmail", "linear").
-type ProviderID string
+	"tclaw/provider"
+)
 
 // ConnectionID uniquely identifies a connection: "<provider>/<label>".
 type ConnectionID string
 
 // NewConnectionID builds a ConnectionID from a provider and label.
-func NewConnectionID(provider ProviderID, label string) ConnectionID {
-	return ConnectionID(fmt.Sprintf("%s/%s", provider, label))
+func NewConnectionID(providerID provider.ProviderID, label string) ConnectionID {
+	return ConnectionID(fmt.Sprintf("%s/%s", providerID, label))
 }
 
 // Connection is an authenticated instance of a provider.
@@ -21,7 +20,7 @@ func NewConnectionID(provider ProviderID, label string) ConnectionID {
 // (e.g. "gmail/work" and "gmail/personal").
 type Connection struct {
 	ID         ConnectionID
-	ProviderID ProviderID
+	ProviderID provider.ProviderID
 	Label      string // user-chosen namespace ("work", "personal")
 	CreatedAt  time.Time
 }

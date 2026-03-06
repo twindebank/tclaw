@@ -13,6 +13,9 @@
 ## Memory & Context
 - [x] System and agent memories — system prompt (--append-system-prompt) for identity/rules, CLAUDE.md for persistent per-user memory, seeded on first startup
 - [x] Custom MCPs can be built in — register Go-native MCP servers alongside the agent
+- [ ] TfL MCP — London transport status, journey planning, disruptions
+- [ ] Calendar MCP — read/write calendar events (Google Calendar, etc.)
+- [ ] Home Assistant MCP — control smart home devices, query states, trigger automations
 
 ## Permissions & Security
 - [x] Secret management — OS keychain (local) + encrypted FS (deployed), per-user isolation, ${secret:NAME} config syntax

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"tclaw/connection"
-	"tclaw/mcp"
 	"tclaw/provider"
 )
 
@@ -21,7 +20,20 @@ const (
 	pendingFlowTTL = 10 * time.Minute
 )
 
-// PendingFlow tracks an in-progress OAuth authorization.
+// PendingOAuthFlow is the interface that all OAuth flows must implement
+// so the callback server can dispatch without knowing concrete types.
+// Both Complete and Fail must close the done channel before returning.
+type PendingOAuthFlow interface {
+	// Complete is called when the OAuth callback arrives with an authorization code.
+	// Must close DoneChan before returning (even on error).
+	Complete(ctx context.Context, code string, callbackURL string) error
+	// Fail records an error and closes the done channel.
+	Fail(err error)
+	// DoneChan returns a channel that's closed when the flow finishes.
+	DoneChan() <-chan struct{}
+}
+
+// PendingFlow tracks an in-progress OAuth authorization for built-in providers.
 type PendingFlow struct {
 	ConnID      connection.ConnectionID
 	Provider    *provider.Provider
@@ -42,11 +54,39 @@ type PendingFlow struct {
 	createdAt time.Time
 }
 
+func (f *PendingFlow) Complete(ctx context.Context, code string, callbackURL string) error {
+	creds, err := ExchangeCode(ctx, f.Provider.OAuth2, code, f.CallbackURL)
+	if err != nil {
+		return fmt.Errorf("code exchange failed: %w", err)
+	}
+
+	if err := f.Manager.SetCredentials(ctx, f.ConnID, creds); err != nil {
+		return fmt.Errorf("store credentials: %w", err)
+	}
+
+	if f.OnConnect != nil {
+		f.OnConnect()
+	}
+
+	f.Result = fmt.Sprintf("Connection %s authorized successfully", f.ConnID)
+	close(f.Done)
+	return nil
+}
+
+func (f *PendingFlow) Fail(err error) {
+	f.Err = err
+	close(f.Done)
+}
+
+func (f *PendingFlow) DoneChan() <-chan struct{} {
+	return f.Done
+}
+
 // CallbackServer handles OAuth redirect callbacks on localhost.
 // A single server runs per tclaw process, shared across all users.
 type CallbackServer struct {
 	addr    string
-	pending sync.Map // state string -> *PendingFlow
+	pending sync.Map // state string -> PendingOAuthFlow
 	srv     *http.Server
 	ln      net.Listener
 }
@@ -110,43 +150,19 @@ func (s *CallbackServer) StartFlow(flow *PendingFlow) (string, error) {
 	}
 	flow.Done = make(chan struct{})
 	flow.CallbackURL = s.CallbackURL()
-	s.pending.Store(state, flow)
+	s.pending.Store(state, PendingOAuthFlow(flow))
 	return state, nil
 }
 
-// PendingRemoteMCPFlow tracks an in-progress OAuth flow for a remote MCP server.
-// Unlike PendingFlow (for built-in providers), this uses the MCP OAuth 2.1
-// discovery chain with PKCE and dynamic client registration.
-type PendingRemoteMCPFlow struct {
-	Name          string
-	MCPURL        string
-	AuthMeta      *mcp.AuthMetadata
-	ClientReg     *mcp.ClientRegistration
-	Manager       *connection.Manager
-	ConfigUpdater func(ctx context.Context) error
-	CodeVerifier  string // set after StartRemoteMCPFlow
-
-	// Done is closed when the flow completes.
-	Done   chan struct{}
-	Result string
-	Err    error
-}
-
-// StartRemoteMCPFlow registers a pending remote MCP OAuth flow and returns the
-// state token, PKCE code verifier, and the full authorization URL.
-func (s *CallbackServer) StartRemoteMCPFlow(flow *PendingRemoteMCPFlow, callbackURL, mcpURL string) (state, codeVerifier, authURL string, err error) {
-	state, err = generateState()
+// RegisterFlow stores any PendingOAuthFlow implementation with a generated state token.
+// Used by external flow types (e.g. remote MCP) that manage their own initialization.
+func (s *CallbackServer) RegisterFlow(flow PendingOAuthFlow) (string, error) {
+	state, err := generateState()
 	if err != nil {
-		return "", "", "", err
+		return "", err
 	}
-
-	flow.Done = make(chan struct{})
-
-	authURL, codeVerifier = mcp.BuildAuthURLWithPKCE(flow.AuthMeta, flow.ClientReg, state, callbackURL, mcpURL)
-	flow.CodeVerifier = codeVerifier
-
 	s.pending.Store(state, flow)
-	return state, codeVerifier, authURL, nil
+	return state, nil
 }
 
 func (s *CallbackServer) handleCallback(w http.ResponseWriter, r *http.Request) {
@@ -165,137 +181,33 @@ func (s *CallbackServer) handleCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Dispatch based on flow type.
-	switch flow := val.(type) {
-	case *PendingFlow:
-		s.handleBuiltinCallback(w, r, flow, code, errParam)
-	case *PendingRemoteMCPFlow:
-		s.handleRemoteMCPCallback(w, r, flow, code, errParam)
-	default:
+	flow, ok := val.(PendingOAuthFlow)
+	if !ok {
 		http.Error(w, "unknown flow type", http.StatusInternalServerError)
+		return
 	}
-}
 
-// handleBuiltinCallback handles OAuth callbacks for built-in provider connections.
-func (s *CallbackServer) handleBuiltinCallback(w http.ResponseWriter, r *http.Request, flow *PendingFlow, code, errParam string) {
 	if errParam != "" {
 		errDesc := r.URL.Query().Get("error_description")
-		flow.Err = fmt.Errorf("oauth error: %s — %s", errParam, errDesc)
-		flow.Result = fmt.Sprintf("Authorization denied: %s", errDesc)
-		close(flow.Done)
+		flow.Fail(fmt.Errorf("oauth error: %s — %s", errParam, errDesc))
 		fmt.Fprintf(w, "<html><body><h2>❌ Authorization denied</h2><p>%s</p><p>You can close this tab.</p></body></html>", errDesc)
 		return
 	}
 
 	if code == "" {
-		flow.Err = fmt.Errorf("missing authorization code")
-		flow.Result = "Authorization failed: no code received"
-		close(flow.Done)
+		flow.Fail(fmt.Errorf("missing authorization code"))
 		http.Error(w, "missing authorization code", http.StatusBadRequest)
 		return
 	}
 
-	slog.Info("oauth callback received", "connection", flow.ConnID)
-
-	creds, err := ExchangeCode(r.Context(), flow.Provider.OAuth2, code, flow.CallbackURL)
-	if err != nil {
-		slog.Error("oauth code exchange failed", "connection", flow.ConnID, "err", err)
-		flow.Err = fmt.Errorf("code exchange failed: %w", err)
-		flow.Result = "Authorization failed: could not exchange code for tokens"
-		close(flow.Done)
-		fmt.Fprintf(w, "<html><body><h2>❌ Authorization failed</h2><p>Could not exchange code for tokens. Check the logs.</p><p>You can close this tab.</p></body></html>")
+	if err := flow.Complete(r.Context(), code, s.CallbackURL()); err != nil {
+		slog.Error("oauth flow completion failed", "err", err)
+		flow.Fail(err)
+		fmt.Fprintf(w, "<html><body><h2>❌ Authorization failed</h2><p>%s</p><p>You can close this tab.</p></body></html>", err.Error())
 		return
 	}
 
-	if err := flow.Manager.SetCredentials(r.Context(), flow.ConnID, creds); err != nil {
-		slog.Error("failed to store credentials", "connection", flow.ConnID, "err", err)
-		flow.Err = fmt.Errorf("store credentials: %w", err)
-		flow.Result = "Authorization succeeded but failed to store credentials"
-		close(flow.Done)
-		fmt.Fprintf(w, "<html><body><h2>⚠️ Partially failed</h2><p>Got tokens but failed to store them. Check the logs.</p><p>You can close this tab.</p></body></html>")
-		return
-	}
-
-	if flow.OnConnect != nil {
-		flow.OnConnect()
-	}
-
-	slog.Info("oauth flow completed", "connection", flow.ConnID)
-	flow.Result = fmt.Sprintf("Connection %s authorized successfully", flow.ConnID)
-	close(flow.Done)
-	fmt.Fprintf(w, "<html><body><h2>✅ Authorized!</h2><p>Connection <strong>%s</strong> is now connected.</p><p>You can close this tab and return to your chat.</p></body></html>", flow.ConnID)
-}
-
-// handleRemoteMCPCallback handles OAuth callbacks for remote MCP servers.
-func (s *CallbackServer) handleRemoteMCPCallback(w http.ResponseWriter, r *http.Request, flow *PendingRemoteMCPFlow, code, errParam string) {
-	if errParam != "" {
-		errDesc := r.URL.Query().Get("error_description")
-		flow.Err = fmt.Errorf("oauth error: %s — %s", errParam, errDesc)
-		flow.Result = fmt.Sprintf("Authorization denied: %s", errDesc)
-		close(flow.Done)
-		fmt.Fprintf(w, "<html><body><h2>❌ Authorization denied</h2><p>%s</p><p>You can close this tab.</p></body></html>", errDesc)
-		return
-	}
-
-	if code == "" {
-		flow.Err = fmt.Errorf("missing authorization code")
-		flow.Result = "Authorization failed: no code received"
-		close(flow.Done)
-		http.Error(w, "missing authorization code", http.StatusBadRequest)
-		return
-	}
-
-	slog.Info("remote mcp oauth callback received", "name", flow.Name)
-
-	// Exchange code for tokens using PKCE.
-	creds, err := mcp.ExchangeCodeWithPKCE(
-		r.Context(), flow.AuthMeta, flow.ClientReg,
-		code, flow.CodeVerifier, s.CallbackURL(), flow.MCPURL,
-	)
-	if err != nil {
-		slog.Error("remote mcp code exchange failed", "name", flow.Name, "err", err)
-		flow.Err = fmt.Errorf("code exchange failed: %w", err)
-		flow.Result = "Authorization failed: could not exchange code for tokens"
-		close(flow.Done)
-		fmt.Fprintf(w, "<html><body><h2>❌ Authorization failed</h2><p>Could not exchange code for tokens. Check the logs.</p><p>You can close this tab.</p></body></html>")
-		return
-	}
-
-	// Update the stored auth with the new tokens.
-	auth, err := flow.Manager.GetRemoteMCPAuth(r.Context(), flow.Name)
-	if err != nil || auth == nil {
-		slog.Error("failed to load remote mcp auth", "name", flow.Name, "err", err)
-		flow.Err = fmt.Errorf("load auth for token storage: %w", err)
-		close(flow.Done)
-		fmt.Fprintf(w, "<html><body><h2>⚠️ Partially failed</h2><p>Got tokens but failed to store them.</p></body></html>")
-		return
-	}
-
-	auth.AccessToken = creds.AccessToken
-	auth.RefreshToken = creds.RefreshToken
-	if creds.ExpiresIn > 0 {
-		auth.TokenExpiry = time.Now().Add(time.Duration(creds.ExpiresIn) * time.Second)
-	}
-
-	if err := flow.Manager.SetRemoteMCPAuth(r.Context(), flow.Name, auth); err != nil {
-		slog.Error("failed to store remote mcp tokens", "name", flow.Name, "err", err)
-		flow.Err = fmt.Errorf("store tokens: %w", err)
-		close(flow.Done)
-		fmt.Fprintf(w, "<html><body><h2>⚠️ Partially failed</h2><p>Got tokens but failed to store them.</p></body></html>")
-		return
-	}
-
-	// Regenerate the MCP config so the next turn picks up the new server.
-	if flow.ConfigUpdater != nil {
-		if err := flow.ConfigUpdater(r.Context()); err != nil {
-			slog.Error("failed to update mcp config after remote auth", "err", err)
-		}
-	}
-
-	slog.Info("remote mcp oauth flow completed", "name", flow.Name)
-	flow.Result = fmt.Sprintf("Remote MCP %q authorized successfully", flow.Name)
-	close(flow.Done)
-	fmt.Fprintf(w, "<html><body><h2>✅ Authorized!</h2><p>Remote MCP <strong>%s</strong> is now connected.</p><p>You can close this tab and return to your chat.</p></body></html>", flow.Name)
+	fmt.Fprintf(w, "<html><body><h2>✅ Authorized!</h2><p>You can close this tab and return to your chat.</p></body></html>")
 }
 
 func generateState() (string, error) {
