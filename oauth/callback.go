@@ -106,6 +106,10 @@ func (s *CallbackServer) Start() error {
 	s.addr = ln.Addr().String()
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, "ok")
+	})
 	mux.HandleFunc("/oauth/callback", s.handleCallback)
 
 	s.srv = &http.Server{

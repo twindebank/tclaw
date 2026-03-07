@@ -4,12 +4,8 @@ services:
     env_file:
       - path: .env
         required: false
-    environment:
-      - TCLAW_STORE_PATH=/data/store
     volumes:
-      - store-data:/data/store
-      - claude-config:/root/.claude
+      - tclaw-data:/data
 
 volumes:
-  store-data:
-  claude-config:
+  tclaw-data:

@@ -14,8 +14,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// File is the top-level config file structure.
-type File struct {
+// Config is the top-level configuration.
+type Config struct {
 	// BaseDir is the root for all per-user data (home dirs, stores).
 	// Defaults to /tmp/tclaw if not set.
 	BaseDir string `yaml:"base_dir"`
@@ -82,13 +82,15 @@ const (
 )
 
 // Load reads and parses a config file from the given path.
-func Load(path string) (*File, error) {
+// Any environment variables consumed during secret resolution are immediately
+// unset so they cannot leak to subprocesses.
+func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 
-	var cfg File
+	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
@@ -100,8 +102,15 @@ func Load(path string) (*File, error) {
 		cfg.OAuth.CallbackAddr = "127.0.0.1:9876"
 	}
 
-	if err := resolveSecrets(&cfg); err != nil {
+	resolvedEnvVars, err := resolveSecrets(&cfg)
+	if err != nil {
 		return nil, fmt.Errorf("resolve secrets: %w", err)
+	}
+
+	// Scrub secret-bearing env vars so subprocesses can't read them.
+	for _, name := range resolvedEnvVars {
+		os.Unsetenv(name)
+		slog.Debug("scrubbed secret env var", "name", name)
 	}
 
 	if err := validate(&cfg); err != nil {
@@ -111,7 +120,7 @@ func Load(path string) (*File, error) {
 	return &cfg, nil
 }
 
-func validate(cfg *File) error {
+func validate(cfg *Config) error {
 	if len(cfg.Users) == 0 {
 		return fmt.Errorf("no users defined")
 	}
@@ -183,43 +192,57 @@ const (
 	refSuffix       = "}"
 )
 
-// resolveSecrets expands secret references in config fields.
+// resolveSecrets expands secret references in config fields and returns the
+// names of any environment variables that were read during resolution.
 //
 // Supported syntax:
 //
 //	${secret:NAME}  — tries OS keychain for NAME, falls back to env var NAME
 //	${NAME}         — env var only (legacy syntax)
 //	literal         — used as-is
-func resolveSecrets(cfg *File) error {
+func resolveSecrets(cfg *Config) ([]string, error) {
+	var envVars []string
+
 	for i := range cfg.Users {
-		val, err := resolveRef(cfg.Users[i].APIKey)
+		val, envVar, err := resolveRef(cfg.Users[i].APIKey)
 		if err != nil {
-			return fmt.Errorf("user %q api_key: %w", cfg.Users[i].ID, err)
+			return nil, fmt.Errorf("user %q api_key: %w", cfg.Users[i].ID, err)
 		}
 		cfg.Users[i].APIKey = val
+		if envVar != "" {
+			envVars = append(envVars, envVar)
+		}
 	}
 
 	// Resolve provider credentials.
 	if cfg.Providers.Gmail != nil {
-		val, err := resolveRef(cfg.Providers.Gmail.ClientID)
+		val, envVar, err := resolveRef(cfg.Providers.Gmail.ClientID)
 		if err != nil {
-			return fmt.Errorf("providers.gmail.client_id: %w", err)
+			return nil, fmt.Errorf("providers.gmail.client_id: %w", err)
 		}
 		cfg.Providers.Gmail.ClientID = val
+		if envVar != "" {
+			envVars = append(envVars, envVar)
+		}
 
-		val, err = resolveRef(cfg.Providers.Gmail.ClientSecret)
+		val, envVar, err = resolveRef(cfg.Providers.Gmail.ClientSecret)
 		if err != nil {
-			return fmt.Errorf("providers.gmail.client_secret: %w", err)
+			return nil, fmt.Errorf("providers.gmail.client_secret: %w", err)
 		}
 		cfg.Providers.Gmail.ClientSecret = val
+		if envVar != "" {
+			envVars = append(envVars, envVar)
+		}
 	}
 
-	return nil
+	return envVars, nil
 }
 
-func resolveRef(s string) (string, error) {
+// resolveRef resolves a single config value. Returns the resolved value and,
+// if an environment variable was read, its name (so callers can scrub it).
+func resolveRef(s string) (string, string, error) {
 	if !strings.HasPrefix(s, envRefPrefix) || !strings.HasSuffix(s, refSuffix) {
-		return s, nil
+		return s, "", nil
 	}
 
 	inner := s[2 : len(s)-1] // strip ${ and }
@@ -232,22 +255,23 @@ func resolveRef(s string) (string, error) {
 	// ${NAME} — env var only
 	val := os.Getenv(inner)
 	if val == "" {
-		return "", fmt.Errorf("env var %q is not set", inner)
+		return "", "", fmt.Errorf("env var %q is not set", inner)
 	}
-	return val, nil
+	return val, inner, nil
 }
 
 // resolveSecret tries the OS keychain first, then falls back to env var.
-func resolveSecret(name string) (string, error) {
+// Returns the resolved value and the env var name if one was used.
+func resolveSecret(name string) (string, string, error) {
 	if secret.KeychainAvailable() {
 		ks := secret.NewKeychainStore("_config")
 		val, err := ks.Get(context.Background(), name)
 		if err != nil {
-			return "", fmt.Errorf("keychain lookup %q: %w", name, err)
+			return "", "", fmt.Errorf("keychain lookup %q: %w", name, err)
 		}
 		if val != "" {
 			slog.Info("resolved secret from keychain", "name", name)
-			return val, nil
+			return val, "", nil
 		}
 	}
 
@@ -255,10 +279,10 @@ func resolveSecret(name string) (string, error) {
 	val := os.Getenv(name)
 	if val != "" {
 		slog.Info("resolved secret from env var", "name", name)
-		return val, nil
+		return val, name, nil
 	}
 
-	return "", fmt.Errorf("secret %q not found in keychain or env var", name)
+	return "", "", fmt.Errorf("secret %q not found in keychain or env var", name)
 }
 
 // ToUserConfig converts a config User to a user.Config (without system-derived fields).

@@ -3,3 +3,8 @@ bin/
 tmp/
 tclaw.yaml
 .idea/
+
+# Compiled binaries
+/tclaw
+/tclaw-chat
+/cmd/chat/tclaw-chat
