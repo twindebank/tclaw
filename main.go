@@ -38,16 +38,15 @@ func main() {
 		))
 	}
 
-	// Start OAuth callback server if any OAuth providers are configured.
-	var callback *oauth.CallbackServer
-	if cfg.Providers.Gmail != nil {
-		callback = oauth.NewCallbackServer(cfg.OAuth.CallbackAddr)
-		if err := callback.Start(); err != nil {
-			slog.Error("failed to start oauth callback server", "err", err)
-			os.Exit(1)
-		}
-		defer callback.Stop(context.Background())
+	// Start the HTTP server (health checks + OAuth callbacks).
+	// Always started so the health check endpoint is available even without
+	// OAuth providers configured.
+	callback := oauth.NewCallbackServer(cfg.OAuth.CallbackAddr)
+	if err := callback.Start(); err != nil {
+		slog.Error("failed to start http server", "err", err)
+		os.Exit(1)
 	}
+	defer callback.Stop(context.Background())
 
 	r := router.New(cfg.BaseDir, reg, callback)
 	defer r.StopAll()
