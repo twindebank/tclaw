@@ -18,15 +18,13 @@ RUN npm install -g @anthropic-ai/claude-code
 COPY --from=builder /bin/tclaw /usr/local/bin/tclaw
 COPY --from=builder /bin/tclaw-chat /usr/local/bin/tclaw-chat
 
-# Persistent volumes:
-#   /data/store  — our key-value store (session IDs, etc.)
-#   /root/.claude — Claude Code's own config, sessions, and conversation history
-VOLUME ["/data/store", "/root/.claude"]
+# Deploy config — secrets resolved from env vars at runtime.
+COPY tclaw.deploy.yaml /etc/tclaw/tclaw.yaml
 
-# The unix socket lives here by default.
-VOLUME ["/tmp"]
+# Persistent volume at /data holds all per-user state (store, home dirs, etc.).
+VOLUME ["/data"]
 
 ENV CLAUDECODE=""
 ENV CLAUDE_CODE_ENTRYPOINT=""
 
-ENTRYPOINT ["tclaw"]
+ENTRYPOINT ["tclaw", "--config", "/etc/tclaw/tclaw.yaml"]
