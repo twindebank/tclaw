@@ -23,5 +23,44 @@
 - Per-user isolation via `HOME` env var on claude subprocess — all CLI state (`~/.claude/`) scoped per user
 - `CLAUDECODE` and `CLAUDE_CODE_ENTRYPOINT` stripped from subprocess env in `buildEnv()` (prevents nested session detection)
 
+## Deployment (Fly.io)
+
+### Overview
+- Hosted on Fly.io in `lhr` (London), app name: `tclaw`
+- Local Docker builds only (`make deploy`) — no auto-deploy on push
+- Persistent volume `tclaw_data` at `/data` for per-user state
+- Health check at `/healthz` on port 9876
+- Config baked into image at `/etc/tclaw/tclaw.yaml` from `tclaw.deploy.yaml`
+
+### Secret management
+- Secrets stored locally in OS keychain via `make secret ARGS="set NAME value"`
+- `make deploy-secrets` scans `tclaw.deploy.yaml` for `${secret:NAME}` refs, reads each from keychain, pushes to Fly in one call
+- At runtime: Fly injects secrets as env vars → config resolves them → `main.go` scrubs env vars before spawning Claude subprocesses
+
+### Commands
+```
+make deploy-secrets    # Push keychain secrets to Fly
+make deploy            # Build locally + deploy to Fly
+fly status -a tclaw    # Check app status
+fly logs -a tclaw      # Tail logs
+fly scale count 0 -a tclaw --yes   # Spin down
+fly scale count 1 -a tclaw --yes   # Spin up
+```
+
+### First-time setup
+1. `brew install flyctl && fly auth login`
+2. `fly apps create tclaw`
+3. `fly volumes create tclaw_data --region lhr --size 1 -a tclaw -y`
+4. Set secrets in keychain, then `make deploy-secrets`
+5. `make deploy`
+
+### Domain (not yet configured)
+1. Add CNAME: `tclaw.example.com` → `your-app.fly.dev`
+2. `fly certs add tclaw.example.com -a tclaw`
+3. Update Google OAuth redirect URI to `https://tclaw.example.com/oauth/callback`
+
+### CI (optional)
+GitHub Actions workflow at `.github/workflows/deploy.yml` — manual trigger only (`workflow_dispatch`). Needs `FLY_API_TOKEN` GitHub secret from `fly tokens create deploy -x 999999h`.
+
 ## Memory
 - When I say "add to memory" or "remember this", update THIS file (CLAUDE.md), not the ~/.claude/ memory directory
