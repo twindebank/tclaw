@@ -5,11 +5,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"regexp"
 
 	"tclaw/connection"
 	"tclaw/mcp"
 	"tclaw/mcp/discovery"
 )
+
+const (
+	maxMCPNameLength = 64
+	maxMCPURLLength  = 2048
+)
+
+var mcpNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
 func remoteMCPAddDef() mcp.ToolDef {
 	return mcp.ToolDef{
@@ -42,6 +51,20 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 		var a remoteMCPAddArgs
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
+		}
+
+		if a.Name == "" || len(a.Name) > maxMCPNameLength || !mcpNamePattern.MatchString(a.Name) {
+			return nil, fmt.Errorf("name must be 1-%d characters, alphanumeric with hyphens/underscores", maxMCPNameLength)
+		}
+		if a.URL == "" || len(a.URL) > maxMCPURLLength {
+			return nil, fmt.Errorf("url is required and must be under %d characters", maxMCPURLLength)
+		}
+		parsed, err := url.Parse(a.URL)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return nil, fmt.Errorf("url must be a valid absolute URL (e.g. https://mcp.example.com/sse)")
+		}
+		if parsed.Scheme != "https" {
+			return nil, fmt.Errorf("only HTTPS MCP server URLs are allowed")
 		}
 
 		// Store the remote MCP entry.
