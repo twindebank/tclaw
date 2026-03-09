@@ -5,9 +5,11 @@
 # subprocesses cannot read them.
 
 base_dir: /data/tclaw
+env: prod
 
-oauth:
-  callback_addr: "0.0.0.0:9876"
+server:
+  addr: "0.0.0.0:9876"
+  public_url: "https://your-app.fly.dev"
 
 providers:
   google:
@@ -23,6 +25,11 @@ users:
       - type: socket
         name: main
         description: Primary channel
+      - type: telegram
+        name: telegram-prod
+        description: Telegram
+        token: ${secret:TELEGRAM_BOT_TOKEN_PROD}
+        envs: [prod]
     allowed_tools:
       - Bash
       - Read
