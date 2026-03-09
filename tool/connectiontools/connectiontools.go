@@ -14,10 +14,10 @@ type Deps struct {
 	Callback *oauth.CallbackServer // nil if OAuth is not configured
 	Handler  *mcp.Handler          // MCP handler for dynamic tool registration
 
-	// OnGmailConnect is called when a Gmail OAuth flow completes so the
-	// caller can register Gmail tools dynamically. Avoids importing the
-	// gmail sub-package from here.
-	OnGmailConnect func(connID connection.ConnectionID, mgr *connection.Manager, p *provider.Provider)
+	// OnProviderConnect is called when an OAuth flow completes so the
+	// caller can register provider-specific tools dynamically. Avoids
+	// importing provider tool packages from here.
+	OnProviderConnect func(connID connection.ConnectionID, mgr *connection.Manager, p *provider.Provider)
 }
 
 // RegisterTools adds the connection management tools to the MCP handler.
