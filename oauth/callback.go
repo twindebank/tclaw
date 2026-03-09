@@ -84,8 +84,11 @@ func (f *PendingFlow) DoneChan() <-chan struct{} {
 
 // CallbackServer handles OAuth redirect callbacks on localhost.
 // A single server runs per tclaw process, shared across all users.
+// Additional routes (e.g. Telegram webhooks) can be registered via Handle()
+// before or after Start().
 type CallbackServer struct {
 	addr    string
+	mux     *http.ServeMux
 	pending sync.Map // state string -> PendingOAuthFlow
 	srv     *http.Server
 	ln      net.Listener
@@ -93,10 +96,18 @@ type CallbackServer struct {
 
 // NewCallbackServer creates a callback server but does not start it.
 func NewCallbackServer(addr string) *CallbackServer {
-	return &CallbackServer{addr: addr}
+	mux := http.NewServeMux()
+	return &CallbackServer{addr: addr, mux: mux}
 }
 
-// Start begins listening for OAuth callbacks.
+// Handle registers an additional route on the server's mux.
+// Can be called before or after Start() — the mux is created at construction time.
+func (s *CallbackServer) Handle(pattern string, handler http.Handler) {
+	s.mux.Handle(pattern, handler)
+	slog.Info("registered http handler", "pattern", pattern)
+}
+
+// Start begins listening for HTTP requests.
 func (s *CallbackServer) Start() error {
 	ln, err := net.Listen("tcp", s.addr)
 	if err != nil {
@@ -105,26 +116,25 @@ func (s *CallbackServer) Start() error {
 	s.ln = ln
 	s.addr = ln.Addr().String()
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+	s.mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "ok")
 	})
-	mux.HandleFunc("/oauth/callback", s.handleCallback)
+	s.mux.HandleFunc("/oauth/callback", s.handleCallback)
 
 	s.srv = &http.Server{
-		Handler:      mux,
+		Handler:      s.mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 	go func() {
 		if err := s.srv.Serve(ln); err != nil && err != http.ErrServerClosed {
-			slog.Error("oauth callback server error", "err", err)
+			slog.Error("http server error", "err", err)
 		}
 	}()
 
-	slog.Info("oauth callback server started", "addr", s.addr)
+	slog.Info("http server started", "addr", s.addr)
 	return nil
 }
 

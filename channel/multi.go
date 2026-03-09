@@ -43,6 +43,45 @@ func FanIn(ctx context.Context, channels map[ChannelID]Channel) <-chan TaggedMes
 	return out
 }
 
+// MergeFanIns combines multiple TaggedMessage sources into a single channel.
+// The returned channel closes when all sources are drained or ctx is cancelled.
+func MergeFanIns(ctx context.Context, sources ...<-chan TaggedMessage) <-chan TaggedMessage {
+	out := make(chan TaggedMessage)
+
+	var wg sync.WaitGroup
+	for _, src := range sources {
+		if src == nil {
+			continue
+		}
+		wg.Add(1)
+		go func(ch <-chan TaggedMessage) {
+			defer wg.Done()
+			for {
+				select {
+				case msg, ok := <-ch:
+					if !ok {
+						return
+					}
+					select {
+					case out <- msg:
+					case <-ctx.Done():
+						return
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+		}(src)
+	}
+
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
+
+	return out
+}
+
 // InfoAll returns Info for every channel in the map.
 func InfoAll(channels map[ChannelID]Channel) []Info {
 	infos := make([]Info, 0, len(channels))
