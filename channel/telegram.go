@@ -2,6 +2,8 @@ package channel
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -37,6 +39,12 @@ type Telegram struct {
 	source      Source
 	opts        TelegramOptions
 
+	// webhookSecret is a random token used to verify that incoming webhook
+	// requests are actually from Telegram, not a third party who guessed the URL.
+	// Generated at construction time, passed to both SetWebhook (so Telegram sends it)
+	// and WithWebhookSecretToken (so the library checks it on every request).
+	webhookSecret string
+
 	mu            sync.Mutex
 	currentChatID int64
 	bot           *bot.Bot // set in Messages(), used by Send/Edit
@@ -44,12 +52,23 @@ type Telegram struct {
 
 func NewTelegram(token, name, description string, opts TelegramOptions) *Telegram {
 	return &Telegram{
-		token:       token,
-		name:        name,
-		description: description,
-		source:      SourceStatic,
-		opts:        opts,
+		token:         token,
+		name:          name,
+		description:   description,
+		source:        SourceStatic,
+		opts:          opts,
+		webhookSecret: generateWebhookSecret(),
 	}
+}
+
+// generateWebhookSecret returns a 32-char hex string (128 bits of entropy).
+func generateWebhookSecret() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand should never fail; if it does something is very wrong.
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
+	}
+	return hex.EncodeToString(b)
 }
 
 func (t *Telegram) Info() Info {
@@ -68,7 +87,7 @@ func (t *Telegram) Messages(ctx context.Context) <-chan string {
 	go func() {
 		defer close(out)
 
-		b, err := bot.New(t.token,
+		opts := []bot.Option{
 			bot.WithDefaultHandler(func(_ context.Context, _ *bot.Bot, update *models.Update) {
 				if update.Message == nil || update.Message.Text == "" {
 					return
@@ -94,7 +113,15 @@ func (t *Telegram) Messages(ctx context.Context) <-chan string {
 			}),
 			// Process messages sequentially so we don't interleave responses.
 			bot.WithNotAsyncHandlers(),
-		)
+		}
+
+		// In webhook mode, verify the secret token on every incoming request
+		// to reject forged updates from third parties.
+		if t.opts.WebhookURL != "" {
+			opts = append(opts, bot.WithWebhookSecretToken(t.webhookSecret))
+		}
+
+		b, err := bot.New(t.token, opts...)
 		if err != nil {
 			slog.Error("failed to create telegram bot", "err", err, "channel", t.name)
 			return
@@ -128,9 +155,12 @@ func (t *Telegram) startWebhook(ctx context.Context, b *bot.Bot) {
 	t.opts.RegisterHandler(webhookPath, b.WebhookHandler())
 
 	// Tell Telegram to send updates to our webhook URL.
+	// SecretToken tells Telegram to include this value in the
+	// X-Telegram-Bot-Api-Secret-Token header on every webhook POST.
 	ok, err := b.SetWebhook(ctx, &bot.SetWebhookParams{
 		URL:                t.opts.WebhookURL,
 		DropPendingUpdates: true,
+		SecretToken:        t.webhookSecret,
 	})
 	if err != nil {
 		slog.Error("failed to set telegram webhook", "err", err, "channel", t.name, "url", t.opts.WebhookURL)

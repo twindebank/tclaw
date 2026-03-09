@@ -34,7 +34,7 @@
 - [x] Timestamps on messages — show when each message was sent/received
 - [x] Visual message separation — clearer boundaries between messages in the chat UI
 - [x] Show tool arguments — display tool call parameters alongside tool use events
-- [ ] Chat keywords — special commands: `/new` (reset session), `/restart` (restart agent), `/status` (show agent info), `/model` (switch model), `/compact` (compact context), `/help` (list commands), `/cancel` (abort current response)
+- [ ] Chat keywords — special commands: `/new` (reset session), `/restart` (restart agent), `/status` (show agent info), `/model` (switch model), `/compact` (compact context), `/help` (list commands), `/cancel` (abort current response), `/nuke` (wipe all user data across all sessions — home dir, store, secrets, connections, everything)
 - [ ] Render markdown in chat — parse and render markdown formatting in the TUI client
 - [ ] Web browser tool / Selenium — give the agent the ability to browse and interact with web pages
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"regexp"
 	"strings"
 
 	"tclaw/claudecli"
@@ -13,6 +14,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+// channelNamePattern restricts channel names to safe characters only.
+// Prevents path traversal when names are used in filesystem paths or URL routes.
+var channelNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
 // Config is the top-level configuration.
 type Config struct {
@@ -180,6 +185,9 @@ func validate(cfg *Config) error {
 		for j, ch := range u.Channels {
 			if ch.Name == "" {
 				return fmt.Errorf("user %q channel %d: missing name", u.ID, j)
+			}
+			if !channelNamePattern.MatchString(ch.Name) {
+				return fmt.Errorf("user %q channel %d: name %q contains invalid characters (must match %s)", u.ID, j, ch.Name, channelNamePattern.String())
 			}
 			if chNames[ch.Name] {
 				return fmt.Errorf("user %q channel %d: duplicate name %q", u.ID, j, ch.Name)

@@ -128,6 +128,14 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Env = buildEnv(opts)
 
+	// Set CWD to the memory directory so the agent's file operations
+	// (Read, Write, Edit, Bash) default to the sandboxed memory dir.
+	if opts.MemoryDir != "" {
+		cmd.Dir = opts.MemoryDir
+	} else if opts.HomeDir != "" {
+		cmd.Dir = opts.HomeDir
+	}
+
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", fmt.Errorf("stdout pipe: %w", err)

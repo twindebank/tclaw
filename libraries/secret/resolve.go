@@ -29,6 +29,13 @@ func Resolve(userID string, storeDir string, masterKey string) (Store, error) {
 			"set %s env var to enable encrypted secret storage", MasterKeyEnv, MasterKeyEnv)
 	}
 
+	// Enforce minimum key length to prevent weak master keys from being
+	// used to derive encryption keys (HKDF doesn't compensate for low entropy).
+	const minKeyLength = 32
+	if len(masterKey) < minKeyLength {
+		return nil, fmt.Errorf("%s must be at least %d characters (got %d)", MasterKeyEnv, minKeyLength, len(masterKey))
+	}
+
 	slog.Info("using encrypted filesystem for secrets", "user", userID, "dir", storeDir)
 	return NewEncryptedFSStore(storeDir, []byte(masterKey), userID)
 }
