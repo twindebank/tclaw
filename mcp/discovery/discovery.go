@@ -54,6 +54,11 @@ type RemoteCredentials struct {
 //
 // Returns nil metadata (no error) if the server does not require auth (2xx response).
 func DiscoverAuth(ctx context.Context, mcpURL string) (*AuthMetadata, error) {
+	// Validate the MCP URL before making any outbound requests.
+	if err := validateExternalURL(mcpURL); err != nil {
+		return nil, fmt.Errorf("unsafe MCP URL: %w", err)
+	}
+
 	// Send a minimal MCP initialize request to provoke a 401 if auth is needed.
 	probe := jsonRPCRequest{
 		JSONRPC: "2.0",
@@ -78,12 +83,13 @@ func DiscoverAuth(ctx context.Context, mcpURL string) (*AuthMetadata, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := safeClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("probe MCP server: %w", err)
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	// Drain (capped) body so the connection can be reused.
+	io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBodyBytes))
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil, nil
@@ -97,6 +103,12 @@ func DiscoverAuth(ctx context.Context, mcpURL string) (*AuthMetadata, error) {
 	resourceMetaURL, err := parseResourceMetadataURL(resp.Header.Get("WWW-Authenticate"), mcpURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse WWW-Authenticate: %w", err)
+	}
+
+	// Validate the resource metadata URL before fetching (SSRF protection —
+	// this URL comes from the remote server's WWW-Authenticate header).
+	if err := validateExternalURL(resourceMetaURL); err != nil {
+		return nil, fmt.Errorf("unsafe resource metadata URL: %w", err)
 	}
 
 	// Fetch protected resource metadata to find the authorization server.
@@ -114,6 +126,12 @@ func DiscoverAuth(ctx context.Context, mcpURL string) (*AuthMetadata, error) {
 	wellKnownURL, err := buildWellKnownURL(authServerURL)
 	if err != nil {
 		return nil, fmt.Errorf("build auth server well-known URL: %w", err)
+	}
+
+	// Validate the well-known URL (SSRF protection — derived from
+	// authorization_servers[0] in the resource metadata response).
+	if err := validateExternalURL(wellKnownURL); err != nil {
+		return nil, fmt.Errorf("unsafe auth server URL: %w", err)
 	}
 
 	asMeta, err := fetchJSON[authServerMeta](ctx, wellKnownURL)
@@ -137,6 +155,10 @@ func RegisterClient(ctx context.Context, meta *AuthMetadata, redirectURI string)
 		return nil, fmt.Errorf("auth server does not support dynamic client registration")
 	}
 
+	if err := validateExternalURL(meta.RegistrationEndpoint); err != nil {
+		return nil, fmt.Errorf("unsafe registration endpoint: %w", err)
+	}
+
 	regReq := clientRegistrationRequest{
 		RedirectURIs:            []string{redirectURI},
 		GrantTypes:              []string{"authorization_code", "refresh_token"},
@@ -155,19 +177,21 @@ func RegisterClient(ctx context.Context, meta *AuthMetadata, redirectURI string)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := safeClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("register client: %w", err)
 	}
 	defer resp.Body.Close()
 
+	limited := io.LimitReader(resp.Body, maxResponseBodyBytes)
+
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(limited)
 		return nil, fmt.Errorf("registration failed (status %d): %s", resp.StatusCode, string(respBody))
 	}
 
 	var regResp clientRegistrationResponse
-	if err := json.NewDecoder(resp.Body).Decode(&regResp); err != nil {
+	if err := json.NewDecoder(limited).Decode(&regResp); err != nil {
 		return nil, fmt.Errorf("decode registration response: %w", err)
 	}
 
@@ -230,6 +254,10 @@ func RefreshRemoteToken(ctx context.Context, meta *AuthMetadata, reg *ClientRegi
 // doTokenRequest sends a form-encoded POST to the token endpoint and decodes
 // the response into RemoteCredentials. Adds client_secret via Basic auth if present.
 func doTokenRequest(ctx context.Context, tokenEndpoint string, reg *ClientRegistration, form url.Values) (*RemoteCredentials, error) {
+	if err := validateExternalURL(tokenEndpoint); err != nil {
+		return nil, fmt.Errorf("unsafe token endpoint: %w", err)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenEndpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("create token request: %w", err)
@@ -240,19 +268,21 @@ func doTokenRequest(ctx context.Context, tokenEndpoint string, reg *ClientRegist
 		req.SetBasicAuth(reg.ClientID, reg.ClientSecret)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := safeClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("token request: %w", err)
 	}
 	defer resp.Body.Close()
 
+	limited := io.LimitReader(resp.Body, maxResponseBodyBytes)
+
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(limited)
 		return nil, fmt.Errorf("token request failed (status %d): %s", resp.StatusCode, string(respBody))
 	}
 
 	var tokenResp tokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+	if err := json.NewDecoder(limited).Decode(&tokenResp); err != nil {
 		return nil, fmt.Errorf("decode token response: %w", err)
 	}
 
@@ -302,6 +332,7 @@ func buildWellKnownURL(authServerURL string) (string, error) {
 }
 
 // fetchJSON GETs a URL and decodes the JSON response into T.
+// Response bodies are capped at maxResponseBodyBytes to prevent memory exhaustion.
 func fetchJSON[T any](ctx context.Context, rawURL string) (*T, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -309,19 +340,22 @@ func fetchJSON[T any](ctx context.Context, rawURL string) (*T, error) {
 	}
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := safeClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch %s: %w", rawURL, err)
 	}
 	defer resp.Body.Close()
 
+	// Cap response body to prevent memory exhaustion from oversized payloads.
+	limited := io.LimitReader(resp.Body, maxResponseBodyBytes)
+
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(limited)
 		return nil, fmt.Errorf("fetch %s returned status %d: %s", rawURL, resp.StatusCode, string(body))
 	}
 
 	var result T
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(limited).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode response from %s: %w", rawURL, err)
 	}
 
