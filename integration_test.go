@@ -303,6 +303,79 @@ func TestIntegration_SessionPersistence(t *testing.T) {
 	}
 }
 
+// TestIntegration_MemoryLoaded seeds a unique fact into memory/CLAUDE.md,
+// sets up the symlink at home/.claude/CLAUDE.md, starts the agent with
+// MemoryDir set, and verifies the agent can recall the fact — proving the
+// full pipeline (memory dir → symlink → CLI auto-load → agent context).
+func TestIntegration_MemoryLoaded(t *testing.T) {
+	skipIfNoClaude(t)
+
+	tmpDir := t.TempDir()
+	socketPath := filepath.Join(tmpDir, "test.sock")
+	homeDir := filepath.Join(tmpDir, "home")
+	memoryDir := filepath.Join(tmpDir, "memory")
+	claudeDir := filepath.Join(homeDir, ".claude")
+
+	for _, dir := range []string{homeDir, memoryDir, claudeDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("create dir %s: %v", dir, err)
+		}
+	}
+
+	// Seed a unique fact into memory/CLAUDE.md.
+	memoryContent := "# Memory\n\nThe user's secret codeword is \"flamingo7242\".\n"
+	if err := os.WriteFile(filepath.Join(memoryDir, "CLAUDE.md"), []byte(memoryContent), 0o600); err != nil {
+		t.Fatalf("write memory CLAUDE.md: %v", err)
+	}
+
+	// Create the symlink: home/.claude/CLAUDE.md → ../../memory/CLAUDE.md
+	if err := os.Symlink(filepath.Join("..", "..", "memory", "CLAUDE.md"), filepath.Join(claudeDir, "CLAUDE.md")); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	sock := channel.NewSocketServer(socketPath, "test", "Memory test channel")
+	chMap := channel.ChannelMap(sock)
+
+	opts := agent.Options{
+		PermissionMode: claudecli.PermissionPlan,
+		Model:          claudecli.ModelHaiku35,
+		MaxTurns:       3,
+		APIKey:         os.Getenv("ANTHROPIC_API_KEY"),
+		HomeDir:        homeDir,
+		MemoryDir:      memoryDir,
+		Channels:       chMap,
+		Sessions:       make(map[channel.ChannelID]string),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- agent.Run(ctx, opts)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Log("agent did not stop within 10s")
+		}
+	})
+
+	waitForSocket(t, socketPath, 5*time.Second)
+	client := &socketClient{socketPath: socketPath}
+
+	msgs, err := client.send("What is my secret codeword? Reply with ONLY the codeword, nothing else.")
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	text := fullText(msgs)
+	t.Logf("Response:\n%s", text)
+
+	if !strings.Contains(strings.ToLower(text), "flamingo7242") {
+		t.Errorf("expected agent to recall 'flamingo7242' from memory, got: %s", text)
+	}
+}
+
 // TestIntegration_DynamicChannelLifecycle tests creating a dynamic channel
 // via the DynamicStore and then connecting to it via the socket.
 func TestIntegration_DynamicChannelLifecycle(t *testing.T) {

@@ -51,6 +51,11 @@ type Options struct {
 	// CLI state (~/.claude/) per user. If empty, inherits the parent's HOME.
 	HomeDir string
 
+	// MemoryDir is the agent's sandboxed workspace for persistent memory files.
+	// Passed to the CLI as --add-dir and used as the subprocess CWD.
+	// If empty, falls back to HomeDir for CWD and no --add-dir is passed.
+	MemoryDir string
+
 	Channels map[channel.ChannelID]channel.Channel
 
 	// Sessions maps channel IDs to their last-known CLI session IDs.
@@ -271,6 +276,9 @@ func buildArgs(opts Options, sessionID string, systemPrompt string, prompt strin
 	}
 	if opts.MCPConfigPath != "" {
 		args = append(args, "--mcp-config", opts.MCPConfigPath)
+	}
+	if opts.MemoryDir != "" {
+		args = append(args, "--add-dir", opts.MemoryDir)
 	}
 	// "--" terminates flag parsing so prompts starting with "-" aren't
 	// mistaken for CLI options.

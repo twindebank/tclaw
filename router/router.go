@@ -53,13 +53,28 @@ type managedUser struct {
 }
 
 // New creates a Router. baseDir is the root for per-user data — each user
-// gets a subdirectory containing their home dir and store.
+// gets a subdirectory organized into three zones:
 //
 //	baseDir/
 //	  <user-id>/
-//	    home/       -> HOME for claude subprocess (~/.claude/ lives here)
-//	    store/      -> key-value store for agent state (session IDs, etc.)
-//	    secrets/    -> encrypted credentials for connections
+//	    home/                  -> HOME env var for Claude subprocess
+//	      .claude/             -> Claude Code internal state (off limits to agent)
+//	        CLAUDE.md          -> symlink to ../../memory/CLAUDE.md
+//	        projects/          -> conversation history
+//	        settings.json      -> CLI settings
+//	    memory/                -> agent's sandbox (CWD + --add-dir)
+//	      CLAUDE.md            -> real file, agent's persistent memory
+//	      *.md                 -> topic files (@filename.md refs from CLAUDE.md)
+//	    state/                 -> tclaw persistent data (connections, remote MCPs, channels)
+//	    sessions/              -> Claude CLI session IDs per channel
+//	    secrets/               -> encrypted credentials (NaCl secretbox)
+//	    runtime/               -> ephemeral generated files (mcp-config.json)
+//	    *.sock                 -> unix socket files for channels
+//
+// Zone 1 (memory/): agent reads/writes freely, sandboxed via CWD + --add-dir.
+// Zone 2 (home/.claude/): Claude Code internal state, off limits to agent.
+// Zone 3 (state/, sessions/, secrets/, runtime/): tclaw data, tool-only access via MCP.
+//
 // callback may be nil if OAuth is not configured.
 func New(baseDir string, registry *provider.Registry, callback *oauth.CallbackServer, publicURL string) *Router {
 	return &Router{
@@ -106,13 +121,25 @@ func (r *Router) Register(ctx context.Context, cfg user.Config, channels []chann
 // until ctx is cancelled.
 func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap map[channel.ChannelID]channel.Channel, staticMsgs <-chan channel.TaggedMessage) {
 	userDir := filepath.Join(r.baseDir, string(mu.cfg.ID))
-	homeDir := filepath.Join(userDir, "home")
-	storeDir := filepath.Join(userDir, "store")
-	secretsDir := filepath.Join(userDir, "secrets")
+	homeDir := filepath.Join(userDir, "home")       // Claude Code's territory (HOME env var)
+	memoryDir := filepath.Join(userDir, "memory")    // agent's sandboxed memory (CWD + --add-dir)
+	stateDir := filepath.Join(userDir, "state")      // tclaw persistent data
+	sessionsDir := filepath.Join(userDir, "sessions") // Claude CLI session IDs per channel
+	secretsDir := filepath.Join(userDir, "secrets")   // encrypted credentials
+	runtimeDir := filepath.Join(userDir, "runtime")   // ephemeral generated files
 
-	s, err := store.NewFS(storeDir)
+	// State store for tclaw's own data (connections, remote MCPs, dynamic channels).
+	s, err := store.NewFS(stateDir)
 	if err != nil {
-		slog.Error("failed to create store", "user", mu.cfg.ID, "err", err)
+		slog.Error("failed to create state store", "user", mu.cfg.ID, "err", err)
+		return
+	}
+
+	// Separate store for session IDs — these bridge tclaw and Claude Code,
+	// so they live outside both home/ (Claude's territory) and state/ (tclaw's data).
+	sessionStore, err := store.NewFS(sessionsDir)
+	if err != nil {
+		slog.Error("failed to create session store", "user", mu.cfg.ID, "err", err)
 		return
 	}
 
@@ -187,7 +214,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Called after remote MCPs are added/removed/authorized.
 	configUpdater := func(ctx context.Context) error {
 		remotes := buildRemoteMCPEntries(ctx)
-		_, genErr := mcp.GenerateConfigFile(userDir, mcpAddr, remotes)
+		_, genErr := mcp.GenerateConfigFile(runtimeDir, mcpAddr, remotes)
 		if genErr != nil {
 			return fmt.Errorf("regenerate mcp config: %w", genErr)
 		}
@@ -208,24 +235,37 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 	// Generate the MCP config file for --mcp-config (includes existing remote MCPs).
 	remotes := buildRemoteMCPEntries(ctx)
-	mcpConfigPath, err := mcp.GenerateConfigFile(userDir, mcpAddr, remotes)
+	mcpConfigPath, err := mcp.GenerateConfigFile(runtimeDir, mcpAddr, remotes)
 	if err != nil {
 		slog.Error("failed to generate mcp config", "user", mu.cfg.ID, "err", err)
 		return
 	}
 	slog.Info("mcp config ready", "user", mu.cfg.ID, "addr", mcpAddr, "config", mcpConfigPath, "remotes", len(remotes))
 
-	// Seed the user's CLAUDE.md memory file if it doesn't exist yet.
-	// The Claude CLI auto-loads ~/.claude/CLAUDE.md as global instructions.
-	claudeDir := filepath.Join(homeDir, ".claude")
-	claudeMDPath := filepath.Join(claudeDir, "CLAUDE.md")
-	if _, statErr := os.Stat(claudeMDPath); os.IsNotExist(statErr) {
-		if mkErr := os.MkdirAll(claudeDir, 0o700); mkErr != nil {
-			slog.Error("failed to create .claude dir", "user", mu.cfg.ID, "err", mkErr)
-		} else if wErr := os.WriteFile(claudeMDPath, []byte(agent.DefaultMemoryTemplate), 0o600); wErr != nil {
+	// Seed the user's memory directory and CLAUDE.md.
+	// The real file lives in memory/CLAUDE.md (the agent's sandbox). A symlink
+	// at home/.claude/CLAUDE.md points to it so the Claude CLI auto-loads it.
+	memoryMDPath := filepath.Join(memoryDir, "CLAUDE.md")
+	if _, statErr := os.Stat(memoryMDPath); os.IsNotExist(statErr) {
+		if mkErr := os.MkdirAll(memoryDir, 0o700); mkErr != nil {
+			slog.Error("failed to create memory dir", "user", mu.cfg.ID, "err", mkErr)
+		} else if wErr := os.WriteFile(memoryMDPath, []byte(agent.DefaultMemoryTemplate), 0o600); wErr != nil {
 			slog.Error("failed to seed CLAUDE.md", "user", mu.cfg.ID, "err", wErr)
 		} else {
-			slog.Info("seeded CLAUDE.md memory file", "user", mu.cfg.ID, "path", claudeMDPath)
+			slog.Info("seeded memory/CLAUDE.md", "user", mu.cfg.ID, "path", memoryMDPath)
+		}
+	}
+
+	// Ensure home/.claude/ exists and symlink CLAUDE.md into it.
+	claudeDir := filepath.Join(homeDir, ".claude")
+	symlinkPath := filepath.Join(claudeDir, "CLAUDE.md")
+	if _, statErr := os.Lstat(symlinkPath); os.IsNotExist(statErr) {
+		if mkErr := os.MkdirAll(claudeDir, 0o700); mkErr != nil {
+			slog.Error("failed to create .claude dir", "user", mu.cfg.ID, "err", mkErr)
+		} else if linkErr := os.Symlink(filepath.Join("..", "..", "memory", "CLAUDE.md"), symlinkPath); linkErr != nil {
+			slog.Error("failed to create CLAUDE.md symlink", "user", mu.cfg.ID, "err", linkErr)
+		} else {
+			slog.Info("created CLAUDE.md symlink", "user", mu.cfg.ID, "link", symlinkPath)
 		}
 	}
 
@@ -297,7 +337,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// Load sessions from store for each channel.
 		sessions := make(map[channel.ChannelID]string)
 		for chID := range allChMap {
-			sid, loadErr := loadSession(ctx, s, chID)
+			sid, loadErr := loadSession(ctx, sessionStore, chID)
 			if loadErr != nil {
 				slog.Warn("failed to load session, starting fresh", "channel", chID, "err", loadErr)
 			}
@@ -339,10 +379,11 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			Debug:           mu.cfg.Debug,
 			APIKey:          mu.cfg.APIKey,
 			HomeDir:         homeDir,
+			MemoryDir:       memoryDir,
 			Channels:        allChMap,
 			Sessions:        sessions,
 			OnSessionUpdate: func(chID channel.ChannelID, sessionID string) {
-				if saveErr := saveSession(ctx, s, chID, sessionID); saveErr != nil {
+				if saveErr := saveSession(ctx, sessionStore, chID, sessionID); saveErr != nil {
 					slog.Error("failed to save session", "err", saveErr)
 				}
 			},
