@@ -14,9 +14,10 @@ func NewStdio() *Stdio { return &Stdio{} }
 
 func (s *Stdio) Info() Info {
 	return Info{
-		ID:   "stdio",
-		Type: TypeStdio,
-		Name: "stdio",
+		ID:     "stdio",
+		Type:   TypeStdio,
+		Name:   "stdio",
+		Source: SourceStatic,
 	}
 }
 
@@ -52,4 +53,8 @@ func (s *Stdio) Edit(_ context.Context, _ MessageID, text string) error {
 
 func (s *Stdio) Done(_ context.Context) error {
 	return nil
+}
+
+func (s *Stdio) SplitStatusMessages() bool {
+	return false
 }

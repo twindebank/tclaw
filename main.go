@@ -38,10 +38,10 @@ func main() {
 		))
 	}
 
-	// Start the HTTP server (health checks + OAuth callbacks).
+	// Start the HTTP server (health checks, OAuth callbacks, Telegram webhooks).
 	// Always started so the health check endpoint is available even without
 	// OAuth providers configured.
-	callback := oauth.NewCallbackServer(cfg.OAuth.CallbackAddr)
+	callback := oauth.NewCallbackServer(cfg.Server.Addr)
 	if err := callback.Start(); err != nil {
 		slog.Error("failed to start http server", "err", err)
 		os.Exit(1)
@@ -52,11 +52,11 @@ func main() {
 	if cfg.Providers.Google != nil {
 		gwsPath = cfg.Providers.Google.GWSPath
 	}
-	r := router.New(cfg.BaseDir, reg, callback, gwsPath)
+	r := router.New(cfg.BaseDir, reg, callback, gwsPath, cfg.Server.PublicURL)
 	defer r.StopAll()
 
 	for _, u := range cfg.Users {
-		channels, err := r.BuildChannels(u.ID, u.Channels)
+		channels, err := r.BuildChannels(u.ID, u.Channels, cfg.Env)
 		if err != nil {
 			slog.Error("failed to build channels", "user", u.ID, "err", err)
 			os.Exit(1)

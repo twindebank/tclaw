@@ -20,12 +20,16 @@
 ## Permissions & Security
 - [x] Secret management — OS keychain (local) + encrypted FS (deployed), per-user isolation, ${secret:NAME} config syntax
 - [x] Channel descriptions — agent aware of current and other channels via config descriptions
+- [ ] Clearly define session access boundaries — make it explicit what the agent can/can't access in terms of current session state vs other sessions (cross-session isolation model)
 - [ ] Tool permissions / 2FA — approve or deny tool calls via the chat channel
 - [ ] Privileged sessions — temporary elevated permissions with a timeout (e.g. user grants write access for 30 min)
 - [ ] Permission matching rules — expressive rules for tool permissions based on provider, read/write, resource scope, etc.
 - [ ] Per-channel tool allowlists — restrict which tools are available on each channel independently
 
 ## UX
+- [ ] Split thinking and final message — separate thinking/reasoning from the final response in the output
+- [ ] Thinking message formatting for Signal — format thinking blocks appropriately for the Signal channel
+- [ ] Channel list doesn't show the prod channel — fix channel listing to include production channels
 - [ ] Typing indicator — show typing state in the interface while agent is working
 - [x] Timestamps on messages — show when each message was sent/received
 - [x] Visual message separation — clearer boundaries between messages in the chat UI
@@ -52,6 +56,7 @@
 
 ## Self-Modification
 - [ ] Privileged mode — agent can modify its own codebase, commit to branches, and open PRs via a deploy key (never commits directly to main)
+- [ ] Tools and deploy key for self-modification — give the agent MCP tools + a deploy key to make limited changes to itself by opening PRs
 
 ## Automation
 - [ ] Task scheduling — cron-like triggers that kick off agent sessions autonomously

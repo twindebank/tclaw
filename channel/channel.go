@@ -22,12 +22,21 @@ const (
 	TypeSlack    ChannelType = "slack"
 )
 
+// Source indicates where a channel's configuration came from.
+type Source string
+
+const (
+	SourceStatic  Source = "static"  // from config file, not editable via tools
+	SourceDynamic Source = "dynamic" // user-created via channel management tools
+)
+
 // Info describes a channel's identity and transport type.
 type Info struct {
 	ID          ChannelID
 	Type        ChannelType
 	Name        string // human-readable label
 	Description string // explains the channel's purpose (e.g. "Desktop workstation", "Phone")
+	Source      Source // where this channel's config came from
 }
 
 // TaggedMessage pairs an incoming message with the channel it arrived on
@@ -50,4 +59,7 @@ type Channel interface {
 	Edit(ctx context.Context, id MessageID, text string) error
 	// Done signals the end of a response turn.
 	Done(ctx context.Context) error
+	// SplitStatusMessages reports whether the channel wants thinking/tool-use
+	// status separated from the response text into distinct messages.
+	SplitStatusMessages() bool
 }

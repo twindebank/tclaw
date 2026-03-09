@@ -15,16 +15,43 @@ import (
 	"tclaw/claudecli"
 )
 
-// turnWriter accumulates all output for a single turn into one channel
-// message, using Send for the first write and Edit for subsequent ones.
+// writePhase distinguishes status output (thinking, tools, stats) from
+// the actual response text so they can be rendered in separate messages.
+type writePhase int
+
+const (
+	phaseStatus   writePhase = iota // thinking, tool use, tool results, init, stats
+	phaseResponse                   // assistant text content
+)
+
+// turnWriter accumulates output for a single turn. In split mode (Telegram),
+// status and response content go to separate channel messages. In normal mode
+// everything goes to one message.
 type turnWriter struct {
-	ch  channel.Channel
-	ctx context.Context
+	ch    channel.Channel
+	ctx   context.Context
+	split bool // true for channels that support split messages (Telegram)
+
+	// Normal mode: single message.
 	buf strings.Builder
 	id  channel.MessageID
+
+	// Split mode: two independent messages.
+	statusBuf strings.Builder
+	statusID  channel.MessageID
+	respBuf   strings.Builder
+	respID    channel.MessageID
 }
 
-func (tw *turnWriter) write(text string) error {
+func (tw *turnWriter) write(phase writePhase, text string) error {
+	if !tw.split {
+		return tw.writeSingle(text)
+	}
+	return tw.writeSplit(phase, text)
+}
+
+// writeSingle appends to a single message (socket, stdio).
+func (tw *turnWriter) writeSingle(text string) error {
 	tw.buf.WriteString(text)
 	if tw.id == "" {
 		id, err := tw.ch.Send(tw.ctx, tw.buf.String())
@@ -36,6 +63,39 @@ func (tw *turnWriter) write(text string) error {
 	}
 	if err := tw.ch.Edit(tw.ctx, tw.id, tw.buf.String()); err != nil {
 		return fmt.Errorf("edit: %w", err)
+	}
+	return nil
+}
+
+// writeSplit routes to separate status and response messages.
+func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
+	switch phase {
+	case phaseStatus:
+		tw.statusBuf.WriteString(text)
+		if tw.statusID == "" {
+			id, err := tw.ch.Send(tw.ctx, tw.statusBuf.String())
+			if err != nil {
+				return fmt.Errorf("send status: %w", err)
+			}
+			tw.statusID = id
+			return nil
+		}
+		if err := tw.ch.Edit(tw.ctx, tw.statusID, tw.statusBuf.String()); err != nil {
+			return fmt.Errorf("edit status: %w", err)
+		}
+	case phaseResponse:
+		tw.respBuf.WriteString(text)
+		if tw.respID == "" {
+			id, err := tw.ch.Send(tw.ctx, tw.respBuf.String())
+			if err != nil {
+				return fmt.Errorf("send response: %w", err)
+			}
+			tw.respID = id
+			return nil
+		}
+		if err := tw.ch.Edit(tw.ctx, tw.respID, tw.respBuf.String()); err != nil {
+			return fmt.Errorf("edit response: %w", err)
+		}
 	}
 	return nil
 }
@@ -52,8 +112,10 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		return "", fmt.Errorf("unknown channel %q", msg.ChannelID)
 	}
 
-	tw := &turnWriter{ch: ch, ctx: ctx}
-	if err := tw.write("🤔 Thinking...\n"); err != nil {
+	split := ch.SplitStatusMessages()
+
+	tw := &turnWriter{ch: ch, ctx: ctx, split: split}
+	if err := tw.write(phaseStatus, "🤔 Thinking...\n"); err != nil {
 		return "", fmt.Errorf("initial write: %w", err)
 	}
 
@@ -179,7 +241,7 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				if sys.SessionID != "" {
 					sessionID = sys.SessionID
 				}
-				if err := tw.write("✅ Session ready, generating response...\n"); err != nil {
+				if err := tw.write(phaseStatus, "✅ Session ready, generating response...\n"); err != nil {
 					return "", err
 				}
 			}
@@ -193,11 +255,11 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			currentBlockType = start.ContentBlock.Type
 			switch currentBlockType {
 			case claudecli.ContentThinking:
-				if err := tw.write("💭 "); err != nil {
+				if err := tw.write(phaseStatus, "💭 "); err != nil {
 					return "", err
 				}
 			case claudecli.ContentToolUse:
-				if err := tw.write(formatToolUse(start.ContentBlock)); err != nil {
+				if err := tw.write(phaseStatus, formatToolUse(start.ContentBlock)); err != nil {
 					return "", err
 				}
 			}
@@ -211,19 +273,19 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			switch delta.Delta.Type {
 			case claudecli.DeltaText:
 				gotTextDeltas = true
-				if err := tw.write(delta.Delta.Text); err != nil {
+				if err := tw.write(phaseResponse, delta.Delta.Text); err != nil {
 					return "", err
 				}
 			case claudecli.DeltaThinking:
 				gotTextDeltas = true
-				if err := tw.write(delta.Delta.Thinking); err != nil {
+				if err := tw.write(phaseStatus, delta.Delta.Thinking); err != nil {
 					return "", err
 				}
 			}
 
 		case claudecli.EventContentBlockStop:
 			if currentBlockType == claudecli.ContentThinking {
-				if err := tw.write("\n"); err != nil {
+				if err := tw.write(phaseStatus, "\n"); err != nil {
 					return "", err
 				}
 			}
@@ -249,7 +311,11 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				}
 				text := formatBlock(block)
 				if text != "" {
-					if err := tw.write(text); err != nil {
+					phase := phaseStatus
+					if block.Type == claudecli.ContentText {
+						phase = phaseResponse
+					}
+					if err := tw.write(phase, text); err != nil {
 						return "", err
 					}
 				}
@@ -262,7 +328,7 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				slog.Warn("failed to parse user event", "err", err)
 				continue
 			}
-			if err := tw.write(formatToolResult(user.ToolUseResult)); err != nil {
+			if err := tw.write(phaseStatus, formatToolResult(user.ToolUseResult)); err != nil {
 				return "", err
 			}
 
@@ -278,7 +344,7 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			if result.SessionID != "" && sessionID == "" {
 				sessionID = result.SessionID
 			}
-			if err := tw.write(fmt.Sprintf("\n📊 %d turns | %.1fs | $%.4f\n",
+			if err := tw.write(phaseStatus, fmt.Sprintf("\n📊 %d turns | %.1fs | $%.4f\n",
 				result.NumTurns,
 				result.DurationMs/1000,
 				result.CostUSD,

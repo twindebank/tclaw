@@ -1,0 +1,61 @@
+package channeltools
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"tclaw/channel"
+	"tclaw/mcp"
+)
+
+func channelListDef() mcp.ToolDef {
+	return mcp.ToolDef{
+		Name:        "channel_list",
+		Description: "List all channels (both static from config and dynamic user-created ones). Shows name, type, description, and source.",
+		InputSchema: json.RawMessage(`{"type": "object", "properties": {}}`),
+	}
+}
+
+type channelListEntry struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+	Source      string `json:"source"`
+}
+
+func channelListHandler(deps Deps) mcp.ToolHandler {
+	return func(ctx context.Context, _ json.RawMessage) (json.RawMessage, error) {
+		var entries []channelListEntry
+
+		// Static channels from config.
+		for _, info := range deps.StaticChannels {
+			entries = append(entries, channelListEntry{
+				Name:        info.Name,
+				Type:        string(info.Type),
+				Description: info.Description,
+				Source:      string(channel.SourceStatic),
+			})
+		}
+
+		// Dynamic channels from user store.
+		dynamics, err := deps.DynamicStore.List(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list dynamic channels: %w", err)
+		}
+		for _, cfg := range dynamics {
+			entries = append(entries, channelListEntry{
+				Name:        cfg.Name,
+				Type:        string(cfg.Type),
+				Description: cfg.Description,
+				Source:      string(channel.SourceDynamic),
+			})
+		}
+
+		if len(entries) == 0 {
+			return json.Marshal("No channels configured.")
+		}
+
+		return json.Marshal(entries)
+	}
+}

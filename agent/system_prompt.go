@@ -26,6 +26,7 @@ type ChannelInfo struct {
 	Name        string
 	Type        string
 	Description string
+	Source      string // "static" or "dynamic"
 }
 
 // BuildSystemPrompt executes the system_prompt.md template with runtime
