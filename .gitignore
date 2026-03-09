@@ -8,3 +8,5 @@ tclaw.yaml
 /tclaw
 /tclaw-chat
 /cmd/chat/tclaw-chat
+/secret
+/cmd/secret/secret

@@ -55,8 +55,13 @@
 - [ ] Other channel support (Telegram, Slack, etc.)
 
 ## Self-Modification
-- [ ] Privileged mode — agent can modify its own codebase, commit to branches, and open PRs via a deploy key (never commits directly to main)
-- [ ] Tools and deploy key for self-modification — give the agent MCP tools + a deploy key to make limited changes to itself by opening PRs
+- [ ] Dev tools — MCP tools that let the agent make limited changes to its own codebase:
+  - `dev_start` — clones/mounts the repo into a temp worktree, creates a branch. Returns a workspace path.
+  - `dev_read_file` / `dev_write_file` / `dev_list_files` — scoped file operations within the mounted worktree. Agent never sees raw git commands.
+  - `dev_finish` — commits, pushes, opens a PR, then unmounts the worktree. Agent provides a title + description, tools handle the rest.
+  - `dev_cancel` — tears down the worktree without committing.
+  - All git mechanics (clone, branch, commit, push, PR creation) are deterministic and hidden from the agent. Agent only decides what to change and why.
+  - Deploy key for push access — never commits directly to main, always opens PRs.
 
 ## Automation
 - [ ] Task scheduling — cron-like triggers that kick off agent sessions autonomously
