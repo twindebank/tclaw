@@ -48,7 +48,8 @@ func BuildSystemPrompt(channels []ChannelInfo, userPrompt string) string {
 }
 
 // DefaultMemoryTemplate is the initial content seeded into a new user's
-// ~/.claude/CLAUDE.md when it doesn't exist yet.
+// memory/CLAUDE.md when it doesn't exist yet. The file lives in the memory
+// directory (the agent's CWD), so all paths are relative to that directory.
 const DefaultMemoryTemplate = `# Memory
 
 This is your persistent memory. It is loaded into every conversation automatically.

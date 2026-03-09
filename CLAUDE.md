@@ -23,6 +23,12 @@
 - Per-user isolation via `HOME` env var on claude subprocess — all CLI state (`~/.claude/`) scoped per user
 - `CLAUDECODE` and `CLAUDE_CODE_ENTRYPOINT` stripped from subprocess env in `buildEnv()` (prevents nested session detection)
 
+### Three-zone directory model
+Per-user data is split into three zones with clear access boundaries:
+1. **Agent memory** (`<user>/memory/`) — agent reads/writes freely, sandboxed via CWD + `--add-dir`. Contains CLAUDE.md (real file) and topic subfiles.
+2. **Claude Code state** (`<user>/home/.claude/`) — internal CLI state (conversation history, settings, plans). Off limits to the agent. A symlink at `home/.claude/CLAUDE.md` → `../../memory/CLAUDE.md` bridges the CLI's auto-load with the agent's sandbox.
+3. **tclaw state** (`<user>/state/`, `sessions/`, `secrets/`, `runtime/`) — accessible only via MCP tools, outside the agent's HOME entirely.
+
 ## Deployment (Fly.io)
 
 ### Overview

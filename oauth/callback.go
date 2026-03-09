@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"html"
 	"log/slog"
 	"net"
 	"net/http"
@@ -82,22 +83,35 @@ func (f *PendingFlow) DoneChan() <-chan struct{} {
 	return f.Done
 }
 
+// pendingEntry wraps a flow with its creation time so we can expire stale entries.
+type pendingEntry struct {
+	flow      PendingOAuthFlow
+	createdAt time.Time
+}
+
 // CallbackServer handles OAuth redirect callbacks on localhost.
 // A single server runs per tclaw process, shared across all users.
 // Additional routes (e.g. Telegram webhooks) can be registered via Handle()
 // before or after Start().
 type CallbackServer struct {
-	addr    string
-	mux     *http.ServeMux
-	pending sync.Map // state string -> PendingOAuthFlow
-	srv     *http.Server
-	ln      net.Listener
+	addr        string
+	mux         *http.ServeMux
+	pending     sync.Map // state string -> pendingEntry
+	srv         *http.Server
+	ln          net.Listener
+	stopGC      chan struct{} // closed to stop the stale flow cleanup goroutine
+	rateLimiter *RateLimiter
 }
 
 // NewCallbackServer creates a callback server but does not start it.
 func NewCallbackServer(addr string) *CallbackServer {
 	mux := http.NewServeMux()
-	return &CallbackServer{addr: addr, mux: mux}
+	return &CallbackServer{
+		addr:        addr,
+		mux:         mux,
+		stopGC:      make(chan struct{}),
+		rateLimiter: NewRateLimiter(),
+	}
 }
 
 // Handle registers an additional route on the server's mux.
@@ -123,16 +137,20 @@ func (s *CallbackServer) Start() error {
 	s.mux.HandleFunc("/oauth/callback", s.handleCallback)
 
 	s.srv = &http.Server{
-		Handler:      s.mux,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Handler:        s.rateLimiter.Middleware(s.mux),
+		ReadTimeout:    10 * time.Second,
+		WriteTimeout:   10 * time.Second,
+		IdleTimeout:    60 * time.Second,
+		MaxHeaderBytes: 1 << 16, // 64 KiB
 	}
 	go func() {
 		if err := s.srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			slog.Error("http server error", "err", err)
 		}
 	}()
+
+	// Periodically clean up stale OAuth flows that were never completed.
+	go s.reapStaleFlows()
 
 	slog.Info("http server started", "addr", s.addr)
 	return nil
@@ -145,6 +163,8 @@ func (s *CallbackServer) Addr() string {
 
 // Stop gracefully shuts down the callback server.
 func (s *CallbackServer) Stop(ctx context.Context) error {
+	close(s.stopGC)
+	s.rateLimiter.Stop()
 	if s.srv == nil {
 		return nil
 	}
@@ -164,7 +184,7 @@ func (s *CallbackServer) StartFlow(flow *PendingFlow) (string, error) {
 	}
 	flow.Done = make(chan struct{})
 	flow.CallbackURL = s.CallbackURL()
-	s.pending.Store(state, PendingOAuthFlow(flow))
+	s.pending.Store(state, pendingEntry{flow: PendingOAuthFlow(flow), createdAt: time.Now()})
 	return state, nil
 }
 
@@ -175,7 +195,7 @@ func (s *CallbackServer) RegisterFlow(flow PendingOAuthFlow) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	s.pending.Store(state, flow)
+	s.pending.Store(state, pendingEntry{flow: flow, createdAt: time.Now()})
 	return state, nil
 }
 
@@ -195,16 +215,24 @@ func (s *CallbackServer) handleCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	flow, ok := val.(PendingOAuthFlow)
+	entry, ok := val.(pendingEntry)
 	if !ok {
 		http.Error(w, "unknown flow type", http.StatusInternalServerError)
 		return
 	}
 
+	if time.Since(entry.createdAt) > pendingFlowTTL {
+		entry.flow.Fail(fmt.Errorf("authorization flow expired"))
+		http.Error(w, "authorization flow expired", http.StatusBadRequest)
+		return
+	}
+
+	flow := entry.flow
+
 	if errParam != "" {
 		errDesc := r.URL.Query().Get("error_description")
 		flow.Fail(fmt.Errorf("oauth error: %s — %s", errParam, errDesc))
-		fmt.Fprintf(w, "<html><body><h2>❌ Authorization denied</h2><p>%s</p><p>You can close this tab.</p></body></html>", errDesc)
+		fmt.Fprintf(w, "<html><body><h2>❌ Authorization denied</h2><p>%s</p><p>You can close this tab.</p></body></html>", html.EscapeString(errDesc))
 		return
 	}
 
@@ -217,11 +245,38 @@ func (s *CallbackServer) handleCallback(w http.ResponseWriter, r *http.Request) 
 	if err := flow.Complete(r.Context(), code, s.CallbackURL()); err != nil {
 		slog.Error("oauth flow completion failed", "err", err)
 		flow.Fail(err)
-		fmt.Fprintf(w, "<html><body><h2>❌ Authorization failed</h2><p>%s</p><p>You can close this tab.</p></body></html>", err.Error())
+		fmt.Fprintf(w, "<html><body><h2>❌ Authorization failed</h2><p>%s</p><p>You can close this tab.</p></body></html>", html.EscapeString(err.Error()))
 		return
 	}
 
 	fmt.Fprintf(w, "<html><body><h2>✅ Authorized!</h2><p>You can close this tab and return to your chat.</p></body></html>")
+}
+
+// reapStaleFlows periodically removes pending OAuth flows that exceeded the TTL.
+// Prevents unbounded memory growth if users start flows but never complete them.
+func (s *CallbackServer) reapStaleFlows() {
+	ticker := time.NewTicker(pendingFlowTTL / 2)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stopGC:
+			return
+		case <-ticker.C:
+			now := time.Now()
+			s.pending.Range(func(key, val any) bool {
+				entry, ok := val.(pendingEntry)
+				if !ok {
+					return true
+				}
+				if now.Sub(entry.createdAt) > pendingFlowTTL {
+					s.pending.Delete(key)
+					entry.flow.Fail(fmt.Errorf("authorization flow expired (TTL exceeded)"))
+					slog.Debug("reaped stale oauth flow", "state", key)
+				}
+				return true
+			})
+		}
+	}
 }
 
 func generateState() (string, error) {
