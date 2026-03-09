@@ -20,7 +20,7 @@ import (
 	"tclaw/libraries/secret"
 	"tclaw/libraries/store"
 	"tclaw/tool/connectiontools"
-	"tclaw/tool/gmail"
+	googletools "tclaw/tool/google"
 	"tclaw/tool/remotemcp"
 	"tclaw/user"
 )
@@ -34,6 +34,7 @@ type Router struct {
 	baseDir  string // root for per-user data (home dirs, stores)
 	registry *provider.Registry
 	callback *oauth.CallbackServer // nil if OAuth is not configured
+	gwsPath  string                // path to gws CLI binary for Google Workspace tools
 
 	// Per-user MCP servers, keyed by user ID.
 	mcpServers map[user.ID]*mcp.Server
@@ -57,13 +58,14 @@ type managedUser struct {
 //	    store/      -> key-value store for agent state (session IDs, etc.)
 //	    secrets/    -> encrypted credentials for connections
 // callback may be nil if OAuth is not configured.
-func New(baseDir string, registry *provider.Registry, callback *oauth.CallbackServer) *Router {
+func New(baseDir string, registry *provider.Registry, callback *oauth.CallbackServer, gwsPath string) *Router {
 	return &Router{
 		users:      make(map[user.ID]*managedUser),
 		mcpServers: make(map[user.ID]*mcp.Server),
 		baseDir:    baseDir,
 		registry:   registry,
 		callback:   callback,
+		gwsPath:    gwsPath,
 	}
 }
 
@@ -126,12 +128,8 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, chMap map[ch
 		Registry: r.registry,
 		Callback: r.callback,
 		Handler:  mcpHandler,
-		OnGmailConnect: func(connID connection.ConnectionID, mgr *connection.Manager, p *provider.Provider) {
-			gmail.RegisterTools(mcpHandler, gmail.Deps{
-				ConnID:   connID,
-				Manager:  mgr,
-				Provider: p,
-			})
+		OnProviderConnect: func(connID connection.ConnectionID, mgr *connection.Manager, p *provider.Provider) {
+			r.registerToolsForProvider(mcpHandler, connID, mgr, p)
 		},
 	})
 	if r.callback != nil {
@@ -343,8 +341,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, chMap map[ch
 }
 
 // registerProviderTools loads existing connections and registers
-// provider-specific MCP tools (e.g. gmail tools) for connections
-// that already have credentials stored.
+// provider-specific MCP tools for connections that already have credentials stored.
 func (r *Router) registerProviderTools(ctx context.Context, h *mcp.Handler, mgr *connection.Manager) {
 	conns, err := mgr.List(ctx)
 	if err != nil {
@@ -368,15 +365,21 @@ func (r *Router) registerProviderTools(ctx context.Context, h *mcp.Handler, mgr 
 			continue
 		}
 
-		switch conn.ProviderID {
-		case provider.GmailProviderID:
-			gmail.RegisterTools(h, gmail.Deps{
-				ConnID:   conn.ID,
-				Manager:  mgr,
-				Provider: p,
-			})
-			slog.Info("registered gmail tools", "connection", conn.ID)
-		}
+		r.registerToolsForProvider(h, conn.ID, mgr, p)
+	}
+}
+
+// registerToolsForProvider registers provider-specific MCP tools for a single connection.
+func (r *Router) registerToolsForProvider(h *mcp.Handler, connID connection.ConnectionID, mgr *connection.Manager, p *provider.Provider) {
+	switch p.ID {
+	case provider.GoogleProviderID:
+		googletools.RegisterTools(h, googletools.Deps{
+			ConnID:   connID,
+			Manager:  mgr,
+			Provider: p,
+			GWSPath:  r.gwsPath,
+		})
+		slog.Info("registered google workspace tools", "connection", connID)
 	}
 }
 

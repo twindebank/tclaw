@@ -13,6 +13,13 @@
 
 base_dir: /tmp/tclaw
 
+# providers:
+#   # Google Workspace (Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks)
+#   google:
+#     client_id: ${secret:GOOGLE_CLIENT_ID}
+#     client_secret: ${secret:GOOGLE_CLIENT_SECRET}
+#     gws_path: /path/to/gws  # optional, defaults to "gws" in PATH
+
 users:
   - id: default
     api_key: ${secret:ANTHROPIC_API_KEY}
