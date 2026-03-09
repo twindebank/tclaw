@@ -48,11 +48,7 @@ func main() {
 	}
 	defer callback.Stop(context.Background())
 
-	var gwsPath string
-	if cfg.Providers.Google != nil {
-		gwsPath = cfg.Providers.Google.GWSPath
-	}
-	r := router.New(cfg.BaseDir, reg, callback, gwsPath, cfg.Server.PublicURL)
+	r := router.New(cfg.BaseDir, reg, callback, cfg.Server.PublicURL)
 	defer r.StopAll()
 
 	for _, u := range cfg.Users {

@@ -50,13 +50,10 @@ type ProvidersConfig struct {
 	Google *GoogleProviderCredentials `yaml:"google"`
 }
 
-// GoogleProviderCredentials holds OAuth client credentials and the gws binary path.
+// GoogleProviderCredentials holds OAuth client credentials for Google Workspace.
 type GoogleProviderCredentials struct {
 	ClientID     string `yaml:"client_id"`
 	ClientSecret string `yaml:"client_secret"`
-
-	// GWSPath is the path to the gws CLI binary. Defaults to "gws" (PATH lookup).
-	GWSPath string `yaml:"gws_path"`
 }
 
 // User defines per-user agent configuration.

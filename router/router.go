@@ -37,7 +37,6 @@ type Router struct {
 	baseDir   string // root for per-user data (home dirs, stores)
 	registry  *provider.Registry
 	callback  *oauth.CallbackServer // nil if OAuth is not configured
-	gwsPath   string                // path to gws CLI binary for Google Workspace tools
 	publicURL string                // externally-reachable base URL, enables Telegram webhooks
 
 	// Per-user MCP servers, keyed by user ID.
@@ -62,14 +61,13 @@ type managedUser struct {
 //	    store/      -> key-value store for agent state (session IDs, etc.)
 //	    secrets/    -> encrypted credentials for connections
 // callback may be nil if OAuth is not configured.
-func New(baseDir string, registry *provider.Registry, callback *oauth.CallbackServer, gwsPath string, publicURL string) *Router {
+func New(baseDir string, registry *provider.Registry, callback *oauth.CallbackServer, publicURL string) *Router {
 	return &Router{
 		users:      make(map[user.ID]*managedUser),
 		mcpServers: make(map[user.ID]*mcp.Server),
 		baseDir:    baseDir,
 		registry:   registry,
 		callback:   callback,
-		gwsPath:    gwsPath,
 		publicURL:  publicURL,
 	}
 }
@@ -450,7 +448,6 @@ func (r *Router) registerToolsForProvider(h *mcp.Handler, connID connection.Conn
 			ConnID:   connID,
 			Manager:  mgr,
 			Provider: p,
-			GWSPath:  r.gwsPath,
 		})
 		slog.Info("registered google workspace tools", "connection", connID)
 	}

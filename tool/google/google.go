@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 
 	"tclaw/connection"
 	"tclaw/mcp"
@@ -19,7 +21,6 @@ type Deps struct {
 	ConnID   connection.ConnectionID
 	Manager  *connection.Manager
 	Provider *provider.Provider
-	GWSPath  string // path to gws binary, defaults to "gws" (PATH lookup)
 }
 
 // RegisterTools adds the Google Workspace tools for a specific connection to the MCP handler.
@@ -29,12 +30,42 @@ func RegisterTools(handler *mcp.Handler, deps Deps) {
 	handler.Register(defs[1], schemaHandler(deps))
 }
 
-// resolveGWSPath returns the gws binary path, defaulting to "gws".
-func resolveGWSPath(deps Deps) string {
-	if deps.GWSPath != "" {
-		return deps.GWSPath
-	}
-	return "gws"
+var (
+	gwsBinaryOnce sync.Once
+	gwsBinaryPath string
+)
+
+// findGWSBinary locates the gws binary. Checks PATH first, then common
+// locations where npm/nvm install global packages.
+func findGWSBinary() string {
+	gwsBinaryOnce.Do(func() {
+		// Try PATH first.
+		if path, err := exec.LookPath("gws"); err == nil {
+			gwsBinaryPath = path
+			return
+		}
+
+		// Common global install locations for npm/nvm.
+		home, _ := os.UserHomeDir()
+		candidates := []string{
+			home + "/.nvm/versions/node/*/bin/gws",  // nvm
+			"/usr/local/bin/gws",                     // system npm
+			home + "/.local/bin/gws",                 // user-local
+			home + "/.npm-global/bin/gws",            // npm prefix
+		}
+
+		for _, pattern := range candidates {
+			matches, _ := filepath.Glob(pattern)
+			if len(matches) > 0 {
+				gwsBinaryPath = matches[len(matches)-1] // latest version if nvm glob matches multiple
+				return
+			}
+		}
+
+		// Fall back to bare name — will fail at exec time with a clear error.
+		gwsBinaryPath = "gws"
+	})
+	return gwsBinaryPath
 }
 
 // accessToken gets a valid access token for the connection, refreshing if needed.
@@ -57,7 +88,7 @@ func runGWS(ctx context.Context, deps Deps, args ...string) (json.RawMessage, er
 		return nil, err
 	}
 
-	cmd := exec.CommandContext(ctx, resolveGWSPath(deps), args...)
+	cmd := exec.CommandContext(ctx, findGWSBinary(), args...)
 	cmd.Env = append(os.Environ(), "GOOGLE_WORKSPACE_CLI_TOKEN="+token)
 
 	output, err := cmd.CombinedOutput()
@@ -80,7 +111,7 @@ func runGWSRaw(ctx context.Context, deps Deps, args ...string) (string, error) {
 		return "", err
 	}
 
-	cmd := exec.CommandContext(ctx, resolveGWSPath(deps), args...)
+	cmd := exec.CommandContext(ctx, findGWSBinary(), args...)
 	cmd.Env = append(os.Environ(), "GOOGLE_WORKSPACE_CLI_TOKEN="+token)
 
 	output, err := cmd.CombinedOutput()
