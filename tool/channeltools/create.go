@@ -4,11 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"time"
 
 	"tclaw/channel"
 	"tclaw/mcp"
 )
+
+const (
+	maxChannelNameLength        = 64
+	maxChannelDescriptionLength = 512
+)
+
+var channelNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
 func channelCreateDef() mcp.ToolDef {
 	return mcp.ToolDef{
@@ -43,11 +51,14 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
-		if a.Name == "" {
-			return nil, fmt.Errorf("name is required")
+		if a.Name == "" || len(a.Name) > maxChannelNameLength {
+			return nil, fmt.Errorf("name is required and must be under %d characters", maxChannelNameLength)
 		}
-		if a.Description == "" {
-			return nil, fmt.Errorf("description is required")
+		if !channelNamePattern.MatchString(a.Name) {
+			return nil, fmt.Errorf("name must be alphanumeric with hyphens/underscores (no spaces or special characters)")
+		}
+		if a.Description == "" || len(a.Description) > maxChannelDescriptionLength {
+			return nil, fmt.Errorf("description is required and must be under %d characters", maxChannelDescriptionLength)
 		}
 
 		// Check uniqueness against static channels.

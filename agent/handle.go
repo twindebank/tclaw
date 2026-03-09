@@ -180,6 +180,7 @@ func buildEnv(opts Options) []string {
 	strip := map[string]bool{
 		"CLAUDECODE":             true,
 		"CLAUDE_CODE_ENTRYPOINT": true,
+		"TCLAW_SECRET_KEY":       true, // master encryption key must not leak to subprocess
 	}
 
 	overrides := make(map[string]string)

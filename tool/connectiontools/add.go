@@ -44,6 +44,13 @@ func connectionAddHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
+		if a.Provider == "" || len(a.Provider) > 64 {
+			return nil, fmt.Errorf("provider is required and must be under 64 characters")
+		}
+		if a.Label == "" || len(a.Label) > 64 {
+			return nil, fmt.Errorf("label is required and must be under 64 characters")
+		}
+
 		providerID := provider.ProviderID(a.Provider)
 		p := deps.Registry.Get(providerID)
 		if p == nil {
