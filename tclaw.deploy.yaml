@@ -9,6 +9,11 @@ base_dir: /data/tclaw
 oauth:
   callback_addr: "0.0.0.0:9876"
 
+providers:
+  google:
+    client_id: ${secret:GOOGLE_CLIENT_ID}
+    client_secret: ${secret:GOOGLE_CLIENT_SECRET}
+
 users:
   - id: default
     api_key: ${secret:ANTHROPIC_API_KEY}
