@@ -20,8 +20,12 @@ type Config struct {
 	// Defaults to /tmp/tclaw if not set.
 	BaseDir string `yaml:"base_dir"`
 
-	// OAuth configures the OAuth callback server for provider authorization.
-	OAuth OAuthConfig `yaml:"oauth"`
+	// Env identifies the environment this process runs in (e.g. "local", "prod").
+	// Used to filter channels via the Envs field. Defaults to "local".
+	Env string `yaml:"env"`
+
+	// Server configures the HTTP server (health checks, OAuth callbacks, webhooks).
+	Server ServerConfig `yaml:"server"`
 
 	// Providers configures external service providers (Gmail, etc.).
 	Providers ProvidersConfig `yaml:"providers"`
@@ -29,11 +33,16 @@ type Config struct {
 	Users []User `yaml:"users"`
 }
 
-// OAuthConfig holds settings for the OAuth callback server.
-type OAuthConfig struct {
-	// CallbackAddr is the address for the OAuth callback HTTP server.
+// ServerConfig holds settings for the HTTP server that handles health checks,
+// OAuth callbacks, and Telegram webhooks.
+type ServerConfig struct {
+	// Addr is the listen address for the HTTP server.
 	// Defaults to "127.0.0.1:9876".
-	CallbackAddr string `yaml:"callback_addr"`
+	Addr string `yaml:"addr"`
+
+	// PublicURL is the externally-reachable base URL (e.g. "https://tclaw.fly.dev").
+	// When set, Telegram channels use webhooks instead of long polling.
+	PublicURL string `yaml:"public_url"`
 }
 
 // ProvidersConfig holds per-provider configuration.
@@ -72,16 +81,22 @@ type Channel struct {
 	Name        string      `yaml:"name"`
 	Description string      `yaml:"description"`
 
-	// Telegram-specific (future)
+	// Token is the bot token (required for Telegram channels).
+	// Supports secret references: ${secret:NAME} or ${NAME}.
 	Token string `yaml:"token,omitempty"`
+
+	// Envs restricts this channel to specific environments.
+	// Empty means the channel is active in all environments.
+	Envs []string `yaml:"envs,omitempty"`
 }
 
 // ChannelType identifies the transport kind in config.
 type ChannelType string
 
 const (
-	ChannelTypeSocket ChannelType = "socket"
-	ChannelTypeStdio  ChannelType = "stdio"
+	ChannelTypeSocket   ChannelType = "socket"
+	ChannelTypeStdio    ChannelType = "stdio"
+	ChannelTypeTelegram ChannelType = "telegram"
 )
 
 // Load reads and parses a config file from the given path.
@@ -101,8 +116,11 @@ func Load(path string) (*Config, error) {
 	if cfg.BaseDir == "" {
 		cfg.BaseDir = "/tmp/tclaw"
 	}
-	if cfg.OAuth.CallbackAddr == "" {
-		cfg.OAuth.CallbackAddr = "127.0.0.1:9876"
+	if cfg.Env == "" {
+		cfg.Env = "local"
+	}
+	if cfg.Server.Addr == "" {
+		cfg.Server.Addr = "127.0.0.1:9876"
 	}
 
 	resolvedEnvVars, err := resolveSecrets(&cfg)
@@ -178,10 +196,14 @@ func validate(cfg *Config) error {
 			switch ch.Type {
 			case ChannelTypeSocket, ChannelTypeStdio:
 				// valid
+			case ChannelTypeTelegram:
+				if ch.Token == "" {
+					return fmt.Errorf("user %q channel %q: telegram channel requires a token", u.ID, ch.Name)
+				}
 			case "":
 				return fmt.Errorf("user %q channel %q: missing type", u.ID, ch.Name)
 			default:
-				return fmt.Errorf("user %q channel %q: unknown type %q (known: socket, stdio)", u.ID, ch.Name, ch.Type)
+				return fmt.Errorf("user %q channel %q: unknown type %q (known: socket, stdio, telegram)", u.ID, ch.Name, ch.Type)
 			}
 		}
 	}
@@ -214,6 +236,21 @@ func resolveSecrets(cfg *Config) ([]string, error) {
 		cfg.Users[i].APIKey = val
 		if envVar != "" {
 			envVars = append(envVars, envVar)
+		}
+
+		// Resolve channel tokens (e.g. Telegram bot tokens).
+		for j := range cfg.Users[i].Channels {
+			if cfg.Users[i].Channels[j].Token == "" {
+				continue
+			}
+			val, envVar, err := resolveRef(cfg.Users[i].Channels[j].Token)
+			if err != nil {
+				return nil, fmt.Errorf("user %q channel %q token: %w", cfg.Users[i].ID, cfg.Users[i].Channels[j].Name, err)
+			}
+			cfg.Users[i].Channels[j].Token = val
+			if envVar != "" {
+				envVars = append(envVars, envVar)
+			}
 		}
 	}
 

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"tclaw/agent"
@@ -19,6 +21,7 @@ import (
 	"tclaw/provider"
 	"tclaw/libraries/secret"
 	"tclaw/libraries/store"
+	"tclaw/tool/channeltools"
 	"tclaw/tool/connectiontools"
 	googletools "tclaw/tool/google"
 	"tclaw/tool/remotemcp"
@@ -29,12 +32,13 @@ import (
 // channels, store, and Claude session. Agents start lazily on
 // the first message, not at registration time.
 type Router struct {
-	mu       sync.Mutex
-	users    map[user.ID]*managedUser
-	baseDir  string // root for per-user data (home dirs, stores)
-	registry *provider.Registry
-	callback *oauth.CallbackServer // nil if OAuth is not configured
-	gwsPath  string                // path to gws CLI binary for Google Workspace tools
+	mu        sync.Mutex
+	users     map[user.ID]*managedUser
+	baseDir   string // root for per-user data (home dirs, stores)
+	registry  *provider.Registry
+	callback  *oauth.CallbackServer // nil if OAuth is not configured
+	gwsPath   string                // path to gws CLI binary for Google Workspace tools
+	publicURL string                // externally-reachable base URL, enables Telegram webhooks
 
 	// Per-user MCP servers, keyed by user ID.
 	mcpServers map[user.ID]*mcp.Server
@@ -58,7 +62,7 @@ type managedUser struct {
 //	    store/      -> key-value store for agent state (session IDs, etc.)
 //	    secrets/    -> encrypted credentials for connections
 // callback may be nil if OAuth is not configured.
-func New(baseDir string, registry *provider.Registry, callback *oauth.CallbackServer, gwsPath string) *Router {
+func New(baseDir string, registry *provider.Registry, callback *oauth.CallbackServer, gwsPath string, publicURL string) *Router {
 	return &Router{
 		users:      make(map[user.ID]*managedUser),
 		mcpServers: make(map[user.ID]*mcp.Server),
@@ -66,6 +70,7 @@ func New(baseDir string, registry *provider.Registry, callback *oauth.CallbackSe
 		registry:   registry,
 		callback:   callback,
 		gwsPath:    gwsPath,
+		publicURL:  publicURL,
 	}
 }
 
@@ -86,12 +91,12 @@ func (r *Router) Register(ctx context.Context, cfg user.Config, channels []chann
 	}
 	r.users[cfg.ID] = mu
 
-	// Start listening on all channels and fan messages into a trigger
+	// Start listening on all static channels and fan messages into a trigger
 	// that starts the agent on the first arrival.
-	chMap := channel.ChannelMap(channels...)
-	msgs := channel.FanIn(ctx, chMap)
+	staticChMap := channel.ChannelMap(channels...)
+	staticMsgs := channel.FanIn(ctx, staticChMap)
 
-	go r.waitAndStart(ctx, mu, chMap, msgs)
+	go r.waitAndStart(ctx, mu, staticChMap, staticMsgs)
 
 	slog.Info("user registered (agent will start on first message)", "user", cfg.ID)
 	return nil
@@ -101,7 +106,7 @@ func (r *Router) Register(ctx context.Context, cfg user.Config, channels []chann
 // agent. If the agent exits due to idle timeout, it goes back to waiting
 // for the next message and restarts the agent — repeating indefinitely
 // until ctx is cancelled.
-func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, chMap map[channel.ChannelID]channel.Channel, msgs <-chan channel.TaggedMessage) {
+func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap map[channel.ChannelID]channel.Channel, staticMsgs <-chan channel.TaggedMessage) {
 	userDir := filepath.Join(r.baseDir, string(mu.cfg.ID))
 	homeDir := filepath.Join(userDir, "home")
 	storeDir := filepath.Join(userDir, "store")
@@ -226,30 +231,56 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, chMap map[ch
 		}
 	}
 
-	// Convert channel.Info → agent.ChannelInfo for the system prompt.
-	var chInfos []agent.ChannelInfo
-	for _, ch := range chMap {
-		info := ch.Info()
-		chInfos = append(chInfos, agent.ChannelInfo{
-			Name:        info.Name,
-			Type:        string(info.Type),
-			Description: info.Description,
-		})
-	}
+	// Create dynamic channel store and register channel management tools.
+	dynamicStore := channel.NewDynamicStore(s)
 
-	// Build the system prompt once — it's static for this user's lifecycle.
-	// Channel list and identity don't change; per-turn current-channel
-	// info is prepended to each prompt in handle().
-	systemPrompt := agent.BuildSystemPrompt(chInfos, mu.cfg.SystemPrompt)
+	// Collect static channel infos for the channel tools (immutable reference).
+	staticInfos := channel.InfoAll(staticChMap)
+	channeltools.RegisterTools(mcpHandler, channeltools.Deps{
+		DynamicStore:   dynamicStore,
+		StaticChannels: staticInfos,
+	})
 
 	for {
+		// Build dynamic channels from the store each iteration so
+		// creates/deletes from the previous agent session take effect.
+		dynamicCtx, cancelDynamic := context.WithCancel(ctx)
+		dynamicChMap, dynamicMsgs := r.buildDynamicChannels(dynamicCtx, mu.cfg.ID, dynamicStore)
+
+		// Merge static + dynamic into a combined view for this iteration.
+		allChMap := make(map[channel.ChannelID]channel.Channel, len(staticChMap)+len(dynamicChMap))
+		for id, ch := range staticChMap {
+			allChMap[id] = ch
+		}
+		for id, ch := range dynamicChMap {
+			allChMap[id] = ch
+		}
+
+		// Merge message streams.
+		mergedMsgs := channel.MergeFanIns(dynamicCtx, staticMsgs, dynamicMsgs)
+
+		// Build system prompt inside the loop — channel list may change between iterations.
+		var chInfos []agent.ChannelInfo
+		for _, ch := range allChMap {
+			info := ch.Info()
+			chInfos = append(chInfos, agent.ChannelInfo{
+				Name:        info.Name,
+				Type:        string(info.Type),
+				Description: info.Description,
+				Source:      string(info.Source),
+			})
+		}
+		systemPrompt := agent.BuildSystemPrompt(chInfos, mu.cfg.SystemPrompt)
+
 		// Wait for a message or shutdown.
 		var firstMsg channel.TaggedMessage
 		select {
 		case <-ctx.Done():
+			cancelDynamic()
 			return
-		case m, ok := <-msgs:
+		case m, ok := <-mergedMsgs:
 			if !ok {
+				cancelDynamic()
 				return
 			}
 			firstMsg = m
@@ -267,7 +298,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, chMap map[ch
 
 		// Load sessions from store for each channel.
 		sessions := make(map[channel.ChannelID]string)
-		for chID := range chMap {
+		for chID := range allChMap {
 			sid, loadErr := loadSession(ctx, s, chID)
 			if loadErr != nil {
 				slog.Warn("failed to load session, starting fresh", "channel", chID, "err", loadErr)
@@ -277,16 +308,26 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, chMap map[ch
 			}
 		}
 
-		// Bridge: re-emit the first message plus remaining fan-in messages
+		// Bridge: re-emit the first message plus remaining merged messages
 		// into a channel that agent.RunWithMessages reads from.
 		bridgeCh := make(chan channel.TaggedMessage, 1)
 		bridgeCh <- firstMsg
 
+		bridgeDone := make(chan struct{})
 		go func() {
+			defer close(bridgeDone)
 			defer close(bridgeCh)
-			for msg := range msgs {
+			for {
 				select {
-				case bridgeCh <- msg:
+				case msg, ok := <-mergedMsgs:
+					if !ok {
+						return
+					}
+					select {
+					case bridgeCh <- msg:
+					case <-agentCtx.Done():
+						return
+					}
 				case <-agentCtx.Done():
 					return
 				}
@@ -300,7 +341,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, chMap map[ch
 			Debug:           mu.cfg.Debug,
 			APIKey:          mu.cfg.APIKey,
 			HomeDir:         homeDir,
-			Channels:        chMap,
+			Channels:        allChMap,
 			Sessions:        sessions,
 			OnSessionUpdate: func(chID channel.ChannelID, sessionID string) {
 				if saveErr := saveSession(ctx, s, chID, sessionID); saveErr != nil {
@@ -319,10 +360,18 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, chMap map[ch
 			agentErr <- agent.RunWithMessages(agentCtx, opts, bridgeCh)
 		}()
 
-		// Wait for agent to finish.
+		// Wait for agent and bridge goroutine to finish.
+		// The bridge must exit before we loop back to reading mergedMsgs,
+		// otherwise both the bridge and the main loop race to read
+		// from the same channel and the bridge drops the message.
 		err := <-agentErr
 		cancel()
 		<-done
+		<-bridgeDone
+
+		// Cancel dynamic channels so their listeners/sockets close.
+		// Next iteration will recreate them from the (possibly updated) store.
+		cancelDynamic()
 
 		r.mu.Lock()
 		mu.cancel = nil
@@ -338,6 +387,30 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, chMap map[ch
 		}
 		return
 	}
+}
+
+// buildDynamicChannels loads dynamic channel configs from the store and creates
+// SocketServer instances for each. Returns a channel map and a fan-in of messages.
+// The caller should cancel dynamicCtx when the agent exits to close the listeners.
+func (r *Router) buildDynamicChannels(dynamicCtx context.Context, userID user.ID, dynamicStore *channel.DynamicStore) (map[channel.ChannelID]channel.Channel, <-chan channel.TaggedMessage) {
+	configs, err := dynamicStore.List(dynamicCtx)
+	if err != nil {
+		slog.Error("failed to load dynamic channels", "user", userID, "err", err)
+		return nil, nil
+	}
+	if len(configs) == 0 {
+		return nil, nil
+	}
+
+	channels := make(map[channel.ChannelID]channel.Channel, len(configs))
+	for _, cfg := range configs {
+		socketPath := filepath.Join(r.baseDir, string(userID), cfg.Name+".sock")
+		sock := channel.NewDynamicSocketServer(socketPath, cfg.Name, cfg.Description)
+		channels[sock.Info().ID] = sock
+	}
+
+	slog.Info("built dynamic channels", "user", userID, "count", len(channels))
+	return channels, channel.FanIn(dynamicCtx, channels)
 }
 
 // registerProviderTools loads existing connections and registers
@@ -420,10 +493,16 @@ func (r *Router) StopAll() {
 }
 
 // BuildChannels creates channel instances from config for a given user.
+// Channels whose Envs list doesn't include env are skipped.
 // System-derived paths (socket paths) are computed from the base directory.
-func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel) ([]channel.Channel, error) {
+func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel, env string) ([]channel.Channel, error) {
 	var channels []channel.Channel
 	for i, chCfg := range channelConfigs {
+		if len(chCfg.Envs) > 0 && !slices.Contains(chCfg.Envs, env) {
+			slog.Info("skipping channel (env mismatch)", "channel", chCfg.Name, "envs", chCfg.Envs, "current", env)
+			continue
+		}
+
 		switch chCfg.Type {
 		case config.ChannelTypeSocket:
 			// Each socket channel gets its own path: <base_dir>/<user_id>/<name>.sock
@@ -431,6 +510,16 @@ func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel) 
 			channels = append(channels, channel.NewSocketServer(socketPath, chCfg.Name, chCfg.Description))
 		case config.ChannelTypeStdio:
 			channels = append(channels, channel.NewStdio())
+		case config.ChannelTypeTelegram:
+			var opts channel.TelegramOptions
+			if r.publicURL != "" && r.callback != nil {
+				webhookPath := "/telegram/" + chCfg.Name
+				opts.WebhookURL = r.publicURL + webhookPath
+				opts.RegisterHandler = func(pattern string, handler http.Handler) {
+					r.callback.Handle(pattern, handler)
+				}
+			}
+			channels = append(channels, channel.NewTelegram(chCfg.Token, chCfg.Name, chCfg.Description, opts))
 		default:
 			return nil, fmt.Errorf("channel %d: unsupported type %q", i, chCfg.Type)
 		}

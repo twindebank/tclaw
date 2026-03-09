@@ -54,10 +54,8 @@ fly scale count 1 -a tclaw --yes   # Spin up
 4. Set secrets in keychain, then `make deploy-secrets`
 5. `make deploy`
 
-### Domain (not yet configured)
-1. Add CNAME: `tclaw.theowindebank.co.uk` → `tclaw.fly.dev`
-2. `fly certs add tclaw.theowindebank.co.uk -a tclaw`
-3. Update Google OAuth redirect URI to `https://tclaw.theowindebank.co.uk/oauth/callback`
+### OAuth callback URL
+`https://tclaw.fly.dev/oauth/callback` — set this as the redirect URI in Google OAuth console.
 
 ### CI (optional)
 GitHub Actions workflow at `.github/workflows/deploy.yml` — manual trigger only (`workflow_dispatch`). Needs `FLY_API_TOKEN` GitHub secret from `fly tokens create deploy -x 999999h`.
