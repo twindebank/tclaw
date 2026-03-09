@@ -91,8 +91,8 @@ func handleOAuthAdd(ctx context.Context, deps Deps, p *provider.Provider, conn *
 		Provider: p,
 		Manager:  deps.Manager,
 		OnConnect: func() {
-			if deps.OnGmailConnect != nil && p.ID == provider.GmailProviderID {
-				deps.OnGmailConnect(conn.ID, deps.Manager, p)
+			if deps.OnProviderConnect != nil {
+				deps.OnProviderConnect(conn.ID, deps.Manager, p)
 			}
 		},
 	}

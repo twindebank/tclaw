@@ -1,4 +1,4 @@
-.PHONY: agent chat agent-dev chat-dev secret build clean tidy docker docker-agent docker-chat docker-down
+.PHONY: agent chat agent-dev chat-dev secret build clean tidy docker docker-agent docker-chat docker-down deploy deploy-secrets
 
 # Run the agent daemon — logs appear here.
 agent:
@@ -58,3 +58,12 @@ docker-down:
 
 docker-chat:
 	@docker compose exec agent tclaw-chat
+
+# Push all ${secret:NAME} refs from the deploy config to Fly.io.
+deploy-secrets:
+	@go run ./cmd/secret deploy-secrets tclaw.deploy.yaml
+
+# Build locally and deploy to Fly.io.
+deploy:
+	@echo "→ deploying to fly.io (local build)..."
+	@DOCKER_HOST=unix://$(HOME)/.docker/run/docker.sock fly deploy --local-only -a tclaw

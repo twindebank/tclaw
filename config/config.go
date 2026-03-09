@@ -38,13 +38,16 @@ type OAuthConfig struct {
 
 // ProvidersConfig holds per-provider configuration.
 type ProvidersConfig struct {
-	Gmail *ProviderCredentials `yaml:"gmail"`
+	Google *GoogleProviderCredentials `yaml:"google"`
 }
 
-// ProviderCredentials holds OAuth client credentials for a provider.
-type ProviderCredentials struct {
+// GoogleProviderCredentials holds OAuth client credentials and the gws binary path.
+type GoogleProviderCredentials struct {
 	ClientID     string `yaml:"client_id"`
 	ClientSecret string `yaml:"client_secret"`
+
+	// GWSPath is the path to the gws CLI binary. Defaults to "gws" (PATH lookup).
+	GWSPath string `yaml:"gws_path"`
 }
 
 // User defines per-user agent configuration.
@@ -215,21 +218,21 @@ func resolveSecrets(cfg *Config) ([]string, error) {
 	}
 
 	// Resolve provider credentials.
-	if cfg.Providers.Gmail != nil {
-		val, envVar, err := resolveRef(cfg.Providers.Gmail.ClientID)
+	if cfg.Providers.Google != nil {
+		val, envVar, err := resolveRef(cfg.Providers.Google.ClientID)
 		if err != nil {
-			return nil, fmt.Errorf("providers.gmail.client_id: %w", err)
+			return nil, fmt.Errorf("providers.google.client_id: %w", err)
 		}
-		cfg.Providers.Gmail.ClientID = val
+		cfg.Providers.Google.ClientID = val
 		if envVar != "" {
 			envVars = append(envVars, envVar)
 		}
 
-		val, envVar, err = resolveRef(cfg.Providers.Gmail.ClientSecret)
+		val, envVar, err = resolveRef(cfg.Providers.Google.ClientSecret)
 		if err != nil {
-			return nil, fmt.Errorf("providers.gmail.client_secret: %w", err)
+			return nil, fmt.Errorf("providers.google.client_secret: %w", err)
 		}
-		cfg.Providers.Gmail.ClientSecret = val
+		cfg.Providers.Google.ClientSecret = val
 		if envVar != "" {
 			envVars = append(envVars, envVar)
 		}

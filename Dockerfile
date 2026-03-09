@@ -4,19 +4,17 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /bin/tclaw . && \
-    CGO_ENABLED=0 go build -o /bin/tclaw-chat ./cmd/chat
+RUN CGO_ENABLED=0 go build -o /bin/tclaw .
 
 # ---
 
 FROM node:22-bookworm-slim
 
-# Install claude CLI globally.
-RUN npm install -g @anthropic-ai/claude-code
+# Install claude CLI and Google Workspace CLI globally.
+RUN npm install -g @anthropic-ai/claude-code @googleworkspace/cli
 
 # Copy the Go binaries.
 COPY --from=builder /bin/tclaw /usr/local/bin/tclaw
-COPY --from=builder /bin/tclaw-chat /usr/local/bin/tclaw-chat
 
 # Deploy config — secrets resolved from env vars at runtime.
 COPY tclaw.deploy.yaml /etc/tclaw/tclaw.yaml
