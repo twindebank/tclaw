@@ -24,10 +24,11 @@ type OAuth2Config struct {
 
 // Provider defines a service that tclaw can connect to.
 type Provider struct {
-	ID     ProviderID
-	Name   string // human-readable ("Gmail", "Linear")
-	Auth   AuthType
-	OAuth2 *OAuth2Config // nil if Auth != AuthOAuth2
+	ID       ProviderID
+	Name     string // human-readable ("Gmail", "Linear")
+	Auth     AuthType
+	OAuth2   *OAuth2Config // nil if Auth != AuthOAuth2
+	Services []string      // services unlocked by this provider (e.g. "Gmail", "Google Drive")
 }
 
 // Registry holds all known providers, keyed by ID.

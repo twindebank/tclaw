@@ -24,18 +24,20 @@ func connectionProvidersHandler(reg *provider.Registry) mcp.ToolHandler {
 		}
 
 		type providerInfo struct {
-			ID   provider.ProviderID `json:"id"`
-			Name string              `json:"name"`
-			Auth provider.AuthType   `json:"auth_type"`
+			ID       provider.ProviderID `json:"id"`
+			Name     string              `json:"name"`
+			Auth     provider.AuthType   `json:"auth_type"`
+			Services []string            `json:"services,omitempty"`
 		}
 
 		var result []providerInfo
 		for _, id := range ids {
 			p := reg.Get(id)
 			result = append(result, providerInfo{
-				ID:   p.ID,
-				Name: p.Name,
-				Auth: p.Auth,
+				ID:       p.ID,
+				Name:     p.Name,
+				Auth:     p.Auth,
+				Services: p.Services,
 			})
 		}
 
