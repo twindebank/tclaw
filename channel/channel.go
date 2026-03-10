@@ -15,6 +15,16 @@ type ChannelID string
 // its formatting, message length, etc.
 type ChannelType string
 
+// Markup describes which rich-text format a channel's Send/Edit methods accept.
+type Markup string
+
+const (
+	// MarkupMarkdown is standard markdown (socket, stdio).
+	MarkupMarkdown Markup = "markdown"
+	// MarkupHTML is Telegram-style HTML (<b>, <code>, etc.).
+	MarkupHTML Markup = "html"
+)
+
 const (
 	TypeSocket   ChannelType = "socket"
 	TypeStdio    ChannelType = "stdio"
@@ -62,4 +72,6 @@ type Channel interface {
 	// SplitStatusMessages reports whether the channel wants thinking/tool-use
 	// status separated from the response text into distinct messages.
 	SplitStatusMessages() bool
+	// Markup returns the rich-text format the channel accepts.
+	Markup() Markup
 }

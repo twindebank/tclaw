@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"tclaw/agent"
 	"tclaw/channel"
@@ -19,12 +20,14 @@ import (
 	"tclaw/mcp"
 	"tclaw/oauth"
 	"tclaw/provider"
+	"tclaw/schedule"
 	"tclaw/libraries/secret"
 	"tclaw/libraries/store"
 	"tclaw/tool/channeltools"
 	"tclaw/tool/connectiontools"
 	googletools "tclaw/tool/google"
 	"tclaw/tool/remotemcp"
+	"tclaw/tool/scheduletools"
 	"tclaw/user"
 )
 
@@ -35,6 +38,7 @@ type Router struct {
 	mu        sync.Mutex
 	users     map[user.ID]*managedUser
 	baseDir   string // root for per-user data (home dirs, stores)
+	env       string // runtime environment ("local", "prod")
 	registry  *provider.Registry
 	callback  *oauth.CallbackServer // nil if OAuth is not configured
 	publicURL string                // externally-reachable base URL, enables Telegram webhooks
@@ -76,11 +80,12 @@ type managedUser struct {
 // Zone 3 (state/, sessions/, secrets/, runtime/): tclaw data, tool-only access via MCP.
 //
 // callback may be nil if OAuth is not configured.
-func New(baseDir string, registry *provider.Registry, callback *oauth.CallbackServer, publicURL string) *Router {
+func New(baseDir string, env string, registry *provider.Registry, callback *oauth.CallbackServer, publicURL string) *Router {
 	return &Router{
 		users:      make(map[user.ID]*managedUser),
 		mcpServers: make(map[user.ID]*mcp.Server),
 		baseDir:    baseDir,
+		env:        env,
 		registry:   registry,
 		callback:   callback,
 		publicURL:  publicURL,
@@ -256,6 +261,49 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		}
 	}
 
+	// Symlink Library/Keychains into the per-user HOME so macOS Keychain
+	// works when claude auth login runs with the overridden HOME.
+	// The keychain service looks for ~/Library/Keychains/login.keychain-db.
+	realHome, _ := os.UserHomeDir()
+	if realHome != "" {
+		realKeychains := filepath.Join(realHome, "Library", "Keychains")
+		if _, statErr := os.Stat(realKeychains); statErr == nil {
+			userKeychains := filepath.Join(homeDir, "Library", "Keychains")
+			if _, statErr := os.Lstat(userKeychains); os.IsNotExist(statErr) {
+				if mkErr := os.MkdirAll(filepath.Join(homeDir, "Library"), 0o700); mkErr != nil {
+					slog.Error("failed to create Library dir", "user", mu.cfg.ID, "err", mkErr)
+				} else if linkErr := os.Symlink(realKeychains, userKeychains); linkErr != nil {
+					slog.Error("failed to symlink Keychains", "user", mu.cfg.ID, "err", linkErr)
+				} else {
+					slog.Info("symlinked Keychains", "user", mu.cfg.ID, "target", realKeychains)
+				}
+			}
+		}
+	}
+
+	// Restore Keychains symlink if a previous OAuth flow crashed mid-rename.
+	hiddenKeychains := filepath.Join(homeDir, "Library", "Keychains.hidden")
+	normalKeychains := filepath.Join(homeDir, "Library", "Keychains")
+	if _, err := os.Lstat(hiddenKeychains); err == nil {
+		if _, err := os.Lstat(normalKeychains); os.IsNotExist(err) {
+			if renameErr := os.Rename(hiddenKeychains, normalKeychains); renameErr != nil {
+				slog.Error("failed to restore hidden Keychains symlink", "user", mu.cfg.ID, "err", renameErr)
+			} else {
+				slog.Info("restored Keychains symlink from previous crash", "user", mu.cfg.ID)
+			}
+		}
+	}
+
+	// Pre-provision OAuth credentials from a deployed per-user secret
+	// (e.g. Fly.io env var CLAUDE_OAUTH_CREDS_<USER>) so headless agents
+	// can use OAuth without an interactive browser flow.
+	oauthEnvVar := agent.OAuthCredsEnvVarName(string(mu.cfg.ID))
+	if creds := os.Getenv(oauthEnvVar); creds != "" {
+		if provErr := agent.ProvisionOAuthCredentials(homeDir, creds); provErr != nil {
+			slog.Error("failed to provision OAuth credentials", "user", mu.cfg.ID, "err", provErr)
+		}
+	}
+
 	// Ensure home/.claude/ exists and symlink CLAUDE.md into it.
 	claudeDir := filepath.Join(homeDir, ".claude")
 	symlinkPath := filepath.Join(claudeDir, "CLAUDE.md")
@@ -279,6 +327,28 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		StaticChannels: staticInfos,
 	})
 
+	// Set up the scheduler — runs at user lifetime, outlives the agent.
+	// When a schedule fires it injects a message that wakes the agent.
+	scheduleStore := schedule.NewStore(s)
+	scheduleMsgs := make(chan channel.TaggedMessage, 8)
+
+	var currentChannels atomic.Pointer[map[channel.ChannelID]channel.Channel]
+	scheduler := schedule.NewScheduler(scheduleStore, scheduleMsgs, func() map[channel.ChannelID]channel.Channel {
+		if p := currentChannels.Load(); p != nil {
+			return *p
+		}
+		return nil
+	})
+	go scheduler.Run(ctx)
+
+	scheduletools.RegisterTools(mcpHandler, scheduletools.Deps{
+		Store:     scheduleStore,
+		Scheduler: scheduler,
+	})
+
+	// Merge schedule messages into the static stream so they outlive the agent.
+	allStaticMsgs := channel.MergeFanIns(ctx, staticMsgs, scheduleMsgs)
+
 	for {
 		// Build dynamic channels from the store each iteration so
 		// creates/deletes from the previous agent session take effect.
@@ -294,8 +364,12 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			allChMap[id] = ch
 		}
 
+		// Update the channel map so the scheduler can resolve channel names.
+		currentChannels.Store(&allChMap)
+		scheduler.Reload()
+
 		// Merge message streams.
-		mergedMsgs := channel.MergeFanIns(dynamicCtx, staticMsgs, dynamicMsgs)
+		mergedMsgs := channel.MergeFanIns(dynamicCtx, allStaticMsgs, dynamicMsgs)
 
 		// Build system prompt inside the loop — channel list may change between iterations.
 		var chInfos []agent.ChannelInfo
@@ -391,6 +465,9 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			DisallowedTools: mu.cfg.DisallowedTools,
 			MCPConfigPath:   mcpConfigPath,
 			SystemPrompt:    systemPrompt,
+			SecretStore:     secretStore,
+			Env:             r.env,
+			UserID:          string(mu.cfg.ID),
 		}
 
 		agentErr := make(chan error, 1)
