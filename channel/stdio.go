@@ -58,3 +58,7 @@ func (s *Stdio) Done(_ context.Context) error {
 func (s *Stdio) SplitStatusMessages() bool {
 	return false
 }
+
+func (s *Stdio) Markup() Markup {
+	return MarkupMarkdown
+}

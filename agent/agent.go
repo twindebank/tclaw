@@ -12,6 +12,16 @@ import (
 	"tclaw/claudecli"
 )
 
+// SecretStore provides encrypted persistent storage for secrets.
+// Matches the secret.Store interface without importing it directly.
+type SecretStore interface {
+	Get(ctx context.Context, key string) (string, error)
+	Set(ctx context.Context, key string, value string) error
+}
+
+// secretKeyAPIKey is the key used to store the API key in the secret store.
+const secretKeyAPIKey = "anthropic_api_key"
+
 const (
 	// CmdStop cancels the active turn. Typed directly by the user.
 	CmdStop = "stop"
@@ -20,10 +30,26 @@ const (
 	// Sent by the chat client when the user types "new", "reset", "clear", or "delete".
 	CmdReset = "/tclaw:reset"
 
+	// CmdLogin starts the OAuth login flow via `claude auth login`.
+	CmdLogin = "login"
+
+	// CmdAuthStatus shows current authentication status.
+	CmdAuthStatus = "auth"
+
 	// "compact" is handled client-side — rewritten into a prompt asking Claude
 	// to compact its conversation context. Not defined here since the agent
 	// never sees it.
 )
+
+// isResetCommand returns true if the raw user text is one of the
+// recognised reset synonyms. Case-insensitive.
+func isResetCommand(text string) bool {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "new", "reset", "clear", "delete", CmdReset:
+		return true
+	}
+	return false
+}
 
 const defaultMaxTurns = 10
 const agentIdleTimeout = 10 * time.Minute
@@ -82,6 +108,18 @@ type Options struct {
 	// --append-system-prompt. Contains agent identity, channel context,
 	// and memory instructions.
 	SystemPrompt string
+
+	// SecretStore provides encrypted storage for sensitive credentials
+	// like API keys. Used by the auth flow to persist keys securely.
+	// May be nil if no secret store is available (keys won't be persisted).
+	SecretStore SecretStore
+
+	// Env identifies the runtime environment (e.g. "local", "prod").
+	// OAuth login is only available when Env == "local".
+	Env string
+
+	// UserID identifies the user, used for per-user credential deployment.
+	UserID string
 }
 
 type handleResult struct {
@@ -100,6 +138,14 @@ func Run(ctx context.Context, opts Options) error {
 // instead of calling FanIn internally. Used by the Router for lazy startup
 // where the first message has already been consumed.
 func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.TaggedMessage) error {
+	// Load a persisted API key if no key was provided via config.
+	if opts.APIKey == "" {
+		if key := loadPersistedAPIKey(ctx, opts); key != "" {
+			opts.APIKey = key
+			slog.Info("loaded persisted API key")
+		}
+	}
+
 	// Per-channel session IDs — seeded from opts, updated as sessions change.
 	sessions := make(map[channel.ChannelID]string)
 	for chID, sid := range opts.Sessions {
@@ -111,6 +157,14 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 	var queue []channel.TaggedMessage
 	idle := newIdleTimer()
 	defer idle.Stop()
+
+	// Per-channel auth flow state so channels don't interfere with each other.
+	authFlows := make(map[channel.ChannelID]*pendingAuth)
+
+	// oauthNotify wakes the main loop when a background OAuth goroutine
+	// finishes. It carries the channel ID that completed auth so we can
+	// inject a synthetic message and let the state machine process it.
+	oauthNotify := make(chan channel.ChannelID, 4)
 
 	for {
 		var msg channel.TaggedMessage
@@ -130,15 +184,33 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				}
 				msg = m
 				idle.Reset()
+			case chID := <-oauthNotify:
+				// OAuth goroutine finished. Only inject a synthetic message if
+				// the auth flow still exists — it may have been cancelled by "stop".
+				if _, ok := authFlows[chID]; !ok {
+					continue
+				}
+				msg = channel.TaggedMessage{ChannelID: chID}
 			}
 		}
 
 		if strings.EqualFold(msg.Text, CmdStop) {
+			// Stop also cancels any pending auth flow for this channel.
+			if flow, ok := authFlows[msg.ChannelID]; ok {
+				flow.cleanup()
+				delete(authFlows, msg.ChannelID)
+			}
 			continue
 		}
 
 		// Control command: clear session so next message starts fresh.
-		if msg.Text == CmdReset {
+		// The chat client sends `/tclaw:reset`, but other channels (Telegram)
+		// send the raw word. Normalise both forms here.
+		if isResetCommand(msg.Text) {
+			if flow, ok := authFlows[msg.ChannelID]; ok {
+				flow.cleanup()
+				delete(authFlows, msg.ChannelID)
+			}
 			old := sessions[msg.ChannelID]
 			delete(sessions, msg.ChannelID)
 			if opts.OnSessionUpdate != nil {
@@ -152,6 +224,153 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				}
 				if err := ch.Done(ctx); err != nil {
 					slog.Error("failed to close turn after reset", "err", err)
+				}
+			}
+			continue
+		}
+
+		// Explicit auth commands.
+		if strings.EqualFold(msg.Text, CmdLogin) {
+			ch, ok := opts.Channels[msg.ChannelID]
+			if ok {
+				if _, err := ch.Send(ctx, authPrompt(ch.Markup())); err != nil {
+					slog.Error("failed to send auth prompt", "err", err)
+				}
+				if err := ch.Done(ctx); err != nil {
+					slog.Error("failed to close turn after login prompt", "err", err)
+				}
+				authFlows[msg.ChannelID] = &pendingAuth{state: authChoosing}
+			}
+			continue
+		}
+		if strings.EqualFold(msg.Text, CmdAuthStatus) {
+			ch, ok := opts.Channels[msg.ChannelID]
+			if ok {
+				handleAuthStatus(ctx, opts, ch)
+				if err := ch.Done(ctx); err != nil {
+					slog.Error("failed to close turn after auth status", "err", err)
+				}
+			}
+			continue
+		}
+
+		// Handle auth flow responses (per-channel).
+		if flow, ok := authFlows[msg.ChannelID]; ok {
+			ch, chOK := opts.Channels[msg.ChannelID]
+			if !chOK {
+				delete(authFlows, msg.ChannelID)
+				continue
+			}
+
+			switch flow.state {
+			case authChoosing:
+				choice := strings.TrimSpace(strings.ToLower(msg.Text))
+				switch choice {
+				case "1", "oauth":
+					if opts.Env != "local" && opts.Env != "" {
+						m := ch.Markup()
+						if _, err := ch.Send(ctx, "❌ OAuth login requires a browser and only works locally.\n"+
+							"Use option "+bold(m, "2")+" to paste an API key instead.\n\n"+authPrompt(m)); err != nil {
+							slog.Error("failed to send non-local oauth error", "err", err)
+						}
+					} else {
+						if _, err := ch.Send(ctx, "⏳ Opening browser for OAuth login..."); err != nil {
+							slog.Error("failed to send oauth starting message", "err", err)
+						}
+						startOAuthLogin(ctx, opts, flow, msg.ChannelID, oauthNotify)
+					}
+				case "2", "api", "key", "api key", "apikey":
+					flow.state = authAPIKeyEntry
+					if _, err := ch.Send(ctx, apiKeyPrompt(ch.Markup())); err != nil {
+						slog.Error("failed to send api key prompt", "err", err)
+					}
+				case "3", "cancel":
+					delete(authFlows, msg.ChannelID)
+				default:
+					m := ch.Markup()
+					if _, err := ch.Send(ctx, "Please enter "+bold(m, "1")+" (OAuth) or "+bold(m, "2")+" (API key).\n\n"+authPrompt(m)); err != nil {
+						slog.Error("failed to send auth re-prompt", "err", err)
+					}
+				}
+
+			case authOAuthActive:
+				// Check if the background OAuth goroutine has finished.
+				select {
+				case result := <-flow.oauthDone:
+					m := ch.Markup()
+					if result.credentialsJSON != "" {
+						flow.credentialsJSON = result.credentialsJSON
+						flow.state = authDeployConfirm
+						if _, err := ch.Send(ctx, "✅ "+result.loginMessage+"\n\n"+
+							"Deploy credentials to production? Reply "+bold(m, "yes")+" or "+bold(m, "no")+"."); err != nil {
+							slog.Error("failed to send deploy prompt", "err", err)
+						}
+					} else {
+						if _, err := ch.Send(ctx, "❌ "+result.loginMessage); err != nil {
+							slog.Error("failed to send oauth failure", "err", err)
+						}
+						delete(authFlows, msg.ChannelID)
+					}
+				default:
+					// OAuth still running — tell user to wait.
+					if _, err := ch.Send(ctx, "⏳ Still authenticating in browser. Send a message after you're done."); err != nil {
+						slog.Error("failed to send oauth wait message", "err", err)
+					}
+				}
+
+			case authDeployConfirm:
+				answer := strings.TrimSpace(strings.ToLower(msg.Text))
+				m := ch.Markup()
+				switch answer {
+				case "yes", "y":
+					if err := deployOAuthCredentials(opts.UserID, flow.credentialsJSON); err != nil {
+						slog.Error("failed to deploy OAuth credentials", "err", err)
+						if _, sendErr := ch.Send(ctx, "❌ Deploy failed: "+err.Error()+"\n\nCredentials are saved locally."); sendErr != nil {
+							slog.Error("failed to send deploy error", "err", sendErr)
+						}
+					} else {
+						if _, sendErr := ch.Send(ctx, "✅ Credentials deployed to production."); sendErr != nil {
+							slog.Error("failed to send deploy success", "err", sendErr)
+						}
+					}
+					retryMsg := flow.originalMsg
+					delete(authFlows, msg.ChannelID)
+					if retryMsg.Text != "" {
+						queue = append([]channel.TaggedMessage{retryMsg}, queue...)
+					}
+				case "no", "n", "skip":
+					if _, sendErr := ch.Send(ctx, "Skipped. Credentials are saved locally only."); sendErr != nil {
+						slog.Error("failed to send deploy skip", "err", sendErr)
+					}
+					retryMsg := flow.originalMsg
+					delete(authFlows, msg.ChannelID)
+					if retryMsg.Text != "" {
+						queue = append([]channel.TaggedMessage{retryMsg}, queue...)
+					}
+				default:
+					if _, err := ch.Send(ctx, "Reply "+bold(m, "yes")+" to deploy or "+bold(m, "no")+" to skip."); err != nil {
+						slog.Error("failed to send deploy re-prompt", "err", err)
+					}
+				}
+
+			case authAPIKeyEntry:
+				success := handleAPIKeyEntry(ctx, opts, ch, msg.Text)
+				if success {
+					opts.APIKey = strings.TrimSpace(msg.Text)
+					retryMsg := flow.originalMsg
+					delete(authFlows, msg.ChannelID)
+					if retryMsg.Text != "" {
+						queue = append([]channel.TaggedMessage{retryMsg}, queue...)
+					}
+				}
+			}
+
+			// Don't close the turn while OAuth is running — the goroutine
+			// will deliver the result asynchronously via oauthNotify and we
+			// need the connection alive to send it.
+			if flow.state != authOAuthActive {
+				if err := ch.Done(ctx); err != nil {
+					slog.Error("failed to close turn after auth step", "err", err)
 				}
 			}
 			continue
@@ -172,6 +391,24 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		for {
 			select {
 			case result := <-handleDone:
+				// Auth failure: start the interactive auth flow instead of
+				// showing a cryptic error. Store the original message to
+				// retry once the user has authenticated.
+				if errors.Is(result.err, ErrAuthRequired) {
+					slog.Info("auth required, starting auth flow", "channel", msg.ChannelID)
+					authFlows[msg.ChannelID] = &pendingAuth{
+						state:       authChoosing,
+						originalMsg: msg,
+					}
+					ch, chOK := opts.Channels[msg.ChannelID]
+					if chOK {
+						if _, sendErr := ch.Send(ctx, authPrompt(ch.Markup())); sendErr != nil {
+							slog.Error("failed to send auth prompt", "err", sendErr)
+						}
+					}
+					goto done
+				}
+
 				if result.err != nil && turnCtx.Err() == nil {
 					slog.Error("handle failed", "err", result.err)
 				}

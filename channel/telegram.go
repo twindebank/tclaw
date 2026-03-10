@@ -232,3 +232,7 @@ func (t *Telegram) Done(_ context.Context) error {
 func (t *Telegram) SplitStatusMessages() bool {
 	return true
 }
+
+func (t *Telegram) Markup() Markup {
+	return MarkupHTML
+}

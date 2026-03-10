@@ -199,3 +199,7 @@ func (s *SocketServer) Done(_ context.Context) error {
 func (s *SocketServer) SplitStatusMessages() bool {
 	return false
 }
+
+func (s *SocketServer) Markup() Markup {
+	return MarkupMarkdown
+}
