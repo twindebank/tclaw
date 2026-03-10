@@ -318,9 +318,11 @@ func loadPersistedAPIKey(ctx context.Context, opts Options) string {
 // from a deployed secret (e.g. Fly.io env var) so headless agents can use
 // OAuth without an interactive browser flow.
 // Does nothing if homeDir or credentialsJSON is empty.
-// Does not overwrite existing credentials.
+// Always overwrites existing credentials — the deployed secret is the
+// authoritative source in headless environments.
 func ProvisionOAuthCredentials(homeDir string, credentialsJSON string) error {
 	if homeDir == "" || credentialsJSON == "" {
+		slog.Warn("skipping OAuth provisioning: empty homeDir or credentials", "homeDir_empty", homeDir == "", "creds_empty", credentialsJSON == "")
 		return nil
 	}
 
@@ -335,13 +337,6 @@ func ProvisionOAuthCredentials(homeDir string, credentialsJSON string) error {
 
 	claudeDir := filepath.Join(homeDir, ".claude")
 	credPath := filepath.Join(claudeDir, ".credentials.json")
-
-	// Don't overwrite existing credentials — the user may have logged in
-	// interactively and we don't want to clobber their session.
-	if _, err := os.Stat(credPath); err == nil {
-		slog.Debug("credentials file already exists, skipping provisioning", "path", credPath)
-		return nil
-	}
 
 	if err := os.MkdirAll(claudeDir, 0o700); err != nil {
 		return fmt.Errorf("create .claude dir: %w", err)
