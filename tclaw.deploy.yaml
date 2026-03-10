@@ -17,8 +17,7 @@ providers:
     client_secret: ${secret:GOOGLE_CLIENT_SECRET}
 
 users:
-  - id: default
-    api_key: ${secret:ANTHROPIC_API_KEY}
+  - id: theo
     model: claude-sonnet-4-6
     permission_mode: dontAsk
     channels:
