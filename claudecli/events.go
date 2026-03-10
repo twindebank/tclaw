@@ -45,10 +45,16 @@ type SystemEvent struct {
 }
 
 // AssistantEvent is the complete assistant message returned by --print mode.
+// When the CLI cannot authenticate, the Error field is set (e.g. "authentication_failed")
+// and the message content is a human-readable error like "Not logged in · Please run /login".
 type AssistantEvent struct {
 	Type    EventType        `json:"type"`
 	Message AssistantMessage `json:"message"`
+	Error   string           `json:"error,omitempty"`
 }
+
+// AssistantErrorAuthFailed is the error string the CLI returns when not logged in.
+const AssistantErrorAuthFailed = "authentication_failed"
 
 type AssistantMessage struct {
 	Content []ContentBlock `json:"content"`
