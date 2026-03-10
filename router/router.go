@@ -261,6 +261,20 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		}
 	}
 
+	// Pre-provision OAuth credentials from a deployed per-user secret
+	// (e.g. Fly.io env var CLAUDE_OAUTH_CREDS_<USER>) so headless agents
+	// can use OAuth without an interactive browser flow.
+	// This runs early — before secret store or MCP setup — because it only
+	// needs homeDir and is critical for the agent to authenticate with Claude.
+	oauthEnvVar := agent.OAuthCredsEnvVarName(string(mu.cfg.ID))
+	creds := os.Getenv(oauthEnvVar)
+	slog.Info("checking OAuth credentials env var", "user", mu.cfg.ID, "env_var", oauthEnvVar, "found", creds != "", "creds_len", len(creds))
+	if creds != "" {
+		if provErr := agent.ProvisionOAuthCredentials(homeDir, creds); provErr != nil {
+			slog.Error("failed to provision OAuth credentials", "user", mu.cfg.ID, "err", provErr)
+		}
+	}
+
 	// Symlink Library/Keychains into the per-user HOME so macOS Keychain
 	// works when claude auth login runs with the overridden HOME.
 	// The keychain service looks for ~/Library/Keychains/login.keychain-db.
@@ -291,16 +305,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			} else {
 				slog.Info("restored Keychains symlink from previous crash", "user", mu.cfg.ID)
 			}
-		}
-	}
-
-	// Pre-provision OAuth credentials from a deployed per-user secret
-	// (e.g. Fly.io env var CLAUDE_OAUTH_CREDS_<USER>) so headless agents
-	// can use OAuth without an interactive browser flow.
-	oauthEnvVar := agent.OAuthCredsEnvVarName(string(mu.cfg.ID))
-	if creds := os.Getenv(oauthEnvVar); creds != "" {
-		if provErr := agent.ProvisionOAuthCredentials(homeDir, creds); provErr != nil {
-			slog.Error("failed to provision OAuth credentials", "user", mu.cfg.ID, "err", provErr)
 		}
 	}
 
