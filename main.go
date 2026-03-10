@@ -48,7 +48,7 @@ func main() {
 	}
 	defer callback.Stop(context.Background())
 
-	r := router.New(cfg.BaseDir, reg, callback, cfg.Server.PublicURL)
+	r := router.New(cfg.BaseDir, cfg.Env, reg, callback, cfg.Server.PublicURL)
 	defer r.StopAll()
 
 	for _, u := range cfg.Users {
