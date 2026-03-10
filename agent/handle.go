@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,10 @@ import (
 	"tclaw/channel"
 	"tclaw/claudecli"
 )
+
+// ErrAuthRequired is returned by handle/streamResponse when the CLI reports
+// authentication_failed. The caller should start the interactive auth flow.
+var ErrAuthRequired = errors.New("authentication required")
 
 // writePhase distinguishes status output (thinking, tools, stats) from
 // the actual response text so they can be rendered in separate messages.
@@ -308,6 +313,13 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				slog.Warn("failed to parse assistant event", "err", err)
 				continue
 			}
+
+			// Auth failure: suppress the CLI's error text and return
+			// a sentinel so the caller can start the auth flow.
+			if msg.Error == claudecli.AssistantErrorAuthFailed {
+				return sessionID, ErrAuthRequired
+			}
+
 			for _, block := range msg.Message.Content {
 				switch block.Type {
 				case claudecli.ContentToolUse:
