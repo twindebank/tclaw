@@ -261,51 +261,13 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		}
 	}
 
-	// Pre-provision OAuth credentials from a deployed per-user secret
-	// (e.g. Fly.io env var CLAUDE_OAUTH_CREDS_<USER>) so headless agents
-	// can use OAuth without an interactive browser flow.
-	// This runs early — before secret store or MCP setup — because it only
-	// needs homeDir and is critical for the agent to authenticate with Claude.
-	oauthEnvVar := agent.OAuthCredsEnvVarName(string(mu.cfg.ID))
-	creds := os.Getenv(oauthEnvVar)
-	slog.Info("checking OAuth credentials env var", "user", mu.cfg.ID, "env_var", oauthEnvVar, "found", creds != "", "creds_len", len(creds))
-	if creds != "" {
-		if provErr := agent.ProvisionOAuthCredentials(homeDir, creds); provErr != nil {
-			slog.Error("failed to provision OAuth credentials", "user", mu.cfg.ID, "err", provErr)
-		}
-	}
-
-	// Symlink Library/Keychains into the per-user HOME so macOS Keychain
-	// works when claude auth login runs with the overridden HOME.
-	// The keychain service looks for ~/Library/Keychains/login.keychain-db.
-	realHome, _ := os.UserHomeDir()
-	if realHome != "" {
-		realKeychains := filepath.Join(realHome, "Library", "Keychains")
-		if _, statErr := os.Stat(realKeychains); statErr == nil {
-			userKeychains := filepath.Join(homeDir, "Library", "Keychains")
-			if _, statErr := os.Lstat(userKeychains); os.IsNotExist(statErr) {
-				if mkErr := os.MkdirAll(filepath.Join(homeDir, "Library"), 0o700); mkErr != nil {
-					slog.Error("failed to create Library dir", "user", mu.cfg.ID, "err", mkErr)
-				} else if linkErr := os.Symlink(realKeychains, userKeychains); linkErr != nil {
-					slog.Error("failed to symlink Keychains", "user", mu.cfg.ID, "err", linkErr)
-				} else {
-					slog.Info("symlinked Keychains", "user", mu.cfg.ID, "target", realKeychains)
-				}
-			}
-		}
-	}
-
-	// Restore Keychains symlink if a previous OAuth flow crashed mid-rename.
-	hiddenKeychains := filepath.Join(homeDir, "Library", "Keychains.hidden")
-	normalKeychains := filepath.Join(homeDir, "Library", "Keychains")
-	if _, err := os.Lstat(hiddenKeychains); err == nil {
-		if _, err := os.Lstat(normalKeychains); os.IsNotExist(err) {
-			if renameErr := os.Rename(hiddenKeychains, normalKeychains); renameErr != nil {
-				slog.Error("failed to restore hidden Keychains symlink", "user", mu.cfg.ID, "err", renameErr)
-			} else {
-				slog.Info("restored Keychains symlink from previous crash", "user", mu.cfg.ID)
-			}
-		}
+	// Read per-user setup token from Fly secret (e.g. CLAUDE_SETUP_TOKEN_THEO).
+	// Passed to the agent as opts.SetupToken, which buildEnv() maps to
+	// CLAUDE_CODE_OAUTH_TOKEN for the claude subprocess.
+	setupTokenEnvVar := agent.SetupTokenEnvVarName(string(mu.cfg.ID))
+	setupToken := os.Getenv(setupTokenEnvVar)
+	if setupToken != "" {
+		slog.Info("found setup token", "user", mu.cfg.ID, "env_var", setupTokenEnvVar)
 	}
 
 	// Ensure home/.claude/ exists and symlink CLAUDE.md into it.
@@ -472,6 +434,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			SecretStore:     secretStore,
 			Env:             r.env,
 			UserID:          string(mu.cfg.ID),
+			SetupToken:      setupToken,
 		}
 
 		agentErr := make(chan error, 1)
