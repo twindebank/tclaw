@@ -120,6 +120,11 @@ type Options struct {
 
 	// UserID identifies the user, used for per-user credential deployment.
 	UserID string
+
+	// SetupToken is the Claude setup token for OAuth auth. When set, it is
+	// passed to the subprocess as CLAUDE_CODE_OAUTH_TOKEN. On prod, loaded
+	// from the per-user Fly secret; locally, captured from `claude setup-token`.
+	SetupToken string
 }
 
 type handleResult struct {
@@ -277,7 +282,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 						if _, err := ch.Send(ctx, "⏳ Opening browser for OAuth login..."); err != nil {
 							slog.Error("failed to send oauth starting message", "err", err)
 						}
-						startOAuthLogin(ctx, opts, flow, msg.ChannelID, oauthNotify)
+						startSetupToken(ctx, opts, flow, msg.ChannelID, oauthNotify)
 					}
 				case "2", "api", "key", "api key", "apikey":
 					flow.state = authAPIKeyEntry
@@ -298,11 +303,11 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				select {
 				case result := <-flow.oauthDone:
 					m := ch.Markup()
-					if result.credentialsJSON != "" {
-						flow.credentialsJSON = result.credentialsJSON
+					if result.setupToken != "" {
+						flow.setupToken = result.setupToken
 						flow.state = authDeployConfirm
 						if _, err := ch.Send(ctx, "✅ "+result.loginMessage+"\n\n"+
-							"Deploy credentials to production? Reply "+bold(m, "yes")+" or "+bold(m, "no")+"."); err != nil {
+							"Deploy setup token to production? Reply "+bold(m, "yes")+" or "+bold(m, "no")+"."); err != nil {
 							slog.Error("failed to send deploy prompt", "err", err)
 						}
 					} else {
@@ -323,13 +328,13 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				m := ch.Markup()
 				switch answer {
 				case "yes", "y":
-					if err := deployOAuthCredentials(opts.UserID, flow.credentialsJSON); err != nil {
-						slog.Error("failed to deploy OAuth credentials", "err", err)
-						if _, sendErr := ch.Send(ctx, "❌ Deploy failed: "+err.Error()+"\n\nCredentials are saved locally."); sendErr != nil {
+					if err := deploySetupToken(opts.UserID, flow.setupToken); err != nil {
+						slog.Error("failed to deploy setup token", "err", err)
+						if _, sendErr := ch.Send(ctx, "❌ Deploy failed: "+err.Error()+"\n\nToken is saved locally."); sendErr != nil {
 							slog.Error("failed to send deploy error", "err", sendErr)
 						}
 					} else {
-						if _, sendErr := ch.Send(ctx, "✅ Credentials deployed to production."); sendErr != nil {
+						if _, sendErr := ch.Send(ctx, "✅ Setup token deployed to production."); sendErr != nil {
 							slog.Error("failed to send deploy success", "err", sendErr)
 						}
 					}
@@ -339,7 +344,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 						queue = append([]channel.TaggedMessage{retryMsg}, queue...)
 					}
 				case "no", "n", "skip":
-					if _, sendErr := ch.Send(ctx, "Skipped. Credentials are saved locally only."); sendErr != nil {
+					if _, sendErr := ch.Send(ctx, "Skipped. Token is saved locally only."); sendErr != nil {
 						slog.Error("failed to send deploy skip", "err", sendErr)
 					}
 					retryMsg := flow.originalMsg

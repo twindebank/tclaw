@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,15 +19,15 @@ const (
 	authNone          authState = iota // no auth flow in progress
 	authChoosing                       // waiting for user to pick oauth or api key
 	authAPIKeyEntry                    // waiting for user to paste an api key
-	authOAuthActive                    // `claude auth login` is running in the background
-	authDeployConfirm                  // asking user whether to deploy creds to prod
+	authOAuthActive                    // `claude setup-token` is running in the background
+	authDeployConfirm                  // asking user whether to deploy setup token to prod
 )
 
 // apiKeyPrefix is the expected prefix for Anthropic API keys.
 const apiKeyPrefix = "sk-ant-"
 
-// oauthLoginTimeout limits how long we wait for `claude auth login` to complete.
-const oauthLoginTimeout = 5 * time.Minute
+// setupTokenTimeout limits how long we wait for `claude setup-token` to complete.
+const setupTokenTimeout = 5 * time.Minute
 
 // flyAppName is the Fly.io application name used for credential deployment.
 const flyAppName = "tclaw"
@@ -64,11 +62,11 @@ func apiKeyPrompt(m channel.Markup) string {
 	return "🔑 Paste your Anthropic API key (starts with " + code(m, "sk-ant-") + "):"
 }
 
-// oauthResult carries the outcome of an async `claude auth login` goroutine
+// oauthResult carries the outcome of an async `claude setup-token` goroutine
 // back to the main event loop.
 type oauthResult struct {
-	credentialsJSON string // non-empty on success
-	loginMessage    string // success or failure message for the user
+	setupToken   string // non-empty on success
+	loginMessage string // success or failure message for the user
 }
 
 // pendingAuth tracks per-channel auth flow state so channels don't
@@ -82,7 +80,7 @@ type pendingAuth struct {
 	oauthDone   chan oauthResult // receives exactly one result when OAuth completes
 
 	// Stored after OAuth success, used for the deploy step.
-	credentialsJSON string
+	setupToken string
 }
 
 // cleanup cancels any running OAuth process.
@@ -103,12 +101,12 @@ type authStatus struct {
 	SubscriptionType string `json:"subscriptionType"`
 }
 
-// startOAuthLogin launches `claude auth login` in a background goroutine.
-// The CLI opens the user's browser for OAuth. Sends exactly one result to
-// flow.oauthDone when finished. All channel I/O is left to the caller
-// (main event loop) — the goroutine does not send messages or call Done.
-func startOAuthLogin(ctx context.Context, opts Options, flow *pendingAuth, channelID channel.ChannelID, notify chan<- channel.ChannelID) {
-	oauthCtx, cancel := context.WithTimeout(ctx, oauthLoginTimeout)
+// startSetupToken launches `claude setup-token` in a background goroutine.
+// The CLI opens the user's browser for OAuth and outputs a long-lived setup
+// token to stdout. Sends exactly one result to flow.oauthDone when finished.
+// All channel I/O is left to the caller (main event loop).
+func startSetupToken(ctx context.Context, opts Options, flow *pendingAuth, channelID channel.ChannelID, notify chan<- channel.ChannelID) {
+	tokenCtx, cancel := context.WithTimeout(ctx, setupTokenTimeout)
 	flow.oauthCancel = cancel
 	flow.oauthDone = make(chan oauthResult, 1)
 	flow.state = authOAuthActive
@@ -117,84 +115,41 @@ func startOAuthLogin(ctx context.Context, opts Options, flow *pendingAuth, chann
 		defer cancel()
 		defer func() { notify <- channelID }()
 
-		// Temporarily hide the Keychains symlink so the CLI falls back to
-		// writing .credentials.json instead of macOS Keychain. This ensures
-		// credentials are per-user (each user has their own HOME) rather
-		// than sharing a single Keychain entry across all users.
-		keychainsPath := filepath.Join(opts.HomeDir, "Library", "Keychains")
-		hiddenPath := keychainsPath + ".hidden"
-		keychainHidden := false
-		if err := os.Rename(keychainsPath, hiddenPath); err == nil {
-			keychainHidden = true
-		}
-		restoreKeychain := func() {
-			if keychainHidden {
-				if err := os.Rename(hiddenPath, keychainsPath); err != nil {
-					slog.Error("failed to restore Keychains symlink", "err", err)
-				}
-			}
-		}
-		defer restoreKeychain()
-
-		cmd := exec.CommandContext(oauthCtx, "claude", "auth", "login")
+		cmd := exec.CommandContext(tokenCtx, "claude", "setup-token")
 		cmd.Env = buildEnv(opts)
 
-		output, err := cmd.CombinedOutput()
+		output, err := cmd.Output()
 		if err != nil {
-			if oauthCtx.Err() != nil {
-				flow.oauthDone <- oauthResult{loginMessage: "OAuth login was cancelled."}
+			if tokenCtx.Err() != nil {
+				flow.oauthDone <- oauthResult{loginMessage: "Setup token generation was cancelled."}
 				return
 			}
-			slog.Error("claude auth login failed", "err", err, "output", string(output))
-			flow.oauthDone <- oauthResult{loginMessage: "OAuth login failed. Check server logs."}
+			slog.Error("claude setup-token failed", "err", err, "output", string(output))
+			flow.oauthDone <- oauthResult{loginMessage: "Setup token generation failed. Check server logs."}
 			return
 		}
 
-		slog.Info("claude auth login completed", "output", string(output))
-
-		// Restore Keychain immediately so subsequent CLI calls can use it.
-		restoreKeychain()
-		keychainHidden = false
-
-		// The CLI output already confirms "Login successful." so we skip
-		// `claude auth status --json` which can hang. Just read the
-		// .credentials.json that the CLI wrote (Keychain was hidden during
-		// login, forcing file-based storage in the per-user HOME).
-		credPath := filepath.Join(opts.HomeDir, ".claude", ".credentials.json")
-		credsData, readErr := os.ReadFile(credPath)
-		if readErr != nil {
-			slog.Error("failed to read credentials after OAuth", "err", readErr, "path", credPath)
-			flow.oauthDone <- oauthResult{
-				loginMessage: "Login succeeded but couldn't read credentials file for prod deployment.",
-			}
+		token := strings.TrimSpace(string(output))
+		if token == "" {
+			slog.Error("claude setup-token returned empty output")
+			flow.oauthDone <- oauthResult{loginMessage: "Setup token generation returned empty output."}
 			return
 		}
 
-		// Validate the credentials JSON has the expected structure.
-		var parsed map[string]json.RawMessage
-		if err := json.Unmarshal(credsData, &parsed); err != nil {
-			slog.Error("credentials file is not valid JSON", "err", err)
-			flow.oauthDone <- oauthResult{loginMessage: "Login succeeded but credentials file is malformed."}
-			return
-		}
-		if _, ok := parsed["claudeAiOauth"]; !ok {
-			slog.Error("credentials file missing claudeAiOauth key")
-			flow.oauthDone <- oauthResult{loginMessage: "Login succeeded but credentials file is missing OAuth data."}
-			return
-		}
+		slog.Info("claude setup-token completed", "token_len", len(token))
 
 		flow.oauthDone <- oauthResult{
-			credentialsJSON: string(credsData),
-			loginMessage:    "✅ OAuth login successful.",
+			setupToken:   token,
+			loginMessage: "✅ Setup token generated.",
 		}
 	}()
 }
 
-// deployOAuthCredentials pushes the user's OAuth credentials to Fly.io as a
-// per-user secret so headless production agents can use OAuth without a browser.
-func deployOAuthCredentials(userID string, credentialsJSON string) error {
-	envName := OAuthCredsEnvVarName(userID)
-	arg := envName + "=" + credentialsJSON
+// deploySetupToken pushes the user's setup token to Fly.io as a per-user
+// secret so headless production agents can authenticate without a browser.
+func deploySetupToken(userID string, setupToken string) error {
+	envName := SetupTokenEnvVarName(userID)
+	arg := envName + "=" + setupToken
 
 	cmd := exec.Command("fly", "secrets", "set", arg, "-a", flyAppName)
 	output, err := cmd.CombinedOutput()
@@ -202,20 +157,21 @@ func deployOAuthCredentials(userID string, credentialsJSON string) error {
 		return fmt.Errorf("fly secrets set: %w (output: %s)", err, strings.TrimSpace(string(output)))
 	}
 
-	slog.Info("deployed OAuth credentials to Fly", "user", userID, "env_var", envName)
+	slog.Info("deployed setup token to Fly", "user", userID, "env_var", envName)
 	return nil
 }
 
-// OAuthCredsEnvVarName returns the environment variable name used to store
-// a user's OAuth credentials as a Fly secret.
-func OAuthCredsEnvVarName(userID string) string {
+// SetupTokenEnvVarName returns the environment variable name used to store
+// a user's setup token as a Fly secret. On the subprocess side, it gets
+// mapped to CLAUDE_CODE_OAUTH_TOKEN which the CLI reads natively.
+func SetupTokenEnvVarName(userID string) string {
 	sanitized := strings.Map(func(r rune) rune {
 		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
 			return r
 		}
 		return '_'
 	}, userID)
-	return "CLAUDE_OAUTH_CREDS_" + strings.ToUpper(sanitized)
+	return "CLAUDE_SETUP_TOKEN_" + strings.ToUpper(sanitized)
 }
 
 // handleAPIKeyEntry validates and persists an API key the user pasted.
@@ -311,41 +267,4 @@ func loadPersistedAPIKey(ctx context.Context, opts Options) string {
 		return ""
 	}
 	return key
-}
-
-// ProvisionOAuthCredentials writes OAuth credentials JSON to the per-user
-// HOME's .claude/.credentials.json. Used on startup to pre-provision auth
-// from a deployed secret (e.g. Fly.io env var) so headless agents can use
-// OAuth without an interactive browser flow.
-// Does nothing if homeDir or credentialsJSON is empty.
-// Always overwrites existing credentials — the deployed secret is the
-// authoritative source in headless environments.
-func ProvisionOAuthCredentials(homeDir string, credentialsJSON string) error {
-	if homeDir == "" || credentialsJSON == "" {
-		slog.Warn("skipping OAuth provisioning: empty homeDir or credentials", "homeDir_empty", homeDir == "", "creds_empty", credentialsJSON == "")
-		return nil
-	}
-
-	// Minimal validation — must be valid JSON with the expected key.
-	var parsed map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(credentialsJSON), &parsed); err != nil {
-		return fmt.Errorf("invalid credentials JSON: %w", err)
-	}
-	if _, ok := parsed["claudeAiOauth"]; !ok {
-		return fmt.Errorf("credentials JSON missing claudeAiOauth key")
-	}
-
-	claudeDir := filepath.Join(homeDir, ".claude")
-	credPath := filepath.Join(claudeDir, ".credentials.json")
-
-	if err := os.MkdirAll(claudeDir, 0o700); err != nil {
-		return fmt.Errorf("create .claude dir: %w", err)
-	}
-
-	if err := os.WriteFile(credPath, []byte(credentialsJSON), 0o600); err != nil {
-		return fmt.Errorf("write credentials: %w", err)
-	}
-
-	slog.Info("provisioned OAuth credentials", "path", credPath)
-	return nil
 }

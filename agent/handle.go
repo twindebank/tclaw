@@ -195,6 +195,9 @@ func buildEnv(opts Options) []string {
 	if opts.APIKey != "" {
 		overrides["ANTHROPIC_API_KEY"] = opts.APIKey
 	}
+	if opts.SetupToken != "" {
+		overrides["CLAUDE_CODE_OAUTH_TOKEN"] = opts.SetupToken
+	}
 
 	var env []string
 	for _, kv := range os.Environ() {
