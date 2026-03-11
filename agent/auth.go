@@ -129,10 +129,10 @@ func startSetupToken(ctx context.Context, opts Options, flow *pendingAuth, chann
 			return
 		}
 
-		token := strings.TrimSpace(string(output))
+		token := extractSetupToken(string(output))
 		if token == "" {
-			slog.Error("claude setup-token returned empty output")
-			flow.oauthDone <- oauthResult{loginMessage: "Setup token generation returned empty output."}
+			slog.Error("claude setup-token: no token found in output", "output", string(output))
+			flow.oauthDone <- oauthResult{loginMessage: "Setup token generation succeeded but no token found in output."}
 			return
 		}
 
@@ -172,6 +172,22 @@ func SetupTokenEnvVarName(userID string) string {
 		return '_'
 	}, userID)
 	return "CLAUDE_SETUP_TOKEN_" + strings.ToUpper(sanitized)
+}
+
+// setupTokenPrefix is the expected prefix for setup tokens from `claude setup-token`.
+const setupTokenPrefix = "sk-ant-oat01-"
+
+// extractSetupToken parses the setup token from `claude setup-token` output.
+// The command outputs a banner, the token on its own line, and instructions.
+// We find the line starting with the expected token prefix.
+func extractSetupToken(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, setupTokenPrefix) {
+			return line
+		}
+	}
+	return ""
 }
 
 // handleAPIKeyEntry validates and persists an API key the user pasted.
