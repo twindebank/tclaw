@@ -46,7 +46,7 @@ To create a new Telegram channel (e.g. an "assistant" channel for mobile use):
 
 Each channel can have its own `allowed_tools` and `disallowed_tools`. These **replace** (not merge with) the user-level defaults, giving each channel an independent security profile.
 
-**Tool names include:**
+Use **tool_list** to get the full list of available tool names. Tool names include:
 - Claude Code tools: `Bash`, `Read`, `Edit`, `Write`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `Agent`, etc.
 - MCP tool patterns: `mcp__tclaw__channel_*`, `mcp__tclaw__schedule_*`, `mcp__tclaw__connection_*`, `mcp__tclaw__google_*`
 - Builtin commands: `builtin__stop`, `builtin__compact`, `builtin__login`, `builtin__reset` (wildcard for all reset levels), `builtin__reset_session`, `builtin__reset_memories`, `builtin__reset_project`, `builtin__reset_all`
