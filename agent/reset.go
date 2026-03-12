@@ -104,9 +104,9 @@ func resetLevelMenuLine(level ResetLevel, m channel.Markup) string {
 	case ResetMemories:
 		return bold(m, "Memories") + " — erase all memory files (CLAUDE.md + topic files, shared across all channels)"
 	case ResetProject:
-		return bold(m, "Project") + " — clear Claude state + sessions on " + bold(m, "all") + " channels (keeps memories, connections, schedules)"
+		return bold(m, "Project") + " — clear Claude state + sessions on " + bold(m, "all") + " channels (keeps memories, connections, schedules, API keys)"
 	case ResetAll:
-		return bold(m, "Everything") + " — full reset: erase all data, connections, schedules, and secrets"
+		return bold(m, "Everything") + " — erase all data including API keys, OAuth connections, channel tokens, and schedules"
 	default:
 		return "unknown"
 	}
@@ -162,14 +162,14 @@ func resetConfirmPrompt(level ResetLevel, m channel.Markup) string {
 	switch level {
 	case ResetMemories:
 		lines = bold(m, "Erased:") + " CLAUDE.md and all topic files (shared across all channels)\n" +
-			bold(m, "Kept:") + " conversation sessions, connections, schedules, secrets\n\n" +
+			bold(m, "Kept:") + " conversation sessions, OAuth connections, schedules, API keys, channel tokens\n\n" +
 			"A fresh CLAUDE.md will be created on restart."
 
 	case ResetProject:
 		lines = bold(m, "Erased:") + "\n" +
 			"  • Conversation sessions on " + bold(m, "all channels") + " (not just this one)\n" +
 			"  • Claude Code internal state (conversation history, plans, settings)\n\n" +
-			bold(m, "Kept:") + " memory files, OAuth connections, schedules, secrets"
+			bold(m, "Kept:") + " memory files, OAuth connections, schedules, API keys, channel tokens"
 
 	case ResetAll:
 		lines = bold(m, "Erased:") + "\n" +
@@ -178,8 +178,9 @@ func resetConfirmPrompt(level ResetLevel, m channel.Markup) string {
 			"  • Claude Code internal state\n" +
 			"  • OAuth connections (Google Workspace, etc.)\n" +
 			"  • Schedules\n" +
-			"  • Stored secrets (API keys, tokens)\n\n" +
-			"You will need to re-authenticate and reconnect services."
+			"  • API keys (Anthropic key, setup token)\n" +
+			"  • Channel tokens (Telegram bot tokens for dynamic channels)\n\n" +
+			"You will need to re-authenticate and reconnect all services."
 	}
 
 	return "⚠️ " + bold(m, "Confirm reset") + "\n\n" +
