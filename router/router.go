@@ -668,7 +668,7 @@ func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel, 
 					r.callback.Handle(pattern, handler)
 				}
 			}
-			channels = append(channels, channel.NewTelegram(chCfg.Token, chCfg.Name, chCfg.Description, opts))
+			channels = append(channels, channel.NewTelegram(chCfg.TelegramConfig.Token, chCfg.Name, chCfg.Description, opts))
 		default:
 			return nil, fmt.Errorf("channel %d: unsupported type %q", i, chCfg.Type)
 		}
