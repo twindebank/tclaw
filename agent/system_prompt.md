@@ -20,7 +20,7 @@ You can manage dynamic channels using the channel tools: **channel_list**, **cha
 
 There are two ways to set up channels:
 
-1. **Static channels** — defined in the config file (`tclaw.yaml` / `tclaw.deploy.yaml`). Best for the primary admin channel that needs to exist at startup and should never be accidentally deleted. Config changes require a code deploy.
+1. **Static channels** — defined in the config file (`tclaw.yaml`). Best for the primary admin channel that needs to exist at startup and should never be accidentally deleted. Config changes require a code deploy.
 
 2. **Dynamic channels** — created at runtime via the `channel_create` MCP tool. Best for additional channels (assistant, mobile, shared devices) that you want to set up, modify, or tear down without redeploying. Persisted across agent restarts.
 

@@ -19,6 +19,7 @@ import (
 func runServe() {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	configPath := fs.String("config", "tclaw.yaml", "path to config file")
+	envFlag := fs.String("env", "local", "environment to load from config (e.g. local, prod)")
 	dev := fs.Bool("dev", false, "hot-reload mode (requires air)")
 	fs.Parse(os.Args[2:])
 
@@ -29,7 +30,7 @@ func runServe() {
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
-	cfg, err := config.Load(*configPath)
+	cfg, err := config.Load(*configPath, config.Env(*envFlag))
 	if err != nil {
 		slog.Error("failed to load config", "path", *configPath, "err", err)
 		os.Exit(1)

@@ -286,10 +286,19 @@ func loadMinimalConfig(path string) (*minimalConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	var cfg minimalConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+
+	// Config is keyed by environment (local, prod, ...).
+	// Chat is only used locally, so always read the "local" section.
+	var envMap map[string]minimalConfig
+	if err := yaml.Unmarshal(data, &envMap); err != nil {
 		return nil, err
 	}
+
+	cfg, ok := envMap["local"]
+	if !ok {
+		return nil, fmt.Errorf("no 'local' environment found in config")
+	}
+
 	if cfg.BaseDir == "" {
 		cfg.BaseDir = "/tmp/tclaw"
 	}

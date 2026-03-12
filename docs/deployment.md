@@ -5,12 +5,12 @@
 - Local Docker builds only (`tclaw deploy`) — no auto-deploy on push
 - Persistent volume `tclaw_data` at `/data` for per-user state
 - Health check at `/healthz` on port 9876
-- Config baked into image at `/etc/tclaw/tclaw.yaml` from `tclaw.deploy.yaml`
+- Config baked into image at `/etc/tclaw/tclaw.yaml` (unified multi-env file, `--env prod` selects the prod section)
 - Subprocess sandboxing via bubblewrap (mount namespace isolation per user)
 
 ## Secret Management
 - Secrets stored locally in OS keychain via `tclaw secret set NAME value`
-- `tclaw deploy secrets` scans `tclaw.deploy.yaml` for `${secret:NAME}` refs, reads each from keychain, pushes to Fly in one call
+- `tclaw deploy secrets` scans `tclaw.yaml` for `${secret:NAME}` refs across all environments, reads each from keychain, pushes to Fly in one call
 - At runtime: Fly injects secrets as env vars → config resolves them → `main.go` scrubs env vars before spawning Claude subprocesses
 
 ## Commands

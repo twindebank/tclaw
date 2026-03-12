@@ -120,25 +120,41 @@ const (
 	ChannelTypeTelegram ChannelType = "telegram"
 )
 
-// Load reads and parses a config file from the given path.
-// Any environment variables consumed during secret resolution are immediately
-// unset so they cannot leak to subprocesses.
-func Load(path string) (*Config, error) {
+// Load reads a multi-environment config file and returns the Config for the
+// given environment. The file is keyed by environment name at the top level
+// (e.g. "local:", "prod:"). Any environment variables consumed during secret
+// resolution are immediately unset so they cannot leak to subprocesses.
+func Load(path string, env Env) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	// Parse as a map of env name → raw YAML, then decode the requested env.
+	var envMap map[string]yaml.Node
+	if err := yaml.Unmarshal(data, &envMap); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
+	node, ok := envMap[string(env)]
+	if !ok {
+		var available []string
+		for k := range envMap {
+			available = append(available, k)
+		}
+		return nil, fmt.Errorf("environment %q not found in config (available: %v)", env, available)
+	}
+
+	var cfg Config
+	if err := node.Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("decode config for env %q: %w", env, err)
+	}
+
+	// Set the env from the key — no need to duplicate it in the YAML body.
+	cfg.Env = env
+
 	if cfg.BaseDir == "" {
 		cfg.BaseDir = "/tmp/tclaw"
-	}
-	if cfg.Env == "" {
-		cfg.Env = EnvLocal
 	}
 	if cfg.Server.Addr == "" {
 		cfg.Server.Addr = "127.0.0.1:9876"

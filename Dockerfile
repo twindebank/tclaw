@@ -20,8 +20,8 @@ RUN npm install -g @anthropic-ai/claude-code @googleworkspace/cli
 # Copy the Go binaries.
 COPY --from=builder /bin/tclaw /usr/local/bin/tclaw
 
-# Deploy config — secrets resolved from env vars at runtime.
-COPY tclaw.deploy.yaml /etc/tclaw/tclaw.yaml
+# Config file — multi-env, prod section selected at runtime.
+COPY tclaw.yaml /etc/tclaw/tclaw.yaml
 
 # Persistent volume at /data holds all per-user state (store, home dirs, etc.).
 VOLUME ["/data"]
@@ -29,4 +29,4 @@ VOLUME ["/data"]
 ENV CLAUDECODE=""
 ENV CLAUDE_CODE_ENTRYPOINT=""
 
-ENTRYPOINT ["tclaw", "serve", "--config", "/etc/tclaw/tclaw.yaml"]
+ENTRYPOINT ["tclaw", "serve", "--config", "/etc/tclaw/tclaw.yaml", "--env", "prod"]
