@@ -21,6 +21,35 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 
 	return []mcp.ToolDef{
 		{
+			Name: "google_gmail_list",
+			Description: "Search and list Gmail messages with full metadata (subject, from, to, date, snippet, labels) in a single call. " +
+				"Use this instead of google_workspace when scanning or searching email — " +
+				"Gmail's list API only returns message IDs, so this tool automatically fetches metadata for each result. " +
+				"Without a query, returns the most recent messages. " +
+				"Defaults: max_results=10 (max 25), query=empty (all mail). " +
+				"Returns fetched_count, total_estimate, and next_page_token for pagination awareness. " +
+				"For reading a single email's full body, use google_workspace with 'gmail users messages get' instead.",
+			InputSchema: json.RawMessage(fmt.Sprintf(`{
+				"type": "object",
+				"properties": {
+					"connection": {
+						"type": "string",
+						"description": %q,
+						"enum": %s
+					},
+					"query": {
+						"type": "string",
+						"description": "Gmail search query using the same syntax as the Gmail search box. Omit to list recent messages without filtering. Examples: 'from:alice@example.com', 'is:unread subject:invoice', 'after:2026/03/01 has:attachment', 'in:inbox -category:promotions'."
+					},
+					"max_results": {
+						"type": "integer",
+						"description": "Number of messages to return. Defaults to 10, maximum 25. Each message requires a separate API call internally, so keep this low for faster responses."
+					}
+				},
+				"required": ["connection"]
+			}`, connDescription, enumJSON)),
+		},
+		{
 			Name: "google_workspace",
 			Description: "Execute a Google Workspace command. " +
 				"Supports Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks, and more. " +
