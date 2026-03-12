@@ -1,0 +1,191 @@
+# tclaw configuration — keyed by environment.
+#
+# Secrets use ${secret:NAME} syntax:
+#   1. Tries OS keychain (local dev)
+#   2. Falls back to environment variables (production / Fly.io)
+# After load, secret-bearing env vars are scrubbed from the process.
+
+local:
+  base_dir: /tmp/tclaw
+
+  providers:
+    google:
+      client_id: ${secret:GOOGLE_CLIENT_ID}
+      client_secret: ${secret:GOOGLE_CLIENT_SECRET}
+
+  users:
+    - id: theo
+      model: claude-sonnet-4-6
+      permission_mode: dontAsk
+
+      # Empty user-level tools — each channel defines its own permissions.
+      allowed_tools: []
+
+      channels:
+        # Admin: socket for local dev — full dev tools + channel/schedule management + all builtins.
+        - type: socket
+          name: admin
+          description: Primary desktop workstation for developing and testing
+          allowed_tools:
+            - Bash
+            - Read
+            - Edit
+            - Write
+            - Glob
+            - Grep
+            - LS
+            - LSP
+            - WebFetch
+            - WebSearch
+            - NotebookEdit
+            - Agent
+            - Task
+            - TaskOutput
+            - TaskStop
+            - TodoWrite
+            - ToolSearch
+            - Skill
+            - AskUserQuestion
+            - EnterPlanMode
+            - ExitPlanMode
+            - EnterWorktree
+            - ListMcpResources
+            - ReadMcpResource
+            - "mcp__tclaw__channel_*"
+            - "mcp__tclaw__schedule_*"
+            - "mcp__tclaw__connection_*"
+            - "mcp__tclaw__remote_mcp_*"
+            - "builtin__reset"
+            - "builtin__stop"
+            - "builtin__compact"
+            - "builtin__login"
+        - type: socket
+          name: scratch
+          description: Scratch pad for quick experiments
+          allowed_tools:
+            - Bash
+            - Read
+            - Edit
+            - Write
+            - Glob
+            - Grep
+            - LS
+            - LSP
+            - WebFetch
+            - WebSearch
+            - NotebookEdit
+            - Agent
+            - Task
+            - TaskOutput
+            - TaskStop
+            - TodoWrite
+            - ToolSearch
+            - Skill
+            - AskUserQuestion
+            - EnterPlanMode
+            - ExitPlanMode
+            - EnterWorktree
+            - ListMcpResources
+            - ReadMcpResource
+            - "builtin__reset_session"
+            - "builtin__stop"
+            - "builtin__compact"
+        - type: telegram
+          name: telegram-local
+          description: Telegram messaging (dev bot)
+          token: ${secret:TELEGRAM_BOT_TOKEN}
+          allowed_tools:
+            - Bash
+            - Read
+            - Edit
+            - Write
+            - Glob
+            - Grep
+            - LS
+            - LSP
+            - WebFetch
+            - WebSearch
+            - NotebookEdit
+            - Agent
+            - Task
+            - TaskOutput
+            - TaskStop
+            - TodoWrite
+            - ToolSearch
+            - Skill
+            - AskUserQuestion
+            - EnterPlanMode
+            - ExitPlanMode
+            - EnterWorktree
+            - ListMcpResources
+            - ReadMcpResource
+            - "mcp__tclaw__channel_*"
+            - "mcp__tclaw__schedule_*"
+            - "mcp__tclaw__connection_*"
+            - "mcp__tclaw__remote_mcp_*"
+            - "builtin__reset"
+            - "builtin__stop"
+            - "builtin__compact"
+            - "builtin__login"
+
+prod:
+  base_dir: /data/tclaw
+
+  server:
+    addr: "0.0.0.0:9876"
+    public_url: "https://tclaw.fly.dev"
+
+  providers:
+    google:
+      client_id: ${secret:GOOGLE_CLIENT_ID}
+      client_secret: ${secret:GOOGLE_CLIENT_SECRET}
+
+  users:
+    - id: theo
+      model: claude-sonnet-4-6
+      permission_mode: dontAsk
+      max_turns: 50
+
+      # Empty user-level tools — each channel defines its own permissions.
+      allowed_tools: []
+
+      channels:
+        # Admin channel: full dev tools, channel/schedule/connection management,
+        # all reset levels and builtins.
+        - type: telegram
+          name: admin
+          description: Primary admin channel
+          token: ${secret:TELEGRAM_BOT_TOKEN_PROD}
+          allowed_tools:
+            - Bash
+            - Read
+            - Edit
+            - Write
+            - Glob
+            - Grep
+            - LS
+            - LSP
+            - WebFetch
+            - WebSearch
+            - NotebookEdit
+            - Agent
+            - Task
+            - TaskOutput
+            - TaskStop
+            - TodoWrite
+            - ToolSearch
+            - Skill
+            - AskUserQuestion
+            - EnterPlanMode
+            - ExitPlanMode
+            - EnterWorktree
+            - ListMcpResources
+            - ReadMcpResource
+            - "mcp__tclaw__channel_*"
+            - "mcp__tclaw__schedule_*"
+            - "mcp__tclaw__connection_*"
+            - "mcp__tclaw__remote_mcp_*"
+            - "builtin__reset"
+            - "builtin__stop"
+            - "builtin__compact"
+            - "builtin__login"
