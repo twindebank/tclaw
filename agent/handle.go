@@ -29,6 +29,11 @@ const (
 	phaseResponse                   // assistant text content
 )
 
+// maxMessageLen is the threshold at which split-mode messages are rotated
+// to a new message. Telegram's hard limit is 4096 chars; we use 3500 for
+// safe headroom (HTML entities, emoji encoding, etc.).
+const maxMessageLen = 3500
+
 // turnWriter accumulates output for a single turn. In split mode (Telegram),
 // status and response content go to separate channel messages. In normal mode
 // everything goes to one message.
@@ -73,33 +78,81 @@ func (tw *turnWriter) writeSingle(text string) error {
 }
 
 // writeSplit routes to separate status and response messages.
+// It proactively rotates to a new message when the buffer approaches
+// Telegram's character limit, and reactively recovers from Edit failures
+// by starting a fresh message.
 func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 	switch phase {
 	case phaseStatus:
 		tw.statusBuf.WriteString(text)
+		content := tw.statusBuf.String()
+
+		// Proactive split: rotate to a new message before hitting the limit.
+		if tw.statusID != "" && len(content) > maxMessageLen {
+			tw.statusBuf.Reset()
+			tw.statusBuf.WriteString(text)
+			tw.statusID = ""
+			content = text
+		}
+
 		if tw.statusID == "" {
-			id, err := tw.ch.Send(tw.ctx, tw.statusBuf.String())
+			id, err := tw.ch.Send(tw.ctx, content)
 			if err != nil {
-				return fmt.Errorf("send status: %w", err)
+				// Status is informational — log and swallow.
+				slog.Warn("failed to send status message", "err", err)
+				return nil
 			}
 			tw.statusID = id
 			return nil
 		}
-		if err := tw.ch.Edit(tw.ctx, tw.statusID, tw.statusBuf.String()); err != nil {
-			return fmt.Errorf("edit status: %w", err)
+
+		if err := tw.ch.Edit(tw.ctx, tw.statusID, content); err != nil {
+			// Reactive recovery: start a fresh message.
+			slog.Warn("failed to edit status message, starting new message", "err", err)
+			tw.statusBuf.Reset()
+			tw.statusBuf.WriteString(text)
+			tw.statusID = ""
+			id, err := tw.ch.Send(tw.ctx, text)
+			if err != nil {
+				// Status is informational — log and swallow.
+				slog.Warn("failed to send replacement status message", "err", err)
+				return nil
+			}
+			tw.statusID = id
 		}
+
 	case phaseResponse:
 		tw.respBuf.WriteString(text)
+		content := tw.respBuf.String()
+
+		// Proactive split: rotate to a new message before hitting the limit.
+		if tw.respID != "" && len(content) > maxMessageLen {
+			tw.respBuf.Reset()
+			tw.respBuf.WriteString(text)
+			tw.respID = ""
+			content = text
+		}
+
 		if tw.respID == "" {
-			id, err := tw.ch.Send(tw.ctx, tw.respBuf.String())
+			id, err := tw.ch.Send(tw.ctx, content)
 			if err != nil {
 				return fmt.Errorf("send response: %w", err)
 			}
 			tw.respID = id
 			return nil
 		}
-		if err := tw.ch.Edit(tw.ctx, tw.respID, tw.respBuf.String()); err != nil {
-			return fmt.Errorf("edit response: %w", err)
+
+		if err := tw.ch.Edit(tw.ctx, tw.respID, content); err != nil {
+			// Reactive recovery: start a fresh message.
+			slog.Warn("failed to edit response message, starting new message", "err", err)
+			tw.respBuf.Reset()
+			tw.respBuf.WriteString(text)
+			tw.respID = ""
+			id, err := tw.ch.Send(tw.ctx, text)
+			if err != nil {
+				return fmt.Errorf("send replacement response: %w", err)
+			}
+			tw.respID = id
 		}
 	}
 	return nil
