@@ -20,7 +20,7 @@ users:
   - id: theo
     model: claude-sonnet-4-6
     permission_mode: dontAsk
-    max_turns: 20
+    max_turns: 50
     channels:
       - type: socket
         name: main
