@@ -59,6 +59,7 @@ Channel type is validated at creation time — attempting to create a socket cha
 - **channel_edit** — updates a dynamic channel's description, rotates its Telegram bot token (via `telegram_config`), updates `allowed_users`, and/or updates `allowed_tools` and `disallowed_tools`. At least one field must be provided. Cannot edit static channels.
 - **channel_delete** — removes a dynamic channel and cleans up any associated secrets (e.g. Telegram bot token from the secret store). Cannot delete static channels.
 - **channel_list** — lists all channels (static and dynamic) with name, type, description, source, and tool permissions (`allowed_tools`/`disallowed_tools`).
+- **tool_list** — lists all available tool names that can be used in `allowed_tools` and `disallowed_tools`. Returns Claude Code tools, tclaw MCP tools, and builtin commands. Useful when setting up channel permissions.
 
 **Secret lifecycle:** Telegram bot tokens follow a strict lifecycle tied to their channel — created in the secret store on `channel_create`, rotated via `channel_edit`, and deleted on `channel_delete`. Tokens are never stored in the channel config JSON and are only read from the secret store when building the live Telegram channel on agent restart.
 
