@@ -271,6 +271,20 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		slog.Info("found setup token", "user", mu.cfg.ID, "env_var", setupTokenEnvVar)
 	}
 
+	// Seed GitHub token from Fly secret (e.g. GITHUB_TOKEN_THEO) into the
+	// encrypted secret store. Dev tools read from the store, so this makes
+	// pre-provisioned tokens available without runtime prompting. The user
+	// can still provide a token interactively via dev_start — it overwrites
+	// whatever is in the store.
+	githubTokenEnvVar := agent.GitHubTokenEnvVarName(string(mu.cfg.ID))
+	if githubToken := os.Getenv(githubTokenEnvVar); githubToken != "" {
+		if seedErr := secretStore.Set(ctx, "github_token", githubToken); seedErr != nil {
+			slog.Error("failed to seed github token from env", "user", mu.cfg.ID, "err", seedErr)
+		} else {
+			slog.Info("seeded github token from env", "user", mu.cfg.ID, "env_var", githubTokenEnvVar)
+		}
+	}
+
 	// Create dynamic channel store and register channel management tools.
 	dynamicStore := channel.NewDynamicStore(s)
 

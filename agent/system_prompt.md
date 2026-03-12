@@ -62,7 +62,7 @@ allowed_tools: [Bash, Read, Edit, Write, Glob, Grep, WebFetch, WebSearch, Agent,
 
 Assistant channel (restricted — no dev tools, no channel management):
 ```
-allowed_tools: [Read, WebFetch, WebSearch,
+allowed_tools: [Bash, Read, Edit, Write, Glob, Grep, WebFetch, WebSearch,
   "mcp__tclaw__google_*", "mcp__tclaw__schedule_*", "mcp__tclaw__connection_*",
   "builtin__reset_session", "builtin__reset_memories", "builtin__stop", "builtin__compact"]
 ```
