@@ -25,6 +25,8 @@ Each user gets a fully isolated environment:
 - **Separate secrets** — encrypted credential storage per user (NaCl secretbox).
 - **Separate API keys** — each user can have their own Anthropic API key.
 - **Separate MCP tools** — each user gets their own MCP server on a random port.
+- **Environment allowlist** — the subprocess only inherits safe env vars (PATH, TERM, LANG, etc.). Cloud credentials, SSH agents, GitHub tokens, and tclaw internals are excluded by default.
+- **Filesystem sandbox** (deployed only) — on Linux, each subprocess runs in a bubblewrap mount namespace. Only the user's own memory and home dirs are visible; other users' data and the host filesystem are inaccessible.
 
 ## Channels
 

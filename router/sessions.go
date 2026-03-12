@@ -21,11 +21,30 @@ func loadSession(ctx context.Context, s store.Store, chID channel.ChannelID) (st
 	if err != nil {
 		return "", fmt.Errorf("load session: %w", err)
 	}
-	if len(data) > 0 {
-		slog.Info("resumed session", "channel", chID, "session_id", string(data))
-		return string(data), nil
+	sid := string(data)
+	if sid == "" {
+		return "", nil
 	}
-	return "", nil
+	if !validSessionID(sid) {
+		slog.Warn("ignoring invalid session ID", "channel", chID, "len", len(sid))
+		return "", nil
+	}
+	slog.Info("resumed session", "channel", chID, "session_id", sid)
+	return sid, nil
+}
+
+// validSessionID checks that a session ID is non-empty, reasonable length,
+// and contains no control characters.
+func validSessionID(sid string) bool {
+	if sid == "" || len(sid) > 256 {
+		return false
+	}
+	for _, r := range sid {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 func saveSession(ctx context.Context, s store.Store, chID channel.ChannelID, id string) error {
