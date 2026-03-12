@@ -259,6 +259,14 @@ base_dir: /tmp/tclaw
 env: local                          # default, enables OAuth browser login
 server:
   addr: 127.0.0.1:9876             # default, localhost only
+
+users:
+  - id: myuser
+    allowed_tools:
+      - "mcp__tclaw__*"            # required for MCP tools (connections, channels, etc.)
+      - Bash
+      - Read
+      # ... other Claude Code tools
 ```
 
 - Secrets from OS keychain (`tclaw secret set NAME value`)
@@ -288,12 +296,15 @@ server:
 ```
 
 - Secrets from `fly secrets set` (pushed via `tclaw deploy secrets`)
-- OAuth credentials pre-provisioned from env var on startup
+- Setup token from `fly secrets set CLAUDE_SETUP_TOKEN_<USER>=<token>` (per-user OAuth)
 - Health check at `/healthz` every 30s
+- `allowed_tools` must include `"mcp__tclaw__*"` — same as local config
 
 ## MCP Architecture
 
 Each user gets their own MCP server on a random port (`127.0.0.1:0`). The server implements JSON-RPC over HTTP and registers tools from all `tool/` packages.
+
+**Important:** The user's `allowed_tools` must include `"mcp__tclaw__*"` for the agent to use any tclaw MCP tools (connections, channels, schedules, etc.). Without this, the CLI's permission system will block MCP tool calls.
 
 The `mcp-config.json` file is generated at `<user>/runtime/mcp-config.json` and passed to the CLI via `--mcp-config`. It includes:
 
