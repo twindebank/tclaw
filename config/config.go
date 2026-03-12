@@ -103,7 +103,7 @@ type Channel struct {
 // TelegramChannelConfig holds Telegram-specific channel configuration.
 type TelegramChannelConfig struct {
 	// Token is the Telegram bot token from @BotFather.
-	// Supports secret references: ${secret:NAME} or ${NAME}.
+	// Supports secret references: ${secret:NAME}.
 	Token string `yaml:"token"`
 }
 
@@ -271,7 +271,6 @@ func validate(cfg *Config) error {
 
 const (
 	secretRefPrefix = "${secret:"
-	envRefPrefix    = "${"
 	refSuffix       = "}"
 )
 
@@ -281,7 +280,6 @@ const (
 // Supported syntax:
 //
 //	${secret:NAME}  — tries OS keychain for NAME, falls back to env var NAME
-//	${NAME}         — env var only (legacy syntax)
 //	literal         — used as-is
 func resolveSecrets(cfg *Config) ([]string, error) {
 	var envVars []string
@@ -340,23 +338,13 @@ func resolveSecrets(cfg *Config) ([]string, error) {
 // resolveRef resolves a single config value. Returns the resolved value and,
 // if an environment variable was read, its name (so callers can scrub it).
 func resolveRef(s string) (string, string, error) {
-	if !strings.HasPrefix(s, envRefPrefix) || !strings.HasSuffix(s, refSuffix) {
+	if !strings.HasPrefix(s, secretRefPrefix) || !strings.HasSuffix(s, refSuffix) {
+		// Not a secret reference — use as literal.
 		return s, "", nil
 	}
 
-	inner := s[2 : len(s)-1] // strip ${ and }
-
-	// ${secret:NAME} — keychain first, env var fallback
-	if name, ok := strings.CutPrefix(inner, "secret:"); ok {
-		return resolveSecret(name)
-	}
-
-	// ${NAME} — env var only
-	val := os.Getenv(inner)
-	if val == "" {
-		return "", "", fmt.Errorf("env var %q is not set", inner)
-	}
-	return val, inner, nil
+	name := s[len(secretRefPrefix) : len(s)-len(refSuffix)]
+	return resolveSecret(name)
 }
 
 // resolveSecret tries the OS keychain first, then falls back to env var.
