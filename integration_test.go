@@ -559,7 +559,7 @@ func TestIntegration_MCPToolGlobPermission(t *testing.T) {
 		SetupToken:     setupToken,
 		HomeDir:        homeDir,
 		MCPConfigPath:  mcpConfigPath,
-		MCPToolNames:   []string{"test_ping"},
+		MCPToolNames:   func() []string { return []string{"test_ping"} },
 		Debug:          true,
 		Channels:       chMap,
 		Sessions:       make(map[channel.ChannelID]string),

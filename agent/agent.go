@@ -125,12 +125,14 @@ type Options struct {
 	// Empty means no MCP tools are available.
 	MCPConfigPath string
 
-	// MCPToolNames is the list of tool names registered on the local MCP
-	// server (e.g. "channel_create", "schedule_list"). Used to expand glob
-	// patterns in AllowedTools/DisallowedTools into explicit names, since
-	// the Claude CLI's --allowedTools flag does not support wildcards for
-	// MCP tools.
-	MCPToolNames []string
+	// MCPToolNames returns the current list of tool names registered on
+	// the local MCP server (e.g. "channel_create", "schedule_list"). Called
+	// on every turn to expand glob patterns in AllowedTools/DisallowedTools
+	// into explicit names, since the Claude CLI's --allowedTools flag does
+	// not support wildcards for MCP tools.
+	// Must return live data — tools may be registered mid-session (e.g.
+	// Google tools after OAuth connection).
+	MCPToolNames func() []string
 
 	// SystemPrompt is appended to the default Claude system prompt via
 	// --append-system-prompt. Contains agent identity, channel context,
@@ -744,8 +746,12 @@ func resolveToolsForChannel(opts Options, channelID channel.ChannelID) (allowed 
 		allowed = filterOutBuiltins(opts.AllowedTools)
 		disallowed = filterOutBuiltins(opts.DisallowedTools)
 	}
-	allowed = expandMCPGlobs(allowed, opts.MCPToolNames)
-	disallowed = expandMCPGlobs(disallowed, opts.MCPToolNames)
+	var mcpToolNames []string
+	if opts.MCPToolNames != nil {
+		mcpToolNames = opts.MCPToolNames()
+	}
+	allowed = expandMCPGlobs(allowed, mcpToolNames)
+	disallowed = expandMCPGlobs(disallowed, mcpToolNames)
 	return allowed, disallowed
 }
 
