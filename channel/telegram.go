@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/go-telegram/bot"
@@ -195,7 +197,7 @@ func (t *Telegram) Send(ctx context.Context, text string) (MessageID, error) {
 
 	msg, err := b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:    chatID,
-		Text:      text,
+		Text:      markdownToTelegramHTML(text),
 		ParseMode: models.ParseModeHTML,
 	})
 	if err != nil {
@@ -223,7 +225,7 @@ func (t *Telegram) Edit(ctx context.Context, msgID MessageID, text string) error
 	_, err = b.EditMessageText(ctx, &bot.EditMessageTextParams{
 		ChatID:    chatID,
 		MessageID: telegramMsgID,
-		Text:      text,
+		Text:      markdownToTelegramHTML(text),
 		ParseMode: models.ParseModeHTML,
 	})
 	if err != nil {
@@ -243,4 +245,25 @@ func (t *Telegram) SplitStatusMessages() bool {
 
 func (t *Telegram) Markup() Markup {
 	return MarkupHTML
+}
+
+// markdownBold matches **text** that the model emits despite being told to use HTML.
+var markdownBold = regexp.MustCompile(`\*\*(.+?)\*\*`)
+
+// markdownInlineCode matches `text` (single backtick, not triple).
+var markdownInlineCode = regexp.MustCompile("(?s)`([^`]+)`")
+
+// markdownToTelegramHTML converts common markdown patterns the model may
+// produce into Telegram-compatible HTML. This is a best-effort fallback —
+// the system prompt asks for HTML, but models sometimes slip into markdown.
+func markdownToTelegramHTML(s string) string {
+	// Skip conversion if the text already contains HTML tags — the model
+	// followed the instructions and we shouldn't double-convert.
+	if strings.Contains(s, "<b>") || strings.Contains(s, "<code>") || strings.Contains(s, "<pre>") {
+		return s
+	}
+
+	s = markdownBold.ReplaceAllString(s, "<b>$1</b>")
+	s = markdownInlineCode.ReplaceAllString(s, "<code>$1</code>")
+	return s
 }
