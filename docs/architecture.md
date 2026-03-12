@@ -38,7 +38,8 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 
 | Package | Responsibility |
 |---------|----------------|
-| `main.go` | Entry point: loads config, builds providers, starts HTTP server, registers users with router |
+| `main.go` | Entry point: dispatches to `cli.Run()` |
+| `cli/` | CLI subcommand dispatch. `serve` (start server), `chat` (TUI client), `secret` (keychain management), `deploy` (Fly.io deployment, secrets, suspend/resume). |
 | `router/` | Per-user agent lifecycle management. Owns goroutine lifetimes, directory setup, MCP server creation, tool registration. The only stateful orchestrator. |
 | `agent/` | Stateless package. `Run(ctx, opts)` reads messages from channels, handles auth flows, spawns CLI subprocess per turn, streams responses back. |
 | `channel/` | Transport abstraction. `Channel` interface with implementations: Socket, Stdio, Telegram, Dynamic. `FanIn()` multiplexer and `ChannelMap()` helper. |
@@ -79,8 +80,7 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 
 | Package | Responsibility |
 |---------|----------------|
-| `cmd/chat/` | Bubbletea TUI client. Connects to the agent via unix socket. |
-| `cmd/secret/` | Secret management CLI. Keychain get/set/delete plus `deploy-secrets` for Fly.io. |
+| `cmd/chat/` | Bubbletea TUI client (separate Go module). Connects to the agent via unix socket. Invoked via `tclaw chat`. |
 
 ## Dependency Layers
 
@@ -96,7 +96,8 @@ Layer 6:  Agent loop (agent.Run — spawns CLI, handles auth, manages turns)
 Layer 7:  HTTP server (oauth.CallbackServer — callbacks, webhooks, health)
 Layer 8:  Tool implementations (channeltools, connectiontools, remotemcp, scheduletools, google)
 Layer 9:  Configuration (YAML parsing, secret resolution)
-Layer 10: Orchestration (router, main)
+Layer 10: CLI dispatch (cli/ — subcommand routing, deploy/secret commands)
+Layer 11: Orchestration (router, main)
 ```
 
 ## Data Flow
@@ -260,7 +261,7 @@ server:
   addr: 127.0.0.1:9876             # default, localhost only
 ```
 
-- Secrets from OS keychain (`make secret ARGS="set NAME value"`)
+- Secrets from OS keychain (`tclaw secret set NAME value`)
 - Telegram uses long polling (no `public_url`)
 - Agent memory in `/tmp/tclaw/<user>/memory/`
 
@@ -286,7 +287,7 @@ server:
   public_url: https://tclaw.fly.dev  # enables Telegram webhooks
 ```
 
-- Secrets from `fly secrets set` (pushed via `make deploy-secrets`)
+- Secrets from `fly secrets set` (pushed via `tclaw deploy secrets`)
 - OAuth credentials pre-provisioned from env var on startup
 - Health check at `/healthz` every 30s
 
