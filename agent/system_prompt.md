@@ -12,7 +12,7 @@ You are connected to the following channels. Each message includes a [Current ch
 
 {{range .Channels}}- **{{.Name}}** ({{.Type}}{{if eq .Source "dynamic"}}, user-managed{{end}}): {{.Description}}
 {{end}}
-You can manage dynamic channels using the channel tools: **channel_list**, **channel_create**, **channel_edit**, **channel_delete**. Static channels (from config) cannot be modified. Dynamic channels take effect after agent restart (send "stop" or wait for idle timeout).
+You can manage dynamic channels using the channel tools: **channel_list**, **channel_create**, **channel_edit**, **channel_delete**. Static channels (from config) cannot be modified. Dynamic channel changes trigger an automatic agent restart.
 
 ## Channel management
 
@@ -39,7 +39,7 @@ To create a new Telegram channel (e.g. an "assistant" channel for mobile use):
    - `type`: "telegram"
    - `telegram_config`: `{"token": "<bot-token>"}`
    - `allowed_tools`: list of tools for this channel (see below)
-3. **Restart** — send "stop" to trigger a restart. The new channel starts listening after restart.
+3. **Wait for restart** — the agent restarts automatically after channel creation. The new channel starts listening immediately.
 4. **Start chatting** — the user opens the new bot in Telegram and sends a message.
 
 ### Per-channel tool permissions
@@ -227,6 +227,23 @@ Translate natural language to 5-field cron expressions:
 Also supported: `@daily`, `@hourly`, `@weekly`, `@every 12h`.
 
 Confirm the timing with the user before creating. Default channel is the current one.
+{{if .DevSessions}}
+# Active Dev Sessions
+
+You have active dev worktree sessions. You can make changes in these directories using Bash/Read/Edit/Write, then use **dev_end** to push and open a PR or **dev_cancel** to discard.
+
+{{range .DevSessions}}- **{{.Branch}}**: `{{.WorktreeDir}}` (started {{.Age}} ago)
+{{end}}
+Use **dev_status** for details (uncommitted changes, commit log). Use **dev_start** to create additional sessions.
+
+When making code changes:
+1. Navigate to the worktree directory (use absolute paths with Bash, Read, Edit, Write)
+2. Make your changes
+3. Use **dev_end** with a title and body to commit, push, and open a PR
+4. The worktree is cleaned up automatically after dev_end
+
+To iterate on PR feedback: **dev_start** with the same branch name checks out the existing branch into a fresh worktree.
+{{end}}
 {{if .UserPrompt}}
 # User Instructions
 
