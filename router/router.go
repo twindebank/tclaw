@@ -428,6 +428,13 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// Build per-channel tool overrides from config (static) and store (dynamic).
 		channelToolOverrides := buildChannelToolOverrides(staticChMap, configByName, dynamicChMap, dynamicCtx, dynamicStore)
 
+		// Collect MCP tool names so the agent can expand glob patterns in
+		// --allowedTools (the CLI doesn't support wildcards for MCP tools).
+		mcpToolNames := make([]string, 0, len(mcpHandler.ListTools()))
+		for _, td := range mcpHandler.ListTools() {
+			mcpToolNames = append(mcpToolNames, td.Name)
+		}
+
 		opts := agent.Options{
 			PermissionMode:  mu.cfg.PermissionMode,
 			Model:           mu.cfg.Model,
@@ -447,6 +454,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			DisallowedTools:      mu.cfg.DisallowedTools,
 			ChannelToolOverrides: channelToolOverrides,
 			MCPConfigPath:        mcpConfigPath,
+			MCPToolNames:         mcpToolNames,
 			SystemPrompt:         systemPrompt,
 			SecretStore:          secretStore,
 			OnReset: func(level agent.ResetLevel) error {
