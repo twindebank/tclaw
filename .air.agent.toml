@@ -1,6 +1,7 @@
 [build]
-  cmd = "go build -o tmp/agent ."
-  bin = "tmp/agent"
+  cmd = "go build -o tmp/tclaw ."
+  bin = "tmp/tclaw"
+  full_bin = "tmp/tclaw serve"
   include_ext = ["go"]
   exclude_dir = ["cmd"]
   kill_delay = "500ms"
