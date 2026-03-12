@@ -33,12 +33,14 @@ func RegisterTools(handler *mcp.Handler, connMap map[connection.ConnectionID]Dep
 	}
 
 	defs := ToolDefs(connIDs)
-	handler.Register(defs[0], workspaceHandler(connMap))
-	handler.Register(defs[1], schemaHandler(connMap))
+	handler.Register(defs[0], gmailListHandler(connMap))
+	handler.Register(defs[1], workspaceHandler(connMap))
+	handler.Register(defs[2], schemaHandler(connMap))
 }
 
 // UnregisterTools removes the Google Workspace tools from the handler.
 func UnregisterTools(handler *mcp.Handler) {
+	handler.Unregister("google_gmail_list")
 	handler.Unregister("google_workspace")
 	handler.Unregister("google_workspace_schema")
 }
