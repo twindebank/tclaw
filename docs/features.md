@@ -142,8 +142,9 @@ The admin channel is defined statically in config with full tool access includin
 channels:
   - name: admin
     type: telegram
-    token: ${secret:TELEGRAM_ADMIN_TOKEN}
     description: Primary admin channel
+    telegram:
+      token: ${secret:TELEGRAM_ADMIN_TOKEN}
     allowed_tools:
       - Bash
       - Read
@@ -188,8 +189,9 @@ All channels are defined in the config file. The assistant channel is pre-config
 channels:
   - name: admin
     type: telegram
-    token: ${secret:TELEGRAM_ADMIN_TOKEN}
     description: Primary admin channel
+    telegram:
+      token: ${secret:TELEGRAM_ADMIN_TOKEN}
     allowed_tools:
       - Bash
       - Read
@@ -205,8 +207,9 @@ channels:
       - "builtin__login"
   - name: assistant
     type: telegram
-    token: ${secret:TELEGRAM_ASSISTANT_TOKEN}
     description: Mobile assistant — concise responses, no dev tools
+    telegram:
+      token: ${secret:TELEGRAM_ASSISTANT_TOKEN}
     allowed_tools:
       - Read
       - WebFetch

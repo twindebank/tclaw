@@ -83,9 +83,9 @@ type Channel struct {
 	Name        string      `yaml:"name"`
 	Description string      `yaml:"description"`
 
-	// Token is the bot token (required for Telegram channels).
-	// Supports secret references: ${secret:NAME} or ${NAME}.
-	Token string `yaml:"token,omitempty"`
+	// TelegramConfig holds config specific to Telegram channels.
+	// Required when Type is "telegram".
+	TelegramConfig *TelegramChannelConfig `yaml:"telegram,omitempty"`
 
 	// Envs restricts this channel to specific environments.
 	// Empty means the channel is active in all environments.
@@ -98,6 +98,13 @@ type Channel struct {
 	// DisallowedTools overrides the user-level disallowed_tools for this channel.
 	// When set, this replaces (not merges with) the user-level list.
 	DisallowedTools []string `yaml:"disallowed_tools,omitempty"`
+}
+
+// TelegramChannelConfig holds Telegram-specific channel configuration.
+type TelegramChannelConfig struct {
+	// Token is the Telegram bot token from @BotFather.
+	// Supports secret references: ${secret:NAME} or ${NAME}.
+	Token string `yaml:"token"`
 }
 
 // Env identifies the runtime environment.
@@ -248,8 +255,8 @@ func validate(cfg *Config) error {
 			case ChannelTypeSocket, ChannelTypeStdio:
 				// valid
 			case ChannelTypeTelegram:
-				if ch.Token == "" {
-					return fmt.Errorf("user %q channel %q: telegram channel requires a token", u.ID, ch.Name)
+				if ch.TelegramConfig == nil || ch.TelegramConfig.Token == "" {
+					return fmt.Errorf("user %q channel %q: telegram channel requires telegram.token", u.ID, ch.Name)
 				}
 			case "":
 				return fmt.Errorf("user %q channel %q: missing type", u.ID, ch.Name)
@@ -289,16 +296,17 @@ func resolveSecrets(cfg *Config) ([]string, error) {
 			envVars = append(envVars, envVar)
 		}
 
-		// Resolve channel tokens (e.g. Telegram bot tokens).
+		// Resolve Telegram bot tokens.
 		for j := range cfg.Users[i].Channels {
-			if cfg.Users[i].Channels[j].Token == "" {
+			tc := cfg.Users[i].Channels[j].TelegramConfig
+			if tc == nil || tc.Token == "" {
 				continue
 			}
-			val, envVar, err := resolveRef(cfg.Users[i].Channels[j].Token)
+			val, envVar, err := resolveRef(tc.Token)
 			if err != nil {
-				return nil, fmt.Errorf("user %q channel %q token: %w", cfg.Users[i].ID, cfg.Users[i].Channels[j].Name, err)
+				return nil, fmt.Errorf("user %q channel %q telegram.token: %w", cfg.Users[i].ID, cfg.Users[i].Channels[j].Name, err)
 			}
-			cfg.Users[i].Channels[j].Token = val
+			tc.Token = val
 			if envVar != "" {
 				envVars = append(envVars, envVar)
 			}
