@@ -1,0 +1,148 @@
+package devtools
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"os/exec"
+	"strings"
+
+	"tclaw/mcp"
+)
+
+func deployDef() mcp.ToolDef {
+	return mcp.ToolDef{
+		Name:        "deploy",
+		Description: "Deploy the application to Fly.io. Call without confirm=true to preview what will be deployed (commit log, changed files). Call with confirm=true to execute the deploy. Only deploys from main.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"confirm": {
+					"type": "boolean",
+					"description": "Set to true to execute the deploy after reviewing the preview. Omit or false to get a preview."
+				}
+			}
+		}`),
+	}
+}
+
+type deployArgs struct {
+	Confirm bool `json:"confirm"`
+}
+
+func deployHandler(deps Deps) mcp.ToolHandler {
+	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
+		var a deployArgs
+		if err := json.Unmarshal(args, &a); err != nil {
+			return nil, fmt.Errorf("invalid arguments: %w", err)
+		}
+
+		// We need the repo to exist for deploy preview/execution.
+		repoURL, err := deps.Store.GetRepoURL(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if repoURL == "" {
+			return nil, fmt.Errorf("no repo URL configured — run dev_start first to set up the repo")
+		}
+
+		token, err := deps.SecretStore.Get(ctx, githubTokenKey)
+		if err != nil {
+			return nil, fmt.Errorf("read github token: %w", err)
+		}
+
+		repoDir := fmt.Sprintf("%s/repo", deps.UserDir)
+		if err := cloneOrFetch(repoDir, repoURL, token); err != nil {
+			return nil, fmt.Errorf("fetch: %w", err)
+		}
+
+		// Get current deployed commit.
+		deployedCommit, err := deps.Store.GetDeployedCommit(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		// Get origin/main HEAD.
+		cmd := exec.Command("git", "-C", repoDir, "rev-parse", "--short", "origin/main")
+		mainShortOut, err := cmd.CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("rev-parse origin/main: %s: %w", string(mainShortOut), err)
+		}
+		mainShort := strings.TrimSpace(string(mainShortOut))
+
+		mainHead, err := gitHeadCommitRef(repoDir, "origin/main")
+		if err != nil {
+			return nil, err
+		}
+
+		if !a.Confirm {
+			// Preview mode.
+			result := map[string]any{
+				"target_commit": mainHead,
+			}
+
+			if deployedCommit == "" {
+				result["deployed_commit"] = "unknown (first deploy)"
+				result["message"] = "First deploy — no previous version to compare. Call deploy with confirm=true to proceed."
+			} else {
+				result["deployed_commit"] = deployedCommit
+
+				commitLog, logErr := gitLogRange(repoDir, deployedCommit, "origin/main")
+				if logErr != nil {
+					commitLog = "error: " + logErr.Error()
+				}
+				diffStat, diffErr := gitDiffStatRange(repoDir, deployedCommit, "origin/main")
+				if diffErr != nil {
+					diffStat = "error: " + diffErr.Error()
+				}
+
+				commitCount := 0
+				if commitLog != "" {
+					commitCount = len(strings.Split(commitLog, "\n"))
+				}
+
+				result["commits_since_deploy"] = commitCount
+				result["commit_log"] = commitLog
+				result["changed_files"] = diffStat
+
+				if commitCount == 0 {
+					result["message"] = "Already up to date — nothing new to deploy."
+				} else {
+					result["message"] = fmt.Sprintf("%d commit(s) to deploy. Call deploy with confirm=true to proceed.", commitCount)
+				}
+			}
+
+			return json.Marshal(result)
+		}
+
+		// Execute deploy.
+		cmd = exec.Command("fly", "deploy", "--remote-only", "-a", "tclaw")
+		deployOut, err := cmd.CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("fly deploy failed: %s: %w", string(deployOut), err)
+		}
+
+		// Record the deployed commit. Non-fatal since deploy already succeeded.
+		if setErr := deps.Store.SetDeployedCommit(ctx, mainShort); setErr != nil {
+			slog.Warn("failed to record deployed commit", "commit", mainShort, "err", setErr)
+		}
+
+		result := map[string]any{
+			"deployed_commit": mainShort,
+			"output":          strings.TrimSpace(string(deployOut)),
+			"message":         "Deploy complete.",
+		}
+		return json.Marshal(result)
+	}
+}
+
+// gitHeadCommitRef returns the short hash and subject of a ref.
+func gitHeadCommitRef(repoDir string, ref string) (string, error) {
+	cmd := exec.Command("git", "-C", repoDir, "log", "-1", "--format=%h %s", ref)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git log %s: %s: %w", ref, string(out), err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}

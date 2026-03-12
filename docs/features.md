@@ -45,7 +45,7 @@ Channels are the transport layer between users and the agent.
 
 ### Dynamic Channels (runtime-created)
 
-The agent can create, edit, and delete channels at runtime via MCP tools. Dynamic channels persist across agent restarts (stored in the user's state directory). The agent sees both static and dynamic channels in its system prompt.
+The agent can create, edit, and delete channels at runtime via MCP tools. Dynamic channels persist across agent restarts (stored in the user's state directory). The agent sees both static and dynamic channels in its system prompt. Channel mutations (create, edit, delete) trigger an automatic agent restart so changes take effect immediately.
 
 Supported dynamic channel types:
 - **Socket** — local environments only (no authentication). Created with `type: "socket"`.
@@ -162,7 +162,7 @@ The admin channel is defined statically in config with full tool access includin
 2. User messages admin channel: "set up an assistant channel on Telegram"
 3. Agent guides user through @BotFather token creation
 4. Agent calls `channel_create` with restricted `allowed_tools` (no dev tools, no channel management, restricted reset)
-5. Agent restarts, new channel is live
+5. Agent restarts automatically, new channel is live
 
 **Example admin config:**
 ```yaml
@@ -359,6 +359,39 @@ The agent can create and manage cron schedules that fire autonomously:
 - **schedule_list** — lists all schedules with their status and next fire time.
 
 When a schedule fires, it injects a message into the specified channel, waking the agent if it's idle. Schedules persist across agent restarts and are managed by a background goroutine that runs at user lifetime (not agent lifetime).
+
+## Dev Workflow
+
+The agent can manage code changes, PRs, and deployments through a dev session lifecycle built on git worktrees. Multiple concurrent sessions are supported.
+
+### Dev session tools
+
+- **dev_start** — starts a dev session. Clones/fetches the repo (bare clone at `<userDir>/repo/`), creates a git worktree on a new branch or checks out an existing one. Branch names are auto-generated as `YYYY-MM-DD-slugified-description`. Accepts optional `repo_url` and `github_token` on first use (persisted for subsequent calls).
+- **dev_status** — shows branch, uncommitted changes, commit log, and diff stat. Lists all active sessions when multiple exist.
+- **dev_end** — commits uncommitted changes, pushes the branch, creates a PR (or detects an existing one), and tears down the worktree. To iterate on PR feedback, `dev_start` again with the same branch name.
+- **dev_cancel** — removes the worktree and local branch without pushing. All uncommitted changes are lost.
+- **deploy** — two-phase deploy to Fly.io. Without `confirm=true`, shows a preview (commit log, changed files, current vs target commit). With `confirm=true`, runs `fly deploy --remote-only`. Tracks the deployed commit for future previews.
+
+### Session lifecycle
+
+```
+dev_start → make changes → dev_end (commit + push + PR + cleanup)
+                         → dev_cancel (discard + cleanup)
+
+PR feedback: dev_start --branch=existing → make changes → dev_end
+```
+
+### Git authentication
+
+GitHub PAT stored in the encrypted secret store (key: `github_token`). On first `dev_start`, the agent asks the user for a token if none is stored.
+
+### Worktree access
+
+Active worktree directories are passed to the Claude subprocess via `--add-dir` flags and added to the bwrap sandbox's read-write paths (Linux). On macOS (local dev), the agent can access worktrees immediately. On Linux (production), a restart is needed after `dev_start` so the sandbox picks up the new paths.
+
+### System prompt integration
+
+Active dev sessions are listed in the system prompt so the agent knows which worktrees are available and how to use them.
 
 ## Secret Management
 
