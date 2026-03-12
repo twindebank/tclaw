@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"tclaw/connection"
@@ -106,6 +107,8 @@ func gmailListHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler 
 			maxResults = maxGmailListResults
 		}
 
+		slog.Info("gmail list starting", "connection", a.Connection, "query", a.Query, "max_results", maxResults)
+
 		// Step 1: list message IDs.
 		listParams := map[string]any{
 			"userId":     "me",
@@ -122,13 +125,17 @@ func gmailListHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler 
 
 		listOutput, err := runGWS(ctx, deps, "gmail", "users", "messages", "list", "--params", string(paramsJSON))
 		if err != nil {
+			slog.Error("gmail list failed", "connection", a.Connection, "error", err)
 			return nil, fmt.Errorf("list messages: %w", err)
 		}
 
 		var listRsp gmailListResponse
 		if err := json.Unmarshal(listOutput, &listRsp); err != nil {
+			slog.Error("gmail list response parse failed", "connection", a.Connection, "error", err, "raw_output_len", len(listOutput))
 			return nil, fmt.Errorf("parse list response: %w", err)
 		}
+
+		slog.Info("gmail list results", "connection", a.Connection, "message_count", len(listRsp.Messages), "total_estimate", listRsp.ResultSizeEstimate)
 
 		if len(listRsp.Messages) == 0 {
 			return json.Marshal(gmailListToolResponse{
@@ -165,12 +172,14 @@ func gmailListHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler 
 
 				output, err := runGWS(ctx, deps, "gmail", "users", "messages", "get", "--params", string(getParams))
 				if err != nil {
+					slog.Warn("gmail message metadata fetch failed", "message_id", msgID, "error", err)
 					results[idx] = indexedResult{index: idx, err: err}
 					return
 				}
 
 				var meta gmailMessageMetadata
 				if err := json.Unmarshal(output, &meta); err != nil {
+					slog.Warn("gmail message metadata parse failed", "message_id", msgID, "error", err)
 					results[idx] = indexedResult{index: idx, err: err}
 					return
 				}
@@ -191,6 +200,10 @@ func gmailListHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler 
 				continue
 			}
 			summaries = append(summaries, r.summary)
+		}
+
+		if errorCount > 0 {
+			slog.Warn("gmail metadata fetch errors", "connection", a.Connection, "fetched", len(summaries), "errors", errorCount)
 		}
 
 		return json.Marshal(gmailListToolResponse{

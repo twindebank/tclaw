@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -122,6 +123,7 @@ func runGWS(ctx context.Context, deps Deps, args ...string) (json.RawMessage, er
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		slog.Error("gws command failed", "args", strings.Join(args, " "), "error", err, "output", string(output))
 		return nil, fmt.Errorf("gws %s: %s", strings.Join(args, " "), string(output))
 	}
 
@@ -145,6 +147,7 @@ func runGWSRaw(ctx context.Context, deps Deps, args ...string) (string, error) {
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		slog.Error("gws command failed", "args", strings.Join(args, " "), "error", err, "output", string(output))
 		return "", fmt.Errorf("gws %s: %s", strings.Join(args, " "), string(output))
 	}
 
