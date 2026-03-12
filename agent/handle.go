@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"tclaw/channel"
@@ -198,9 +199,16 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	// On Linux (deployed), wrap with bubblewrap so the subprocess can only
 	// see explicitly bound paths. Locally (macOS) this is a no-op.
 	if sandboxEnabled() {
+		readOnly := systemReadOnlyPaths
+		if opts.MCPConfigPath != "" {
+			// The MCP config lives in state/ which is outside the user's
+			// home and memory dirs. Bind its parent directory read-only so
+			// the claude CLI can read --mcp-config.
+			readOnly = append(readOnly, filepath.Dir(opts.MCPConfigPath))
+		}
 		paths := sandboxPaths{
 			ReadWrite: []string{opts.MemoryDir, opts.HomeDir},
-			ReadOnly:  systemReadOnlyPaths,
+			ReadOnly:  readOnly,
 		}
 		cmd = wrapWithSandbox(ctx, cmd, paths)
 	}

@@ -244,10 +244,9 @@ Channel stops listening on next agent restart
     memory/                    agent's sandbox (CWD + --add-dir)
       CLAUDE.md                real file, agent's persistent memory
       *.md                     topic files
-    state/                     tclaw persistent data (JSON files)
+    state/                     tclaw persistent data (JSON files, mcp-config.json)
     sessions/                  Claude CLI session IDs per channel
     secrets/                   NaCl-encrypted credentials
-    runtime/                   ephemeral files (mcp-config.json)
     main.sock                  unix socket for "main" channel (local only)
     *.sock                     unix sockets for other channels (local only)
 ```
@@ -358,7 +357,7 @@ Each user gets their own MCP server on a random port (`127.0.0.1:0`). The server
 
 **Important:** The user's `allowed_tools` must include `"mcp__tclaw__*"` for the agent to use any tclaw MCP tools (connections, channels, schedules, etc.). Without this, the CLI's permission system will block MCP tool calls.
 
-The `mcp-config.json` file is generated at `<user>/runtime/mcp-config.json` and passed to the CLI via `--mcp-config`. It includes:
+The `mcp-config.json` file is generated at `<user>/state/mcp-config.json` and passed to the CLI via `--mcp-config`. It includes:
 
 1. The local tclaw MCP server (all built-in tools)
 2. Any remote MCP servers the user has connected

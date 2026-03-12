@@ -240,7 +240,7 @@ Per-user data is split into three zones with clear access boundaries:
 
 1. **Agent memory** (`<user>/memory/`) — the agent reads and writes freely. This is the subprocess CWD and is also passed via `--add-dir`. Contains `CLAUDE.md` (the real file) and topic subfiles.
 2. **Claude Code state** (`<user>/home/.claude/`) — internal CLI state (conversation history, settings, plans). Off limits to the agent. A symlink at `home/.claude/CLAUDE.md` → `../../memory/CLAUDE.md` bridges the CLI's auto-load with the agent's sandbox.
-3. **tclaw state** (`<user>/state/`, `sessions/`, `secrets/`, `runtime/`) — accessible only via MCP tools, outside the agent's HOME entirely.
+3. **tclaw state** (`<user>/state/`, `sessions/`, `secrets/`) — accessible only via MCP tools, outside the agent's HOME entirely.
 
 ### CLAUDE.md
 

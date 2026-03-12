@@ -21,7 +21,7 @@
 ### Three-zone directory model
 1. **Agent memory** (`<user>/memory/`) — agent reads/writes freely, sandboxed via CWD + `--add-dir`
 2. **Claude Code state** (`<user>/home/.claude/`) — internal CLI state, off limits to agent. Symlink bridges CLAUDE.md.
-3. **tclaw state** (`<user>/state/`, `sessions/`, `secrets/`, `runtime/`) — MCP tool access only
+3. **tclaw state** (`<user>/state/`, `sessions/`, `secrets/`) — MCP tool access only
 
 ## Reference Docs
 - @docs/go-patterns.md — comments, error handling, testing, function design, naming
