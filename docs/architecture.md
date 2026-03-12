@@ -326,25 +326,25 @@ users:
 ### Docker
 
 ```yaml
-# Dockerfile bakes tclaw.deploy.yaml as /etc/tclaw/tclaw.yaml
+# Dockerfile bakes tclaw.yaml and selects prod env via --env prod
 # docker-compose.yml loads .env for secrets
 # Volume tclaw-data:/data for persistence
 # cap_add: SYS_ADMIN for bubblewrap namespace creation
 ```
 
 - Secrets from `.env` file (optional)
-- Same binary, different config path
+- Same binary and config file, `--env` flag selects the environment
 - `SYS_ADMIN` capability required for bubblewrap sandbox (Fly.io allows this natively)
 
 ### Fly.io (Production)
 
 ```yaml
-# tclaw.deploy.yaml
-base_dir: /data/tclaw               # persistent Fly volume
-env: prod
-server:
-  addr: 0.0.0.0:9876               # all interfaces (Fly proxy)
-  public_url: https://your-app.fly.dev  # enables Telegram webhooks
+# tclaw.yaml (prod section)
+prod:
+  base_dir: /data/tclaw               # persistent Fly volume
+  server:
+    addr: 0.0.0.0:9876               # all interfaces (Fly proxy)
+    public_url: https://your-app.fly.dev  # enables Telegram webhooks
 ```
 
 - Secrets from `fly secrets set` (pushed via `tclaw deploy secrets`)
