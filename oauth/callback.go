@@ -95,6 +95,7 @@ type pendingEntry struct {
 // before or after Start().
 type CallbackServer struct {
 	addr        string
+	publicURL   string // externally-reachable base URL (e.g. "https://tclaw.fly.dev")
 	mux         *http.ServeMux
 	pending     sync.Map // state string -> pendingEntry
 	srv         *http.Server
@@ -104,10 +105,13 @@ type CallbackServer struct {
 }
 
 // NewCallbackServer creates a callback server but does not start it.
-func NewCallbackServer(addr string) *CallbackServer {
+// publicURL is the externally-reachable base URL (e.g. "https://tclaw.fly.dev").
+// When empty, the callback URL is derived from the listen address.
+func NewCallbackServer(addr string, publicURL string) *CallbackServer {
 	mux := http.NewServeMux()
 	return &CallbackServer{
 		addr:        addr,
+		publicURL:   publicURL,
 		mux:         mux,
 		stopGC:      make(chan struct{}),
 		rateLimiter: NewRateLimiter(),
@@ -172,8 +176,22 @@ func (s *CallbackServer) Stop(ctx context.Context) error {
 }
 
 // CallbackURL returns the full callback URL for OAuth redirect_uri.
+// Uses publicURL when configured (prod), otherwise derives from the listen address.
 func (s *CallbackServer) CallbackURL() string {
-	return fmt.Sprintf("http://%s/oauth/callback", s.addr)
+	if s.publicURL != "" {
+		return s.publicURL + "/oauth/callback"
+	}
+
+	// Replace wildcard addresses with localhost so the URL is routable
+	// and matches what's registered with OAuth providers.
+	host, port, err := net.SplitHostPort(s.addr)
+	if err != nil {
+		return fmt.Sprintf("http://%s/oauth/callback", s.addr)
+	}
+	if host == "" || host == "::" || host == "0.0.0.0" {
+		host = "127.0.0.1"
+	}
+	return fmt.Sprintf("http://%s/oauth/callback", net.JoinHostPort(host, port))
 }
 
 // StartFlow registers a pending OAuth flow and returns the state token.
