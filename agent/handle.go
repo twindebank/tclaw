@@ -368,11 +368,20 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			if result.SessionID != "" && sessionID == "" {
 				sessionID = result.SessionID
 			}
-			if err := tw.write(phaseStatus, fmt.Sprintf("\n📊 %d turns | %.1fs | $%.4f\n",
+			stats := fmt.Sprintf("\n📊 %d turns | %.1fs | $%.4f",
 				result.NumTurns,
 				result.DurationMs/1000,
 				result.CostUSD,
-			)); err != nil {
+			)
+			maxTurns := opts.MaxTurns
+			if maxTurns == 0 {
+				maxTurns = defaultMaxTurns
+			}
+			if result.NumTurns >= maxTurns {
+				stats += fmt.Sprintf("\n⚠️ Turn limit reached (%d/%d). Send another message to continue.", result.NumTurns, maxTurns)
+			}
+			stats += "\n"
+			if err := tw.write(phaseStatus, stats); err != nil {
 				return "", err
 			}
 			slog.Info("turn complete",

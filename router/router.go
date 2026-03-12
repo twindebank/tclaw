@@ -158,13 +158,21 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Set up connection manager and MCP server.
 	connMgr := connection.NewManager(s, secretStore)
 	mcpHandler := mcp.NewHandler()
+
+	// Track active Google connections so tools can list all available
+	// connections in their enum. Shared across connect/disconnect callbacks.
+	googleConns := make(map[connection.ConnectionID]googletools.Deps)
+
 	connectiontools.RegisterTools(mcpHandler, connectiontools.Deps{
 		Manager:  connMgr,
 		Registry: r.registry,
 		Callback: r.callback,
 		Handler:  mcpHandler,
 		OnProviderConnect: func(connID connection.ConnectionID, mgr *connection.Manager, p *provider.Provider) {
-			r.registerToolsForProvider(mcpHandler, connID, mgr, p)
+			r.registerToolsForProvider(mcpHandler, connID, mgr, p, googleConns)
+		},
+		OnProviderDisconnect: func(connID connection.ConnectionID) {
+			r.unregisterToolsForProvider(mcpHandler, connID, googleConns)
 		},
 	})
 	if r.callback != nil {
@@ -172,7 +180,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	}
 
 	// Register provider-specific tools for existing connections.
-	r.registerProviderTools(ctx, mcpHandler, connMgr)
+	r.registerProviderTools(ctx, mcpHandler, connMgr, googleConns)
 
 	mcpServer := mcp.NewServer(mcpHandler)
 	// Bind to a random port on localhost.
@@ -498,7 +506,7 @@ func (r *Router) buildDynamicChannels(dynamicCtx context.Context, userID user.ID
 
 // registerProviderTools loads existing connections and registers
 // provider-specific MCP tools for connections that already have credentials stored.
-func (r *Router) registerProviderTools(ctx context.Context, h *mcp.Handler, mgr *connection.Manager) {
+func (r *Router) registerProviderTools(ctx context.Context, h *mcp.Handler, mgr *connection.Manager, googleConns map[connection.ConnectionID]googletools.Deps) {
 	conns, err := mgr.List(ctx)
 	if err != nil {
 		slog.Error("failed to list connections for tool registration", "err", err)
@@ -521,21 +529,36 @@ func (r *Router) registerProviderTools(ctx context.Context, h *mcp.Handler, mgr 
 			continue
 		}
 
-		r.registerToolsForProvider(h, conn.ID, mgr, p)
+		r.registerToolsForProvider(h, conn.ID, mgr, p, googleConns)
 	}
 }
 
-// registerToolsForProvider registers provider-specific MCP tools for a single connection.
-func (r *Router) registerToolsForProvider(h *mcp.Handler, connID connection.ConnectionID, mgr *connection.Manager, p *provider.Provider) {
+// registerToolsForProvider adds a connection to the provider's tool set
+// and re-registers tools with the updated connection list.
+func (r *Router) registerToolsForProvider(h *mcp.Handler, connID connection.ConnectionID, mgr *connection.Manager, p *provider.Provider, googleConns map[connection.ConnectionID]googletools.Deps) {
 	switch p.ID {
 	case provider.GoogleProviderID:
-		googletools.RegisterTools(h, googletools.Deps{
+		googleConns[connID] = googletools.Deps{
 			ConnID:   connID,
 			Manager:  mgr,
 			Provider: p,
-		})
-		slog.Info("registered google workspace tools", "connection", connID)
+		}
+		googletools.RegisterTools(h, googleConns)
+		slog.Info("registered google workspace tools", "connection", connID, "total_connections", len(googleConns))
 	}
+}
+
+// unregisterToolsForProvider removes a connection from the provider's tool set.
+// If no connections remain, the tools are removed entirely.
+func (r *Router) unregisterToolsForProvider(h *mcp.Handler, connID connection.ConnectionID, googleConns map[connection.ConnectionID]googletools.Deps) {
+	delete(googleConns, connID)
+	if len(googleConns) == 0 {
+		googletools.UnregisterTools(h)
+		slog.Info("unregistered google workspace tools (no connections remain)")
+		return
+	}
+	googletools.RegisterTools(h, googleConns)
+	slog.Info("updated google workspace tools after disconnect", "removed", connID, "remaining", len(googleConns))
 }
 
 // StopUser cancels a user's agent and waits for it to finish.
