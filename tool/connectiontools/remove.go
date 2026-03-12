@@ -30,7 +30,7 @@ type connectionRemoveArgs struct {
 	ConnectionID string `json:"connection_id"`
 }
 
-func connectionRemoveHandler(mgr *connection.Manager) mcp.ToolHandler {
+func connectionRemoveHandler(mgr *connection.Manager, onDisconnect func(connection.ConnectionID)) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 		var a connectionRemoveArgs
 		if err := json.Unmarshal(args, &a); err != nil {
@@ -40,6 +40,10 @@ func connectionRemoveHandler(mgr *connection.Manager) mcp.ToolHandler {
 		id := connection.ConnectionID(a.ConnectionID)
 		if err := mgr.Remove(ctx, id); err != nil {
 			return nil, fmt.Errorf("remove connection: %w", err)
+		}
+
+		if onDisconnect != nil {
+			onDisconnect(id)
 		}
 
 		return json.Marshal(fmt.Sprintf("Connection %s removed.", id))
