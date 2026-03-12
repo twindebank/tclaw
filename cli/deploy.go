@@ -80,7 +80,7 @@ func deployApp() {
 var secretRefPattern = regexp.MustCompile(`\$\{secret:([^}]+)\}`)
 
 func deploySecrets() {
-	configPath := "tclaw.deploy.yaml"
+	configPath := "tclaw.yaml"
 	if len(os.Args) >= 4 {
 		configPath = os.Args[3]
 	}
