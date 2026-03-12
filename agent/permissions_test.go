@@ -297,3 +297,70 @@ func TestReset_DeniedOnRestrictedChannel(t *testing.T) {
 		}
 	}
 }
+
+// --- expandMCPGlobs tests ---
+
+func TestExpandMCPGlobs(t *testing.T) {
+	mcpTools := []string{
+		"channel_create", "channel_edit", "channel_delete", "channel_list",
+		"schedule_create", "schedule_list",
+		"google_workspace", "google_workspace_schema", "google_gmail_list",
+		"connection_add", "connection_list",
+	}
+
+	t.Run("expands glob to matching MCP tools", func(t *testing.T) {
+		tools := []claudecli.Tool{"mcp__tclaw__channel_*"}
+		got := expandMCPGlobs(tools, mcpTools)
+		if len(got) != 4 {
+			t.Fatalf("expected 4 expanded tools, got %d: %v", len(got), got)
+		}
+		for _, g := range got {
+			if !strings.HasPrefix(string(g), "mcp__tclaw__channel_") {
+				t.Errorf("unexpected tool %q", g)
+			}
+		}
+	})
+
+	t.Run("expands google glob", func(t *testing.T) {
+		tools := []claudecli.Tool{"mcp__tclaw__google_*"}
+		got := expandMCPGlobs(tools, mcpTools)
+		if len(got) != 3 {
+			t.Fatalf("expected 3 google tools, got %d: %v", len(got), got)
+		}
+	})
+
+	t.Run("non-glob tools pass through unchanged", func(t *testing.T) {
+		tools := []claudecli.Tool{"Bash", "Read", "mcp__tclaw__channel_create"}
+		got := expandMCPGlobs(tools, mcpTools)
+		if len(got) != 3 {
+			t.Fatalf("expected 3 tools, got %d: %v", len(got), got)
+		}
+		if got[0] != "Bash" || got[1] != "Read" || got[2] != "mcp__tclaw__channel_create" {
+			t.Errorf("unexpected tools: %v", got)
+		}
+	})
+
+	t.Run("mixed globs and explicit tools", func(t *testing.T) {
+		tools := []claudecli.Tool{"Bash", "mcp__tclaw__schedule_*", "WebSearch"}
+		got := expandMCPGlobs(tools, mcpTools)
+		if len(got) != 4 {
+			t.Fatalf("expected 4 tools (Bash + 2 schedule + WebSearch), got %d: %v", len(got), got)
+		}
+	})
+
+	t.Run("unmatched glob preserved for non-MCP tools", func(t *testing.T) {
+		tools := []claudecli.Tool{"Bash*"}
+		got := expandMCPGlobs(tools, mcpTools)
+		if len(got) != 1 || got[0] != "Bash*" {
+			t.Errorf("expected unmatched glob preserved, got: %v", got)
+		}
+	})
+
+	t.Run("nil MCP tools returns input unchanged", func(t *testing.T) {
+		tools := []claudecli.Tool{"mcp__tclaw__channel_*", "Bash"}
+		got := expandMCPGlobs(tools, nil)
+		if len(got) != 2 {
+			t.Fatalf("expected 2 tools, got %d: %v", len(got), got)
+		}
+	})
+}

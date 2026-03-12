@@ -184,6 +184,10 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		fmt.Sprintf("\n# Active Channel\n\nThis message is from **%s** (%s): %s\n", info.Name, info.Type, info.Description)
 
 	allowed, disallowed := resolveToolsForChannel(opts, msg.ChannelID)
+	if opts.Debug {
+		slog.Debug("resolved channel tools", "channel", msg.ChannelID,
+			"allowed", allowed, "disallowed", disallowed)
+	}
 	args := buildArgs(opts, sessionID, systemPrompt, msg.Text, allowed, disallowed)
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Env = buildEnv(opts)
