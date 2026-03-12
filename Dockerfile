@@ -28,4 +28,4 @@ VOLUME ["/data"]
 ENV CLAUDECODE=""
 ENV CLAUDE_CODE_ENTRYPOINT=""
 
-ENTRYPOINT ["tclaw", "--config", "/etc/tclaw/tclaw.yaml"]
+ENTRYPOINT ["tclaw", "serve", "--config", "/etc/tclaw/tclaw.yaml"]
