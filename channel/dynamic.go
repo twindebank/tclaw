@@ -25,6 +25,10 @@ type DynamicChannelConfig struct {
 
 	// DisallowedTools overrides user-level tool permissions for this channel.
 	DisallowedTools []string `json:"disallowed_tools,omitempty"`
+
+	// AllowedUsers restricts which Telegram user IDs can interact with this channel.
+	// When non-empty, messages from users not in this list are silently ignored.
+	AllowedUsers []int64 `json:"allowed_users,omitempty"`
 }
 
 // ChannelSecretKey returns the secret store key for a channel's secret (e.g. bot token).
