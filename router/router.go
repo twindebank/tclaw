@@ -319,6 +319,16 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// ensures re-seeding after a reset that clears these files.
 		seedUserMemory(mu.cfg.ID, memoryDir, homeDir)
 
+		// Regenerate the MCP config on each iteration. ResetAll clears state/
+		// which contains mcp-config.json, so the file must be recreated before
+		// the next agent spawn.
+		remotes := buildRemoteMCPEntries(ctx)
+		if p, genErr := mcp.GenerateConfigFile(stateDir, mcpAddr, remotes); genErr != nil {
+			slog.Error("failed to regenerate mcp config", "user", mu.cfg.ID, "err", genErr)
+		} else {
+			mcpConfigPath = p
+		}
+
 		// Build dynamic channels from the store each iteration so
 		// creates/deletes from the previous agent session take effect.
 		dynamicCtx, cancelDynamic := context.WithCancel(ctx)
