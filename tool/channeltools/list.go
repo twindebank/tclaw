@@ -24,6 +24,7 @@ type channelListEntry struct {
 	Source          string   `json:"source"`
 	AllowedTools    []string `json:"allowed_tools,omitempty"`
 	DisallowedTools []string `json:"disallowed_tools,omitempty"`
+	AllowedUsers    []int64  `json:"allowed_users,omitempty"`
 }
 
 func channelListHandler(deps Deps) mcp.ToolHandler {
@@ -55,6 +56,7 @@ func channelListHandler(deps Deps) mcp.ToolHandler {
 				Source:          string(channel.SourceDynamic),
 				AllowedTools:    cfg.AllowedTools,
 				DisallowedTools: cfg.DisallowedTools,
+				AllowedUsers:    cfg.AllowedUsers,
 			})
 		}
 
