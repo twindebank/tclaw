@@ -93,7 +93,8 @@ local:
         - type: telegram
           name: telegram-local
           description: Telegram messaging (dev bot)
-          token: ${secret:TELEGRAM_BOT_TOKEN}
+          telegram:
+            token: ${secret:TELEGRAM_BOT_TOKEN}
           allowed_tools:
             - Bash
             - Read
@@ -155,7 +156,8 @@ prod:
         - type: telegram
           name: admin
           description: Primary admin channel
-          token: ${secret:TELEGRAM_BOT_TOKEN_PROD}
+          telegram:
+            token: ${secret:TELEGRAM_BOT_TOKEN_PROD}
           allowed_tools:
             - Bash
             - Read
