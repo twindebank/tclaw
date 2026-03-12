@@ -89,6 +89,27 @@ type pendingEntry struct {
 	createdAt time.Time
 }
 
+// swappableHandler wraps an http.Handler that can be replaced at runtime.
+// Registered once on the mux; subsequent Handle() calls for the same pattern
+// swap the inner handler instead of re-registering (which would panic).
+type swappableHandler struct {
+	mu      sync.RWMutex
+	handler http.Handler
+}
+
+func (h *swappableHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.mu.RLock()
+	inner := h.handler
+	h.mu.RUnlock()
+	inner.ServeHTTP(w, r)
+}
+
+func (h *swappableHandler) swap(handler http.Handler) {
+	h.mu.Lock()
+	h.handler = handler
+	h.mu.Unlock()
+}
+
 // CallbackServer handles OAuth redirect callbacks on localhost.
 // A single server runs per tclaw process, shared across all users.
 // Additional routes (e.g. Telegram webhooks) can be registered via Handle()
@@ -102,6 +123,11 @@ type CallbackServer struct {
 	ln          net.Listener
 	stopGC      chan struct{} // closed to stop the stale flow cleanup goroutine
 	rateLimiter *RateLimiter
+
+	// handlers tracks registered patterns so Handle() can swap the handler
+	// for an existing pattern instead of panicking on duplicate registration.
+	handlersMu sync.Mutex
+	handlers   map[string]*swappableHandler
 }
 
 // NewCallbackServer creates a callback server but does not start it.
@@ -115,13 +141,28 @@ func NewCallbackServer(addr string, publicURL string) *CallbackServer {
 		mux:         mux,
 		stopGC:      make(chan struct{}),
 		rateLimiter: NewRateLimiter(),
+		handlers:    make(map[string]*swappableHandler),
 	}
 }
 
 // Handle registers an additional route on the server's mux.
 // Can be called before or after Start() — the mux is created at construction time.
+// Safe to call multiple times for the same pattern (swaps the handler instead of
+// panicking on duplicate registration).
 func (s *CallbackServer) Handle(pattern string, handler http.Handler) {
-	s.mux.Handle(pattern, handler)
+	s.handlersMu.Lock()
+	defer s.handlersMu.Unlock()
+
+	if existing, ok := s.handlers[pattern]; ok {
+		// Pattern already registered — swap the inner handler.
+		existing.swap(handler)
+		slog.Info("swapped http handler", "pattern", pattern)
+		return
+	}
+
+	sw := &swappableHandler{handler: handler}
+	s.handlers[pattern] = sw
+	s.mux.Handle(pattern, sw)
 	slog.Info("registered http handler", "pattern", pattern)
 }
 
