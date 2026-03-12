@@ -6,6 +6,10 @@ services:
         required: false
     volumes:
       - tclaw-data:/data
+    # bubblewrap needs SYS_ADMIN for namespace creation — Fly.io (Firecracker VM)
+    # allows this natively, but Docker requires the capability explicitly.
+    cap_add:
+      - SYS_ADMIN
 
 volumes:
   tclaw-data:

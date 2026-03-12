@@ -6,6 +6,7 @@
 - Persistent volume `tclaw_data` at `/data` for per-user state
 - Health check at `/healthz` on port 9876
 - Config baked into image at `/etc/tclaw/tclaw.yaml` from `tclaw.deploy.yaml`
+- Subprocess sandboxing via bubblewrap (mount namespace isolation per user)
 
 ## Secret Management
 - Secrets stored locally in OS keychain via `tclaw secret set NAME value`

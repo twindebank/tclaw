@@ -198,9 +198,10 @@ func deploySetupToken(ctx context.Context, userID string, setupToken string) err
 	defer cancel()
 
 	envName := SetupTokenEnvVarName(userID)
-	arg := envName + "=" + setupToken
 
-	cmd := exec.CommandContext(deployCtx, "fly", "secrets", "set", arg, "-a", flyAppName)
+	// Pass the secret via stdin instead of CLI args to avoid exposure in `ps aux`.
+	cmd := exec.CommandContext(deployCtx, "fly", "secrets", "set", "-a", flyAppName)
+	cmd.Stdin = strings.NewReader(envName + "=" + setupToken)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		if deployCtx.Err() != nil {
@@ -237,10 +238,15 @@ func stripANSI(s string) string {
 	return ansiEscape.ReplaceAllString(s, "")
 }
 
+// validTokenPattern matches the expected character set for setup tokens
+// (alphanumeric, hyphens, underscores).
+var validTokenPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
 // extractSetupToken parses the setup token from `claude setup-token` output.
 // The command outputs a banner, the token on its own line, and instructions.
 // We find the line containing the expected token prefix and extract it.
 // Output may contain ANSI escape codes from the pty, so we strip those first.
+// Returns "" if the extracted token fails format validation.
 func extractSetupToken(output string) string {
 	clean := stripANSI(output)
 	for _, line := range strings.Split(clean, "\n") {
@@ -251,10 +257,19 @@ func extractSetupToken(output string) string {
 			if sp := strings.IndexByte(token, ' '); sp >= 0 {
 				token = token[:sp]
 			}
+			if !validSetupToken(token) {
+				slog.Warn("extracted setup token failed validation", "token_len", len(token))
+				return ""
+			}
 			return token
 		}
 	}
 	return ""
+}
+
+// validSetupToken checks that a token has reasonable length and expected characters.
+func validSetupToken(token string) bool {
+	return len(token) >= 50 && validTokenPattern.MatchString(token)
 }
 
 // handleAPIKeyEntry validates and persists an API key the user pasted.
@@ -262,9 +277,9 @@ func extractSetupToken(output string) string {
 func handleAPIKeyEntry(ctx context.Context, opts Options, ch channel.Channel, key string) bool {
 	key = strings.TrimSpace(key)
 
-	if !strings.HasPrefix(key, apiKeyPrefix) {
+	if !strings.HasPrefix(key, apiKeyPrefix) || len(key) < 50 {
 		m := ch.Markup()
-		if _, err := ch.Send(ctx, "❌ Invalid key — must start with "+code(m, "sk-ant-")+". Try again or type "+bold(m, "stop")+" to cancel."); err != nil {
+		if _, err := ch.Send(ctx, "❌ Invalid key — must start with "+code(m, "sk-ant-")+" and be a valid length. Try again or type "+bold(m, "stop")+" to cancel."); err != nil {
 			slog.Error("failed to send validation error", "err", err)
 		}
 		return false
