@@ -21,7 +21,7 @@ var channelNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 func channelCreateDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name:        "channel_create",
-		Description: "Create a new dynamic channel. Supported types: 'socket' (local only) and 'telegram' (requires a bot token). The channel becomes active after the agent restarts (send 'stop' or wait for idle timeout).",
+		Description: "Create a new dynamic channel. Supported types: 'socket' (local only) and 'telegram' (requires a bot token). The agent restarts automatically to activate the new channel.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -151,11 +151,15 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			}
 		}
 
+		if deps.OnChannelChange != nil {
+			deps.OnChannelChange()
+		}
+
 		result := map[string]any{
 			"name":        cfg.Name,
 			"type":        string(cfg.Type),
 			"description": cfg.Description,
-			"message":     fmt.Sprintf("Channel %q created. It will become active after the agent restarts — send 'stop' or wait for idle timeout.", a.Name),
+			"message":     fmt.Sprintf("Channel %q created. The agent will restart automatically to activate it.", a.Name),
 		}
 		return json.Marshal(result)
 	}

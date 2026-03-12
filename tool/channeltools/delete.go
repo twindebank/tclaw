@@ -12,7 +12,7 @@ import (
 func channelDeleteDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name:        "channel_delete",
-		Description: "Delete a dynamic channel. Cannot delete static channels (from config file). The channel stops listening after agent restart.",
+		Description: "Delete a dynamic channel. Cannot delete static channels (from config file). The agent restarts automatically to apply the change.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -66,6 +66,10 @@ func channelDeleteHandler(deps Deps) mcp.ToolHandler {
 			}
 		}
 
-		return json.Marshal(fmt.Sprintf("Channel %q deleted. It will stop listening after agent restart — send 'stop' or wait for idle timeout.", a.Name))
+		if deps.OnChannelChange != nil {
+			deps.OnChannelChange()
+		}
+
+		return json.Marshal(fmt.Sprintf("Channel %q deleted. The agent will restart automatically to apply the change.", a.Name))
 	}
 }

@@ -210,8 +210,10 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 			// the claude CLI can read --mcp-config.
 			readOnly = append(readOnly, filepath.Dir(opts.MCPConfigPath))
 		}
+		readWrite := []string{opts.MemoryDir, opts.HomeDir}
+		readWrite = append(readWrite, opts.AddDirs...)
 		paths := sandboxPaths{
-			ReadWrite: []string{opts.MemoryDir, opts.HomeDir},
+			ReadWrite: readWrite,
 			ReadOnly:  readOnly,
 		}
 		cmd = wrapWithSandbox(ctx, cmd, paths)

@@ -14,9 +14,10 @@ var systemPromptRaw string
 var systemPromptTmpl = template.Must(template.New("system_prompt").Parse(systemPromptRaw))
 
 type systemPromptData struct {
-	Date       string
-	Channels   []ChannelInfo
-	UserPrompt string
+	Date        string
+	Channels    []ChannelInfo
+	DevSessions []DevSessionInfo
+	UserPrompt  string
 }
 
 // ChannelInfo describes a channel for the system prompt template.
@@ -29,13 +30,21 @@ type ChannelInfo struct {
 	Source      string // "static" or "dynamic"
 }
 
+// DevSessionInfo describes an active dev session for the system prompt.
+type DevSessionInfo struct {
+	Branch      string
+	WorktreeDir string
+	Age         string
+}
+
 // BuildSystemPrompt executes the system_prompt.md template with runtime
 // state and user config. The result is passed to --append-system-prompt.
-func BuildSystemPrompt(channels []ChannelInfo, userPrompt string) string {
+func BuildSystemPrompt(channels []ChannelInfo, devSessions []DevSessionInfo, userPrompt string) string {
 	data := systemPromptData{
-		Date:       time.Now().Format("Monday, January 2, 2006"),
-		Channels:   channels,
-		UserPrompt: userPrompt,
+		Date:        time.Now().Format("Monday, January 2, 2006"),
+		Channels:    channels,
+		DevSessions: devSessions,
+		UserPrompt:  userPrompt,
 	}
 
 	var buf bytes.Buffer

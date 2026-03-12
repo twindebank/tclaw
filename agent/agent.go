@@ -94,6 +94,10 @@ type Options struct {
 	// If empty, falls back to HomeDir for CWD and no --add-dir is passed.
 	MemoryDir string
 
+	// AddDirs are additional directories passed to the CLI as --add-dir flags
+	// and added to the sandbox's read-write paths. Used for dev worktrees.
+	AddDirs []string
+
 	Channels map[channel.ChannelID]channel.Channel
 
 	// Sessions maps channel IDs to their last-known CLI session IDs.
@@ -828,6 +832,9 @@ func buildArgs(opts Options, sessionID string, systemPrompt string, prompt strin
 	}
 	if opts.MemoryDir != "" {
 		args = append(args, "--add-dir", opts.MemoryDir)
+	}
+	for _, d := range opts.AddDirs {
+		args = append(args, "--add-dir", d)
 	}
 	// "--" terminates flag parsing so prompts starting with "-" aren't
 	// mistaken for CLI options.

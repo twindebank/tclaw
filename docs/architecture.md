@@ -64,6 +64,7 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 | `tool/remotemcp/` | MCP tools for remote MCP server management (add, remove, list, auth_wait). |
 | `tool/scheduletools/` | MCP tools for cron schedule management (create, list, edit, delete, pause, resume). |
 | `tool/google/` | Google Workspace tools registered when a Google connection exists. Delegates to `gws` binary. |
+| `tool/devtools/` | MCP tools for dev workflow (dev_start, dev_status, dev_end, dev_cancel, deploy). Git worktree management, PR creation via `gh`, Fly.io deployment. |
 
 ### Infrastructure
 
@@ -75,6 +76,7 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 | `claudecli/` | Typed enums and event structs for the Claude CLI's stream-json output. Models, permission modes, tools, content block types. Pure data types, no I/O. |
 | `user/` | `user.ID` and `user.Config` types. Pure data, no I/O. |
 | `schedule/` | Cron schedule store and scheduler daemon. The scheduler runs at user lifetime and injects messages into channels when schedules fire. |
+| `dev/` | Dev session types and store. Tracks active git worktree sessions, cached repo URL, GitHub token, and deployed commit hash. |
 
 ### CLI Tools
 
@@ -205,7 +207,7 @@ Store DynamicChannelConfig in user's state (name, type, description — no token
 Store bot token in secret store (key: "channel/<name>/token")
     │
     ▼
-Channel becomes active on next agent restart:
+OnChannelChange callback signals router → agent restarts automatically
     buildDynamicChannels() reads config + token from secret store
     └─► Constructs live Telegram channel with webhook/polling
 
@@ -215,7 +217,7 @@ channel_edit(telegram_config: {token: "new-token"})
 Overwrite token in secret store (same key) — token rotation
     │
     ▼
-New token takes effect on next agent restart
+OnChannelChange callback signals router → agent restarts automatically
 
 channel_delete(name: "mybot")
     │
@@ -226,7 +228,7 @@ Remove DynamicChannelConfig from store
 Delete token from secret store (key: "channel/<name>/token")
     │
     ▼
-Channel stops listening on next agent restart
+OnChannelChange callback signals router → agent restarts automatically
 ```
 
 ## Per-User Directory Layout
