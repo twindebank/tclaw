@@ -163,14 +163,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			m.input.Reset()
-
-			// Client-side commands.
-			if handled := m.handleCommand(text); handled {
-				m.viewport.SetContent(m.msgs.render())
-				m.viewport.GotoBottom()
-				break
-			}
-
 			m.msgs.addUser(text)
 			m.viewport.SetContent(m.msgs.render())
 			m.viewport.GotoBottom()
@@ -246,24 +238,6 @@ var markdownLinkRe = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
 // so URLs land on their own line — clickable and copyable in terminals.
 func flattenMarkdownLinks(s string) string {
 	return markdownLinkRe.ReplaceAllString(s, "$1:\n  $2\n")
-}
-
-// handleCommand checks for client-side commands and executes them.
-// Returns true if the input was a command (caller should not send it to agent).
-func (m model) handleCommand(text string) bool {
-	switch strings.ToLower(text) {
-	case "delete", "new", "reset", "clear":
-		// Send control command to the agent to clear the in-memory session.
-		// The agent also persists the change and sends back a confirmation.
-		go sendMessage(m.incoming, "/tclaw:reset")
-		return true
-	case "compact":
-		m.msgs.addUser(text)
-		go sendMessage(m.incoming, "Please compact your conversation context now. Summarize the key points and discard verbose history.")
-		return true
-	default:
-		return false
-	}
 }
 
 // sendMessage dials the agent socket, sends the message, and streams

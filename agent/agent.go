@@ -10,6 +10,7 @@ import (
 
 	"tclaw/channel"
 	"tclaw/claudecli"
+	"tclaw/config"
 )
 
 // SecretStore provides encrypted persistent storage for secrets.
@@ -26,26 +27,25 @@ const (
 	// CmdStop cancels the active turn. Typed directly by the user.
 	CmdStop = "stop"
 
-	// CmdReset clears the channel's session so the next message starts fresh.
-	// Sent by the chat client when the user types "new", "reset", "clear", or "delete".
-	CmdReset = "/tclaw:reset"
-
 	// CmdLogin starts the OAuth login flow via `claude auth login`.
 	CmdLogin = "login"
 
 	// CmdAuthStatus shows current authentication status.
 	CmdAuthStatus = "auth"
 
-	// "compact" is handled client-side — rewritten into a prompt asking Claude
-	// to compact its conversation context. Not defined here since the agent
-	// never sees it.
+	// CmdCompact compacts the conversation context. Rewritten into a prompt
+	// that asks Claude to summarize and discard verbose history.
+	CmdCompact = "compact"
 )
+
+// compactPrompt is injected as the user message when the compact command is used.
+const compactPrompt = "Please compact your conversation context now. Summarize the key points and discard verbose history."
 
 // isResetCommand returns true if the raw user text is one of the
 // recognised reset synonyms. Case-insensitive.
 func isResetCommand(text string) bool {
 	switch strings.ToLower(strings.TrimSpace(text)) {
-	case "new", "reset", "clear", "delete", CmdReset:
+	case "new", "reset", "clear", "delete":
 		return true
 	}
 	return false
@@ -57,6 +57,17 @@ const agentIdleTimeout = 10 * time.Minute
 // ErrIdleTimeout is returned by RunWithMessages when the agent shuts down
 // due to no messages arriving within the idle timeout.
 var ErrIdleTimeout = errors.New("agent idle timeout")
+
+// ErrResetRequested is returned by RunWithMessages when a reset operation
+// requires the agent to restart (project or full reset).
+var ErrResetRequested = errors.New("reset requested")
+
+// ChannelToolPermissions holds per-channel tool permission overrides.
+// When set, these replace (not merge with) the user-level permissions.
+type ChannelToolPermissions struct {
+	AllowedTools    []claudecli.Tool
+	DisallowedTools []claudecli.Tool
+}
 
 // Options configures the agent. All fields are immutable after creation.
 type Options struct {
@@ -99,6 +110,11 @@ type Options struct {
 	// DisallowedTools are removed from the model's context entirely.
 	DisallowedTools []claudecli.Tool
 
+	// ChannelToolOverrides maps channel IDs to per-channel tool permissions.
+	// When a channel has an override, it replaces the user-level AllowedTools
+	// and DisallowedTools entirely (no merging).
+	ChannelToolOverrides map[channel.ChannelID]ChannelToolPermissions
+
 	// MCPConfigPath points to a JSON file for --mcp-config, connecting
 	// Claude to the local tclaw MCP server (and any remote MCPs).
 	// Empty means no MCP tools are available.
@@ -114,9 +130,14 @@ type Options struct {
 	// May be nil if no secret store is available (keys won't be persisted).
 	SecretStore SecretStore
 
+	// OnReset is called when the user triggers a destructive reset (memories,
+	// project, or everything). The callback performs the actual filesystem
+	// cleanup. May be nil if reset is not supported.
+	OnReset func(level ResetLevel) error
+
 	// Env identifies the runtime environment (e.g. "local", "prod").
-	// OAuth login is only available when Env == "local".
-	Env string
+	// OAuth login is only available in local environments.
+	Env config.Env
 
 	// UserID identifies the user, used for per-user credential deployment.
 	UserID string
@@ -172,6 +193,9 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 	// Per-channel auth flow state so channels don't interfere with each other.
 	authFlows := make(map[channel.ChannelID]*pendingAuth)
 
+	// Per-channel reset flow state.
+	resetFlows := make(map[channel.ChannelID]*pendingReset)
+
 	// oauthNotify wakes the main loop when a background OAuth goroutine
 	// finishes. It carries the channel ID that completed auth so we can
 	// inject a synthetic message and let the state machine process it.
@@ -206,42 +230,150 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		}
 
 		if strings.EqualFold(msg.Text, CmdStop) {
-			// Stop also cancels any pending auth flow for this channel.
+			if !isBuiltinAllowed(opts, msg.ChannelID, claudecli.BuiltinStop) {
+				sendDenied(ctx, opts, msg.ChannelID)
+				continue
+			}
+			// Stop also cancels any pending auth/reset flow for this channel.
 			if flow, ok := authFlows[msg.ChannelID]; ok {
 				flow.cleanup()
 				delete(authFlows, msg.ChannelID)
 			}
+			delete(resetFlows, msg.ChannelID)
 			continue
 		}
 
-		// Control command: clear session so next message starts fresh.
-		// The chat client sends `/tclaw:reset`, but other channels (Telegram)
-		// send the raw word. Normalise both forms here.
+		// Compact: rewrite the message into a prompt and fall through to
+		// normal handling so it works on all channels.
+		if strings.EqualFold(msg.Text, CmdCompact) {
+			if !isBuiltinAllowed(opts, msg.ChannelID, claudecli.BuiltinCompact) {
+				sendDenied(ctx, opts, msg.ChannelID)
+				continue
+			}
+			msg.Text = compactPrompt
+			// Fall through to handle() below.
+		}
+
+		// Reset command: show the multi-option reset menu.
+		// Always allowed — allowedResetLevels guarantees at least Session.
 		if isResetCommand(msg.Text) {
 			if flow, ok := authFlows[msg.ChannelID]; ok {
 				flow.cleanup()
 				delete(authFlows, msg.ChannelID)
 			}
-			old := sessions[msg.ChannelID]
-			delete(sessions, msg.ChannelID)
-			if opts.OnSessionUpdate != nil {
-				opts.OnSessionUpdate(msg.ChannelID, "")
-			}
-			slog.Info("session reset", "channel", msg.ChannelID, "old_session", old)
 			ch, ok := opts.Channels[msg.ChannelID]
 			if ok {
-				if _, err := ch.Send(ctx, "🗑️ session cleared — next message starts a fresh conversation."); err != nil {
-					slog.Error("failed to send reset confirmation", "err", err)
+				levels := allowedResetLevels(opts, msg.ChannelID)
+				if _, err := ch.Send(ctx, dynamicResetMenuPrompt(levels, ch.Markup())); err != nil {
+					slog.Error("failed to send reset menu", "err", err)
 				}
 				if err := ch.Done(ctx); err != nil {
-					slog.Error("failed to close turn after reset", "err", err)
+					slog.Error("failed to close turn after reset menu", "err", err)
 				}
+			}
+			resetFlows[msg.ChannelID] = &pendingReset{state: resetChoosing}
+			continue
+		}
+
+		// Handle reset flow responses (per-channel).
+		if flow, ok := resetFlows[msg.ChannelID]; ok {
+			ch, chOK := opts.Channels[msg.ChannelID]
+			if !chOK {
+				delete(resetFlows, msg.ChannelID)
+				continue
+			}
+
+			switch flow.state {
+			case resetChoosing:
+				levels := allowedResetLevels(opts, msg.ChannelID)
+				choice := strings.TrimSpace(strings.ToLower(msg.Text))
+				chosen := resolveResetChoice(choice, levels)
+
+				switch chosen {
+				case ResetSession:
+					old := sessions[msg.ChannelID]
+					delete(sessions, msg.ChannelID)
+					if opts.OnSessionUpdate != nil {
+						opts.OnSessionUpdate(msg.ChannelID, "")
+					}
+					slog.Info("session reset", "channel", msg.ChannelID, "old_session", old)
+					if _, err := ch.Send(ctx, "🗑️ Session cleared — next message starts a fresh conversation."); err != nil {
+						slog.Error("failed to send reset confirmation", "err", err)
+					}
+					delete(resetFlows, msg.ChannelID)
+
+				case ResetMemories, ResetProject, ResetAll:
+					flow.level = chosen
+					flow.state = resetConfirming
+					if _, err := ch.Send(ctx, resetConfirmPrompt(chosen, ch.Markup())); err != nil {
+						slog.Error("failed to send reset confirm prompt", "err", err)
+					}
+
+				case resetCancel:
+					if _, err := ch.Send(ctx, "↩️ Reset cancelled."); err != nil {
+						slog.Error("failed to send reset cancel", "err", err)
+					}
+					delete(resetFlows, msg.ChannelID)
+
+				default:
+					maxN := len(levels) + 1 // +1 for cancel
+					if _, err := ch.Send(ctx, fmt.Sprintf("Please enter a number (1-%d).", maxN)); err != nil {
+						slog.Error("failed to send reset re-prompt", "err", err)
+					}
+				}
+
+			case resetConfirming:
+				if strings.TrimSpace(strings.ToLower(msg.Text)) == "confirm" {
+					slog.Info("reset confirmed", "level", resetLevelName(flow.level), "channel", msg.ChannelID)
+
+					if opts.OnReset != nil {
+						if err := opts.OnReset(flow.level); err != nil {
+							slog.Error("reset failed", "level", resetLevelName(flow.level), "err", err)
+							if _, sendErr := ch.Send(ctx, "❌ Reset failed: "+err.Error()); sendErr != nil {
+								slog.Error("failed to send reset error", "err", sendErr)
+							}
+							delete(resetFlows, msg.ChannelID)
+							if err := ch.Done(ctx); err != nil {
+								slog.Error("failed to close turn after reset error", "err", err)
+							}
+							continue
+						}
+					}
+
+					levelName := resetLevelName(flow.level)
+				if _, err := ch.Send(ctx, "✅ "+bold(ch.Markup(), strings.ToUpper(levelName[:1])+levelName[1:])+" reset complete."); err != nil {
+						slog.Error("failed to send reset confirmation", "err", err)
+					}
+					delete(resetFlows, msg.ChannelID)
+
+					// Project and Everything resets require the agent to restart
+					// so the router can re-seed memory and rebuild state.
+					if flow.level == ResetProject || flow.level == ResetAll {
+						if err := ch.Done(ctx); err != nil {
+							slog.Error("failed to close turn before restart", "err", err)
+						}
+						return ErrResetRequested
+					}
+				} else {
+					if _, err := ch.Send(ctx, "↩️ Reset cancelled."); err != nil {
+						slog.Error("failed to send reset cancel", "err", err)
+					}
+					delete(resetFlows, msg.ChannelID)
+				}
+			}
+
+			if err := ch.Done(ctx); err != nil {
+				slog.Error("failed to close turn after reset step", "err", err)
 			}
 			continue
 		}
 
 		// Explicit auth commands.
 		if strings.EqualFold(msg.Text, CmdLogin) {
+			if !isBuiltinAllowed(opts, msg.ChannelID, claudecli.BuiltinLogin) {
+				sendDenied(ctx, opts, msg.ChannelID)
+				continue
+			}
 			ch, ok := opts.Channels[msg.ChannelID]
 			if ok {
 				if _, err := ch.Send(ctx, authPrompt(ch.Markup())); err != nil {
@@ -255,6 +387,10 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			continue
 		}
 		if strings.EqualFold(msg.Text, CmdAuthStatus) {
+			if !isBuiltinAllowed(opts, msg.ChannelID, claudecli.BuiltinAuth) {
+				sendDenied(ctx, opts, msg.ChannelID)
+				continue
+			}
 			ch, ok := opts.Channels[msg.ChannelID]
 			if ok {
 				handleAuthStatus(ctx, opts, ch)
@@ -278,7 +414,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				choice := strings.TrimSpace(strings.ToLower(msg.Text))
 				switch choice {
 				case "1", "oauth":
-					if opts.Env != "local" && opts.Env != "" {
+					if !opts.Env.IsLocal() {
 						m := ch.Markup()
 						if _, err := ch.Send(ctx, "❌ OAuth login requires a browser and only works locally.\n"+
 							"Use option "+bold(m, "2")+" to paste an API key instead.\n\n"+authPrompt(m)); err != nil {
@@ -512,6 +648,69 @@ func (t *idleTimerT) Stop() {
 	}
 }
 
+// isBuiltinAllowed checks whether a builtin command is permitted on the given channel.
+// If the channel has overrides, checks those; otherwise checks user-level tools.
+// If NO builtin entries exist at all (neither channel nor user level), everything
+// is allowed for backwards compatibility.
+func isBuiltinAllowed(opts Options, channelID channel.ChannelID, cmd claudecli.Tool) bool {
+	var tools []claudecli.Tool
+	if override, ok := opts.ChannelToolOverrides[channelID]; ok {
+		tools = override.AllowedTools
+	} else {
+		tools = opts.AllowedTools
+	}
+
+	// If no builtin entries exist at all, allow everything (backwards compat).
+	hasAnyBuiltin := false
+	for _, t := range tools {
+		if claudecli.IsBuiltinTool(t) {
+			hasAnyBuiltin = true
+			break
+		}
+	}
+	if !hasAnyBuiltin {
+		return true
+	}
+
+	for _, t := range tools {
+		if t == cmd {
+			return true
+		}
+		// builtin__reset acts as wildcard for all reset sub-levels.
+		if t == claudecli.BuiltinReset && isResetBuiltin(cmd) {
+			return true
+		}
+	}
+	return false
+}
+
+// isResetBuiltin reports whether cmd is any of the reset builtins.
+func isResetBuiltin(cmd claudecli.Tool) bool {
+	switch cmd {
+	case claudecli.BuiltinReset, claudecli.BuiltinResetSession, claudecli.BuiltinResetMemories,
+		claudecli.BuiltinResetProject, claudecli.BuiltinResetAll:
+		return true
+	}
+	return false
+}
+
+// builtinDeniedMessage is sent when a builtin command is not allowed on the current channel.
+const builtinDeniedMessage = "⛔ This command is not available on this channel."
+
+// sendDenied sends the denial message and closes the turn.
+func sendDenied(ctx context.Context, opts Options, channelID channel.ChannelID) {
+	ch, ok := opts.Channels[channelID]
+	if !ok {
+		return
+	}
+	if _, err := ch.Send(ctx, builtinDeniedMessage); err != nil {
+		slog.Error("failed to send denied message", "err", err)
+	}
+	if err := ch.Done(ctx); err != nil {
+		slog.Error("failed to close turn after denied message", "err", err)
+	}
+}
+
 func maxTurns(opts Options) int {
 	if opts.MaxTurns > 0 {
 		return opts.MaxTurns
@@ -519,7 +718,33 @@ func maxTurns(opts Options) int {
 	return defaultMaxTurns
 }
 
-func buildArgs(opts Options, sessionID string, systemPrompt string, prompt string) []string {
+// resolveToolsForChannel returns the allowed and disallowed tool lists for a
+// specific channel. If the channel has overrides, they replace the user-level
+// lists entirely. Builtin tools (builtin__*) are filtered out since the CLI
+// doesn't understand them.
+func resolveToolsForChannel(opts Options, channelID channel.ChannelID) (allowed []claudecli.Tool, disallowed []claudecli.Tool) {
+	if override, ok := opts.ChannelToolOverrides[channelID]; ok {
+		allowed = filterOutBuiltins(override.AllowedTools)
+		disallowed = filterOutBuiltins(override.DisallowedTools)
+	} else {
+		allowed = filterOutBuiltins(opts.AllowedTools)
+		disallowed = filterOutBuiltins(opts.DisallowedTools)
+	}
+	return allowed, disallowed
+}
+
+// filterOutBuiltins returns a copy of tools with all builtin__* entries removed.
+func filterOutBuiltins(tools []claudecli.Tool) []claudecli.Tool {
+	var out []claudecli.Tool
+	for _, t := range tools {
+		if !claudecli.IsBuiltinTool(t) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func buildArgs(opts Options, sessionID string, systemPrompt string, prompt string, allowed []claudecli.Tool, disallowed []claudecli.Tool) []string {
 	args := []string{
 		"--output-format", "stream-json",
 		"--verbose",
@@ -538,10 +763,10 @@ func buildArgs(opts Options, sessionID string, systemPrompt string, prompt strin
 		args = append(args, "--model", string(opts.Model))
 	}
 	args = append(args, "--max-turns", fmt.Sprintf("%d", maxTurns(opts)))
-	for _, t := range opts.AllowedTools {
+	for _, t := range allowed {
 		args = append(args, "--allowedTools", string(t))
 	}
-	for _, t := range opts.DisallowedTools {
+	for _, t := range disallowed {
 		args = append(args, "--disallowedTools", string(t))
 	}
 	if opts.MCPConfigPath != "" {

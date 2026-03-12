@@ -21,27 +21,61 @@ var channelNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 func channelCreateDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name:        "channel_create",
-		Description: "Create a new dynamic channel. Only socket channels are supported. The channel becomes active after the agent restarts (send 'stop' or wait for idle timeout).",
+		Description: "Create a new dynamic channel. Supported types: 'socket' (local only) and 'telegram' (requires a bot token). The channel becomes active after the agent restarts (send 'stop' or wait for idle timeout).",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"name": {
 					"type": "string",
-					"description": "Short name for the channel (e.g. 'phone', 'tablet'). Used in socket path and message routing. Must be unique across all channels."
+					"description": "Short name for the channel (e.g. 'phone', 'tablet'). Used in routing and must be unique across all channels."
 				},
 				"description": {
 					"type": "string",
 					"description": "Describes the device or context (e.g. 'Mobile phone', 'Work tablet'). Helps the agent tailor responses."
+				},
+				"type": {
+					"type": "string",
+					"enum": ["socket", "telegram"],
+					"description": "Channel transport type. 'socket' creates a unix domain socket (local environments only). 'telegram' creates a Telegram bot channel (requires telegram_config)."
+				},
+				"telegram_config": {
+					"type": "object",
+					"description": "Configuration for Telegram channels. Required when type is 'telegram'.",
+					"properties": {
+						"token": {
+							"type": "string",
+							"description": "Bot token from @BotFather. Stored encrypted in the secret store."
+						}
+					},
+					"required": ["token"]
+				},
+				"allowed_tools": {
+					"type": "array",
+					"items": {"type": "string"},
+					"description": "Tools this channel is allowed to use. Replaces user-level allowed_tools. Supports glob patterns (e.g. 'mcp__tclaw__google_*') and builtin commands (e.g. 'builtin__reset_session', 'builtin__stop')."
+				},
+				"disallowed_tools": {
+					"type": "array",
+					"items": {"type": "string"},
+					"description": "Tools explicitly denied on this channel. Replaces user-level disallowed_tools."
 				}
 			},
-			"required": ["name", "description"]
+			"required": ["name", "description", "type"]
 		}`),
 	}
 }
 
+type telegramCreateConfig struct {
+	Token string `json:"token"`
+}
+
 type channelCreateArgs struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name            string                `json:"name"`
+	Description     string                `json:"description"`
+	Type            string                `json:"type"`
+	TelegramConfig  *telegramCreateConfig `json:"telegram_config"`
+	AllowedTools    []string              `json:"allowed_tools"`
+	DisallowedTools []string              `json:"disallowed_tools"`
 }
 
 func channelCreateHandler(deps Deps) mcp.ToolHandler {
@@ -61,6 +95,22 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("description is required and must be under %d characters", maxChannelDescriptionLength)
 		}
 
+		var channelType channel.ChannelType
+		switch a.Type {
+		case "socket":
+			if !deps.Env.IsLocal() {
+				return nil, fmt.Errorf("socket channels are not allowed in %q environment (no authentication)", deps.Env)
+			}
+			channelType = channel.TypeSocket
+		case "telegram":
+			if a.TelegramConfig == nil || a.TelegramConfig.Token == "" {
+				return nil, fmt.Errorf("telegram_config with a bot token is required for telegram channels (get a token from @BotFather)")
+			}
+			channelType = channel.TypeTelegram
+		default:
+			return nil, fmt.Errorf("unsupported channel type %q (must be 'socket' or 'telegram')", a.Type)
+		}
+
 		// Check uniqueness against static channels.
 		for _, info := range deps.StaticChannels {
 			if info.Name == a.Name {
@@ -69,13 +119,24 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 		}
 
 		cfg := channel.DynamicChannelConfig{
-			Name:        a.Name,
-			Type:        channel.TypeSocket,
-			Description: a.Description,
-			CreatedAt:   time.Now(),
+			Name:            a.Name,
+			Type:            channelType,
+			Description:     a.Description,
+			CreatedAt:       time.Now(),
+			AllowedTools:    a.AllowedTools,
+			DisallowedTools: a.DisallowedTools,
 		}
 		if err := deps.DynamicStore.Add(ctx, cfg); err != nil {
 			return nil, fmt.Errorf("create channel: %w", err)
+		}
+
+		// Store the bot token in the encrypted secret store, not in the channel config.
+		if a.TelegramConfig != nil {
+			if err := deps.SecretStore.Set(ctx, channel.ChannelSecretKey(a.Name), a.TelegramConfig.Token); err != nil {
+				// Roll back the channel config if we can't store the secret.
+				_ = deps.DynamicStore.Remove(ctx, a.Name)
+				return nil, fmt.Errorf("store channel secret: %w", err)
+			}
 		}
 
 		result := map[string]any{

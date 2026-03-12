@@ -9,7 +9,12 @@ tclaw is a multi-user Claude Code host that spawns isolated `claude` CLI subproc
 - **Turn stats** — after each turn the agent reports turn count, wall-clock time, and cost.
 - **Max turns** — configurable per user (defaults to 10) to limit agentic loops.
 - **Stop/interrupt** — typing `stop` cancels the active turn immediately via context cancellation.
-- **Session reset** — typing `new`, `reset`, `clear`, or `delete` clears the channel's session so the next message starts fresh.
+- **Reset menu** — typing `new`, `reset`, `clear`, or `delete` opens a multi-option reset menu. The menu is dynamic — only reset levels allowed on the current channel are shown (see [Per-Channel Tool Permissions](#per-channel-tool-permissions)):
+  1. **Session** — clear the current channel's conversation session
+  2. **Memories** — erase all memory files (CLAUDE.md and topic files), requires confirmation
+  3. **Project** — clear Claude Code state and all sessions across channels, keeps memories/connections/schedules/secrets, requires confirmation
+  4. **Everything** — erase all user data (memories, state, sessions, connections, secrets), requires confirmation. The agent restarts and re-seeds a fresh CLAUDE.md after project/everything resets.
+- **Compact** — typing `compact` triggers context compaction (summarize and discard verbose history). Works on all channels.
 
 ## Lazy Agent Lifecycle
 
@@ -34,17 +39,195 @@ Channels are the transport layer between users and the agent.
 
 ### Static Channels (from config)
 
-- **Socket** — unix domain sockets. The TUI chat client (`cmd/chat`) connects here. Supports streaming edits (send-then-edit pattern).
-- **Stdio** — standard input/output for simple pipe-based usage.
-- **Telegram** — Telegram Bot API. Uses long polling locally, webhooks in production. Supports HTML markup for rich text. Status messages (thinking, tool use) are separated from response text into distinct messages.
+- **Socket** — unix domain sockets. The TUI chat client (`cmd/chat`) connects here. Supports streaming edits (send-then-edit pattern). **Local only** — blocked in non-local environments because sockets have no authentication.
+- **Stdio** — standard input/output for simple pipe-based usage. **Local only** — blocked in non-local environments.
+- **Telegram** — Telegram Bot API. Uses long polling locally, webhooks in production. Supports HTML markup for rich text. Status messages (thinking, tool use) are separated from response text into distinct messages. The only channel type allowed in production.
 
 ### Dynamic Channels (runtime-created)
 
-The agent can create, edit, and delete channels at runtime via MCP tools. Dynamic channels are socket-based and persist across agent restarts (stored in the user's state directory). The agent sees both static and dynamic channels in its system prompt.
+The agent can create, edit, and delete channels at runtime via MCP tools. Dynamic channels persist across agent restarts (stored in the user's state directory). The agent sees both static and dynamic channels in its system prompt.
+
+Supported dynamic channel types:
+- **Socket** — local environments only (no authentication). Created with `type: "socket"`.
+- **Telegram** — all environments. Created with `type: "telegram"` and a nested `telegram_config` object containing the bot token.
+
+Channel type is validated at creation time — attempting to create a socket channel in a non-local environment returns an error.
+
+**MCP tools:**
+
+- **channel_create** — creates a dynamic channel. Requires `name`, `description`, and `type` ("socket" or "telegram"). Telegram channels require a `telegram_config` with a `token` field. The bot token is stored in the encrypted secret store (not in the channel config JSON). Optionally accepts `allowed_tools` and `disallowed_tools` to set per-channel tool permissions. Returns an error if the channel type is not allowed in the current environment.
+- **channel_edit** — updates a dynamic channel's description, rotates its Telegram bot token (via `telegram_config`), and/or updates `allowed_tools` and `disallowed_tools`. At least one field must be provided. Cannot edit static channels.
+- **channel_delete** — removes a dynamic channel and cleans up any associated secrets (e.g. Telegram bot token from the secret store). Cannot delete static channels.
+- **channel_list** — lists all channels (static and dynamic) with name, type, description, source, and tool permissions (`allowed_tools`/`disallowed_tools`).
+
+**Secret lifecycle:** Telegram bot tokens follow a strict lifecycle tied to their channel — created in the secret store on `channel_create`, rotated via `channel_edit`, and deleted on `channel_delete`. Tokens are never stored in the channel config JSON and are only read from the secret store when building the live Telegram channel on agent restart.
 
 ### Environment Filtering
 
 Each channel can specify which environments it's active in via the `envs` field. A channel with `envs: [prod]` only starts in production. Empty `envs` means active everywhere.
+
+### Per-Channel Tool Permissions
+
+Channels can override the user-level `allowed_tools` and `disallowed_tools` to restrict or customize what the agent can do on each channel. This works for both static channels (in config) and dynamic channels (via MCP tools).
+
+**How it works:**
+
+- Each channel can define `allowed_tools` and/or `disallowed_tools` lists.
+- When a channel sets tool permissions, they **replace** the user-level defaults entirely — there is no merging. This gives full control over what's available per channel.
+- When a channel has no tool overrides, the user-level `allowed_tools` and `disallowed_tools` apply as before.
+
+**Builtin command gating:**
+
+Builtin commands (stop, compact, reset, login/auth) can be gated using `builtin__*` tool names in the allow/disallow lists:
+
+| Tool name | Controls |
+|-----------|----------|
+| `builtin__stop` | The `stop` command |
+| `builtin__compact` | The `compact` command |
+| `builtin__login` / `builtin__auth` | The `login` and `auth` commands |
+| `builtin__reset` | All reset levels (wildcard) |
+| `builtin__reset_session` | Session reset only |
+| `builtin__reset_memories` | Memories reset only |
+| `builtin__reset_project` | Project reset only |
+| `builtin__reset_all` | Everything reset only |
+
+When a user tries a command that's not allowed on the current channel, the agent responds with "This command is not available on this channel."
+
+The reset menu adapts dynamically — it only shows reset levels that are allowed on the current channel. If only `builtin__reset_session` is allowed, the menu shows just the session option.
+
+**Backwards compatibility:**
+
+- No channel overrides and no builtin entries anywhere: all builtins are allowed, user-level tool permissions apply.
+- Builtin tool names only matter when they appear in an allow/disallow list. Omitting them entirely means all builtins are permitted.
+
+**Config example (static channel):**
+
+```yaml
+channels:
+  - name: restricted
+    type: telegram
+    description: "Read-only channel — no resets, no auth"
+    allowed_tools:
+      - "mcp__tclaw__*"
+      - Bash
+      - Read
+    disallowed_tools:
+      - "builtin__reset"
+      - "builtin__login"
+```
+
+**Dynamic channel example:**
+
+The `channel_create` and `channel_edit` MCP tools accept `allowed_tools` and `disallowed_tools` parameters. The `channel_list` tool includes these fields in its output.
+
+### Channel Setup Patterns
+
+There are two approaches to setting up channels, each suited to different deployment scenarios.
+
+#### Approach 1: Admin + Dynamic Assistant (recommended for power users)
+
+The admin channel is defined statically in config with full tool access including `channel_create`. The admin channel then creates additional channels (like an "assistant" channel) at runtime via the `channel_create` MCP tool with a restricted tool set.
+
+**Why this approach:** The admin creates and manages channels conversationally — no deploy needed to add/modify/remove channels. Tool permissions can be iterated on by editing the dynamic channel. Good for users who want flexibility and can manage their own channel setup.
+
+**Setup flow:**
+1. Static admin channel in config with full tools + `mcp__tclaw__channel_*` + all builtins
+2. User messages admin channel: "set up an assistant channel on Telegram"
+3. Agent guides user through @BotFather token creation
+4. Agent calls `channel_create` with restricted `allowed_tools` (no dev tools, no channel management, restricted reset)
+5. Agent restarts, new channel is live
+
+**Example admin config:**
+```yaml
+channels:
+  - name: admin
+    type: telegram
+    token: ${secret:TELEGRAM_ADMIN_TOKEN}
+    description: Primary admin channel
+    allowed_tools:
+      - Bash
+      - Read
+      - Edit
+      - Write
+      - Glob
+      - Grep
+      - WebFetch
+      - WebSearch
+      - Agent
+      - "mcp__tclaw__channel_*"
+      - "mcp__tclaw__schedule_*"
+      - "mcp__tclaw__connection_*"
+      - "mcp__tclaw__remote_mcp_*"
+      - "builtin__reset"
+      - "builtin__stop"
+      - "builtin__compact"
+      - "builtin__login"
+```
+
+The assistant channel is then created dynamically with tools like:
+```json
+{
+  "allowed_tools": [
+    "Read", "WebFetch", "WebSearch",
+    "mcp__tclaw__google_*", "mcp__tclaw__schedule_*",
+    "mcp__tclaw__connection_*",
+    "builtin__reset_session", "builtin__reset_memories",
+    "builtin__stop", "builtin__compact"
+  ]
+}
+```
+
+#### Approach 2: All Static Channels (recommended for managed deployments)
+
+All channels are defined in the config file. The assistant channel is pre-configured with its tool set. No channel management tools are needed.
+
+**Why this approach:** Simpler, more predictable. Good for deployments where the channel setup is known in advance and managed by whoever controls the config file. No risk of accidentally deleting a channel via a tool call.
+
+**Example config:**
+```yaml
+channels:
+  - name: admin
+    type: telegram
+    token: ${secret:TELEGRAM_ADMIN_TOKEN}
+    description: Primary admin channel
+    allowed_tools:
+      - Bash
+      - Read
+      - Edit
+      - Write
+      - WebFetch
+      - WebSearch
+      - "mcp__tclaw__schedule_*"
+      - "mcp__tclaw__connection_*"
+      - "builtin__reset"
+      - "builtin__stop"
+      - "builtin__compact"
+      - "builtin__login"
+  - name: assistant
+    type: telegram
+    token: ${secret:TELEGRAM_ASSISTANT_TOKEN}
+    description: Mobile assistant — concise responses, no dev tools
+    allowed_tools:
+      - Read
+      - WebFetch
+      - WebSearch
+      - "mcp__tclaw__google_*"
+      - "mcp__tclaw__schedule_*"
+      - "builtin__reset_session"
+      - "builtin__reset_memories"
+      - "builtin__stop"
+      - "builtin__compact"
+```
+
+#### Choosing an approach
+
+| Consideration | Dynamic (Approach 1) | Static (Approach 2) |
+|---------------|---------------------|---------------------|
+| Adding/removing channels | Conversational, no deploy | Requires config change + deploy |
+| Iterating tool permissions | `channel_edit` at runtime | Config change + deploy |
+| Risk of accidental deletion | Possible via `channel_delete` | Not possible (static) |
+| Multi-user managed deployments | Less predictable | More controlled |
+| Best for | Power users, single-user setups | Managed/team deployments |
 
 ## Memory System
 
@@ -162,7 +345,13 @@ Per-user encrypted storage using NaCl secretbox:
 - Master key from `TCLAW_SECRET_KEY` env var
 - Per-user key derived via HKDF (SHA-256)
 - Files stored with 0o600 permissions in the user's `secrets/` directory
-- Used for API keys and OAuth tokens
+- Used for API keys, OAuth tokens, and channel secrets (e.g. Telegram bot tokens)
+
+Secret store keys follow a hierarchical naming convention:
+- `anthropic_api_key` — user's Anthropic API key
+- `claude_setup_token` — OAuth setup token
+- `conn/<provider>/<id>` — OAuth connection credentials (auto-refreshed)
+- `channel/<name>/token` — dynamic channel secrets (lifecycle tied to channel CRUD)
 
 ### Keychain tool
 
@@ -179,7 +368,7 @@ The `cmd/chat` binary is a Bubbletea-based terminal UI that connects to the agen
 
 - Input area with multi-line support (Shift+Enter for newlines, Enter to send)
 - Scrollable message history with timestamps
-- Commands: `new`/`reset` (clear session), `stop` (interrupt), `compact` (compact context), `quit`/`exit` (disconnect)
+- All builtin commands (`reset`, `compact`, `stop`, etc.) are sent to the agent — the chat client no longer intercepts them
 - Visual separation between user and assistant messages
 - Auto-reconnect on socket connection
 - Shows streaming output in real time via edit-in-place

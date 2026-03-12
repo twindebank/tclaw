@@ -26,8 +26,8 @@ type Config struct {
 	BaseDir string `yaml:"base_dir"`
 
 	// Env identifies the environment this process runs in (e.g. "local", "prod").
-	// Used to filter channels via the Envs field. Defaults to "local".
-	Env string `yaml:"env"`
+	// Used to filter channels via the Envs field. Defaults to EnvLocal.
+	Env Env `yaml:"env"`
 
 	// Server configures the HTTP server (health checks, OAuth callbacks, webhooks).
 	Server ServerConfig `yaml:"server"`
@@ -89,8 +89,27 @@ type Channel struct {
 
 	// Envs restricts this channel to specific environments.
 	// Empty means the channel is active in all environments.
-	Envs []string `yaml:"envs,omitempty"`
+	Envs []Env `yaml:"envs,omitempty"`
+
+	// AllowedTools overrides the user-level allowed_tools for this channel.
+	// When set, this replaces (not merges with) the user-level list.
+	AllowedTools []string `yaml:"allowed_tools,omitempty"`
+
+	// DisallowedTools overrides the user-level disallowed_tools for this channel.
+	// When set, this replaces (not merges with) the user-level list.
+	DisallowedTools []string `yaml:"disallowed_tools,omitempty"`
 }
+
+// Env identifies the runtime environment.
+type Env string
+
+const (
+	EnvLocal Env = "local"
+	EnvProd  Env = "prod"
+)
+
+// IsLocal returns true if this is the local development environment.
+func (e Env) IsLocal() bool { return e == EnvLocal }
 
 // ChannelType identifies the transport kind in config.
 type ChannelType string
@@ -119,7 +138,7 @@ func Load(path string) (*Config, error) {
 		cfg.BaseDir = "/tmp/tclaw"
 	}
 	if cfg.Env == "" {
-		cfg.Env = "local"
+		cfg.Env = EnvLocal
 	}
 	if cfg.Server.Addr == "" {
 		cfg.Server.Addr = "127.0.0.1:9876"
@@ -196,6 +215,17 @@ func validate(cfg *Config) error {
 
 			if ch.Description == "" {
 				return fmt.Errorf("user %q channel %q: missing description", u.ID, ch.Name)
+			}
+
+			for k, t := range ch.AllowedTools {
+				if !claudecli.ValidTool(claudecli.Tool(t)) {
+					return fmt.Errorf("user %q channel %q allowed_tools[%d]: unknown tool %q", u.ID, ch.Name, k, t)
+				}
+			}
+			for k, t := range ch.DisallowedTools {
+				if !claudecli.ValidTool(claudecli.Tool(t)) {
+					return fmt.Errorf("user %q channel %q disallowed_tools[%d]: unknown tool %q", u.ID, ch.Name, k, t)
+				}
 			}
 
 			switch ch.Type {

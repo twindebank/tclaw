@@ -90,11 +90,11 @@ Secrets use `${secret:NAME}` syntax — tries OS keychain first, falls back to e
 
 | Command | Effect |
 |---------|--------|
-| `new` / `reset` / `clear` / `delete` | Clear session, start fresh |
+| `new` / `reset` / `clear` / `delete` | Open reset menu (session, memories, project, everything) |
 | `stop` | Cancel the active turn |
 | `login` | Start interactive authentication |
 | `auth` | Show authentication status |
-| `compact` | Ask Claude to compact its context |
+| `compact` | Compact conversation context |
 | `quit` / `exit` | Disconnect chat client |
 
 ## License

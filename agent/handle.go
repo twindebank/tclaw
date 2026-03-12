@@ -182,7 +182,8 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	systemPrompt := opts.SystemPrompt +
 		fmt.Sprintf("\n# Active Channel\n\nThis message is from **%s** (%s): %s\n", info.Name, info.Type, info.Description)
 
-	args := buildArgs(opts, sessionID, systemPrompt, msg.Text)
+	allowed, disallowed := resolveToolsForChannel(opts, msg.ChannelID)
+	args := buildArgs(opts, sessionID, systemPrompt, msg.Text, allowed, disallowed)
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Env = buildEnv(opts)
 

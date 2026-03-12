@@ -2,6 +2,8 @@ package channeltools
 
 import (
 	"tclaw/channel"
+	"tclaw/config"
+	"tclaw/libraries/secret"
 	"tclaw/mcp"
 )
 
@@ -9,6 +11,8 @@ import (
 type Deps struct {
 	DynamicStore   *channel.DynamicStore
 	StaticChannels []channel.Info
+	Env            config.Env
+	SecretStore    secret.Store
 }
 
 // RegisterTools adds channel management tools to the MCP handler.

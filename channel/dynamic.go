@@ -12,12 +12,24 @@ import (
 const dynamicChannelsStoreKey = "dynamic_channels"
 
 // DynamicChannelConfig is a user-created channel stored in the per-user store.
-// Only socket channels are supported for now.
+// Secrets (e.g. Telegram bot tokens) are stored separately in the secret store,
+// not in this config. Use ChannelSecretKey to derive the secret store key.
 type DynamicChannelConfig struct {
 	Name        string      `json:"name"`
 	Type        ChannelType `json:"type"`
 	Description string      `json:"description"`
 	CreatedAt   time.Time   `json:"created_at"`
+
+	// AllowedTools overrides user-level tool permissions for this channel.
+	AllowedTools []string `json:"allowed_tools,omitempty"`
+
+	// DisallowedTools overrides user-level tool permissions for this channel.
+	DisallowedTools []string `json:"disallowed_tools,omitempty"`
+}
+
+// ChannelSecretKey returns the secret store key for a channel's secret (e.g. bot token).
+func ChannelSecretKey(channelName string) string {
+	return "channel/" + channelName + "/token"
 }
 
 // DynamicStore manages CRUD for user-created channel configs.
