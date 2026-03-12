@@ -41,6 +41,10 @@ type Telegram struct {
 	source      Source
 	opts        TelegramOptions
 
+	// allowedUsers restricts which Telegram user IDs can interact with this bot.
+	// When non-empty, messages from users not in this set are silently ignored.
+	allowedUsers map[int64]struct{}
+
 	// webhookSecret is a random token used to verify that incoming webhook
 	// requests are actually from Telegram, not a third party who guessed the URL.
 	// Generated at construction time, passed to both SetWebhook (so Telegram sends it)
@@ -52,21 +56,27 @@ type Telegram struct {
 	bot           *bot.Bot // set in Messages(), used by Send/Edit
 }
 
-func NewTelegram(token, name, description string, opts TelegramOptions) *Telegram {
-	return newTelegram(token, name, description, SourceStatic, opts)
+func NewTelegram(token, name, description string, allowedUsers []int64, opts TelegramOptions) *Telegram {
+	return newTelegram(token, name, description, allowedUsers, SourceStatic, opts)
 }
 
-func NewDynamicTelegram(token, name, description string, opts TelegramOptions) *Telegram {
-	return newTelegram(token, name, description, SourceDynamic, opts)
+func NewDynamicTelegram(token, name, description string, allowedUsers []int64, opts TelegramOptions) *Telegram {
+	return newTelegram(token, name, description, allowedUsers, SourceDynamic, opts)
 }
 
-func newTelegram(token, name, description string, source Source, opts TelegramOptions) *Telegram {
+func newTelegram(token, name, description string, allowedUsers []int64, source Source, opts TelegramOptions) *Telegram {
+	allowed := make(map[int64]struct{}, len(allowedUsers))
+	for _, uid := range allowedUsers {
+		allowed[uid] = struct{}{}
+	}
+
 	return &Telegram{
 		token:         token,
 		name:          name,
 		description:   description,
 		source:        source,
 		opts:          opts,
+		allowedUsers:  allowed,
 		webhookSecret: generateWebhookSecret(),
 	}
 }
@@ -101,6 +111,21 @@ func (t *Telegram) Messages(ctx context.Context) <-chan string {
 			bot.WithDefaultHandler(func(_ context.Context, _ *bot.Bot, update *models.Update) {
 				if update.Message == nil || update.Message.Text == "" {
 					return
+				}
+
+				// Reject messages from users not in the allowlist.
+				if len(t.allowedUsers) > 0 {
+					fromID := int64(0)
+					if update.Message.From != nil {
+						fromID = update.Message.From.ID
+					}
+					if _, ok := t.allowedUsers[fromID]; !ok {
+						slog.Warn("telegram message from unauthorized user",
+							"from_id", fromID,
+							"channel", t.name,
+						)
+						return
+					}
 				}
 
 				chatID := update.Message.Chat.ID
@@ -140,6 +165,12 @@ func (t *Telegram) Messages(ctx context.Context) <-chan string {
 		t.mu.Lock()
 		t.bot = b
 		t.mu.Unlock()
+
+		if len(t.allowedUsers) == 0 {
+			slog.Warn("telegram bot has no allowed_users set — anyone who finds the bot username can message it",
+				"channel", t.name,
+			)
+		}
 
 		if t.opts.WebhookURL != "" {
 			t.startWebhook(ctx, b)

@@ -406,6 +406,8 @@ On macOS (local dev), sandboxing is skipped — the developer's own machine does
 - The `channel_create` MCP tool returns an error when creating a socket channel in a non-local environment
 - Telegram bot tokens are stored in the encrypted secret store (not in the channel config JSON) and cleaned up on channel deletion
 
+Telegram channels support an `allowed_users` list of Telegram user IDs. When set, messages from users not in the list are silently dropped at the handler level before reaching the agent. This prevents strangers who discover a bot's username from interacting with it. The allowlist is configured in `telegram.allowed_users` (static config) or via the `telegram_config.allowed_users` field in `channel_create`/`channel_edit` (dynamic channels).
+
 This means production deployments can only communicate via Telegram (which authenticates via bot token + webhook secret). Socket channels are available in local dev where the threat model is the developer's own machine.
 
 ### 3. MCP Tool Boundary

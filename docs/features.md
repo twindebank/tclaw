@@ -41,7 +41,7 @@ Channels are the transport layer between users and the agent.
 
 - **Socket** — unix domain sockets. The TUI chat client (`cmd/chat`) connects here. Supports streaming edits (send-then-edit pattern). **Local only** — blocked in non-local environments because sockets have no authentication.
 - **Stdio** — standard input/output for simple pipe-based usage. **Local only** — blocked in non-local environments.
-- **Telegram** — Telegram Bot API. Uses long polling locally, webhooks in production. Supports HTML markup for rich text. Status messages (thinking, tool use) are separated from response text into distinct messages. The only channel type allowed in production.
+- **Telegram** — Telegram Bot API. Uses long polling locally, webhooks in production. Supports HTML markup for rich text. Status messages (thinking, tool use) are separated from response text into distinct messages. The only channel type allowed in production. Supports an `allowed_users` list to restrict which Telegram user IDs can interact with the bot.
 
 ### Dynamic Channels (runtime-created)
 
@@ -49,18 +49,45 @@ The agent can create, edit, and delete channels at runtime via MCP tools. Dynami
 
 Supported dynamic channel types:
 - **Socket** — local environments only (no authentication). Created with `type: "socket"`.
-- **Telegram** — all environments. Created with `type: "telegram"` and a nested `telegram_config` object containing the bot token.
+- **Telegram** — all environments. Created with `type: "telegram"` and a nested `telegram_config` object containing the bot token. Optionally includes `allowed_users` to restrict which Telegram user IDs can message the bot.
 
 Channel type is validated at creation time — attempting to create a socket channel in a non-local environment returns an error.
 
 **MCP tools:**
 
-- **channel_create** — creates a dynamic channel. Requires `name`, `description`, and `type` ("socket" or "telegram"). Telegram channels require a `telegram_config` with a `token` field. The bot token is stored in the encrypted secret store (not in the channel config JSON). Optionally accepts `allowed_tools` and `disallowed_tools` to set per-channel tool permissions. Returns an error if the channel type is not allowed in the current environment.
-- **channel_edit** — updates a dynamic channel's description, rotates its Telegram bot token (via `telegram_config`), and/or updates `allowed_tools` and `disallowed_tools`. At least one field must be provided. Cannot edit static channels.
+- **channel_create** — creates a dynamic channel. Requires `name`, `description`, and `type` ("socket" or "telegram"). Telegram channels require a `telegram_config` with a `token` field and optionally an `allowed_users` list of Telegram user IDs. The bot token is stored in the encrypted secret store (not in the channel config JSON). Optionally accepts `allowed_tools` and `disallowed_tools` to set per-channel tool permissions. Returns an error if the channel type is not allowed in the current environment.
+- **channel_edit** — updates a dynamic channel's description, rotates its Telegram bot token (via `telegram_config`), updates `allowed_users`, and/or updates `allowed_tools` and `disallowed_tools`. At least one field must be provided. Cannot edit static channels.
 - **channel_delete** — removes a dynamic channel and cleans up any associated secrets (e.g. Telegram bot token from the secret store). Cannot delete static channels.
 - **channel_list** — lists all channels (static and dynamic) with name, type, description, source, and tool permissions (`allowed_tools`/`disallowed_tools`).
 
 **Secret lifecycle:** Telegram bot tokens follow a strict lifecycle tied to their channel — created in the secret store on `channel_create`, rotated via `channel_edit`, and deleted on `channel_delete`. Tokens are never stored in the channel config JSON and are only read from the secret store when building the live Telegram channel on agent restart.
+
+### Telegram User Allowlist
+
+Telegram bots are public by default — anyone who discovers the bot's username can message it. To lock down access:
+
+1. **Set `allowed_users`** — add your Telegram user ID(s) to the channel config. Messages from users not in the list are silently dropped. Get your user ID by messaging [@userinfobot](https://t.me/userinfobot) on Telegram.
+
+   Static config:
+   ```yaml
+   telegram:
+     token: ${secret:TELEGRAM_BOT_TOKEN}
+     allowed_users: [123456789]
+   ```
+
+   Dynamic channel (via `channel_create`):
+   ```json
+   {
+     "telegram_config": {
+       "token": "...",
+       "allowed_users": [123456789]
+     }
+   }
+   ```
+
+2. **Disable bot search in BotFather** — message [@BotFather](https://t.me/BotFather) and use `/setjoingroups` → disable (prevents group adds) and `/setprivacy` → enable (restricts message access in groups). This is security-through-obscurity but reduces casual discovery.
+
+A warning is logged at startup if a Telegram channel has no `allowed_users` configured.
 
 ### Environment Filtering
 
@@ -192,6 +219,7 @@ channels:
     description: Primary admin channel
     telegram:
       token: ${secret:TELEGRAM_ADMIN_TOKEN}
+      allowed_users: [123456789]  # your Telegram user ID (get it from @userinfobot)
     allowed_tools:
       - Bash
       - Read
@@ -210,6 +238,7 @@ channels:
     description: Mobile assistant — concise responses, no dev tools
     telegram:
       token: ${secret:TELEGRAM_ASSISTANT_TOKEN}
+      allowed_users: [123456789]
     allowed_tools:
       - Read
       - WebFetch

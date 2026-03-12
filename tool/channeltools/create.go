@@ -45,6 +45,11 @@ func channelCreateDef() mcp.ToolDef {
 						"token": {
 							"type": "string",
 							"description": "Bot token from @BotFather. Stored encrypted in the secret store."
+						},
+						"allowed_users": {
+							"type": "array",
+							"items": {"type": "integer"},
+							"description": "Telegram user IDs allowed to interact with this bot. When set, messages from other users are silently ignored. Get your user ID from @userinfobot on Telegram."
 						}
 					},
 					"required": ["token"]
@@ -66,7 +71,8 @@ func channelCreateDef() mcp.ToolDef {
 }
 
 type telegramCreateConfig struct {
-	Token string `json:"token"`
+	Token        string  `json:"token"`
+	AllowedUsers []int64 `json:"allowed_users"`
 }
 
 type channelCreateArgs struct {
@@ -118,6 +124,11 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			}
 		}
 
+		var allowedUsers []int64
+		if a.TelegramConfig != nil {
+			allowedUsers = a.TelegramConfig.AllowedUsers
+		}
+
 		cfg := channel.DynamicChannelConfig{
 			Name:            a.Name,
 			Type:            channelType,
@@ -125,6 +136,7 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			CreatedAt:       time.Now(),
 			AllowedTools:    a.AllowedTools,
 			DisallowedTools: a.DisallowedTools,
+			AllowedUsers:    allowedUsers,
 		}
 		if err := deps.DynamicStore.Add(ctx, cfg); err != nil {
 			return nil, fmt.Errorf("create channel: %w", err)

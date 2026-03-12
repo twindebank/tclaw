@@ -539,7 +539,7 @@ func (r *Router) buildDynamicChannels(dynamicCtx context.Context, userID user.ID
 					r.callback.Handle(pattern, handler)
 				}
 			}
-			tg := channel.NewDynamicTelegram(token, cfg.Name, cfg.Description, opts)
+			tg := channel.NewDynamicTelegram(token, cfg.Name, cfg.Description, cfg.AllowedUsers, opts)
 			channels[tg.Info().ID] = tg
 		default:
 			slog.Warn("skipping dynamic channel with unsupported type", "channel", cfg.Name, "type", cfg.Type)
@@ -676,7 +676,7 @@ func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel, 
 					r.callback.Handle(pattern, handler)
 				}
 			}
-			channels = append(channels, channel.NewTelegram(chCfg.TelegramConfig.Token, chCfg.Name, chCfg.Description, opts))
+			channels = append(channels, channel.NewTelegram(chCfg.TelegramConfig.Token, chCfg.Name, chCfg.Description, chCfg.TelegramConfig.AllowedUsers, opts))
 		default:
 			return nil, fmt.Errorf("channel %d: unsupported type %q", i, chCfg.Type)
 		}
