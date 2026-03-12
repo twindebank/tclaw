@@ -302,9 +302,16 @@ func handleAuthStatus(ctx context.Context, opts Options, ch channel.Channel) {
 	}
 
 	m := ch.Markup()
-	msg := fmt.Sprintf("🔓 Logged in as %s (%s, %s)\nAuth: %s | Provider: %s",
-		bold(m, status.Email), status.OrgName, status.SubscriptionType,
-		status.AuthMethod, status.APIProvider)
+	var msg string
+	if status.Email != "" {
+		// Full profile available (API key or first-party with profile)
+		msg = fmt.Sprintf("🔓 Logged in as %s (%s, %s)\nAuth: %s | Provider: %s",
+			bold(m, status.Email), status.OrgName, status.SubscriptionType,
+			status.AuthMethod, status.APIProvider)
+	} else {
+		msg = fmt.Sprintf("🔓 Logged in\nAuth: %s | Provider: %s",
+			status.AuthMethod, status.APIProvider)
+	}
 	if opts.APIKey != "" {
 		msg += "\n⚠️ API key is configured — it takes precedence over OAuth."
 	}
