@@ -39,3 +39,5 @@
 
 ## Memory
 - When I say "add to memory" or "remember this", update THIS file (CLAUDE.md), not the ~/.claude/ memory directory
+- **NEVER use project-level memory** (`~/.claude/projects/.../memory/`) — all memory goes in THIS file
+- Never deploy (`go run . deploy` or any deploy command) without the user explicitly asking to deploy. Committing code does not imply permission to deploy.

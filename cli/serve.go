@@ -65,7 +65,7 @@ func runServe() {
 			os.Exit(1)
 		}
 
-		if err := r.Register(ctx, u.ToUserConfig(), channels); err != nil {
+		if err := r.Register(ctx, u.ToUserConfig(), channels, u.Channels); err != nil {
 			slog.Error("failed to register user", "user", u.ID, "err", err)
 			os.Exit(1)
 		}
