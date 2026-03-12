@@ -30,6 +30,7 @@ users:
         token: ${secret:TELEGRAM_BOT_TOKEN_PROD}
         envs: [prod]
     allowed_tools:
+      - "mcp__tclaw__*"
       - Bash
       - Read
       - Edit
