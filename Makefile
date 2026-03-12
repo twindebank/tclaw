@@ -1,69 +1,37 @@
-.PHONY: agent chat agent-dev chat-dev secret build clean tidy docker docker-agent docker-chat docker-down deploy deploy-secrets
+REPO_DIR := $(shell pwd)
+SHELL_RC := $(HOME)/.zshrc
+DEV_MARKER := \# --- tclaw dev (do not edit) ---
+DEV_END    := \# --- end tclaw dev ---
 
-# Run the agent daemon — logs appear here.
-agent:
-	@echo "→ starting agent (logs below)..."
-	@go run .
+.PHONY: install install-dev uninstall
 
-# Connect a chat session to the running agent.
-chat:
-	@echo "→ connecting to agent..."
-	@cd cmd/chat && TCLAW_CONFIG=$(CURDIR)/tclaw.yaml go run .
+# Install compiled binaries to $GOPATH/bin.
+install:
+	@go install .
+	@cd cmd/chat && go install .
+	@echo "✓ installed tclaw, tclaw-chat to GOPATH"
 
-# Hot-reload versions — restart on any .go change.
-agent-dev:
-	@echo "→ starting agent (hot reload)..."
-	@mkdir -p tmp
-	@air -c .air.agent.toml
+# Install shell functions that run from source (changes reflected immediately).
+install-dev:
+	@if grep -q "tclaw dev (do not edit)" "$(SHELL_RC)" 2>/dev/null; then \
+		echo "✓ already installed (dev) in $(SHELL_RC)"; \
+	else \
+		echo "" >> "$(SHELL_RC)"; \
+		echo "$(DEV_MARKER)" >> "$(SHELL_RC)"; \
+		echo 'tclaw() { (cd "$(REPO_DIR)" && go run . "$$@") }' >> "$(SHELL_RC)"; \
+		echo "$(DEV_END)" >> "$(SHELL_RC)"; \
+		echo "✓ installed tclaw shell function in $(SHELL_RC)"; \
+		echo "  run: source $(SHELL_RC)"; \
+	fi
 
-# chat is stateless so hot-reload via air isn't useful — air doesn't pass
-# stdin through to child processes. Just build fresh and run directly.
-chat-dev:
-	@echo "→ connecting to agent..."
-	@cd cmd/chat && TCLAW_CONFIG=$(CURDIR)/tclaw.yaml go run .
-
-# Manage secrets in the OS keychain — e.g. make secret ARGS="set ANTHROPIC_API_KEY sk-ant-..."
-secret:
-	@go run ./cmd/secret $(ARGS)
-
-build:
-	@echo "→ building..."
-	@go build -o bin/agent .
-	@cd cmd/chat && go build -o ../../bin/chat .
-	@go build -o bin/secret ./cmd/secret
-	@echo "✓ bin/agent  bin/chat  bin/secret"
-
-clean:
-	@echo "→ cleaning..."
-	@rm -rf bin/
-	@echo "✓ done"
-
-tidy:
-	@echo "→ tidying dependencies..."
-	@go mod tidy
-	@cd cmd/chat && go mod tidy
-	@echo "✓ done"
-
-docker:
-	@echo "→ building docker image..."
-	@docker build -t tclaw .
-
-docker-agent:
-	@echo "→ starting container..."
-	@docker compose up --build -d
-
-docker-down:
-	@echo "→ stopping container..."
-	@docker compose down
-
-docker-chat:
-	@docker compose exec agent tclaw-chat
-
-# Push all ${secret:NAME} refs from the deploy config to Fly.io.
-deploy-secrets:
-	@go run ./cmd/secret deploy-secrets tclaw.deploy.yaml
-
-# Build locally and deploy to Fly.io.
-deploy:
-	@echo "→ deploying to fly.io (local build)..."
-	@DOCKER_HOST=unix://$(HOME)/.docker/run/docker.sock fly deploy --local-only -a tclaw
+# Remove everything — binaries and shell functions. Safe if either is missing.
+uninstall:
+	@rm -f "$$(go env GOPATH)/bin/tclaw" "$$(go env GOPATH)/bin/tclaw-chat" 2>/dev/null; \
+	echo "✓ removed binaries (if present)"
+	@if grep -q "tclaw dev (do not edit)" "$(SHELL_RC)" 2>/dev/null; then \
+		sed -i '' '/tclaw dev (do not edit)/,/end tclaw dev/d' "$(SHELL_RC)"; \
+		echo "✓ removed shell functions from $(SHELL_RC)"; \
+		echo "  run: source $(SHELL_RC)"; \
+	else \
+		echo "✓ no shell functions to remove"; \
+	fi
