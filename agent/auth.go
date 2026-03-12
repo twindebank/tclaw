@@ -1,16 +1,33 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os/exec"
+	"regexp"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/creack/pty/v2"
 
 	"tclaw/channel"
 )
+
+// isExpectedPTYError returns true for I/O errors that are normal when a pty
+// child process exits (EIO on the master fd).
+func isExpectedPTYError(err error) bool {
+	var errno syscall.Errno
+	if errors.As(err, &errno) && errno == syscall.EIO {
+		return true
+	}
+	return false
+}
 
 // authState tracks the multi-step authentication flow.
 type authState int
@@ -118,20 +135,46 @@ func startSetupToken(ctx context.Context, opts Options, flow *pendingAuth, chann
 		cmd := exec.CommandContext(tokenCtx, "claude", "setup-token")
 		cmd.Env = buildEnv(opts)
 
-		output, err := cmd.Output()
+		// Use a pty so the CLI sees a real TTY on all fds and opens the
+		// browser for interactive OAuth. A plain bytes.Buffer on stdout
+		// causes the CLI to detect piped output and skip the browser flow.
+		// pty.Start overrides stdin/stdout/stderr to go through the pty.
+		slog.Info("starting claude setup-token", "channel", channelID)
+		// Use a wide terminal so the token (which can be ~120 chars) doesn't
+		// get line-wrapped by the pty, which would break extraction.
+		ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 512})
 		if err != nil {
+			slog.Error("failed to start claude setup-token with pty", "err", err)
+			flow.oauthDone <- oauthResult{loginMessage: "Setup token generation failed to start. Check server logs."}
+			return
+		}
+		defer ptmx.Close()
+
+		// Read all output from the pty master. The child's stdout and
+		// stderr are both multiplexed through the pty.
+		var stdout bytes.Buffer
+		if _, err := io.Copy(&stdout, ptmx); err != nil {
+			// EIO is expected when the child exits and the pty closes.
+			if !isExpectedPTYError(err) {
+				slog.Warn("error reading pty output", "err", err)
+			}
+		}
+
+		if err := cmd.Wait(); err != nil {
 			if tokenCtx.Err() != nil {
 				flow.oauthDone <- oauthResult{loginMessage: "Setup token generation was cancelled."}
 				return
 			}
-			slog.Error("claude setup-token failed", "err", err, "output", string(output))
+			slog.Error("claude setup-token failed", "err", err, "stdout", stdout.String())
 			flow.oauthDone <- oauthResult{loginMessage: "Setup token generation failed. Check server logs."}
 			return
 		}
 
-		token := extractSetupToken(string(output))
+		slog.Info("claude setup-token finished", "stdout_len", stdout.Len())
+
+		token := extractSetupToken(stdout.String())
 		if token == "" {
-			slog.Error("claude setup-token: no token found in output", "output", string(output))
+			slog.Error("claude setup-token: no token found in output", "output", stdout.String())
 			flow.oauthDone <- oauthResult{loginMessage: "Setup token generation succeeded but no token found in output."}
 			return
 		}
@@ -145,15 +188,24 @@ func startSetupToken(ctx context.Context, opts Options, flow *pendingAuth, chann
 	}()
 }
 
+// deployTimeout limits how long we wait for `fly secrets set` to complete.
+const deployTimeout = 30 * time.Second
+
 // deploySetupToken pushes the user's setup token to Fly.io as a per-user
 // secret so headless production agents can authenticate without a browser.
-func deploySetupToken(userID string, setupToken string) error {
+func deploySetupToken(ctx context.Context, userID string, setupToken string) error {
+	deployCtx, cancel := context.WithTimeout(ctx, deployTimeout)
+	defer cancel()
+
 	envName := SetupTokenEnvVarName(userID)
 	arg := envName + "=" + setupToken
 
-	cmd := exec.Command("fly", "secrets", "set", arg, "-a", flyAppName)
+	cmd := exec.CommandContext(deployCtx, "fly", "secrets", "set", arg, "-a", flyAppName)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		if deployCtx.Err() != nil {
+			return fmt.Errorf("fly secrets set timed out after %s", deployTimeout)
+		}
 		return fmt.Errorf("fly secrets set: %w (output: %s)", err, strings.TrimSpace(string(output)))
 	}
 
@@ -177,14 +229,29 @@ func SetupTokenEnvVarName(userID string) string {
 // setupTokenPrefix is the expected prefix for setup tokens from `claude setup-token`.
 const setupTokenPrefix = "sk-ant-oat01-"
 
+// ansiEscape matches ANSI escape sequences (CSI sequences and simple escapes).
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x1b]*\x1b\\|\x1b[^[\]]`)
+
+// stripANSI removes ANSI escape codes from a string.
+func stripANSI(s string) string {
+	return ansiEscape.ReplaceAllString(s, "")
+}
+
 // extractSetupToken parses the setup token from `claude setup-token` output.
 // The command outputs a banner, the token on its own line, and instructions.
-// We find the line starting with the expected token prefix.
+// We find the line containing the expected token prefix and extract it.
+// Output may contain ANSI escape codes from the pty, so we strip those first.
 func extractSetupToken(output string) string {
-	for _, line := range strings.Split(output, "\n") {
+	clean := stripANSI(output)
+	for _, line := range strings.Split(clean, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, setupTokenPrefix) {
-			return line
+		if idx := strings.Index(line, setupTokenPrefix); idx >= 0 {
+			// Extract from the prefix to the end of the token (no spaces in tokens).
+			token := line[idx:]
+			if sp := strings.IndexByte(token, ' '); sp >= 0 {
+				token = token[:sp]
+			}
+			return token
 		}
 	}
 	return ""
@@ -283,4 +350,29 @@ func loadPersistedAPIKey(ctx context.Context, opts Options) string {
 		return ""
 	}
 	return key
+}
+
+// secretKeySetupToken is the key used to store the setup token in the secret store.
+const secretKeySetupToken = "claude_setup_token"
+
+// persistSetupToken stores the setup token in the encrypted secret store.
+func persistSetupToken(ctx context.Context, opts Options, token string) error {
+	if opts.SecretStore == nil {
+		return fmt.Errorf("no secret store available")
+	}
+	return opts.SecretStore.Set(ctx, secretKeySetupToken, token)
+}
+
+// loadPersistedSetupToken reads a previously stored setup token from the
+// encrypted secret store. Returns empty string if none exists or on error.
+func loadPersistedSetupToken(ctx context.Context, opts Options) string {
+	if opts.SecretStore == nil {
+		return ""
+	}
+	token, err := opts.SecretStore.Get(ctx, secretKeySetupToken)
+	if err != nil {
+		slog.Debug("no persisted setup token found", "err", err)
+		return ""
+	}
+	return token
 }

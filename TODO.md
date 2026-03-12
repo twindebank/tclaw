@@ -27,14 +27,12 @@
 - [ ] Per-channel tool allowlists — restrict which tools are available on each channel independently
 
 ## UX
-- [ ] Split thinking and final message — separate thinking/reasoning from the final response in the output
-- [ ] Thinking message formatting for Signal — format thinking blocks appropriately for the Signal channel
-- [ ] Channel list doesn't show the prod channel — fix channel listing to include production channels
+- [x] Split thinking and final message — separate thinking/tool-use status from response text into distinct messages (Telegram split mode)
 - [ ] Typing indicator — show typing state in the interface while agent is working
 - [x] Timestamps on messages — show when each message was sent/received
 - [x] Visual message separation — clearer boundaries between messages in the chat UI
 - [x] Show tool arguments — display tool call parameters alongside tool use events
-- [ ] Chat keywords — special commands: `/new` (reset session), `/restart` (restart agent), `/status` (show agent info), `/model` (switch model), `/compact` (compact context), `/help` (list commands), `/cancel` (abort current response), `/nuke` (wipe all user data across all sessions — home dir, store, secrets, connections, everything)
+- [ ] Chat keywords — special commands: `/model` (switch model), `/compact` (compact context), `/help` (list commands), `/cancel` (abort current response), `/nuke` (wipe all user data)
 - [ ] Render markdown in chat — parse and render markdown formatting in the TUI client
 - [ ] Web browser tool / Selenium — give the agent the ability to browse and interact with web pages
 
@@ -44,29 +42,36 @@
 - [x] Per-user config — API key, model, permission mode, allowed/disallowed tools via YAML
 - [x] Per-channel session isolation — each channel gets its own Claude session
 - [x] Config validation — validate model, permission mode, tools, and channel types against known values
-- [ ] Filesystem-based database — lightweight persistent storage (users, sessions, etc.) backed by disk, suitable for use with persistent volumes
 
 ## Channel
 - [x] Edit message — allow the channel to update/edit previously sent messages (e.g. for streaming edits in place)
-- [ ] Channel-specific config in system prompt — inject per-channel context (capabilities, restrictions, description) into the agent's system prompt
+- [x] Channel-specific config in system prompt — per-channel context (name, type, description) injected into the agent's system prompt
+- [x] Dynamic channels — agent can create, edit, and delete channels at runtime via MCP tools
+- [x] Telegram support — Bot API with long polling (local) and webhooks (production), HTML markup
+- [ ] Slack support
+- [ ] Signal support
 
 ## Connectivity
-- [ ] Remote MCP support & OAuth over chat channel — proxy MCP auth flows through the user's channel
-- [ ] Other channel support (Telegram, Slack, etc.)
+- [x] Remote MCP support — add/remove/list remote MCP servers with OAuth discovery (RFC 7591)
+- [x] OAuth connections — provider-based OAuth flow via callback server, credential encryption, per-user isolation
+- [x] Google Workspace — Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks via `gws` binary
+
+## Automation
+- [x] Task scheduling — cron-like triggers that kick off agent sessions autonomously
+- [x] Schedule management tools — MCP tools for create, list, edit, delete, pause, resume
 
 ## Self-Modification
 - [ ] Dev tools — MCP tools that let the agent make limited changes to its own codebase:
-  - `dev_start` — clones/mounts the repo into a temp worktree, creates a branch. Returns a workspace path.
-  - `dev_read_file` / `dev_write_file` / `dev_list_files` — scoped file operations within the mounted worktree. Agent never sees raw git commands.
-  - `dev_finish` — commits, pushes, opens a PR, then unmounts the worktree. Agent provides a title + description, tools handle the rest.
-  - `dev_cancel` — tears down the worktree without committing.
-  - All git mechanics (clone, branch, commit, push, PR creation) are deterministic and hidden from the agent. Agent only decides what to change and why.
-  - Deploy key for push access — never commits directly to main, always opens PRs.
-
-## Automation
-- [ ] Task scheduling — cron-like triggers that kick off agent sessions autonomously
-- [ ] Schedule management tools — MCP tools the agent can use to create, list, update, and delete its own scheduled tasks
+  - `dev_start` — clones/mounts the repo into a temp worktree, creates a branch
+  - `dev_read_file` / `dev_write_file` / `dev_list_files` — scoped file operations
+  - `dev_finish` — commits, pushes, opens a PR
+  - `dev_cancel` — tears down the worktree without committing
+  - Deploy key for push access — never commits directly to main, always opens PRs
 
 ## Operations
-- [ ] Deployment — containerise, CI/CD, hosting
-- [ ] Monitoring — logging, metrics, alerting, cost tracking
+- [x] Deployment — Docker + Fly.io with persistent volume, health checks, CI workflow
+- [ ] Monitoring — metrics, alerting, cost tracking (logging is in place via slog)
+
+## Documentation
+- [x] Project docs — [features](docs/features.md), [architecture](docs/architecture.md), README
+- [ ] Coding style guide — extract general patterns from CLAUDE.md into standalone docs

@@ -143,11 +143,17 @@ func Run(ctx context.Context, opts Options) error {
 // instead of calling FanIn internally. Used by the Router for lazy startup
 // where the first message has already been consumed.
 func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.TaggedMessage) error {
-	// Load a persisted API key if no key was provided via config.
+	// Load persisted credentials if none were provided via config/env.
 	if opts.APIKey == "" {
 		if key := loadPersistedAPIKey(ctx, opts); key != "" {
 			opts.APIKey = key
 			slog.Info("loaded persisted API key")
+		}
+	}
+	if opts.SetupToken == "" {
+		if token := loadPersistedSetupToken(ctx, opts); token != "" {
+			opts.SetupToken = token
+			slog.Info("loaded persisted setup token")
 		}
 	}
 
@@ -326,26 +332,48 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			case authDeployConfirm:
 				answer := strings.TrimSpace(strings.ToLower(msg.Text))
 				m := ch.Markup()
+				slog.Info("deploy confirm received", "answer", answer, "user_id", opts.UserID, "token_len", len(flow.setupToken))
 				switch answer {
 				case "yes", "y":
-					if err := deploySetupToken(opts.UserID, flow.setupToken); err != nil {
+					// Persist locally first so the token survives even if deploy fails.
+					opts.SetupToken = flow.setupToken
+					if err := persistSetupToken(ctx, opts, flow.setupToken); err != nil {
+						slog.Error("failed to persist setup token", "err", err)
+					} else {
+						if _, sendErr := ch.Send(ctx, "✅ Token saved locally."); sendErr != nil {
+							slog.Error("failed to send persist confirmation", "err", sendErr)
+						}
+					}
+
+					if _, sendErr := ch.Send(ctx, "⏳ Deploying to production..."); sendErr != nil {
+						slog.Error("failed to send deploy progress", "err", sendErr)
+					}
+					slog.Info("deploying setup token", "user_id", opts.UserID)
+					if err := deploySetupToken(ctx, opts.UserID, flow.setupToken); err != nil {
 						slog.Error("failed to deploy setup token", "err", err)
-						if _, sendErr := ch.Send(ctx, "❌ Deploy failed: "+err.Error()+"\n\nToken is saved locally."); sendErr != nil {
+						if _, sendErr := ch.Send(ctx, "❌ Deploy failed: "+err.Error()); sendErr != nil {
 							slog.Error("failed to send deploy error", "err", sendErr)
 						}
 					} else {
-						if _, sendErr := ch.Send(ctx, "✅ Setup token deployed to production."); sendErr != nil {
+						if _, sendErr := ch.Send(ctx, "✅ Deployed to production."); sendErr != nil {
 							slog.Error("failed to send deploy success", "err", sendErr)
 						}
 					}
+
 					retryMsg := flow.originalMsg
 					delete(authFlows, msg.ChannelID)
 					if retryMsg.Text != "" {
 						queue = append([]channel.TaggedMessage{retryMsg}, queue...)
 					}
 				case "no", "n", "skip":
-					if _, sendErr := ch.Send(ctx, "Skipped. Token is saved locally only."); sendErr != nil {
-						slog.Error("failed to send deploy skip", "err", sendErr)
+					// Persist locally so the token survives agent restarts.
+					opts.SetupToken = flow.setupToken
+					if err := persistSetupToken(ctx, opts, flow.setupToken); err != nil {
+						slog.Error("failed to persist setup token", "err", err)
+					} else {
+						if _, sendErr := ch.Send(ctx, "✅ Token saved locally."); sendErr != nil {
+							slog.Error("failed to send persist confirmation", "err", sendErr)
+						}
 					}
 					retryMsg := flow.originalMsg
 					delete(authFlows, msg.ChannelID)
