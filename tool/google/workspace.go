@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"tclaw/connection"
 	"tclaw/mcp"
 )
 
@@ -16,11 +17,16 @@ type workspaceArgs struct {
 	Body       string `json:"body"`
 }
 
-func workspaceHandler(deps Deps) mcp.ToolHandler {
+func workspaceHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var a workspaceArgs
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
+		}
+
+		deps, err := resolveDeps(connMap, a.Connection)
+		if err != nil {
+			return nil, err
 		}
 
 		if a.Command == "" {
