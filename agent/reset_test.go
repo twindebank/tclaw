@@ -411,9 +411,9 @@ func TestResetConfirmPrompt_EverythingListsAllData(t *testing.T) {
 		"all channels",
 		"OAuth connections",
 		"Schedules",
-		"API keys",
-		"Channel tokens",
-		"re-authenticate",
+		"Dynamic channel tokens",
+		"Not affected",
+		"reconnect OAuth",
 	} {
 		if !strings.Contains(prompt, expected) {
 			t.Errorf("everything confirm should mention %q", expected)
