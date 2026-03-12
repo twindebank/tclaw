@@ -105,6 +105,11 @@ type TelegramChannelConfig struct {
 	// Token is the Telegram bot token from @BotFather.
 	// Supports secret references: ${secret:NAME}.
 	Token string `yaml:"token"`
+
+	// AllowedUsers restricts which Telegram user IDs can interact with this bot.
+	// When non-empty, messages from users not in this list are silently ignored.
+	// Find your user ID by messaging @userinfobot on Telegram.
+	AllowedUsers []int64 `yaml:"allowed_users,omitempty"`
 }
 
 // Env identifies the runtime environment.
