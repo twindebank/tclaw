@@ -48,7 +48,7 @@ func runServe() {
 	}
 
 	// Start the HTTP server (health checks, OAuth callbacks, Telegram webhooks).
-	callback := oauth.NewCallbackServer(cfg.Server.Addr)
+	callback := oauth.NewCallbackServer(cfg.Server.Addr, cfg.Server.PublicURL)
 	if err := callback.Start(); err != nil {
 		slog.Error("failed to start http server", "err", err)
 		os.Exit(1)
