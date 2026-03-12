@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -119,6 +120,13 @@ type Options struct {
 	// Claude to the local tclaw MCP server (and any remote MCPs).
 	// Empty means no MCP tools are available.
 	MCPConfigPath string
+
+	// MCPToolNames is the list of tool names registered on the local MCP
+	// server (e.g. "channel_create", "schedule_list"). Used to expand glob
+	// patterns in AllowedTools/DisallowedTools into explicit names, since
+	// the Claude CLI's --allowedTools flag does not support wildcards for
+	// MCP tools.
+	MCPToolNames []string
 
 	// SystemPrompt is appended to the default Claude system prompt via
 	// --append-system-prompt. Contains agent identity, channel context,
@@ -721,7 +729,9 @@ func maxTurns(opts Options) int {
 // resolveToolsForChannel returns the allowed and disallowed tool lists for a
 // specific channel. If the channel has overrides, they replace the user-level
 // lists entirely. Builtin tools (builtin__*) are filtered out since the CLI
-// doesn't understand them.
+// doesn't understand them. MCP glob patterns are expanded into explicit tool
+// names since the CLI's --allowedTools flag doesn't support wildcards for MCP
+// tools.
 func resolveToolsForChannel(opts Options, channelID channel.ChannelID) (allowed []claudecli.Tool, disallowed []claudecli.Tool) {
 	if override, ok := opts.ChannelToolOverrides[channelID]; ok {
 		allowed = filterOutBuiltins(override.AllowedTools)
@@ -730,7 +740,51 @@ func resolveToolsForChannel(opts Options, channelID channel.ChannelID) (allowed 
 		allowed = filterOutBuiltins(opts.AllowedTools)
 		disallowed = filterOutBuiltins(opts.DisallowedTools)
 	}
+	allowed = expandMCPGlobs(allowed, opts.MCPToolNames)
+	disallowed = expandMCPGlobs(disallowed, opts.MCPToolNames)
 	return allowed, disallowed
+}
+
+// expandMCPGlobs replaces glob patterns (containing * or ?) in the tool list
+// with the matching MCP tool names. Non-glob entries are passed through as-is.
+// The Claude CLI's --allowedTools flag doesn't support wildcards for MCP tools,
+// so we expand "mcp__tclaw__channel_*" into "mcp__tclaw__channel_create",
+// "mcp__tclaw__channel_edit", etc.
+func expandMCPGlobs(tools []claudecli.Tool, mcpToolNames []string) []claudecli.Tool {
+	if len(mcpToolNames) == 0 {
+		return tools
+	}
+
+	// Build the set of fully-qualified MCP tool names (mcp__tclaw__<name>)
+	// that the CLI will see.
+	qualified := make([]string, len(mcpToolNames))
+	for i, name := range mcpToolNames {
+		qualified[i] = "mcp__tclaw__" + name
+	}
+
+	var out []claudecli.Tool
+	for _, t := range tools {
+		ts := string(t)
+		if !strings.ContainsAny(ts, "*?[") {
+			// Not a glob — keep as-is.
+			out = append(out, t)
+			continue
+		}
+		// Expand the glob against known MCP tool names.
+		matched := false
+		for _, q := range qualified {
+			if ok, _ := filepath.Match(ts, q); ok {
+				out = append(out, claudecli.Tool(q))
+				matched = true
+			}
+		}
+		if !matched {
+			// No MCP tools matched — keep the original pattern so it can
+			// still match non-MCP tools (e.g. "Bash*").
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // filterOutBuiltins returns a copy of tools with all builtin__* entries removed.
