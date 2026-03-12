@@ -223,6 +223,53 @@ func TestChannelEdit(t *testing.T) {
 	})
 }
 
+func TestChannelChangeCallback(t *testing.T) {
+	t.Run("create calls OnChannelChange", func(t *testing.T) {
+		var called int
+		th := setupHarnessWithCallback(t, config.EnvLocal, func() { called++ })
+
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "test", "description": "Test channel", "type": "socket",
+		})
+		require.Equal(t, 1, called)
+	})
+
+	t.Run("edit calls OnChannelChange", func(t *testing.T) {
+		var called int
+		th := setupHarnessWithCallback(t, config.EnvLocal, func() { called++ })
+
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "test", "description": "Test channel", "type": "socket",
+		})
+		called = 0
+
+		callTool(t, th.handler, "channel_edit", map[string]any{
+			"name": "test", "description": "Updated",
+		})
+		require.Equal(t, 1, called)
+	})
+
+	t.Run("delete calls OnChannelChange", func(t *testing.T) {
+		var called int
+		th := setupHarnessWithCallback(t, config.EnvLocal, func() { called++ })
+
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "test", "description": "Test channel", "type": "socket",
+		})
+		called = 0
+
+		callTool(t, th.handler, "channel_delete", map[string]any{"name": "test"})
+		require.Equal(t, 1, called)
+	})
+
+	t.Run("nil callback does not panic", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "test", "description": "Test channel", "type": "socket",
+		})
+	})
+}
+
 func TestChannelDelete(t *testing.T) {
 	t.Run("removes dynamic channel", func(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
@@ -285,6 +332,10 @@ type testHarness struct {
 }
 
 func setupHarness(t *testing.T, env config.Env) testHarness {
+	return setupHarnessWithCallback(t, env, nil)
+}
+
+func setupHarnessWithCallback(t *testing.T, env config.Env, onChange func()) testHarness {
 	t.Helper()
 	s, err := store.NewFS(t.TempDir())
 	require.NoError(t, err)
@@ -298,10 +349,11 @@ func setupHarness(t *testing.T, env config.Env) testHarness {
 	}
 
 	channeltools.RegisterTools(handler, channeltools.Deps{
-		DynamicStore:   dynamicStore,
-		StaticChannels: staticChannels,
-		Env:            env,
-		SecretStore:    secrets,
+		DynamicStore:    dynamicStore,
+		StaticChannels:  staticChannels,
+		Env:             env,
+		SecretStore:     secrets,
+		OnChannelChange: onChange,
 	})
 
 	return testHarness{handler: handler, dynamicStore: dynamicStore, secretStore: secrets}

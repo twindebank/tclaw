@@ -37,6 +37,11 @@
 - **When adding a new channel type** — update @docs/features.md and @docs/architecture.md
 - **When changing Go conventions** — update @docs/go-patterns.md
 
+## Fly.io Operations
+- `fly logs -a tclaw` is a **streaming command** — it never exits. Always use `timeout 10 fly logs -a tclaw 2>&1` or pipe through `head -N` to get a snapshot instead of blocking.
+- `fly deploy --local-only --no-cache -a tclaw` to force a clean Docker rebuild (avoids stale cache issues).
+- Use `go run . deploy` for the standard deploy flow, but be aware it doesn't pass `--no-cache` by default.
+
 ## Memory
 - When I say "add to memory" or "remember this", update THIS file (CLAUDE.md), not the ~/.claude/ memory directory
 - **NEVER use project-level memory** (`~/.claude/projects/.../memory/`) — all memory goes in THIS file
