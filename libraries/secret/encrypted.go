@@ -79,7 +79,15 @@ func (e *EncryptedFSStore) Set(_ context.Context, key string, value string) erro
 	// nonce + encrypted data
 	sealed := secretbox.Seal(nonce[:], []byte(value), &nonce, &e.key)
 
-	if err := os.WriteFile(filepath.Join(e.dir, key), sealed, 0o600); err != nil {
+	path := filepath.Join(e.dir, key)
+
+	// Keys like "conn/google/personal" contain slashes, so ensure
+	// intermediate directories exist before writing.
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create secret dir for %q: %w", key, err)
+	}
+
+	if err := os.WriteFile(path, sealed, 0o600); err != nil {
 		return fmt.Errorf("write secret %q: %w", key, err)
 	}
 	return nil
