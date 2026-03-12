@@ -95,6 +95,7 @@ local:
           description: Telegram messaging (dev bot)
           telegram:
             token: ${secret:TELEGRAM_BOT_TOKEN}
+            allowed_users: [830516211]
           allowed_tools:
             - Bash
             - Read
@@ -158,6 +159,7 @@ prod:
           description: Primary admin channel
           telegram:
             token: ${secret:TELEGRAM_BOT_TOKEN_PROD}
+            allowed_users: [830516211]
           allowed_tools:
             - Bash
             - Read

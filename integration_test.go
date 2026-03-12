@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	"tclaw/channel"
 	"tclaw/claudecli"
 	"tclaw/libraries/store"
+	"tclaw/mcp"
 	"tclaw/user"
 )
 
@@ -121,9 +123,32 @@ func skipIfNoClaude(t *testing.T) {
 	if _, err := exec.LookPath("claude"); err != nil {
 		t.Skip("claude CLI not found in PATH — skipping integration test")
 	}
-	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		t.Skip("ANTHROPIC_API_KEY not set — skipping integration test")
+	if os.Getenv("ANTHROPIC_API_KEY") == "" && getSetupToken(t) == "" {
+		t.Skip("neither ANTHROPIC_API_KEY nor setup token available — skipping integration test")
 	}
+}
+
+// getSetupToken tries to read the Claude setup token from the macOS keychain.
+// Returns empty string if unavailable. This allows integration tests to use
+// OAuth credentials instead of an API key.
+func getSetupToken(t *testing.T) string {
+	t.Helper()
+	out, err := exec.Command("security", "find-generic-password",
+		"-s", "tclaw/theo", "-a", "claude_setup_token", "-w").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// agentCredentials returns the APIKey and SetupToken for integration tests,
+// preferring the setup token from the keychain over an API key env var.
+func agentCredentials(t *testing.T) (apiKey, setupToken string) {
+	t.Helper()
+	if token := getSetupToken(t); token != "" {
+		return "", token
+	}
+	return os.Getenv("ANTHROPIC_API_KEY"), ""
 }
 
 // setupAgent creates a single-channel agent with a socket and returns
@@ -465,5 +490,124 @@ func TestIntegration_DynamicChannelLifecycle(t *testing.T) {
 	}
 	if len(configs) != 1 || configs[0].Name != "phone" {
 		t.Fatalf("unexpected dynamic channel configs: %+v", configs)
+	}
+}
+
+// TestIntegration_MCPToolGlobPermission verifies that MCP tools are allowed
+// when using a glob pattern like "mcp__tclaw__test_*" in allowedTools with
+// dontAsk permission mode. This reproduces a production issue where the CLI
+// was blocking MCP tool calls despite glob pattern matching.
+func TestIntegration_MCPToolGlobPermission(t *testing.T) {
+	skipIfNoClaude(t)
+
+	// Use a short temp path to stay within Unix socket's 108-char limit.
+	tmpDir, err := os.MkdirTemp("/tmp", "tg")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+
+	socketPath := filepath.Join(tmpDir, "t.sock")
+	homeDir := filepath.Join(tmpDir, "home")
+	stateDir := filepath.Join(tmpDir, "state")
+	for _, dir := range []string{homeDir, stateDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("create dir: %v", err)
+		}
+	}
+
+	// Start a minimal MCP server with a test tool.
+	var toolCalled atomic.Bool
+	handler := mcp.NewHandler()
+	handler.Register(mcp.ToolDef{
+		Name:        "test_ping",
+		Description: "Returns pong. Use this tool when asked to ping.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{}}`),
+	}, func(_ context.Context, _ json.RawMessage) (json.RawMessage, error) {
+		toolCalled.Store(true)
+		return json.RawMessage(`"pong"`), nil
+	})
+
+	mcpServer := mcp.NewServer(handler)
+	mcpAddr, err := mcpServer.Start("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("start MCP server: %v", err)
+	}
+	t.Cleanup(func() { mcpServer.Stop(context.Background()) })
+
+	// Generate MCP config file.
+	mcpConfigPath, err := mcp.GenerateConfigFile(stateDir, mcpAddr, nil)
+	if err != nil {
+		t.Fatalf("generate MCP config: %v", err)
+	}
+
+	sock := channel.NewSocketServer(socketPath, "test", "Integration test channel")
+	chMap := channel.ChannelMap(sock)
+	chID := sock.Info().ID
+
+	apiKey, setupToken := agentCredentials(t)
+	// OAuth tokens (Pro/Teams) don't have access to Haiku — use Sonnet.
+	model := claudecli.ModelHaiku35
+	if setupToken != "" {
+		model = claudecli.ModelSonnet46
+	}
+	opts := agent.Options{
+		PermissionMode: claudecli.PermissionDontAsk,
+		Model:          model,
+		MaxTurns:       5,
+		APIKey:         apiKey,
+		SetupToken:     setupToken,
+		HomeDir:        homeDir,
+		MCPConfigPath:  mcpConfigPath,
+		MCPToolNames:   []string{"test_ping"},
+		Debug:          true,
+		Channels:       chMap,
+		Sessions:       make(map[channel.ChannelID]string),
+		// Use a glob pattern to allow the MCP tool — this is what prod does.
+		ChannelToolOverrides: map[channel.ChannelID]agent.ChannelToolPermissions{
+			chID: {
+				AllowedTools: []claudecli.Tool{
+					"mcp__tclaw__test_*", // glob pattern — expanded by expandMCPGlobs
+				},
+			},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- agent.Run(ctx, opts)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Log("agent did not stop within 10s")
+		}
+	})
+
+	waitForSocket(t, socketPath, 5*time.Second)
+	client := &socketClient{socketPath: socketPath}
+
+	msgs, err := client.send("Call the test_ping tool and tell me what it returns. Do not ask for permission, just call it.")
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	text := fullText(msgs)
+	t.Logf("Response:\n%s", text)
+
+	if !toolCalled.Load() {
+		t.Error("MCP tool was never called — glob pattern in allowedTools may not be working")
+	}
+
+	textLower := strings.ToLower(text)
+	if strings.Contains(textLower, "permission") || strings.Contains(textLower, "approval") || strings.Contains(textLower, "approve") {
+		t.Errorf("agent asked for permission instead of calling the tool: %s", text)
+	}
+
+	if !strings.Contains(textLower, "pong") {
+		t.Errorf("expected response to contain 'pong', got: %s", text)
 	}
 }
