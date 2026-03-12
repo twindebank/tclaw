@@ -47,6 +47,13 @@ type Info struct {
 	Name        string // human-readable label
 	Description string // explains the channel's purpose (e.g. "Desktop workstation", "Phone")
 	Source      Source // where this channel's config came from
+
+	// AllowedTools overrides user-level tool permissions for this channel.
+	// Uses []string (not []claudecli.Tool) to avoid circular dependency.
+	AllowedTools []string
+
+	// DisallowedTools overrides user-level tool permissions for this channel.
+	DisallowedTools []string
 }
 
 // TaggedMessage pairs an incoming message with the channel it arrived on

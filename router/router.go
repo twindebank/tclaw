@@ -15,6 +15,7 @@ import (
 
 	"tclaw/agent"
 	"tclaw/channel"
+	"tclaw/claudecli"
 	"tclaw/config"
 	"tclaw/connection"
 	"tclaw/mcp"
@@ -38,7 +39,7 @@ type Router struct {
 	mu        sync.Mutex
 	users     map[user.ID]*managedUser
 	baseDir   string // root for per-user data (home dirs, stores)
-	env       string // runtime environment ("local", "prod")
+	env       config.Env
 	registry  *provider.Registry
 	callback  *oauth.CallbackServer // nil if OAuth is not configured
 	publicURL string                // externally-reachable base URL, enables Telegram webhooks
@@ -50,6 +51,10 @@ type Router struct {
 type managedUser struct {
 	cfg      user.Config
 	channels []channel.Channel
+
+	// configChannels preserves the raw config.Channel entries so that
+	// per-channel tool permissions can be resolved at agent start time.
+	configChannels []config.Channel
 
 	// Set once the agent is running.
 	cancel context.CancelFunc
@@ -80,7 +85,7 @@ type managedUser struct {
 // Zone 3 (state/, sessions/, secrets/, runtime/): tclaw data, tool-only access via MCP.
 //
 // callback may be nil if OAuth is not configured.
-func New(baseDir string, env string, registry *provider.Registry, callback *oauth.CallbackServer, publicURL string) *Router {
+func New(baseDir string, env config.Env, registry *provider.Registry, callback *oauth.CallbackServer, publicURL string) *Router {
 	return &Router{
 		users:      make(map[user.ID]*managedUser),
 		mcpServers: make(map[user.ID]*mcp.Server),
@@ -95,7 +100,7 @@ func New(baseDir string, env string, registry *provider.Registry, callback *oaut
 // Register adds a user and its channels to the router without starting
 // the agent. Channels begin listening immediately (sockets accept
 // connections) but the agent goroutine starts lazily on the first message.
-func (r *Router) Register(ctx context.Context, cfg user.Config, channels []channel.Channel) error {
+func (r *Router) Register(ctx context.Context, cfg user.Config, channels []channel.Channel, configChannels []config.Channel) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -104,8 +109,9 @@ func (r *Router) Register(ctx context.Context, cfg user.Config, channels []chann
 	}
 
 	mu := &managedUser{
-		cfg:      cfg,
-		channels: channels,
+		cfg:            cfg,
+		channels:       channels,
+		configChannels: configChannels,
 	}
 	r.users[cfg.ID] = mu
 
@@ -255,20 +261,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	}
 	slog.Info("mcp config ready", "user", mu.cfg.ID, "addr", mcpAddr, "config", mcpConfigPath, "remotes", len(remotes))
 
-	// Seed the user's memory directory and CLAUDE.md.
-	// The real file lives in memory/CLAUDE.md (the agent's sandbox). A symlink
-	// at home/.claude/CLAUDE.md points to it so the Claude CLI auto-loads it.
-	memoryMDPath := filepath.Join(memoryDir, "CLAUDE.md")
-	if _, statErr := os.Stat(memoryMDPath); os.IsNotExist(statErr) {
-		if mkErr := os.MkdirAll(memoryDir, 0o700); mkErr != nil {
-			slog.Error("failed to create memory dir", "user", mu.cfg.ID, "err", mkErr)
-		} else if wErr := os.WriteFile(memoryMDPath, []byte(agent.DefaultMemoryTemplate), 0o600); wErr != nil {
-			slog.Error("failed to seed CLAUDE.md", "user", mu.cfg.ID, "err", wErr)
-		} else {
-			slog.Info("seeded memory/CLAUDE.md", "user", mu.cfg.ID, "path", memoryMDPath)
-		}
-	}
-
 	// Read per-user setup token from Fly secret (e.g. CLAUDE_SETUP_TOKEN_THEO).
 	// Passed to the agent as opts.SetupToken, which buildEnv() maps to
 	// CLAUDE_CODE_OAUTH_TOKEN for the claude subprocess.
@@ -278,27 +270,27 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		slog.Info("found setup token", "user", mu.cfg.ID, "env_var", setupTokenEnvVar)
 	}
 
-	// Ensure home/.claude/ exists and symlink CLAUDE.md into it.
-	claudeDir := filepath.Join(homeDir, ".claude")
-	symlinkPath := filepath.Join(claudeDir, "CLAUDE.md")
-	if _, statErr := os.Lstat(symlinkPath); os.IsNotExist(statErr) {
-		if mkErr := os.MkdirAll(claudeDir, 0o700); mkErr != nil {
-			slog.Error("failed to create .claude dir", "user", mu.cfg.ID, "err", mkErr)
-		} else if linkErr := os.Symlink(filepath.Join("..", "..", "memory", "CLAUDE.md"), symlinkPath); linkErr != nil {
-			slog.Error("failed to create CLAUDE.md symlink", "user", mu.cfg.ID, "err", linkErr)
-		} else {
-			slog.Info("created CLAUDE.md symlink", "user", mu.cfg.ID, "link", symlinkPath)
-		}
-	}
-
 	// Create dynamic channel store and register channel management tools.
 	dynamicStore := channel.NewDynamicStore(s)
 
 	// Collect static channel infos for the channel tools (immutable reference).
+	// Enrich with per-channel tool permissions from config.
 	staticInfos := channel.InfoAll(staticChMap)
+	configByName := make(map[string]config.Channel, len(mu.configChannels))
+	for _, cc := range mu.configChannels {
+		configByName[cc.Name] = cc
+	}
+	for i, info := range staticInfos {
+		if cc, ok := configByName[info.Name]; ok {
+			staticInfos[i].AllowedTools = cc.AllowedTools
+			staticInfos[i].DisallowedTools = cc.DisallowedTools
+		}
+	}
 	channeltools.RegisterTools(mcpHandler, channeltools.Deps{
 		DynamicStore:   dynamicStore,
 		StaticChannels: staticInfos,
+		Env:            r.env,
+		SecretStore:    secretStore,
 	})
 
 	// Set up the scheduler — runs at user lifetime, outlives the agent.
@@ -324,10 +316,15 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	allStaticMsgs := channel.MergeFanIns(ctx, staticMsgs, scheduleMsgs)
 
 	for {
+		// Seed memory/CLAUDE.md and the home/.claude/ symlink on each iteration.
+		// This is idempotent — only writes if the file/link doesn't exist — and
+		// ensures re-seeding after a reset that clears these files.
+		seedUserMemory(mu.cfg.ID, memoryDir, homeDir)
+
 		// Build dynamic channels from the store each iteration so
 		// creates/deletes from the previous agent session take effect.
 		dynamicCtx, cancelDynamic := context.WithCancel(ctx)
-		dynamicChMap, dynamicMsgs := r.buildDynamicChannels(dynamicCtx, mu.cfg.ID, dynamicStore)
+		dynamicChMap, dynamicMsgs := r.buildDynamicChannels(dynamicCtx, mu.cfg.ID, dynamicStore, secretStore)
 
 		// Merge static + dynamic into a combined view for this iteration.
 		allChMap := make(map[channel.ChannelID]channel.Channel, len(staticChMap)+len(dynamicChMap))
@@ -420,6 +417,9 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			}
 		}()
 
+		// Build per-channel tool overrides from config (static) and store (dynamic).
+		channelToolOverrides := buildChannelToolOverrides(staticChMap, configByName, dynamicChMap, dynamicCtx, dynamicStore)
+
 		opts := agent.Options{
 			PermissionMode:  mu.cfg.PermissionMode,
 			Model:           mu.cfg.Model,
@@ -435,14 +435,18 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 					slog.Error("failed to save session", "err", saveErr)
 				}
 			},
-			AllowedTools:    mu.cfg.AllowedTools,
-			DisallowedTools: mu.cfg.DisallowedTools,
-			MCPConfigPath:   mcpConfigPath,
-			SystemPrompt:    systemPrompt,
-			SecretStore:     secretStore,
-			Env:             r.env,
-			UserID:          string(mu.cfg.ID),
-			SetupToken:      setupToken,
+			AllowedTools:         mu.cfg.AllowedTools,
+			DisallowedTools:      mu.cfg.DisallowedTools,
+			ChannelToolOverrides: channelToolOverrides,
+			MCPConfigPath:        mcpConfigPath,
+			SystemPrompt:         systemPrompt,
+			SecretStore:          secretStore,
+			OnReset: func(level agent.ResetLevel) error {
+				return resetUser(level, memoryDir, homeDir, sessionsDir, stateDir, secretsDir, runtimeDir)
+			},
+			Env:        r.env,
+			UserID:     string(mu.cfg.ID),
+			SetupToken: setupToken,
 		}
 
 		agentErr := make(chan error, 1)
@@ -473,6 +477,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			slog.Info("agent shut down due to idle timeout, will restart on next message", "user", mu.cfg.ID)
 			continue
 		}
+		if errors.Is(err, agent.ErrResetRequested) {
+			slog.Info("agent reset requested, restarting", "user", mu.cfg.ID)
+			continue
+		}
 		if err != nil {
 			slog.Error("agent exited with error", "user", mu.cfg.ID, "err", err)
 		}
@@ -483,7 +491,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 // buildDynamicChannels loads dynamic channel configs from the store and creates
 // SocketServer instances for each. Returns a channel map and a fan-in of messages.
 // The caller should cancel dynamicCtx when the agent exits to close the listeners.
-func (r *Router) buildDynamicChannels(dynamicCtx context.Context, userID user.ID, dynamicStore *channel.DynamicStore) (map[channel.ChannelID]channel.Channel, <-chan channel.TaggedMessage) {
+func (r *Router) buildDynamicChannels(dynamicCtx context.Context, userID user.ID, dynamicStore *channel.DynamicStore, secretStore secret.Store) (map[channel.ChannelID]channel.Channel, <-chan channel.TaggedMessage) {
 	configs, err := dynamicStore.List(dynamicCtx)
 	if err != nil {
 		slog.Error("failed to load dynamic channels", "user", userID, "err", err)
@@ -495,9 +503,39 @@ func (r *Router) buildDynamicChannels(dynamicCtx context.Context, userID user.ID
 
 	channels := make(map[channel.ChannelID]channel.Channel, len(configs))
 	for _, cfg := range configs {
-		socketPath := filepath.Join(r.baseDir, string(userID), cfg.Name+".sock")
-		sock := channel.NewDynamicSocketServer(socketPath, cfg.Name, cfg.Description)
-		channels[sock.Info().ID] = sock
+		switch cfg.Type {
+		case channel.TypeSocket:
+			if !r.env.IsLocal() {
+				slog.Info("skipping dynamic socket channel (non-local env)", "channel", cfg.Name, "env", r.env)
+				continue
+			}
+			socketPath := filepath.Join(r.baseDir, string(userID), cfg.Name+".sock")
+			sock := channel.NewDynamicSocketServer(socketPath, cfg.Name, cfg.Description)
+			channels[sock.Info().ID] = sock
+		case channel.TypeTelegram:
+			token, tokenErr := secretStore.Get(dynamicCtx, channel.ChannelSecretKey(cfg.Name))
+			if tokenErr != nil {
+				slog.Error("failed to read telegram bot token from secret store", "channel", cfg.Name, "err", tokenErr)
+				continue
+			}
+			if token == "" {
+				slog.Error("telegram bot token not found in secret store", "channel", cfg.Name)
+				continue
+			}
+
+			var opts channel.TelegramOptions
+			if r.publicURL != "" && r.callback != nil {
+				webhookPath := "/telegram/" + cfg.Name
+				opts.WebhookURL = r.publicURL + webhookPath
+				opts.RegisterHandler = func(pattern string, handler http.Handler) {
+					r.callback.Handle(pattern, handler)
+				}
+			}
+			tg := channel.NewDynamicTelegram(token, cfg.Name, cfg.Description, opts)
+			channels[tg.Info().ID] = tg
+		default:
+			slog.Warn("skipping dynamic channel with unsupported type", "channel", cfg.Name, "type", cfg.Type)
+		}
 	}
 
 	slog.Info("built dynamic channels", "user", userID, "count", len(channels))
@@ -600,7 +638,7 @@ func (r *Router) StopAll() {
 // BuildChannels creates channel instances from config for a given user.
 // Channels whose Envs list doesn't include env are skipped.
 // System-derived paths (socket paths) are computed from the base directory.
-func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel, env string) ([]channel.Channel, error) {
+func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel, env config.Env) ([]channel.Channel, error) {
 	var channels []channel.Channel
 	for i, chCfg := range channelConfigs {
 		if len(chCfg.Envs) > 0 && !slices.Contains(chCfg.Envs, env) {
@@ -610,10 +648,16 @@ func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel, 
 
 		switch chCfg.Type {
 		case config.ChannelTypeSocket:
-			// Each socket channel gets its own path: <base_dir>/<user_id>/<name>.sock
+			if !env.IsLocal() {
+				// Socket channels have no authentication — only allow in local dev.
+				return nil, fmt.Errorf("channel %d (%s): socket channels are not allowed in %q environment", i, chCfg.Name, env)
+			}
 			socketPath := filepath.Join(r.baseDir, string(userID), chCfg.Name+".sock")
 			channels = append(channels, channel.NewSocketServer(socketPath, chCfg.Name, chCfg.Description))
 		case config.ChannelTypeStdio:
+			if !env.IsLocal() {
+				return nil, fmt.Errorf("channel %d (%s): stdio channels are not allowed in %q environment", i, chCfg.Name, env)
+			}
 			channels = append(channels, channel.NewStdio())
 		case config.ChannelTypeTelegram:
 			var opts channel.TelegramOptions
@@ -630,4 +674,73 @@ func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel, 
 		}
 	}
 	return channels, nil
+}
+
+// buildChannelToolOverrides constructs the per-channel tool permission map
+// from static config channels and dynamic channel configs. Only channels that
+// have at least one tool field set get an entry (channels without tool fields
+// fall back to user-level defaults in the agent).
+func buildChannelToolOverrides(
+	staticChMap map[channel.ChannelID]channel.Channel,
+	configByName map[string]config.Channel,
+	dynamicChMap map[channel.ChannelID]channel.Channel,
+	ctx context.Context,
+	dynamicStore *channel.DynamicStore,
+) map[channel.ChannelID]agent.ChannelToolPermissions {
+	overrides := make(map[channel.ChannelID]agent.ChannelToolPermissions)
+
+	// Static channels: match by name to config.
+	for chID, ch := range staticChMap {
+		cc, ok := configByName[ch.Info().Name]
+		if !ok {
+			continue
+		}
+		if len(cc.AllowedTools) == 0 && len(cc.DisallowedTools) == 0 {
+			continue
+		}
+		overrides[chID] = agent.ChannelToolPermissions{
+			AllowedTools:    toTools(cc.AllowedTools),
+			DisallowedTools: toTools(cc.DisallowedTools),
+		}
+	}
+
+	// Dynamic channels: read tool fields from the store.
+	if dynamicStore != nil {
+		configs, err := dynamicStore.List(ctx)
+		if err != nil {
+			slog.Error("failed to list dynamic channels for tool overrides", "err", err)
+		} else {
+			dynamicByName := make(map[string]channel.DynamicChannelConfig, len(configs))
+			for _, dc := range configs {
+				dynamicByName[dc.Name] = dc
+			}
+			for chID, ch := range dynamicChMap {
+				dc, ok := dynamicByName[ch.Info().Name]
+				if !ok {
+					continue
+				}
+				if len(dc.AllowedTools) == 0 && len(dc.DisallowedTools) == 0 {
+					continue
+				}
+				overrides[chID] = agent.ChannelToolPermissions{
+					AllowedTools:    toTools(dc.AllowedTools),
+					DisallowedTools: toTools(dc.DisallowedTools),
+				}
+			}
+		}
+	}
+
+	return overrides
+}
+
+// toTools converts a string slice to a claudecli.Tool slice.
+func toTools(ss []string) []claudecli.Tool {
+	if len(ss) == 0 {
+		return nil
+	}
+	tools := make([]claudecli.Tool, len(ss))
+	for i, s := range ss {
+		tools[i] = claudecli.Tool(s)
+	}
+	return tools
 }

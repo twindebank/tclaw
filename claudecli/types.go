@@ -72,6 +72,25 @@ const (
 	ToolReadMcpResource  Tool = "ReadMcpResource"
 )
 
+// Builtin tool constants — evaluated by tclaw only, never passed to the CLI.
+// The builtin__ prefix lets them coexist with Claude Code tools in allowed_tools lists.
+const (
+	BuiltinReset         Tool = "builtin__reset"           // wildcard: all reset levels
+	BuiltinResetSession  Tool = "builtin__reset_session"
+	BuiltinResetMemories Tool = "builtin__reset_memories"
+	BuiltinResetProject  Tool = "builtin__reset_project"
+	BuiltinResetAll      Tool = "builtin__reset_all"
+	BuiltinStop          Tool = "builtin__stop"
+	BuiltinCompact       Tool = "builtin__compact"
+	BuiltinLogin         Tool = "builtin__login"
+	BuiltinAuth          Tool = "builtin__auth"
+)
+
+// IsBuiltinTool reports whether t has the builtin__ prefix.
+func IsBuiltinTool(t Tool) bool {
+	return strings.HasPrefix(string(t), "builtin__")
+}
+
 // Scoped returns a tool with a pattern restriction, e.g. Bash("git *").
 func (t Tool) Scoped(pattern string) Tool {
 	return Tool(string(t) + "(" + pattern + ")")
@@ -140,6 +159,10 @@ func ValidTool(t Tool) bool {
 	s := string(t)
 	// MCP tool patterns: mcp__<server>__<tool_or_glob>
 	if strings.HasPrefix(s, "mcp__") {
+		return true
+	}
+	// Builtin tool patterns: builtin__<command>
+	if strings.HasPrefix(s, "builtin__") {
 		return true
 	}
 	// Scoped pattern: BaseTool(pattern)

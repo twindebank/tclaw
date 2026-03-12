@@ -5,225 +5,345 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"tclaw/channel"
+	"tclaw/config"
 	"tclaw/libraries/store"
 	"tclaw/mcp"
 	"tclaw/tool/channeltools"
 )
 
-func setup(t *testing.T) (*mcp.Handler, *channel.DynamicStore) {
+func TestChannelList(t *testing.T) {
+	t.Run("shows static channels", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		result := callTool(t, th.handler, "channel_list", map[string]any{})
+
+		var entries []struct {
+			Name   string `json:"name"`
+			Source string `json:"source"`
+		}
+		require.NoError(t, json.Unmarshal(result, &entries))
+		require.Len(t, entries, 1)
+		require.Equal(t, "desktop", entries[0].Name)
+		require.Equal(t, "static", entries[0].Source)
+	})
+}
+
+func TestChannelCreate(t *testing.T) {
+	t.Run("socket in local env", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		result := callTool(t, th.handler, "channel_create", map[string]any{
+			"name":        "phone",
+			"description": "Mobile device",
+			"type":        "socket",
+		})
+
+		var created map[string]any
+		require.NoError(t, json.Unmarshal(result, &created))
+		require.Equal(t, "phone", created["name"])
+		require.Equal(t, "socket", created["type"])
+
+		// Should appear in list alongside the static channel.
+		listResult := callTool(t, th.handler, "channel_list", map[string]any{})
+		var entries []struct {
+			Name   string `json:"name"`
+			Source string `json:"source"`
+		}
+		require.NoError(t, json.Unmarshal(listResult, &entries))
+		require.Len(t, entries, 2)
+	})
+
+	t.Run("socket blocked in prod", func(t *testing.T) {
+		th := setupHarness(t, config.EnvProd)
+
+		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
+			"name":        "phone",
+			"description": "Mobile device",
+			"type":        "socket",
+		})
+		require.Contains(t, err.Error(), "not allowed")
+	})
+
+	t.Run("telegram stores token in secret store", func(t *testing.T) {
+		th := setupHarness(t, config.EnvProd)
+
+		result := callTool(t, th.handler, "channel_create", map[string]any{
+			"name":        "mybot",
+			"description": "Personal Telegram bot",
+			"type":        "telegram",
+			"telegram_config": map[string]any{
+				"token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+			},
+		})
+
+		var created map[string]any
+		require.NoError(t, json.Unmarshal(result, &created))
+		require.Equal(t, "mybot", created["name"])
+		require.Equal(t, "telegram", created["type"])
+
+		// Token should be in the secret store, not in the dynamic config.
+		cfg, err := th.dynamicStore.Get(context.Background(), "mybot")
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+		require.Equal(t, channel.TypeTelegram, cfg.Type)
+
+		token, err := th.secretStore.Get(context.Background(), channel.ChannelSecretKey("mybot"))
+		require.NoError(t, err)
+		require.Equal(t, "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", token)
+	})
+
+	t.Run("telegram missing config", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
+			"name":        "mybot",
+			"description": "Missing token",
+			"type":        "telegram",
+		})
+		require.Contains(t, err.Error(), "telegram_config")
+	})
+
+	t.Run("telegram empty token", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
+			"name":        "mybot",
+			"description": "Empty token",
+			"type":        "telegram",
+			"telegram_config": map[string]any{
+				"token": "",
+			},
+		})
+		require.Contains(t, err.Error(), "telegram_config")
+	})
+
+	t.Run("rejects static name collision", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
+			"name":        "desktop",
+			"description": "conflicts with static",
+			"type":        "socket",
+		})
+		require.Contains(t, err.Error(), "static channel")
+	})
+
+	t.Run("rejects duplicate dynamic name", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name":        "phone",
+			"description": "first",
+			"type":        "socket",
+		})
+
+		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
+			"name":        "phone",
+			"description": "duplicate",
+			"type":        "socket",
+		})
+		require.Contains(t, err.Error(), "already exists")
+	})
+}
+
+func TestChannelEdit(t *testing.T) {
+	t.Run("updates description", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "phone", "description": "Old description", "type": "socket",
+		})
+
+		callTool(t, th.handler, "channel_edit", map[string]any{
+			"name":        "phone",
+			"description": "New description",
+		})
+
+		cfg, err := th.dynamicStore.Get(context.Background(), "phone")
+		require.NoError(t, err)
+		require.Equal(t, "New description", cfg.Description)
+	})
+
+	t.Run("rotates telegram token", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "mybot", "description": "Telegram bot", "type": "telegram",
+			"telegram_config": map[string]any{"token": "old-token"},
+		})
+
+		result := callTool(t, th.handler, "channel_edit", map[string]any{
+			"name":            "mybot",
+			"telegram_config": map[string]any{"token": "new-token"},
+		})
+
+		var edited map[string]any
+		require.NoError(t, json.Unmarshal(result, &edited))
+		require.Equal(t, true, edited["token_rotated"])
+
+		token, err := th.secretStore.Get(context.Background(), channel.ChannelSecretKey("mybot"))
+		require.NoError(t, err)
+		require.Equal(t, "new-token", token)
+	})
+
+	t.Run("telegram config on socket channel errors", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "phone", "description": "Socket", "type": "socket",
+		})
+
+		err := callToolExpectError(t, th.handler, "channel_edit", map[string]any{
+			"name":            "phone",
+			"telegram_config": map[string]any{"token": "wrong-type"},
+		})
+		require.Contains(t, err.Error(), "telegram channels")
+	})
+
+	t.Run("rejects static channel", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		err := callToolExpectError(t, th.handler, "channel_edit", map[string]any{
+			"name":        "desktop",
+			"description": "try to edit static",
+		})
+		require.Contains(t, err.Error(), "static channel")
+	})
+
+	t.Run("requires at least one field", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "phone", "description": "Socket", "type": "socket",
+		})
+
+		err := callToolExpectError(t, th.handler, "channel_edit", map[string]any{
+			"name": "phone",
+		})
+		require.Contains(t, err.Error(), "at least one")
+	})
+}
+
+func TestChannelDelete(t *testing.T) {
+	t.Run("removes dynamic channel", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "phone", "description": "will be deleted", "type": "socket",
+		})
+
+		callTool(t, th.handler, "channel_delete", map[string]any{"name": "phone"})
+
+		cfg, err := th.dynamicStore.Get(context.Background(), "phone")
+		require.NoError(t, err)
+		require.Nil(t, cfg)
+	})
+
+	t.Run("cleans up telegram secret", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "mybot", "description": "Telegram bot", "type": "telegram",
+			"telegram_config": map[string]any{"token": "secret-token"},
+		})
+
+		// Verify secret exists before delete.
+		token, err := th.secretStore.Get(context.Background(), channel.ChannelSecretKey("mybot"))
+		require.NoError(t, err)
+		require.Equal(t, "secret-token", token)
+
+		callTool(t, th.handler, "channel_delete", map[string]any{"name": "mybot"})
+
+		// Both config and secret should be gone.
+		token, err = th.secretStore.Get(context.Background(), channel.ChannelSecretKey("mybot"))
+		require.NoError(t, err)
+		require.Empty(t, token)
+
+		cfg, err := th.dynamicStore.Get(context.Background(), "mybot")
+		require.NoError(t, err)
+		require.Nil(t, cfg)
+	})
+
+	t.Run("rejects static channel", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		err := callToolExpectError(t, th.handler, "channel_delete", map[string]any{"name": "desktop"})
+		require.Contains(t, err.Error(), "static channel")
+	})
+
+	t.Run("rejects nonexistent channel", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		err := callToolExpectError(t, th.handler, "channel_delete", map[string]any{"name": "nonexistent"})
+		require.Contains(t, err.Error(), "not found")
+	})
+}
+
+// --- helpers ---
+
+type testHarness struct {
+	handler      *mcp.Handler
+	dynamicStore *channel.DynamicStore
+	secretStore  *memorySecretStore
+}
+
+func setupHarness(t *testing.T, env config.Env) testHarness {
 	t.Helper()
 	s, err := store.NewFS(t.TempDir())
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
+	require.NoError(t, err)
 
-	ds := channel.NewDynamicStore(s)
+	dynamicStore := channel.NewDynamicStore(s)
 	handler := mcp.NewHandler()
+	secrets := newMemorySecretStore()
 
 	staticChannels := []channel.Info{
 		{ID: "/tmp/test/desktop.sock", Type: channel.TypeSocket, Name: "desktop", Description: "Desktop workstation", Source: channel.SourceStatic},
 	}
 
 	channeltools.RegisterTools(handler, channeltools.Deps{
-		DynamicStore:   ds,
+		DynamicStore:   dynamicStore,
 		StaticChannels: staticChannels,
+		Env:            env,
+		SecretStore:    secrets,
 	})
 
-	return handler, ds
+	return testHarness{handler: handler, dynamicStore: dynamicStore, secretStore: secrets}
 }
 
 func callTool(t *testing.T, h *mcp.Handler, name string, args any) json.RawMessage {
 	t.Helper()
 	argsJSON, err := json.Marshal(args)
-	if err != nil {
-		t.Fatalf("marshal args: %v", err)
-	}
+	require.NoError(t, err)
 	result, err := h.Call(context.Background(), name, argsJSON)
-	if err != nil {
-		t.Fatalf("call %s: %v", name, err)
-	}
+	require.NoError(t, err)
 	return result
 }
 
 func callToolExpectError(t *testing.T, h *mcp.Handler, name string, args any) error {
 	t.Helper()
 	argsJSON, err := json.Marshal(args)
-	if err != nil {
-		t.Fatalf("marshal args: %v", err)
-	}
+	require.NoError(t, err)
 	_, err = h.Call(context.Background(), name, argsJSON)
-	if err == nil {
-		t.Fatalf("expected error from %s, got nil", name)
-	}
+	require.Error(t, err)
 	return err
 }
 
-func TestChannelList_ShowsStaticChannels(t *testing.T) {
-	h, _ := setup(t)
-
-	result := callTool(t, h, "channel_list", map[string]any{})
-
-	var entries []struct {
-		Name   string `json:"name"`
-		Source string `json:"source"`
-	}
-	if err := json.Unmarshal(result, &entries); err != nil {
-		t.Fatalf("unmarshal result: %v", err)
-	}
-
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
-	if entries[0].Name != "desktop" {
-		t.Fatalf("expected 'desktop', got %q", entries[0].Name)
-	}
-	if entries[0].Source != "static" {
-		t.Fatalf("expected source 'static', got %q", entries[0].Source)
-	}
+// memorySecretStore is an in-memory secret.Store for testing.
+type memorySecretStore struct {
+	data map[string]string
 }
 
-func TestChannelCreate_AddsAndListsDynamic(t *testing.T) {
-	h, _ := setup(t)
-
-	// Create a dynamic channel.
-	result := callTool(t, h, "channel_create", map[string]string{
-		"name":        "phone",
-		"description": "Mobile device",
-	})
-
-	var createResult map[string]any
-	if err := json.Unmarshal(result, &createResult); err != nil {
-		t.Fatalf("unmarshal create result: %v", err)
-	}
-	if createResult["name"] != "phone" {
-		t.Fatalf("expected name 'phone', got %v", createResult["name"])
-	}
-
-	// List should show both static and dynamic.
-	listResult := callTool(t, h, "channel_list", map[string]any{})
-
-	var entries []struct {
-		Name   string `json:"name"`
-		Source string `json:"source"`
-	}
-	if err := json.Unmarshal(listResult, &entries); err != nil {
-		t.Fatalf("unmarshal list result: %v", err)
-	}
-	if len(entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(entries))
-	}
-
-	// Find the dynamic one.
-	found := false
-	for _, e := range entries {
-		if e.Name == "phone" && e.Source == "dynamic" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("dynamic channel 'phone' not found in list")
-	}
+func newMemorySecretStore() *memorySecretStore {
+	return &memorySecretStore{data: make(map[string]string)}
 }
 
-func TestChannelCreate_RejectsStaticNameCollision(t *testing.T) {
-	h, _ := setup(t)
-
-	err := callToolExpectError(t, h, "channel_create", map[string]string{
-		"name":        "desktop",
-		"description": "conflicts with static",
-	})
-	if err == nil {
-		t.Fatal("expected error for static name collision")
-	}
+func (m *memorySecretStore) Get(_ context.Context, key string) (string, error) {
+	return m.data[key], nil
 }
 
-func TestChannelCreate_RejectsDuplicateDynamic(t *testing.T) {
-	h, _ := setup(t)
-
-	callTool(t, h, "channel_create", map[string]string{
-		"name":        "phone",
-		"description": "first",
-	})
-
-	err := callToolExpectError(t, h, "channel_create", map[string]string{
-		"name":        "phone",
-		"description": "duplicate",
-	})
-	if err == nil {
-		t.Fatal("expected error for duplicate dynamic channel")
-	}
+func (m *memorySecretStore) Set(_ context.Context, key, value string) error {
+	m.data[key] = value
+	return nil
 }
 
-func TestChannelEdit_UpdatesDynamic(t *testing.T) {
-	h, ds := setup(t)
-
-	callTool(t, h, "channel_create", map[string]string{
-		"name":        "phone",
-		"description": "Old description",
-	})
-
-	callTool(t, h, "channel_edit", map[string]string{
-		"name":        "phone",
-		"description": "New description",
-	})
-
-	// Verify the update was persisted.
-	cfg, err := ds.Get(context.Background(), "phone")
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	if cfg.Description != "New description" {
-		t.Fatalf("expected 'New description', got %q", cfg.Description)
-	}
-}
-
-func TestChannelEdit_RejectsStatic(t *testing.T) {
-	h, _ := setup(t)
-
-	err := callToolExpectError(t, h, "channel_edit", map[string]string{
-		"name":        "desktop",
-		"description": "try to edit static",
-	})
-	if err == nil {
-		t.Fatal("expected error when editing static channel")
-	}
-}
-
-func TestChannelDelete_RemovesDynamic(t *testing.T) {
-	h, ds := setup(t)
-
-	callTool(t, h, "channel_create", map[string]string{
-		"name":        "phone",
-		"description": "will be deleted",
-	})
-
-	callTool(t, h, "channel_delete", map[string]string{"name": "phone"})
-
-	// Verify it's gone.
-	cfg, err := ds.Get(context.Background(), "phone")
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	if cfg != nil {
-		t.Fatal("expected nil after delete, channel still exists")
-	}
-}
-
-func TestChannelDelete_RejectsStatic(t *testing.T) {
-	h, _ := setup(t)
-
-	err := callToolExpectError(t, h, "channel_delete", map[string]string{"name": "desktop"})
-	if err == nil {
-		t.Fatal("expected error when deleting static channel")
-	}
-}
-
-func TestChannelDelete_RejectsNonexistent(t *testing.T) {
-	h, _ := setup(t)
-
-	err := callToolExpectError(t, h, "channel_delete", map[string]string{"name": "nonexistent"})
-	if err == nil {
-		t.Fatal("expected error when deleting nonexistent channel")
-	}
+func (m *memorySecretStore) Delete(_ context.Context, key string) error {
+	delete(m.data, key)
+	return nil
 }
