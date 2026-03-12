@@ -52,6 +52,12 @@ type turnWriter struct {
 	statusID  channel.MessageID
 	respBuf   strings.Builder
 	respID    channel.MessageID
+
+	// statusSealed is set when response text first appears. The next
+	// phaseStatus write starts a fresh status message so new status
+	// content (later-turn thinking, tools, stats) appears below the
+	// response in chat order rather than above it.
+	statusSealed bool
 }
 
 func (tw *turnWriter) write(phase writePhase, text string) error {
@@ -85,6 +91,15 @@ func (tw *turnWriter) writeSingle(text string) error {
 func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 	switch phase {
 	case phaseStatus:
+		// Once response text has appeared, start a fresh status message
+		// so subsequent status (later-turn thinking, tools, stats) shows
+		// below the response in chat order.
+		if tw.statusSealed {
+			tw.statusBuf.Reset()
+			tw.statusID = ""
+			tw.statusSealed = false
+		}
+
 		tw.statusBuf.WriteString(text)
 		content := tw.statusBuf.String()
 
@@ -123,6 +138,11 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 		}
 
 	case phaseResponse:
+		// Seal the current status message so future status content
+		// appears below this response in chat order.
+		if tw.respID == "" {
+			tw.statusSealed = true
+		}
 		tw.respBuf.WriteString(text)
 		content := tw.respBuf.String()
 
@@ -291,6 +311,10 @@ func buildEnv(opts Options) []string {
 		overrides["CLAUDE_CODE_OAUTH_TOKEN"] = opts.SetupToken
 	}
 
+	// Disable Claude Code's auto-memory so the agent only writes to
+	// its own memory dir (CWD), not ~/.claude/projects/.../memory/.
+	overrides["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
+
 	var env []string
 	for _, kv := range os.Environ() {
 		key, _, _ := strings.Cut(kv, "=")
@@ -326,10 +350,10 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 
 	var sessionID string
 	var currentBlockType claudecli.ContentBlockType
-	// Track whether we received text/thinking deltas for the current
-	// assistant message. Reset on each assistant event so we always
-	// extract content that wasn't streamed via deltas.
-	gotTextDeltas := false
+	// Track whether content was streamed for the current assistant
+	// message via content_block events. When true, the assistant event's
+	// blocks are redundant and should be skipped.
+	gotStreamedBlocks := false
 	for scanner.Scan() {
 		if ctx.Err() != nil {
 			return sessionID, nil
@@ -371,6 +395,7 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				slog.Warn("failed to parse content_block_start", "err", err)
 				continue
 			}
+			gotStreamedBlocks = true
 			currentBlockType = start.ContentBlock.Type
 			switch currentBlockType {
 			case claudecli.ContentThinking:
@@ -391,12 +416,10 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			}
 			switch delta.Delta.Type {
 			case claudecli.DeltaText:
-				gotTextDeltas = true
 				if err := tw.write(phaseResponse, delta.Delta.Text); err != nil {
 					return "", err
 				}
 			case claudecli.DeltaThinking:
-				gotTextDeltas = true
 				if err := tw.write(phaseStatus, delta.Delta.Thinking); err != nil {
 					return "", err
 				}
@@ -411,8 +434,9 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			currentBlockType = ""
 
 		case claudecli.EventAssistant:
-			// The assistant event carries the complete message. Extract
-			// any text/thinking that wasn't already streamed via deltas.
+			// The assistant event carries the complete message. When
+			// streaming worked (gotStreamedBlocks), all content was
+			// already sent via content_block events — skip re-emitting.
 			var msg claudecli.AssistantEvent
 			if err := json.Unmarshal(line, &msg); err != nil {
 				slog.Warn("failed to parse assistant event", "err", err)
@@ -425,28 +449,23 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				return sessionID, ErrAuthRequired
 			}
 
-			for _, block := range msg.Message.Content {
-				switch block.Type {
-				case claudecli.ContentToolUse:
-					// Already sent via content_block_start if available;
-					// send anyway since it's idempotent for display.
-				case claudecli.ContentText, claudecli.ContentThinking:
-					if gotTextDeltas {
-						continue
-					}
-				}
-				text := formatBlock(block)
-				if text != "" {
-					phase := phaseStatus
-					if block.Type == claudecli.ContentText {
-						phase = phaseResponse
-					}
-					if err := tw.write(phase, text); err != nil {
-						return "", err
+			if !gotStreamedBlocks {
+				// Fallback: no streaming events received, extract
+				// content from the full assistant message.
+				for _, block := range msg.Message.Content {
+					text := formatBlock(block)
+					if text != "" {
+						phase := phaseStatus
+						if block.Type == claudecli.ContentText {
+							phase = phaseResponse
+						}
+						if err := tw.write(phase, text); err != nil {
+							return "", err
+						}
 					}
 				}
 			}
-			gotTextDeltas = false
+			gotStreamedBlocks = false
 
 		case claudecli.EventUser:
 			var user claudecli.UserEvent
