@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"tclaw/channel"
 	"tclaw/mcp"
 )
 
@@ -43,8 +44,26 @@ func channelDeleteHandler(deps Deps) mcp.ToolHandler {
 			}
 		}
 
+		// Look up the channel before deleting so we know its type.
+		cfg, err := deps.DynamicStore.Get(ctx, a.Name)
+		if err != nil {
+			return nil, fmt.Errorf("look up channel: %w", err)
+		}
+		if cfg == nil {
+			return nil, fmt.Errorf("dynamic channel %q not found", a.Name)
+		}
+
 		if err := deps.DynamicStore.Remove(ctx, a.Name); err != nil {
 			return nil, fmt.Errorf("delete channel: %w", err)
+		}
+
+		// Clean up any associated secrets (e.g. Telegram bot token).
+		if cfg.Type == channel.TypeTelegram {
+			if err := deps.SecretStore.Delete(ctx, channel.ChannelSecretKey(a.Name)); err != nil {
+				// Log but don't fail — the channel config is already removed.
+				// An orphaned secret is less harmful than a failed delete.
+				return nil, fmt.Errorf("channel deleted but failed to remove secret: %w", err)
+			}
 		}
 
 		return json.Marshal(fmt.Sprintf("Channel %q deleted. It will stop listening after agent restart — send 'stop' or wait for idle timeout.", a.Name))
