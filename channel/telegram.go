@@ -51,11 +51,19 @@ type Telegram struct {
 }
 
 func NewTelegram(token, name, description string, opts TelegramOptions) *Telegram {
+	return newTelegram(token, name, description, SourceStatic, opts)
+}
+
+func NewDynamicTelegram(token, name, description string, opts TelegramOptions) *Telegram {
+	return newTelegram(token, name, description, SourceDynamic, opts)
+}
+
+func newTelegram(token, name, description string, source Source, opts TelegramOptions) *Telegram {
 	return &Telegram{
 		token:         token,
 		name:          name,
 		description:   description,
-		source:        SourceStatic,
+		source:        source,
 		opts:          opts,
 		webhookSecret: generateWebhookSecret(),
 	}

@@ -21,38 +21,48 @@ users:
     model: claude-sonnet-4-6
     permission_mode: dontAsk
     max_turns: 50
+
+    # Empty user-level tools — each channel defines its own permissions.
+    allowed_tools: []
+
     channels:
-      - type: socket
-        name: main
-        description: Primary channel
+      # Admin channel: full dev tools, channel/schedule/connection management,
+      # all reset levels and builtins. No gsuite (use assistant channel for that).
       - type: telegram
-        name: telegram-prod
-        description: Telegram
+        name: admin
+        description: Primary admin channel
         token: ${secret:TELEGRAM_BOT_TOKEN_PROD}
         envs: [prod]
-    allowed_tools:
-      - "mcp__tclaw__*"
-      - Bash
-      - Read
-      - Edit
-      - Write
-      - Glob
-      - Grep
-      - LS
-      - LSP
-      - WebFetch
-      - WebSearch
-      - NotebookEdit
-      - Agent
-      - Task
-      - TaskOutput
-      - TaskStop
-      - TodoWrite
-      - ToolSearch
-      - Skill
-      - AskUserQuestion
-      - EnterPlanMode
-      - ExitPlanMode
-      - EnterWorktree
-      - ListMcpResources
-      - ReadMcpResource
+        allowed_tools:
+          - Bash
+          - Read
+          - Edit
+          - Write
+          - Glob
+          - Grep
+          - LS
+          - LSP
+          - WebFetch
+          - WebSearch
+          - NotebookEdit
+          - Agent
+          - Task
+          - TaskOutput
+          - TaskStop
+          - TodoWrite
+          - ToolSearch
+          - Skill
+          - AskUserQuestion
+          - EnterPlanMode
+          - ExitPlanMode
+          - EnterWorktree
+          - ListMcpResources
+          - ReadMcpResource
+          - "mcp__tclaw__channel_*"
+          - "mcp__tclaw__schedule_*"
+          - "mcp__tclaw__connection_*"
+          - "mcp__tclaw__remote_mcp_*"
+          - "builtin__reset"
+          - "builtin__stop"
+          - "builtin__compact"
+          - "builtin__login"

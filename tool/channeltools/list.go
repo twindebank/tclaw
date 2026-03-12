@@ -18,10 +18,12 @@ func channelListDef() mcp.ToolDef {
 }
 
 type channelListEntry struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Description string `json:"description"`
-	Source      string `json:"source"`
+	Name            string   `json:"name"`
+	Type            string   `json:"type"`
+	Description     string   `json:"description"`
+	Source          string   `json:"source"`
+	AllowedTools    []string `json:"allowed_tools,omitempty"`
+	DisallowedTools []string `json:"disallowed_tools,omitempty"`
 }
 
 func channelListHandler(deps Deps) mcp.ToolHandler {
@@ -31,10 +33,12 @@ func channelListHandler(deps Deps) mcp.ToolHandler {
 		// Static channels from config.
 		for _, info := range deps.StaticChannels {
 			entries = append(entries, channelListEntry{
-				Name:        info.Name,
-				Type:        string(info.Type),
-				Description: info.Description,
-				Source:      string(channel.SourceStatic),
+				Name:            info.Name,
+				Type:            string(info.Type),
+				Description:     info.Description,
+				Source:          string(channel.SourceStatic),
+				AllowedTools:    info.AllowedTools,
+				DisallowedTools: info.DisallowedTools,
 			})
 		}
 
@@ -45,10 +49,12 @@ func channelListHandler(deps Deps) mcp.ToolHandler {
 		}
 		for _, cfg := range dynamics {
 			entries = append(entries, channelListEntry{
-				Name:        cfg.Name,
-				Type:        string(cfg.Type),
-				Description: cfg.Description,
-				Source:      string(channel.SourceDynamic),
+				Name:            cfg.Name,
+				Type:            string(cfg.Type),
+				Description:     cfg.Description,
+				Source:          string(channel.SourceDynamic),
+				AllowedTools:    cfg.AllowedTools,
+				DisallowedTools: cfg.DisallowedTools,
 			})
 		}
 
