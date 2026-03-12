@@ -31,9 +31,13 @@ func channelEditDef() mcp.ToolDef {
 						"token": {
 							"type": "string",
 							"description": "New bot token to replace the existing one. Stored encrypted."
+						},
+						"allowed_users": {
+							"type": "array",
+							"items": {"type": "integer"},
+							"description": "Telegram user IDs allowed to interact with this bot. Replaces existing list. Pass empty array to remove restrictions."
 						}
-					},
-					"required": ["token"]
+					}
 				},
 				"allowed_tools": {
 					"type": "array",
@@ -52,7 +56,8 @@ func channelEditDef() mcp.ToolDef {
 }
 
 type telegramEditConfig struct {
-	Token string `json:"token"`
+	Token        string  `json:"token"`
+	AllowedUsers *[]int64 `json:"allowed_users"`
 }
 
 type channelEditArgs struct {
@@ -72,6 +77,11 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 
 		if a.Description == "" && a.TelegramConfig == nil && a.AllowedTools == nil && a.DisallowedTools == nil {
 			return nil, fmt.Errorf("at least one of 'description', 'telegram_config', 'allowed_tools', or 'disallowed_tools' must be provided")
+		}
+
+		// telegram_config with only allowed_users (no token) is valid for updating the allowlist.
+		if a.TelegramConfig != nil && a.TelegramConfig.Token == "" && a.TelegramConfig.AllowedUsers == nil {
+			return nil, fmt.Errorf("telegram_config must include 'token' and/or 'allowed_users'")
 		}
 
 		// Reject editing static channels.
@@ -117,13 +127,22 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 			}
 		}
 
-		// Rotate the bot token if provided.
+		// Update Telegram-specific config if provided.
 		if a.TelegramConfig != nil {
-			if a.TelegramConfig.Token == "" {
-				return nil, fmt.Errorf("telegram_config.token must not be empty")
+			// Rotate the bot token if provided.
+			if a.TelegramConfig.Token != "" {
+				if err := deps.SecretStore.Set(ctx, channel.ChannelSecretKey(a.Name), a.TelegramConfig.Token); err != nil {
+					return nil, fmt.Errorf("update channel secret: %w", err)
+				}
 			}
-			if err := deps.SecretStore.Set(ctx, channel.ChannelSecretKey(a.Name), a.TelegramConfig.Token); err != nil {
-				return nil, fmt.Errorf("update channel secret: %w", err)
+
+			// Update allowed users if provided.
+			if a.TelegramConfig.AllowedUsers != nil {
+				if err := deps.DynamicStore.Update(ctx, a.Name, func(c *channel.DynamicChannelConfig) {
+					c.AllowedUsers = *a.TelegramConfig.AllowedUsers
+				}); err != nil {
+					return nil, fmt.Errorf("edit channel allowed_users: %w", err)
+				}
 			}
 		}
 
