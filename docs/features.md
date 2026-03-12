@@ -197,7 +197,8 @@ The assistant channel is then created dynamically with tools like:
 ```json
 {
   "allowed_tools": [
-    "Read", "WebFetch", "WebSearch",
+    "Bash", "Read", "Edit", "Write", "Glob", "Grep",
+    "WebFetch", "WebSearch",
     "mcp__tclaw__google_*", "mcp__tclaw__schedule_*",
     "mcp__tclaw__connection_*",
     "builtin__reset_session", "builtin__reset_memories",
@@ -236,16 +237,22 @@ channels:
       - "builtin__login"
   - name: assistant
     type: telegram
-    description: Mobile assistant — concise responses, no dev tools
+    description: Mobile assistant — concise responses, no channel management
     telegram:
       token: ${secret:TELEGRAM_ASSISTANT_TOKEN}
       allowed_users: [123456789]
     allowed_tools:
+      - Bash
       - Read
+      - Edit
+      - Write
+      - Glob
+      - Grep
       - WebFetch
       - WebSearch
       - "mcp__tclaw__google_*"
       - "mcp__tclaw__schedule_*"
+      - "mcp__tclaw__connection_*"
       - "builtin__reset_session"
       - "builtin__reset_memories"
       - "builtin__stop"
