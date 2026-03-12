@@ -214,17 +214,30 @@ func deploySetupToken(ctx context.Context, userID string, setupToken string) err
 	return nil
 }
 
-// SetupTokenEnvVarName returns the environment variable name used to store
-// a user's setup token as a Fly secret. On the subprocess side, it gets
-// mapped to CLAUDE_CODE_OAUTH_TOKEN which the CLI reads natively.
-func SetupTokenEnvVarName(userID string) string {
-	sanitized := strings.Map(func(r rune) rune {
+// sanitizeEnvSuffix uppercases a user ID and replaces non-alphanumeric chars
+// with underscores, producing a safe environment variable suffix.
+func sanitizeEnvSuffix(userID string) string {
+	return strings.ToUpper(strings.Map(func(r rune) rune {
 		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
 			return r
 		}
 		return '_'
-	}, userID)
-	return "CLAUDE_SETUP_TOKEN_" + strings.ToUpper(sanitized)
+	}, userID))
+}
+
+// SetupTokenEnvVarName returns the environment variable name used to store
+// a user's setup token as a Fly secret. On the subprocess side, it gets
+// mapped to CLAUDE_CODE_OAUTH_TOKEN which the CLI reads natively.
+func SetupTokenEnvVarName(userID string) string {
+	return "CLAUDE_SETUP_TOKEN_" + sanitizeEnvSuffix(userID)
+}
+
+// GitHubTokenEnvVarName returns the environment variable name used to
+// pre-provision a user's GitHub PAT as a Fly secret. At boot, the router
+// seeds this into the encrypted secret store so dev tools find it without
+// prompting.
+func GitHubTokenEnvVarName(userID string) string {
+	return "GITHUB_TOKEN_" + sanitizeEnvSuffix(userID)
 }
 
 // setupTokenPrefix is the expected prefix for setup tokens from `claude setup-token`.
