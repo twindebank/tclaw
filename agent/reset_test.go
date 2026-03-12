@@ -411,7 +411,8 @@ func TestResetConfirmPrompt_EverythingListsAllData(t *testing.T) {
 		"all channels",
 		"OAuth connections",
 		"Schedules",
-		"secrets",
+		"API keys",
+		"Channel tokens",
 		"re-authenticate",
 	} {
 		if !strings.Contains(prompt, expected) {
