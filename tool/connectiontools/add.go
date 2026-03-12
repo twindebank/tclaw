@@ -115,7 +115,7 @@ func handleOAuthAdd(ctx context.Context, deps Deps, p *provider.Provider, conn *
 		"connection_id": conn.ID,
 		"status":        "pending_auth",
 		"auth_url":      authURL,
-		"message":       fmt.Sprintf("Send this authorization URL to the user. After they click it and authorize, use connection_auth_wait with connection_id=%q to confirm completion.", conn.ID),
+		"message":       fmt.Sprintf("Send this authorization URL to the user. You MUST immediately call connection_auth_wait with connection_id=%q in the same turn — do NOT end the turn without calling it.", conn.ID),
 	}
 	return json.Marshal(result)
 }
