@@ -236,16 +236,18 @@ Claude CLI picks up new MCP on next turn (reads --mcp-config)
 └─────────────────────────────────────┘
 
 ┌─────────────────────────────────────┐
-│  Subprocess isolation               │
+│  Subprocess isolation (allowlist)   │
 │                                     │
-│  Stripped from env:                 │
-│    CLAUDECODE                       │
-│    CLAUDE_CODE_ENTRYPOINT           │
-│    TCLAW_SECRET_KEY                 │
+│  Only these env var prefixes pass:  │
+│    PATH, TERM, COLORTERM, LANG,    │
+│    LC_*, TMPDIR, USER, LOGNAME,    │
+│    SHELL, EDITOR, VISUAL, XDG_*,  │
+│    TZ                               │
 │                                     │
 │  Overridden:                        │
 │    HOME → per-user home dir         │
 │    ANTHROPIC_API_KEY → per-user key │
+│    CLAUDE_CODE_OAUTH_TOKEN → token  │
 └─────────────────────────────────────┘
 ```
 
@@ -279,10 +281,12 @@ users:
 # Dockerfile bakes tclaw.deploy.yaml as /etc/tclaw/tclaw.yaml
 # docker-compose.yml loads .env for secrets
 # Volume tclaw-data:/data for persistence
+# cap_add: SYS_ADMIN for bubblewrap namespace creation
 ```
 
 - Secrets from `.env` file (optional)
 - Same binary, different config path
+- `SYS_ADMIN` capability required for bubblewrap sandbox (Fly.io allows this natively)
 
 ### Fly.io (Production)
 
@@ -328,6 +332,65 @@ The `mcp-config.json` file is generated at `<user>/runtime/mcp-config.json` and 
   }
 }
 ```
+
+## Security Model
+
+tclaw's security has three boundaries:
+
+### 1. Subprocess Boundary (Environment + Filesystem Isolation)
+
+**Environment allowlist:** The claude CLI runs with an allowlisted environment. Only safe, functional env vars are inherited (PATH, TERM, LANG, LC_*, TMPDIR, USER, SHELL, EDITOR, XDG_*, TZ). Everything else — cloud credentials (AWS_SECRET_ACCESS_KEY, GOOGLE_APPLICATION_CREDENTIALS), SSH agents (SSH_AUTH_SOCK), GitHub tokens (GITHUB_TOKEN, GH_TOKEN), and tclaw internals (TCLAW_SECRET_KEY) — is excluded by default. Explicit overrides (HOME, ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN) are always set.
+
+**Filesystem sandbox (Linux/deployed only):** On Linux, the subprocess runs inside a bubblewrap (bwrap) mount namespace. Only explicitly bound paths are visible:
+- **Read-write:** the user's memory dir and home dir
+- **Read-only:** system paths (/usr, /bin, /lib, /etc/ssl, /etc/resolv.conf, etc.)
+- **Private:** /tmp, /proc, /dev
+
+The subprocess literally cannot see other users' directories, the host filesystem, or tclaw's own state files. PID and UTS namespaces are also isolated. Network is shared (the MCP server runs on localhost).
+
+On macOS (local dev), sandboxing is skipped — the developer's own machine doesn't need protection from their own agent.
+
+### 2. MCP Tool Boundary
+
+The agent interacts with tclaw state (connections, schedules, channels, secrets) only through MCP tools served on a per-user localhost port. Tool calls are:
+- **Audit logged** with tool name, duration, and success/failure status
+- **Size limited** (1 MiB max request body)
+- **Permission gated** via Claude Code's `allowed_tools` config (must include `"mcp__tclaw__*"`)
+
+### 3. Secret Boundary
+
+Credentials are encrypted at rest using NaCl secretbox with per-user derived keys:
+- Master key from `TCLAW_SECRET_KEY` env var (stripped from subprocess env)
+- Per-user key derived via HKDF (SHA-256) with user ID as info
+- Files stored with 0o600 permissions
+
+OAuth tokens are auto-refreshed and never exposed in logs or subprocess environments. Deploy tokens are passed to `fly secrets set` via stdin (not CLI args) to avoid exposure in process listings.
+
+### Input Validation
+
+- **Session IDs** loaded from disk are validated (non-empty, max 256 chars, no control characters)
+- **Setup tokens** are validated after extraction (min 50 chars, alphanumeric/hyphens/underscores only)
+- **API keys** require the `sk-ant-` prefix and minimum length of 50 characters
+- **OAuth callbacks** use state codes with TTL and per-state rate limiting to prevent brute-force
+- **Remote MCP URLs** are validated against SSRF (HTTPS required, private IP ranges blocked)
+
+### What the Subprocess CAN Access
+
+- Its own memory directory (read/write via CWD)
+- Claude Code internal state (via HOME)
+- The MCP server on localhost (tool calls)
+- Standard system utilities (via PATH)
+- Read-only system paths (libraries, certs, DNS)
+
+### What the Subprocess CANNOT Access
+
+- Cloud provider credentials (AWS, GCP, Azure) — excluded by env allowlist
+- SSH agent sockets — excluded by env allowlist
+- GitHub/GitLab tokens — excluded by env allowlist
+- tclaw's master encryption key — excluded by env allowlist
+- Other users' data — invisible in bwrap mount namespace (deployed)
+- Host filesystem outside bound paths — invisible in bwrap (deployed)
+- tclaw state files — only accessible via MCP tools
 
 ## Scheduling Architecture
 

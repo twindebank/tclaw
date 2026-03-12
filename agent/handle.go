@@ -194,6 +194,16 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		cmd.Dir = opts.HomeDir
 	}
 
+	// On Linux (deployed), wrap with bubblewrap so the subprocess can only
+	// see explicitly bound paths. Locally (macOS) this is a no-op.
+	if sandboxEnabled() {
+		paths := sandboxPaths{
+			ReadWrite: []string{opts.MemoryDir, opts.HomeDir},
+			ReadOnly:  systemReadOnlyPaths,
+		}
+		cmd = wrapWithSandbox(ctx, cmd, paths)
+	}
+
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", fmt.Errorf("stdout pipe: %w", err)
@@ -231,16 +241,30 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 }
 
 
-// buildEnv constructs the environment for the claude subprocess.
-// It inherits the parent env, strips vars that block nested sessions,
-// and overrides HOME and ANTHROPIC_API_KEY for per-user isolation.
-func buildEnv(opts Options) []string {
-	strip := map[string]bool{
-		"CLAUDECODE":             true,
-		"CLAUDE_CODE_ENTRYPOINT": true,
-		"TCLAW_SECRET_KEY":       true, // master encryption key must not leak to subprocess
-	}
+// allowedEnvPrefixes are env var prefixes the subprocess is allowed to inherit.
+// Everything not matching is excluded. Overrides (HOME, ANTHROPIC_API_KEY, etc.)
+// are always set regardless of this list.
+var allowedEnvPrefixes = []string{
+	"PATH",
+	"TERM",
+	"COLORTERM",
+	"LANG",
+	"LC_",
+	"TMPDIR",
+	"USER",
+	"LOGNAME",
+	"SHELL",
+	"EDITOR",
+	"VISUAL",
+	"XDG_",
+	"TZ",
+}
 
+// buildEnv constructs the environment for the claude subprocess using an
+// allowlist. Only vars matching allowedEnvPrefixes are inherited — everything
+// else (cloud credentials, SSH agents, GitHub tokens, tclaw internals) is
+// excluded by default. Overrides are always applied.
+func buildEnv(opts Options) []string {
 	overrides := make(map[string]string)
 	if opts.HomeDir != "" {
 		overrides["HOME"] = opts.HomeDir
@@ -255,10 +279,10 @@ func buildEnv(opts Options) []string {
 	var env []string
 	for _, kv := range os.Environ() {
 		key, _, _ := strings.Cut(kv, "=")
-		if strip[key] {
+		if _, isOverride := overrides[key]; isOverride {
 			continue
 		}
-		if _, ok := overrides[key]; ok {
+		if !allowedEnvVar(key) {
 			continue
 		}
 		env = append(env, kv)
@@ -267,6 +291,16 @@ func buildEnv(opts Options) []string {
 		env = append(env, k+"="+v)
 	}
 	return env
+}
+
+// allowedEnvVar returns true if the given env var name matches the allowlist.
+func allowedEnvVar(key string) bool {
+	for _, prefix := range allowedEnvPrefixes {
+		if key == prefix || strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // streamResponse parses stream-json events and sends them to the channel in

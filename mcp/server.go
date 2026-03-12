@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"time"
 )
 
 const (
@@ -117,6 +118,10 @@ type jsonRPCError struct {
 	Message string `json:"message"`
 }
 
+// maxRequestBodySize limits MCP request bodies to 1 MiB to prevent
+// a malicious or buggy agent from sending huge payloads.
+const maxRequestBodySize = 1 << 20
+
 // handleMCP processes MCP JSON-RPC requests. Supports both single requests
 // and batched arrays (required by the MCP protocol).
 func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
@@ -124,6 +129,8 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 
 	var raw json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
@@ -239,11 +246,16 @@ func (s *Server) handleToolsCall(ctx context.Context, req jsonRPCRequest) *jsonR
 		}
 	}
 
-	slog.Info("mcp tools/call", "tool", params.Name)
-
+	start := time.Now()
 	result, err := s.handler.Call(ctx, params.Name, params.Arguments)
+	duration := time.Since(start)
+
 	if err != nil {
-		slog.Error("mcp tool call failed", "tool", params.Name, "err", err)
+		slog.Warn("mcp tool call failed",
+			"tool", params.Name,
+			"duration_ms", duration.Milliseconds(),
+			"error", err.Error(),
+		)
 		// MCP protocol: tool errors are returned as content with isError=true,
 		// not as JSON-RPC errors. This lets Claude see and react to the error.
 		errContent := map[string]any{
@@ -255,6 +267,11 @@ func (s *Server) handleToolsCall(ctx context.Context, req jsonRPCRequest) *jsonR
 		data, _ := json.Marshal(errContent)
 		return &jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: data}
 	}
+
+	slog.Info("mcp tool call",
+		"tool", params.Name,
+		"duration_ms", duration.Milliseconds(),
+	)
 
 	// Wrap raw result in MCP content format.
 	var resultText string

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -145,6 +146,98 @@ func TestWriteSplit_EditFailureRecovery_Response(t *testing.T) {
 	}
 	if ch.sends[1] != " world" {
 		t.Fatalf("expected recovery message to be ' world', got %q", ch.sends[1])
+	}
+}
+
+func TestBuildEnv_AllowlistExcludesDangerousVars(t *testing.T) {
+	// Set dangerous env vars that should NOT leak to the subprocess.
+	dangerous := map[string]string{
+		"AWS_SECRET_ACCESS_KEY":          "secret",
+		"GITHUB_TOKEN":                   "ghp_fake",
+		"GH_TOKEN":                       "ghp_fake",
+		"SSH_AUTH_SOCK":                   "/tmp/ssh-agent",
+		"GOOGLE_APPLICATION_CREDENTIALS": "/path/to/creds.json",
+		"TCLAW_SECRET_KEY":               "masterkey",
+		"CLAUDECODE":                     "1",
+		"CLAUDE_CODE_ENTRYPOINT":         "/bin/claude",
+		"DATABASE_URL":                   "postgres://secret",
+		"OPENAI_API_KEY":                 "sk-openai",
+	}
+	for k, v := range dangerous {
+		os.Setenv(k, v)
+		defer os.Unsetenv(k)
+	}
+
+	env := buildEnv(Options{})
+
+	envMap := make(map[string]string)
+	for _, kv := range env {
+		key, val, _ := strings.Cut(kv, "=")
+		envMap[key] = val
+	}
+
+	for k := range dangerous {
+		if _, found := envMap[k]; found {
+			t.Errorf("dangerous env var %q leaked to subprocess", k)
+		}
+	}
+}
+
+func TestBuildEnv_AllowsExpectedVars(t *testing.T) {
+	allowed := map[string]string{
+		"PATH":    "/usr/bin",
+		"TERM":    "xterm-256color",
+		"LANG":    "en_US.UTF-8",
+		"LC_ALL":  "en_US.UTF-8",
+		"TMPDIR":  "/tmp",
+		"USER":    "testuser",
+		"SHELL":   "/bin/zsh",
+		"TZ":      "UTC",
+		"EDITOR":  "vim",
+		"VISUAL":  "code",
+		"LOGNAME": "testuser",
+	}
+	for k, v := range allowed {
+		os.Setenv(k, v)
+		defer os.Unsetenv(k)
+	}
+
+	env := buildEnv(Options{})
+
+	envMap := make(map[string]string)
+	for _, kv := range env {
+		key, val, _ := strings.Cut(kv, "=")
+		envMap[key] = val
+	}
+
+	for k, v := range allowed {
+		if envMap[k] != v {
+			t.Errorf("allowed env var %q=%q not found in subprocess env", k, v)
+		}
+	}
+}
+
+func TestBuildEnv_OverridesAlwaysSet(t *testing.T) {
+	env := buildEnv(Options{
+		HomeDir:    "/home/test",
+		APIKey:     "sk-ant-test",
+		SetupToken: "sk-ant-oat01-test",
+	})
+
+	envMap := make(map[string]string)
+	for _, kv := range env {
+		key, val, _ := strings.Cut(kv, "=")
+		envMap[key] = val
+	}
+
+	if envMap["HOME"] != "/home/test" {
+		t.Errorf("HOME override not set, got %q", envMap["HOME"])
+	}
+	if envMap["ANTHROPIC_API_KEY"] != "sk-ant-test" {
+		t.Errorf("ANTHROPIC_API_KEY override not set, got %q", envMap["ANTHROPIC_API_KEY"])
+	}
+	if envMap["CLAUDE_CODE_OAUTH_TOKEN"] != "sk-ant-oat01-test" {
+		t.Errorf("CLAUDE_CODE_OAUTH_TOKEN override not set, got %q", envMap["CLAUDE_CODE_OAUTH_TOKEN"])
 	}
 }
 
