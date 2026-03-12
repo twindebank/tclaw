@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"tclaw/connection"
 	"tclaw/mcp"
 )
 
@@ -13,11 +14,16 @@ type schemaArgs struct {
 	Method     string `json:"method"`
 }
 
-func schemaHandler(deps Deps) mcp.ToolHandler {
+func schemaHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var a schemaArgs
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
+		}
+
+		deps, err := resolveDeps(connMap, a.Connection)
+		if err != nil {
+			return nil, err
 		}
 
 		if a.Method == "" {

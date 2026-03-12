@@ -18,6 +18,10 @@ type Deps struct {
 	// caller can register provider-specific tools dynamically. Avoids
 	// importing provider tool packages from here.
 	OnProviderConnect func(connID connection.ConnectionID, mgr *connection.Manager, p *provider.Provider)
+
+	// OnProviderDisconnect is called when a connection is removed so the
+	// caller can update provider-specific tools (e.g. remove from enum).
+	OnProviderDisconnect func(connID connection.ConnectionID)
 }
 
 // RegisterTools adds the connection management tools to the MCP handler.
@@ -26,7 +30,7 @@ func RegisterTools(h *mcp.Handler, deps Deps) {
 	h.Register(connectionListDef(), connectionListHandler(deps.Manager))
 	h.Register(connectionProvidersDef(), connectionProvidersHandler(deps.Registry))
 	h.Register(connectionAddDef(), connectionAddHandler(deps))
-	h.Register(connectionRemoveDef(), connectionRemoveHandler(deps.Manager))
+	h.Register(connectionRemoveDef(), connectionRemoveHandler(deps.Manager, deps.OnProviderDisconnect))
 }
 
 // RegisterAuthWaitTool adds the connection_auth_wait tool. Separated from

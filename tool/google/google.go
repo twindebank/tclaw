@@ -16,18 +16,45 @@ import (
 	"tclaw/provider"
 )
 
-// Deps holds dependencies for Google Workspace tool handlers.
+// Deps holds dependencies for a single Google Workspace connection.
 type Deps struct {
 	ConnID   connection.ConnectionID
 	Manager  *connection.Manager
 	Provider *provider.Provider
 }
 
-// RegisterTools adds the Google Workspace tools for a specific connection to the MCP handler.
-func RegisterTools(handler *mcp.Handler, deps Deps) {
-	defs := ToolDefs(deps.ConnID)
-	handler.Register(defs[0], workspaceHandler(deps))
-	handler.Register(defs[1], schemaHandler(deps))
+// RegisterTools registers (or re-registers) the Google Workspace tools
+// with handlers that resolve the connection dynamically from connMap.
+// Call this each time a Google connection is added or removed.
+func RegisterTools(handler *mcp.Handler, connMap map[connection.ConnectionID]Deps) {
+	connIDs := make([]connection.ConnectionID, 0, len(connMap))
+	for id := range connMap {
+		connIDs = append(connIDs, id)
+	}
+
+	defs := ToolDefs(connIDs)
+	handler.Register(defs[0], workspaceHandler(connMap))
+	handler.Register(defs[1], schemaHandler(connMap))
+}
+
+// UnregisterTools removes the Google Workspace tools from the handler.
+func UnregisterTools(handler *mcp.Handler) {
+	handler.Unregister("google_workspace")
+	handler.Unregister("google_workspace_schema")
+}
+
+// resolveDeps looks up the Deps for a connection ID from the tool args.
+func resolveDeps(connMap map[connection.ConnectionID]Deps, connIDStr string) (Deps, error) {
+	connID := connection.ConnectionID(connIDStr)
+	deps, ok := connMap[connID]
+	if !ok {
+		available := make([]string, 0, len(connMap))
+		for id := range connMap {
+			available = append(available, string(id))
+		}
+		return Deps{}, fmt.Errorf("unknown connection %q — available: %s", connIDStr, strings.Join(available, ", "))
+	}
+	return deps, nil
 }
 
 var (
