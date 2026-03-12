@@ -13,6 +13,11 @@ type Deps struct {
 	StaticChannels []channel.Info
 	Env            config.Env
 	SecretStore    secret.Store
+
+	// OnChannelChange is called after a channel is created, edited, or deleted.
+	// The router uses this to trigger an automatic agent restart so the new
+	// channel configuration takes effect immediately.
+	OnChannelChange func()
 }
 
 // RegisterTools adds channel management tools to the MCP handler.

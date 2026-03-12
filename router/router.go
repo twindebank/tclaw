@@ -12,12 +12,14 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"tclaw/agent"
 	"tclaw/channel"
 	"tclaw/claudecli"
 	"tclaw/config"
 	"tclaw/connection"
+	"tclaw/dev"
 	"tclaw/mcp"
 	"tclaw/oauth"
 	"tclaw/provider"
@@ -26,6 +28,7 @@ import (
 	"tclaw/libraries/store"
 	"tclaw/tool/channeltools"
 	"tclaw/tool/connectiontools"
+	"tclaw/tool/devtools"
 	googletools "tclaw/tool/google"
 	"tclaw/tool/remotemcp"
 	"tclaw/tool/scheduletools"
@@ -271,6 +274,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Create dynamic channel store and register channel management tools.
 	dynamicStore := channel.NewDynamicStore(s)
 
+	// channelChangeCh signals the main loop to restart the agent when
+	// a channel is created, edited, or deleted via MCP tools.
+	channelChangeCh := make(chan struct{}, 1)
+
 	// Collect static channel infos for the channel tools (immutable reference).
 	// Enrich with per-channel tool permissions from config.
 	staticInfos := channel.InfoAll(staticChMap)
@@ -289,6 +296,12 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		StaticChannels: staticInfos,
 		Env:            r.env,
 		SecretStore:    secretStore,
+		OnChannelChange: func() {
+			select {
+			case channelChangeCh <- struct{}{}:
+			default:
+			}
+		},
 	})
 
 	// Set up the scheduler — runs at user lifetime, outlives the agent.
@@ -308,6 +321,14 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	scheduletools.RegisterTools(mcpHandler, scheduletools.Deps{
 		Store:     scheduleStore,
 		Scheduler: scheduler,
+	})
+
+	// Set up dev workflow tools for code changes, PRs, and deployment.
+	devStore := dev.NewStore(s)
+	devtools.RegisterTools(mcpHandler, devtools.Deps{
+		Store:       devStore,
+		SecretStore: secretStore,
+		UserDir:     userDir,
 	})
 
 	// Merge schedule messages into the static stream so they outlive the agent.
@@ -361,7 +382,24 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				Source:      string(info.Source),
 			})
 		}
-		systemPrompt := agent.BuildSystemPrompt(chInfos, mu.cfg.SystemPrompt)
+
+		// Build dev session info for the system prompt and AddDirs for sandbox access.
+		var devSessionInfos []agent.DevSessionInfo
+		var addDirs []string
+		devSessions, devErr := devStore.ListSessions(ctx)
+		if devErr != nil {
+			slog.Error("failed to list dev sessions", "err", devErr)
+		}
+		for _, sess := range devSessions {
+			devSessionInfos = append(devSessionInfos, agent.DevSessionInfo{
+				Branch:      sess.Branch,
+				WorktreeDir: sess.WorktreeDir,
+				Age:         time.Since(sess.CreatedAt).Truncate(time.Minute).String(),
+			})
+			addDirs = append(addDirs, sess.WorktreeDir)
+		}
+
+		systemPrompt := agent.BuildSystemPrompt(chInfos, devSessionInfos, mu.cfg.SystemPrompt)
 
 		// Wait for a message or shutdown.
 		var firstMsg channel.TaggedMessage
@@ -443,6 +481,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			APIKey:          mu.cfg.APIKey,
 			HomeDir:         homeDir,
 			MemoryDir:       memoryDir,
+			AddDirs:         addDirs,
 			Channels:        allChMap,
 			Sessions:        sessions,
 			OnSessionUpdate: func(chID channel.ChannelID, sessionID string) {
@@ -471,11 +510,28 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			agentErr <- agent.RunWithMessages(agentCtx, opts, bridgeCh)
 		}()
 
-		// Wait for agent and bridge goroutine to finish.
+		// Wait for agent to finish, or for a channel change signal.
 		// The bridge must exit before we loop back to reading mergedMsgs,
 		// otherwise both the bridge and the main loop race to read
 		// from the same channel and the bridge drops the message.
-		err := <-agentErr
+		var err error
+		select {
+		case err = <-agentErr:
+			// Agent exited normally.
+		case <-channelChangeCh:
+			// Channel created/edited/deleted — restart agent to pick up changes.
+			slog.Info("channel changed, restarting agent", "user", mu.cfg.ID)
+			cancel()
+			<-done
+			<-bridgeDone
+			cancelDynamic()
+			r.mu.Lock()
+			mu.cancel = nil
+			mu.done = nil
+			r.mu.Unlock()
+			continue
+		}
+
 		cancel()
 		<-done
 		<-bridgeDone

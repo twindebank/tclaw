@@ -12,7 +12,7 @@ import (
 func channelEditDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name:        "channel_edit",
-		Description: "Update a dynamic channel's description or rotate its bot token. Cannot modify static channels (from config file). Changes take effect after agent restart.",
+		Description: "Update a dynamic channel's description or rotate its bot token. Cannot modify static channels (from config file). The agent restarts automatically to apply changes.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -146,9 +146,13 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 			}
 		}
 
+		if deps.OnChannelChange != nil {
+			deps.OnChannelChange()
+		}
+
 		result := map[string]any{
 			"name":    a.Name,
-			"message": fmt.Sprintf("Channel %q updated. Changes take effect after agent restart — send 'stop' or wait for idle timeout.", a.Name),
+			"message": fmt.Sprintf("Channel %q updated. The agent will restart automatically to apply changes.", a.Name),
 		}
 		if a.Description != "" {
 			result["description"] = a.Description
