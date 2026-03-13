@@ -38,28 +38,31 @@ func dirFiles(t *testing.T, dir string) []string {
 }
 
 type testDirs struct {
-	memory   string
-	home     string
-	sessions string
-	state    string
-	secrets  string
+	memory    string
+	home      string
+	sessions  string
+	state     string
+	secrets   string
+	mcpConfig string
 }
 
 func setupTestDirs(t *testing.T) testDirs {
 	t.Helper()
 	base := t.TempDir()
 	dirs := testDirs{
-		memory:   filepath.Join(base, "memory"),
-		home:     filepath.Join(base, "home"),
-		sessions: filepath.Join(base, "sessions"),
-		state:    filepath.Join(base, "state"),
-		secrets:  filepath.Join(base, "secrets"),
+		memory:    filepath.Join(base, "memory"),
+		home:      filepath.Join(base, "home"),
+		sessions:  filepath.Join(base, "sessions"),
+		state:     filepath.Join(base, "state"),
+		secrets:   filepath.Join(base, "secrets"),
+		mcpConfig: filepath.Join(base, "mcp-config"),
 	}
 
 	seedDir(t, dirs.memory, "CLAUDE.md", "topic-a.md", "topic-b.md")
 	seedDir(t, filepath.Join(dirs.home, ".claude"), "settings.json", "projects/session1.jsonl")
 	seedDir(t, dirs.sessions, "main.sock", "telegram")
-	seedDir(t, dirs.state, "connections", "schedules", "channels", "mcp-config.json")
+	seedDir(t, dirs.state, "connections", "schedules", "channels")
+	seedDir(t, dirs.mcpConfig, "mcp-config.json")
 	seedDir(t, dirs.secrets, "anthropic_api_key.enc", "conn_google_work.enc")
 
 	return dirs
@@ -67,7 +70,7 @@ func setupTestDirs(t *testing.T) testDirs {
 
 func (d testDirs) callReset(t *testing.T, level agent.ResetLevel) {
 	t.Helper()
-	err := resetUser(level, d.memory, d.home, d.sessions, d.state, d.secrets)
+	err := resetUser(level, d.memory, d.home, d.sessions, d.state, d.secrets, d.mcpConfig)
 	require.NoError(t, err)
 }
 
@@ -82,6 +85,7 @@ func TestResetUser(t *testing.T) {
 		require.NotEmpty(t, dirFiles(t, dirs.sessions))
 		require.NotEmpty(t, dirFiles(t, dirs.state))
 		require.NotEmpty(t, dirFiles(t, dirs.secrets))
+		require.NotEmpty(t, dirFiles(t, dirs.mcpConfig))
 	})
 
 	t.Run("project clears claude state and sessions", func(t *testing.T) {
@@ -94,6 +98,7 @@ func TestResetUser(t *testing.T) {
 		require.NotEmpty(t, dirFiles(t, dirs.memory))
 		require.NotEmpty(t, dirFiles(t, dirs.state))
 		require.NotEmpty(t, dirFiles(t, dirs.secrets))
+		require.NotEmpty(t, dirFiles(t, dirs.mcpConfig))
 	})
 
 	t.Run("all clears everything", func(t *testing.T) {
@@ -106,6 +111,7 @@ func TestResetUser(t *testing.T) {
 			dirs.sessions,
 			dirs.state,
 			dirs.secrets,
+			dirs.mcpConfig,
 		} {
 			require.Empty(t, dirFiles(t, dir), "expected %s to be empty", dir)
 		}
@@ -115,7 +121,7 @@ func TestResetUser(t *testing.T) {
 		dirs := setupTestDirs(t)
 		dirs.callReset(t, agent.ResetAll)
 
-		for _, dir := range []string{dirs.memory, dirs.sessions, dirs.state, dirs.secrets} {
+		for _, dir := range []string{dirs.memory, dirs.sessions, dirs.state, dirs.secrets, dirs.mcpConfig} {
 			_, err := os.Stat(dir)
 			require.NoError(t, err, "directory %s should still exist", dir)
 		}
@@ -129,6 +135,7 @@ func TestResetUser(t *testing.T) {
 			filepath.Join(base, "nope-sessions"),
 			filepath.Join(base, "nope-state"),
 			filepath.Join(base, "nope-secrets"),
+			filepath.Join(base, "nope-mcp-config"),
 		)
 		require.NoError(t, err)
 	})

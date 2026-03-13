@@ -269,7 +269,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	if sandboxEnabled() {
 		readOnly := systemReadOnlyPaths
 		if mcpConfigPath != "" {
-			// The MCP config lives in state/ which is outside the user's
+			// The MCP config lives in mcp-config/ which is outside the user's
 			// home and memory dirs. Bind its parent directory read-only so
 			// the claude CLI can read --mcp-config.
 			readOnly = append(readOnly, filepath.Dir(mcpConfigPath))

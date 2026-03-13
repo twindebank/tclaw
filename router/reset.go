@@ -17,7 +17,7 @@ import (
 //	ResetMemories → clears memory/ (CLAUDE.md, topic files)
 //	ResetProject  → clears home/.claude/ (Claude Code state) + sessions/
 //	ResetAll      → clears memory/ + home/.claude/ + sessions/ + state/ + secrets/
-func resetUser(level agent.ResetLevel, memoryDir, homeDir, sessionsDir, stateDir, secretsDir string) error {
+func resetUser(level agent.ResetLevel, memoryDir, homeDir, sessionsDir, stateDir, secretsDir, mcpConfigDir string) error {
 	switch level {
 	case agent.ResetMemories:
 		return clearDirectoryContents(memoryDir)
@@ -42,6 +42,7 @@ func resetUser(level agent.ResetLevel, memoryDir, homeDir, sessionsDir, stateDir
 			{sessionsDir, "sessions"},
 			{stateDir, "state"},
 			{secretsDir, "secrets"},
+			{mcpConfigDir, "mcp-config"},
 		}
 		for _, d := range dirs {
 			if err := clearDirectoryContents(d.path); err != nil {

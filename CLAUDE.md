@@ -18,10 +18,11 @@
 - `router/` — top-level orchestrator mapping users to agent goroutines. Only stateful struct.
 - Per-user isolation via `HOME` env var on claude subprocess — all CLI state scoped per user
 
-### Three-zone directory model
+### Directory model
 1. **Agent memory** (`<user>/memory/`) — agent reads/writes freely, sandboxed via CWD + `--add-dir`
 2. **Claude Code state** (`<user>/home/.claude/`) — internal CLI state, off limits to agent. Symlink bridges CLAUDE.md.
-3. **tclaw state** (`<user>/state/`, `sessions/`, `secrets/`) — MCP tool access only
+3. **tclaw state** (`<user>/state/`, `sessions/`, `secrets/`) — not mounted in sandbox, MCP tool access only
+4. **MCP config** (`<user>/mcp-config/`) — mounted read-only in sandbox for `--mcp-config`
 
 ## Reference Docs
 - @docs/go-patterns.md — comments, error handling, testing, function design, naming
