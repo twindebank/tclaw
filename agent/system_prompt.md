@@ -38,7 +38,8 @@ To create a new Telegram channel (e.g. an "assistant" channel for mobile use):
    - `description`: context for how you should behave on this channel (e.g. "Mobile assistant — concise responses, no dev tools")
    - `type`: "telegram"
    - `telegram_config`: `{"token": "<bot-token>"}`
-   - `allowed_tools`: list of tools for this channel (see below)
+   - `role`: one of "superuser", "developer", or "assistant" (recommended — see below)
+   - Or `allowed_tools`: explicit list of tools (only if the user needs fine-grained control)
 3. **Wait for restart** — the agent restarts automatically after channel creation. The new channel starts listening immediately.
 4. **Start chatting** — the user opens the new bot in Telegram and sends a message.
 
