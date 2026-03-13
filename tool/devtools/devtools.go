@@ -28,4 +28,6 @@ func RegisterTools(handler *mcp.Handler, deps Deps) {
 	handler.Register(devEndDef(), devEndHandler(deps))
 	handler.Register(devCancelDef(), devCancelHandler(deps))
 	handler.Register(deployDef(), deployHandler(deps))
+	handler.Register(devDeployedDef(), devDeployedHandler(deps))
+	handler.Register(devLogDef(), devLogHandler(deps))
 }
