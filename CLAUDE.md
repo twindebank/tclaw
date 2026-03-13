@@ -39,7 +39,7 @@
 - **When changing Go conventions** — update @docs/go-patterns.md
 
 ## Fly.io Operations
-- `fly logs -a tclaw` is a **streaming command** — it never exits. Always use `timeout 10 fly logs -a ${{ vars.FLY_APP_NAME }} 2>&1` or pipe through `head -N` to get a snapshot instead of blocking.
+- **Use `go run . deploy logs`** (or `go run . logs`) to view recent production logs — shows last 100 lines by default, use `-n N` to change, `-f` to stream.
 - `fly deploy --local-only --no-cache -a tclaw` to force a clean Docker rebuild (avoids stale cache issues).
 - Use `go run . deploy` for the standard deploy flow, but be aware it doesn't pass `--no-cache` by default.
 
