@@ -534,7 +534,21 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			APIKey:          mu.cfg.APIKey,
 			HomeDir:         homeDir,
 			MemoryDir:       memoryDir,
-			AddDirs:         addDirs,
+			AddDirs: addDirs,
+			AddDirsFunc: func() []string {
+				// Read from the dev store each turn so worktrees created
+				// mid-session (via dev_start) are immediately accessible.
+				sessions, err := devStore.ListSessions(ctx)
+				if err != nil {
+					slog.Error("failed to list dev sessions for add-dirs", "err", err)
+					return addDirs
+				}
+				var dirs []string
+				for _, sess := range sessions {
+					dirs = append(dirs, sess.WorktreeDir)
+				}
+				return dirs
+			},
 			Channels:        allChMap,
 			Sessions:        sessions,
 			OnSessionUpdate: func(chID channel.ChannelID, sessionID string) {

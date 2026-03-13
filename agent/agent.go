@@ -100,7 +100,13 @@ type Options struct {
 
 	// AddDirs are additional directories passed to the CLI as --add-dir flags
 	// and added to the sandbox's read-write paths. Used for dev worktrees.
+	// If AddDirsFunc is set, it takes precedence over this static list.
 	AddDirs []string
+
+	// AddDirsFunc returns the current list of additional directories to mount.
+	// Called on every turn so newly created worktrees are accessible without
+	// restarting the agent. Falls back to AddDirs if nil.
+	AddDirsFunc func() []string
 
 	Channels map[channel.ChannelID]channel.Channel
 
@@ -653,6 +659,20 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 					}
 				} else {
 					queue = append(queue, newMsg)
+					// Acknowledge the queued message so the user knows it was received.
+					if queueCh, ok := opts.Channels[newMsg.ChannelID]; ok {
+						if _, sendErr := queueCh.Send(ctx, "📥 Queued — will send to the agent once the current turn finishes."); sendErr != nil {
+							slog.Error("failed to send queue acknowledgment", "channel", newMsg.ChannelID, "err", sendErr)
+						}
+						// Only call Done() if the queued message is on a different channel.
+						// Calling Done() on the active turn's channel (e.g. a socket) would
+						// close the connection mid-turn.
+						if newMsg.ChannelID != msg.ChannelID {
+							if doneErr := queueCh.Done(ctx); doneErr != nil {
+								slog.Error("failed to close turn after queue acknowledgment", "channel", newMsg.ChannelID, "err", doneErr)
+							}
+						}
+					}
 				}
 			}
 		}
