@@ -235,6 +235,12 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 // back to the source channel. Returns the session ID from the CLI (may be
 // the same as the input sessionID or a new one from the first invocation).
 func handle(ctx context.Context, opts Options, sessionID string, msg channel.TaggedMessage) (string, error) {
+	// Resolve add-dirs fresh each turn so worktrees created mid-session
+	// (via dev_start) are immediately accessible in the sandbox.
+	if opts.AddDirsFunc != nil {
+		opts.AddDirs = opts.AddDirsFunc()
+	}
+
 	slog.Info("handling message", "prompt", msg.Text, "channel", msg.ChannelID, "session_id", sessionID,
 		"has_api_key", opts.APIKey != "", "home_dir", opts.HomeDir)
 
