@@ -182,6 +182,13 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 		}
 
 		if err := tw.ch.Edit(tw.ctx, tw.statusID, content); err != nil {
+			// "message is not modified" means Telegram already has this
+			// exact content — not a real failure. This happens when
+			// closeThinking permanently writes the close tag that
+			// thinkingSuffix was already displaying.
+			if strings.Contains(err.Error(), "message is not modified") {
+				return nil
+			}
 			// Reactive recovery: start a fresh message. Re-prepend the
 			// spoiler open tag when recovering mid-thinking.
 			slog.Warn("failed to edit status message, starting new message", "err", err)
@@ -226,6 +233,9 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 		}
 
 		if err := tw.ch.Edit(tw.ctx, tw.respID, content); err != nil {
+			if strings.Contains(err.Error(), "message is not modified") {
+				return nil
+			}
 			// Reactive recovery: start a fresh message.
 			slog.Warn("failed to edit response message, starting new message", "err", err)
 			tw.respBuf.Reset()
