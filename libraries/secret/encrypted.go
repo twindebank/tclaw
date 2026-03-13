@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/nacl/secretbox"
@@ -46,8 +47,24 @@ func NewEncryptedFSStore(dir string, masterKey []byte, userID string) (*Encrypte
 	return &EncryptedFSStore{dir: dir, key: key}, nil
 }
 
+// safePath resolves a key to a file path within the store directory,
+// returning an error if the key would escape via path traversal.
+func (e *EncryptedFSStore) safePath(key string) (string, error) {
+	path := filepath.Join(e.dir, key)
+	cleaned := filepath.Clean(path)
+	cleanedDir := filepath.Clean(e.dir)
+	if !strings.HasPrefix(cleaned, cleanedDir+string(filepath.Separator)) && cleaned != cleanedDir {
+		return "", fmt.Errorf("invalid key %q: path traversal detected", key)
+	}
+	return cleaned, nil
+}
+
 func (e *EncryptedFSStore) Get(_ context.Context, key string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(e.dir, key))
+	path, err := e.safePath(key)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return "", nil
 	}
@@ -71,6 +88,11 @@ func (e *EncryptedFSStore) Get(_ context.Context, key string) (string, error) {
 }
 
 func (e *EncryptedFSStore) Set(_ context.Context, key string, value string) error {
+	path, err := e.safePath(key)
+	if err != nil {
+		return err
+	}
+
 	var nonce [nonceSize]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return fmt.Errorf("generate nonce: %w", err)
@@ -78,8 +100,6 @@ func (e *EncryptedFSStore) Set(_ context.Context, key string, value string) erro
 
 	// nonce + encrypted data
 	sealed := secretbox.Seal(nonce[:], []byte(value), &nonce, &e.key)
-
-	path := filepath.Join(e.dir, key)
 
 	// Keys like "conn/google/personal" contain slashes, so ensure
 	// intermediate directories exist before writing.
@@ -94,7 +114,11 @@ func (e *EncryptedFSStore) Set(_ context.Context, key string, value string) erro
 }
 
 func (e *EncryptedFSStore) Delete(_ context.Context, key string) error {
-	err := os.Remove(filepath.Join(e.dir, key))
+	path, err := e.safePath(key)
+	if err != nil {
+		return err
+	}
+	err = os.Remove(path)
 	if os.IsNotExist(err) {
 		return nil
 	}

@@ -2,6 +2,8 @@ package router
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"log/slog"
 	"net/http"
 	"path/filepath"
@@ -53,7 +55,12 @@ func (r *Router) buildDynamicChannels(dynamicCtx context.Context, userID user.ID
 
 			var opts channel.TelegramOptions
 			if r.publicURL != "" && r.callback != nil {
-				webhookPath := "/telegram/" + cfg.Name
+				webhookSecret := make([]byte, 16)
+				if _, err := rand.Read(webhookSecret); err != nil {
+					slog.Error("failed to generate webhook path", "channel", cfg.Name, "err", err)
+					continue
+				}
+				webhookPath := "/telegram/" + hex.EncodeToString(webhookSecret)
 				opts.WebhookURL = r.publicURL + webhookPath
 				opts.RegisterHandler = func(pattern string, handler http.Handler) {
 					r.callback.Handle(pattern, handler)

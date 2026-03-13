@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -24,14 +26,36 @@ type Server struct {
 	listener net.Listener
 	srv      *http.Server
 
+	// Per-session bearer token to prevent unauthorized access from co-located processes.
+	token string
+
 	mu      sync.Mutex
 	running bool
 }
 
 // NewServer creates an MCP server with the given tool handler.
+// A random bearer token is generated to authenticate requests.
 // It does not start listening until Start is called.
 func NewServer(handler *Handler) *Server {
-	return &Server{handler: handler}
+	return &Server{
+		handler: handler,
+		token:   generateToken(),
+	}
+}
+
+// Token returns the bearer token that clients must present in the
+// Authorization header to call this server.
+func (s *Server) Token() string {
+	return s.token
+}
+
+// generateToken returns a cryptographically random 32-byte hex string.
+func generateToken() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
+	return hex.EncodeToString(b)
 }
 
 // Start begins serving on the given address (e.g. "127.0.0.1:0" for random port).
@@ -125,6 +149,15 @@ const maxRequestBodySize = 1 << 20
 // handleMCP processes MCP JSON-RPC requests. Supports both single requests
 // and batched arrays (required by the MCP protocol).
 func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
+	// Validate bearer token to prevent unauthorized access from co-located processes.
+	if s.token != "" {
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer "+s.token {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+	}
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
