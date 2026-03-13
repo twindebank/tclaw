@@ -22,7 +22,7 @@ Commands:
   suspend            Spin down the Fly.io deployment (scale to 0)
   resume             Spin up the Fly.io deployment (scale to 1)
   status             Show Fly.io app status
-  logs               Tail Fly.io app logs
+  logs               Show recent Fly.io app logs (same as tclaw logs)
 `
 
 func runDeploy() {
@@ -45,7 +45,7 @@ func runDeploy() {
 	case "status":
 		run("fly", "status", "-a", flyApp)
 	case "logs":
-		run("fly", "logs", "-a", flyApp)
+		doLogs(os.Args[3:])
 	case "--help", "-h", "help":
 		fmt.Print(deployUsage)
 	default:

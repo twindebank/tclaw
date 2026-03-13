@@ -18,10 +18,13 @@ Options:
 `
 
 func runLogs() {
+	doLogs(os.Args[2:])
+}
+
+func doLogs(args []string) {
 	// Parse args manually to keep it simple.
 	follow := false
 	count := "100"
-	args := os.Args[2:]
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-f", "--follow":
