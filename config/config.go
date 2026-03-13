@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"tclaw/channel"
 	"tclaw/claudecli"
 	"tclaw/libraries/secret"
 	"tclaw/role"
@@ -144,13 +145,14 @@ const (
 // IsLocal returns true if this is the local development environment.
 func (e Env) IsLocal() bool { return e == EnvLocal }
 
-// ChannelType identifies the transport kind in config.
-type ChannelType string
+// ChannelType is an alias for channel.ChannelType to avoid repeating
+// the type definition. Config YAML values unmarshal into channel's type.
+type ChannelType = channel.ChannelType
 
 const (
-	ChannelTypeSocket   ChannelType = "socket"
-	ChannelTypeStdio    ChannelType = "stdio"
-	ChannelTypeTelegram ChannelType = "telegram"
+	ChannelTypeSocket   = channel.TypeSocket
+	ChannelTypeStdio    = channel.TypeStdio
+	ChannelTypeTelegram = channel.TypeTelegram
 )
 
 // Load reads a multi-environment config file and returns the Config for the

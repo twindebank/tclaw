@@ -1,6 +1,9 @@
 package role
 
-import "tclaw/claudecli"
+import (
+	"tclaw/claudecli"
+	"tclaw/provider"
+)
 
 // Role is a named preset of tool permissions. Channels and users can specify a
 // role instead of listing individual tools. Roles and allowed_tools are mutually
@@ -81,6 +84,18 @@ var allBuiltins = []claudecli.Tool{
 	claudecli.BuiltinReset,
 }
 
+// MCP tool patterns for tclaw tools.
+const (
+	MCPToolAll          claudecli.Tool = "mcp__tclaw__*"
+	MCPToolDevAll       claudecli.Tool = "mcp__tclaw__dev_*"
+	MCPToolDeploy       claudecli.Tool = "mcp__tclaw__deploy"
+	MCPToolScheduleAll  claudecli.Tool = "mcp__tclaw__schedule_*"
+	MCPToolConnectionAll claudecli.Tool = "mcp__tclaw__connection_*"
+	MCPToolRemoteMCPAll claudecli.Tool = "mcp__tclaw__remote_mcp_*"
+	MCPToolGoogleAll    claudecli.Tool = "mcp__tclaw__google_*"
+	MCPToolMonzoAll     claudecli.Tool = "mcp__tclaw__monzo_*"
+)
+
 // basic builtins for assistant.
 var basicBuiltins = []claudecli.Tool{
 	claudecli.BuiltinStop,
@@ -102,7 +117,7 @@ func resolveSuperuser(ctx ChannelContext) []claudecli.Tool {
 		claudecli.ToolAskUserQuestion, claudecli.ToolEnterPlanMode, claudecli.ToolExitPlanMode,
 		claudecli.ToolEnterWorktree, claudecli.ToolListMcpResources, claudecli.ToolReadMcpResource,
 		// All tclaw MCP tools.
-		"mcp__tclaw__*",
+		MCPToolAll,
 	}
 	tools = append(tools, allBuiltins...)
 	tools = append(tools, providerToolPatterns(ctx)...)
@@ -135,9 +150,9 @@ func resolveDeveloper() []claudecli.Tool {
 	tools = append(tools, allBuiltins...)
 	// Dev workflow + schedule tools.
 	tools = append(tools,
-		"mcp__tclaw__dev_*",
-		"mcp__tclaw__deploy",
-		"mcp__tclaw__schedule_*",
+		MCPToolDevAll,
+		MCPToolDeploy,
+		MCPToolScheduleAll,
 	)
 	return tools
 }
@@ -149,9 +164,9 @@ func resolveAssistant(ctx ChannelContext) []claudecli.Tool {
 	tools = append(tools, basicBuiltins...)
 	// Connection/remote MCP management + scheduling.
 	tools = append(tools,
-		"mcp__tclaw__connection_*",
-		"mcp__tclaw__remote_mcp_*",
-		"mcp__tclaw__schedule_*",
+		MCPToolConnectionAll,
+		MCPToolRemoteMCPAll,
+		MCPToolScheduleAll,
 	)
 	// Provider tools for connections on this channel.
 	tools = append(tools, providerToolPatterns(ctx)...)
@@ -164,11 +179,11 @@ func resolveAssistant(ctx ChannelContext) []claudecli.Tool {
 func providerToolPatterns(ctx ChannelContext) []claudecli.Tool {
 	var tools []claudecli.Tool
 	for _, pid := range ctx.ProviderIDs {
-		switch pid {
-		case "google":
-			tools = append(tools, "mcp__tclaw__google_*")
-		case "monzo":
-			tools = append(tools, "mcp__tclaw__monzo_*")
+		switch provider.ProviderID(pid) {
+		case provider.GoogleProviderID:
+			tools = append(tools, MCPToolGoogleAll)
+		case provider.MonzoProviderID:
+			tools = append(tools, MCPToolMonzoAll)
 		}
 	}
 	return tools

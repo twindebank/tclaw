@@ -13,16 +13,11 @@ import (
 
 	"tclaw/connection"
 	"tclaw/mcp"
-	"tclaw/oauth"
-	"tclaw/provider"
+	"tclaw/tool/providerutil"
 )
 
 // Deps holds dependencies for a single Google Workspace connection.
-type Deps struct {
-	ConnID   connection.ConnectionID
-	Manager  *connection.Manager
-	Provider *provider.Provider
-}
+type Deps = providerutil.Deps
 
 // RegisterTools registers (or re-registers) the Google Workspace tools
 // with handlers that resolve the connection dynamically from connMap.
@@ -50,16 +45,7 @@ func UnregisterTools(handler *mcp.Handler) {
 
 // resolveDeps looks up the Deps for a connection ID from the tool args.
 func resolveDeps(connMap map[connection.ConnectionID]Deps, connIDStr string) (Deps, error) {
-	connID := connection.ConnectionID(connIDStr)
-	deps, ok := connMap[connID]
-	if !ok {
-		available := make([]string, 0, len(connMap))
-		for id := range connMap {
-			available = append(available, string(id))
-		}
-		return Deps{}, fmt.Errorf("unknown connection %q — available: %s", connIDStr, strings.Join(available, ", "))
-	}
-	return deps, nil
+	return providerutil.ResolveDeps(connMap, connIDStr)
 }
 
 var (
@@ -102,14 +88,7 @@ func findGWSBinary() string {
 
 // accessToken gets a valid access token for the connection, refreshing if needed.
 func accessToken(ctx context.Context, deps Deps) (string, error) {
-	refreshFn := func(ctx context.Context, refreshToken string) (*connection.Credentials, error) {
-		return oauth.RefreshToken(ctx, deps.Provider.OAuth2, refreshToken)
-	}
-	creds, err := deps.Manager.RefreshIfNeeded(ctx, deps.ConnID, refreshFn)
-	if err != nil {
-		return "", fmt.Errorf("get credentials for %s: %w", deps.ConnID, err)
-	}
-	return creds.AccessToken, nil
+	return providerutil.AccessToken(ctx, deps)
 }
 
 // runGWS executes a gws command with the connection's access token injected via env var.
