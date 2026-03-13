@@ -289,6 +289,17 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		}
 	}
 
+	// Seed Fly API token from Fly secret (e.g. FLY_TOKEN_THEO) into the
+	// encrypted secret store, same pattern as the GitHub token above.
+	flyTokenEnvVar := agent.FlyTokenEnvVarName(string(mu.cfg.ID))
+	if flyToken := os.Getenv(flyTokenEnvVar); flyToken != "" {
+		if seedErr := secretStore.Set(ctx, "fly_api_token", flyToken); seedErr != nil {
+			slog.Error("failed to seed fly api token from env", "user", mu.cfg.ID, "err", seedErr)
+		} else {
+			slog.Info("seeded fly api token from env", "user", mu.cfg.ID, "env_var", flyTokenEnvVar)
+		}
+	}
+
 	// Create dynamic channel store and register channel management tools.
 	dynamicStore := channel.NewDynamicStore(s)
 
