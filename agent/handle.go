@@ -296,6 +296,9 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		return "", fmt.Errorf("start claude: %w", err)
 	}
 
+	// Raise the subprocess OOM score so the kernel kills it before tclaw.
+	markSubprocessOOMTarget(cmd)
+
 	// Drain stderr so the process doesn't block on it.
 	go func() {
 		data, _ := io.ReadAll(stderr)
