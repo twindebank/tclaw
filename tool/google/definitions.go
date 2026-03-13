@@ -28,7 +28,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 				"Without a query, returns the most recent messages. " +
 				"Defaults: max_results=10 (max 25), query=empty (all mail). " +
 				"Returns fetched_count, total_estimate, and next_page_token for pagination awareness. " +
-				"For reading a single email's full body, use google_workspace with 'gmail users messages get' instead.",
+				"For reading a single email's full body as clean text, use google_gmail_read instead.",
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
@@ -47,6 +47,28 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 					}
 				},
 				"required": ["connection"]
+			}`, connDescription, enumJSON)),
+		},
+		{
+			Name: "google_gmail_read",
+			Description: "Read a single Gmail message and return its body as clean plain text. " +
+				"Strips HTML formatting, signatures, and styling — returns only readable text content with headers (from, to, subject, date). " +
+				"Use this after google_gmail_list to read specific emails. " +
+				"Much more efficient than google_workspace with format=full, which returns raw HTML that bloats context.",
+			InputSchema: json.RawMessage(fmt.Sprintf(`{
+				"type": "object",
+				"properties": {
+					"connection": {
+						"type": "string",
+						"description": %q,
+						"enum": %s
+					},
+					"message_id": {
+						"type": "string",
+						"description": "The Gmail message ID from google_gmail_list results."
+					}
+				},
+				"required": ["connection", "message_id"]
 			}`, connDescription, enumJSON)),
 		},
 		{
