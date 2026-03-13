@@ -5,6 +5,7 @@ go 1.26
 require (
 	github.com/creack/pty/v2 v2.0.1
 	github.com/go-telegram/bot v1.19.0
+	github.com/k3a/html2text v1.3.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/stretchr/testify v1.11.1
 	github.com/zalando/go-keyring v0.2.6
