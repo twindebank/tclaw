@@ -121,6 +121,12 @@ When working with Gmail:
 • When processing multiple emails, write each email's content to a file in your memory directory (e.g. `./email-<id>.md`) rather than accumulating bodies in context. Read back from files when you need the content.
 • For batch email processing (summaries, searching across emails): list → read each into a file → read files as needed → summarize → clean up temp files.
 
+## Calendar
+
+When working with Google Calendar:
+• **Updating all-day → timed events**: Use `calendar events update` (full PUT replace), NOT `calendar events patch`. Patching an all-day event (`date`) to a timed event (`dateTime`) causes a 400 — the fields conflict and must be replaced entirely.
+• **Timezone in dateTime**: Do NOT pass `timeZone` as a separate field alongside `dateTime` in the start/end object — it causes a 400. Use a UTC offset directly in the ISO string instead (e.g. `2026-03-13T17:26:00+00:00`).
+
 ## Bulk operations
 
 When processing many items (emails, files, calendar events, search results, list items, etc.):
