@@ -71,9 +71,10 @@ type TaggedMessage struct {
 	Text      string
 }
 
-// ThinkingWrap holds the open and close tags for wrapping thinking content.
-// Channels that don't support collapsible/spoiler content return empty strings.
-type ThinkingWrap struct {
+// StatusWrap holds the open and close tags for wrapping status content
+// (thinking, tool use, tool results, stats). Channels that don't support
+// collapsible/spoiler content return empty strings.
+type StatusWrap struct {
 	Open  string // e.g. "<tg-spoiler>"
 	Close string // e.g. "</tg-spoiler>"
 }
@@ -96,8 +97,8 @@ type Channel interface {
 	SplitStatusMessages() bool
 	// Markup returns the rich-text format the channel accepts.
 	Markup() Markup
-	// ThinkingWrap returns the open/close tags for wrapping thinking
-	// content in a collapsible or spoiler block. Returns empty strings
-	// for channels that don't support this.
-	ThinkingWrap() ThinkingWrap
+	// StatusWrap returns the open/close tags for wrapping all status
+	// content (thinking, tool use, stats) in a collapsible or spoiler
+	// block. Returns empty strings for channels that don't support this.
+	StatusWrap() StatusWrap
 }

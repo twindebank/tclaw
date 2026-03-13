@@ -212,6 +212,6 @@ func (f *fakeChannel) Markup() channel.Markup {
 	return channel.MarkupMarkdown
 }
 
-func (f *fakeChannel) ThinkingWrap() channel.ThinkingWrap {
-	return channel.ThinkingWrap{}
+func (f *fakeChannel) StatusWrap() channel.StatusWrap {
+	return channel.StatusWrap{}
 }

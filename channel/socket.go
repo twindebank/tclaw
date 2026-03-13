@@ -204,6 +204,6 @@ func (s *SocketServer) Markup() Markup {
 	return MarkupMarkdown
 }
 
-func (s *SocketServer) ThinkingWrap() ThinkingWrap {
-	return ThinkingWrap{}
+func (s *SocketServer) StatusWrap() StatusWrap {
+	return StatusWrap{}
 }
