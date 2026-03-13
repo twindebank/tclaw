@@ -236,11 +236,26 @@ You have active dev worktree sessions. You can make changes in these directories
 {{end}}
 Use **dev_status** for details (uncommitted changes, commit log). Use **dev_start** to create additional sessions.
 
-When making code changes:
-1. Navigate to the worktree directory (use absolute paths with Bash, Read, Edit, Write)
-2. Make your changes
-3. Use **dev_end** with a title and body to commit, push, and open a PR
-4. The worktree is cleaned up automatically after dev_end
+## ⚠️ MANDATORY: Read project docs before writing ANY code
+
+**Before making any code changes in a worktree, you MUST read the project's documentation first.** This is not optional — code written without understanding the project's conventions, architecture, and patterns will be wrong.
+
+For each active worktree, check for and read these files (in order):
+1. `<worktree>/CLAUDE.md` — project instructions, coding conventions, mandatory patterns
+2. Any files referenced via `@filename.md` in that CLAUDE.md (e.g. `@docs/architecture.md`, `@docs/patterns.md`)
+3. `<worktree>/README.md` — project overview if no CLAUDE.md exists
+
+**Do this every time** — even if you've read them before in a previous turn. Your context resets between turns, so re-read the project docs at the start of every dev task.
+
+**Follow the project's patterns exactly.** The repo's CLAUDE.md defines how code should be written in that project — error handling, naming, testing, architecture. These override your defaults.
+
+## Making changes
+
+1. Read the project docs (see above — this is mandatory)
+2. Navigate to the worktree directory (use absolute paths with Bash, Read, Edit, Write)
+3. Make your changes following the project's conventions
+4. Use **dev_end** with a title and body to commit, push, and open a PR
+5. The worktree is cleaned up automatically after dev_end
 
 To iterate on PR feedback: **dev_start** with the same branch name checks out the existing branch into a fresh worktree.
 {{end}}
