@@ -9,6 +9,9 @@ import (
 const (
 	// githubTokenKey is the secret store key for the GitHub PAT.
 	githubTokenKey = "github_token"
+
+	// flyTokenKey is the secret store key for the Fly.io API token.
+	flyTokenKey = "fly_api_token"
 )
 
 // Deps holds dependencies for dev workflow tools.
