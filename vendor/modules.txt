@@ -1,0 +1,66 @@
+# al.essio.dev/pkg/shellescape v1.5.1
+## explicit; go 1.18
+al.essio.dev/pkg/shellescape
+# github.com/creack/pty/v2 v2.0.1
+## explicit; go 1.13
+github.com/creack/pty/v2
+# github.com/danieljoos/wincred v1.2.2
+## explicit; go 1.18
+github.com/danieljoos/wincred
+# github.com/davecgh/go-spew v1.1.1
+## explicit
+github.com/davecgh/go-spew/spew
+# github.com/go-telegram/bot v1.19.0
+## explicit; go 1.18
+github.com/go-telegram/bot
+github.com/go-telegram/bot/models
+# github.com/godbus/dbus/v5 v5.1.0
+## explicit; go 1.12
+github.com/godbus/dbus/v5
+# github.com/gofrs/uuid/v5 v5.3.2
+## explicit; go 1.19
+github.com/gofrs/uuid/v5
+# github.com/k3a/html2text v1.3.0
+## explicit; go 1.16
+github.com/k3a/html2text
+# github.com/kr/text v0.2.0
+## explicit
+# github.com/pmezard/go-difflib v1.0.0
+## explicit
+github.com/pmezard/go-difflib/difflib
+# github.com/robfig/cron/v3 v3.0.1
+## explicit; go 1.12
+github.com/robfig/cron/v3
+# github.com/rogpeppe/go-internal v1.14.1
+## explicit; go 1.23
+# github.com/stretchr/testify v1.11.1
+## explicit; go 1.17
+github.com/stretchr/testify/assert
+github.com/stretchr/testify/assert/yaml
+github.com/stretchr/testify/require
+# github.com/zalando/go-keyring v0.2.6
+## explicit; go 1.18
+github.com/zalando/go-keyring
+github.com/zalando/go-keyring/secret_service
+# go.jetify.com/typeid v1.3.0
+## explicit; go 1.21
+go.jetify.com/typeid
+go.jetify.com/typeid/base32
+# golang.org/x/crypto v0.48.0
+## explicit; go 1.24.0
+golang.org/x/crypto/hkdf
+golang.org/x/crypto/internal/alias
+golang.org/x/crypto/internal/poly1305
+golang.org/x/crypto/nacl/secretbox
+golang.org/x/crypto/salsa20/salsa
+# golang.org/x/oauth2 v0.35.0
+## explicit; go 1.24.0
+golang.org/x/oauth2
+golang.org/x/oauth2/internal
+# golang.org/x/sys v0.41.0
+## explicit; go 1.24.0
+golang.org/x/sys/cpu
+golang.org/x/sys/windows
+# gopkg.in/yaml.v3 v3.0.1
+## explicit
+gopkg.in/yaml.v3
