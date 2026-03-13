@@ -77,7 +77,7 @@ func devEndHandler(deps Deps) mcp.ToolHandler {
 		}
 
 		// Check for existing PR.
-		prURL, err := ghPRFind(sess.WorktreeDir, sess.Branch)
+		prURL, err := ghPRFind(sess.WorktreeDir, sess.Branch, token)
 		if err != nil {
 			// Non-fatal: gh might not be available.
 			prURL = ""
@@ -89,7 +89,7 @@ func devEndHandler(deps Deps) mcp.ToolHandler {
 			if body == "" {
 				body = a.Title
 			}
-			newURL, prErr := ghPRCreate(sess.WorktreeDir, sess.Branch, a.Title, body)
+			newURL, prErr := ghPRCreate(sess.WorktreeDir, sess.Branch, a.Title, body, token)
 			if prErr != nil {
 				// Push succeeded but PR creation failed — report but don't fail.
 				prURL = "PR creation failed: " + prErr.Error() + " (branch was pushed successfully)"

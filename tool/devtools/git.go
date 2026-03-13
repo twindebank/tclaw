@@ -196,8 +196,19 @@ func authenticatedURL(repoURL string, token string) string {
 	return strings.Replace(repoURL, "https://", "https://"+token+"@", 1)
 }
 
+// ghEnv returns a minimal environment for gh CLI commands with the GitHub token
+// set via GH_TOKEN. The gh CLI doesn't inherit auth from git's URL-based token
+// injection, so it needs the token explicitly.
+func ghEnv(token string) []string {
+	env := os.Environ()
+	if token != "" {
+		env = append(env, "GH_TOKEN="+token)
+	}
+	return env
+}
+
 // ghPRCreate creates a GitHub PR using the gh CLI and returns the PR URL.
-func ghPRCreate(worktreeDir string, branch string, title string, body string) (string, error) {
+func ghPRCreate(worktreeDir string, branch string, title string, body string, token string) (string, error) {
 	cmd := exec.Command("gh", "pr", "create",
 		"--title", title,
 		"--body", body,
@@ -205,6 +216,7 @@ func ghPRCreate(worktreeDir string, branch string, title string, body string) (s
 		"--base", "main",
 	)
 	cmd.Dir = worktreeDir
+	cmd.Env = ghEnv(token)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("gh pr create: %s: %w", string(out), err)
@@ -213,9 +225,10 @@ func ghPRCreate(worktreeDir string, branch string, title string, body string) (s
 }
 
 // ghPRFind checks if a PR already exists for a branch. Returns the URL if found.
-func ghPRFind(worktreeDir string, branch string) (string, error) {
+func ghPRFind(worktreeDir string, branch string, token string) (string, error) {
 	cmd := exec.Command("gh", "pr", "list", "--head", branch, "--json", "url", "--jq", ".[0].url")
 	cmd.Dir = worktreeDir
+	cmd.Env = ghEnv(token)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("gh pr list: %s: %w", string(out), err)
