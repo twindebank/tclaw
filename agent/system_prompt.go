@@ -28,6 +28,7 @@ type ChannelInfo struct {
 	Type        string
 	Description string
 	Source      string // "static" or "dynamic"
+	Role        string // role name if set (e.g. "assistant", "developer")
 }
 
 // DevSessionInfo describes an active dev session for the system prompt.

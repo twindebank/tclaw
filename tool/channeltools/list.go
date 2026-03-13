@@ -7,6 +7,7 @@ import (
 
 	"tclaw/channel"
 	"tclaw/mcp"
+	"tclaw/role"
 )
 
 func channelListDef() mcp.ToolDef {
@@ -18,13 +19,14 @@ func channelListDef() mcp.ToolDef {
 }
 
 type channelListEntry struct {
-	Name            string   `json:"name"`
-	Type            string   `json:"type"`
-	Description     string   `json:"description"`
-	Source          string   `json:"source"`
-	AllowedTools    []string `json:"allowed_tools,omitempty"`
-	DisallowedTools []string `json:"disallowed_tools,omitempty"`
-	AllowedUsers    []int64  `json:"allowed_users,omitempty"`
+	Name            string    `json:"name"`
+	Type            string    `json:"type"`
+	Description     string    `json:"description"`
+	Source          string    `json:"source"`
+	Role            role.Role `json:"role,omitempty"`
+	AllowedTools    []string  `json:"allowed_tools,omitempty"`
+	DisallowedTools []string  `json:"disallowed_tools,omitempty"`
+	AllowedUsers    []int64   `json:"allowed_users,omitempty"`
 }
 
 func channelListHandler(deps Deps) mcp.ToolHandler {
@@ -38,6 +40,7 @@ func channelListHandler(deps Deps) mcp.ToolHandler {
 				Type:            string(info.Type),
 				Description:     info.Description,
 				Source:          string(channel.SourceStatic),
+				Role:            info.Role,
 				AllowedTools:    info.AllowedTools,
 				DisallowedTools: info.DisallowedTools,
 			})
@@ -54,6 +57,7 @@ func channelListHandler(deps Deps) mcp.ToolHandler {
 				Type:            string(cfg.Type),
 				Description:     cfg.Description,
 				Source:          string(channel.SourceDynamic),
+				Role:            cfg.Role,
 				AllowedTools:    cfg.AllowedTools,
 				DisallowedTools: cfg.DisallowedTools,
 				AllowedUsers:    cfg.AllowedUsers,
