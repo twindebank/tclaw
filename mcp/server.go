@@ -157,7 +157,9 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(responses)
+		if err := json.NewEncoder(w).Encode(responses); err != nil {
+			slog.Error("failed to encode batch response", "err", err)
+		}
 		return
 	}
 
@@ -175,7 +177,9 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(rsp)
+	if err := json.NewEncoder(w).Encode(rsp); err != nil {
+		slog.Error("failed to encode response", "err", err)
+	}
 }
 
 // dispatch routes a single JSON-RPC request to the appropriate handler.
@@ -209,25 +213,65 @@ func (s *Server) dispatch(ctx context.Context, req jsonRPCRequest) *jsonRPCRespo
 	}
 }
 
+// initializeResult is the JSON-RPC response for the initialize method.
+type initializeResult struct {
+	ProtocolVersion string           `json:"protocolVersion"`
+	ServerInfo      serverInfo       `json:"serverInfo"`
+	Capabilities    serverCapability `json:"capabilities"`
+}
+
+type serverInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+type serverCapability struct {
+	Tools struct{} `json:"tools"`
+}
+
+// toolsListResult is the JSON-RPC response for the tools/list method.
+type toolsListResult struct {
+	Tools []ToolDef `json:"tools"`
+}
+
+// toolsCallResult is the JSON-RPC response for a successful tools/call.
+type toolsCallResult struct {
+	Content []contentBlock `json:"content"`
+	IsError bool           `json:"isError,omitempty"`
+}
+
+type contentBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
 func (s *Server) handleInitialize(req jsonRPCRequest) *jsonRPCResponse {
-	result := map[string]any{
-		"protocolVersion": protocolVersion,
-		"serverInfo": map[string]string{
-			"name":    serverName,
-			"version": serverVersion,
-		},
-		"capabilities": map[string]any{
-			"tools": map[string]any{},
-		},
+	result := initializeResult{
+		ProtocolVersion: protocolVersion,
+		ServerInfo:      serverInfo{Name: serverName, Version: serverVersion},
 	}
-	data, _ := json.Marshal(result)
+	data, err := json.Marshal(result)
+	if err != nil {
+		return &jsonRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error:   &jsonRPCError{Code: -32603, Message: "internal error: " + err.Error()},
+		}
+	}
 	return &jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: data}
 }
 
 func (s *Server) handleToolsList(req jsonRPCRequest) *jsonRPCResponse {
 	tools := s.handler.ListTools()
-	result := map[string]any{"tools": tools}
-	data, _ := json.Marshal(result)
+	result := toolsListResult{Tools: tools}
+	data, err := json.Marshal(result)
+	if err != nil {
+		return &jsonRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error:   &jsonRPCError{Code: -32603, Message: "internal error: " + err.Error()},
+		}
+	}
 	return &jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: data}
 }
 
@@ -258,13 +302,18 @@ func (s *Server) handleToolsCall(ctx context.Context, req jsonRPCRequest) *jsonR
 		)
 		// MCP protocol: tool errors are returned as content with isError=true,
 		// not as JSON-RPC errors. This lets Claude see and react to the error.
-		errContent := map[string]any{
-			"content": []map[string]any{
-				{"type": "text", "text": err.Error()},
-			},
-			"isError": true,
+		errResult := toolsCallResult{
+			Content: []contentBlock{{Type: "text", Text: err.Error()}},
+			IsError: true,
 		}
-		data, _ := json.Marshal(errContent)
+		data, marshalErr := json.Marshal(errResult)
+		if marshalErr != nil {
+			return &jsonRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error:   &jsonRPCError{Code: -32603, Message: "internal error: " + marshalErr.Error()},
+			}
+		}
 		return &jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: data}
 	}
 
@@ -280,20 +329,27 @@ func (s *Server) handleToolsCall(ctx context.Context, req jsonRPCRequest) *jsonR
 	} else {
 		resultText = "OK"
 	}
-	content := map[string]any{
-		"content": []map[string]any{
-			{"type": "text", "text": resultText},
-		},
+	content := toolsCallResult{
+		Content: []contentBlock{{Type: "text", Text: resultText}},
 	}
-	data, _ := json.Marshal(content)
+	data, marshalErr := json.Marshal(content)
+	if marshalErr != nil {
+		return &jsonRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error:   &jsonRPCError{Code: -32603, Message: "internal error: " + marshalErr.Error()},
+		}
+	}
 	return &jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: data}
 }
 
 func writeJSONRPCError(w http.ResponseWriter, id json.RawMessage, code int, message string) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(jsonRPCResponse{
+	if err := json.NewEncoder(w).Encode(jsonRPCResponse{
 		JSONRPC: "2.0",
 		ID:      id,
 		Error:   &jsonRPCError{Code: code, Message: message},
-	})
+	}); err != nil {
+		slog.Error("failed to encode error response", "err", err)
+	}
 }
