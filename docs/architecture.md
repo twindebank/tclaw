@@ -282,6 +282,8 @@ OnChannelChange callback signals router → agent restarts automatically
 │  Keys:                                   │
 │    anthropic_api_key      (auth)         │
 │    claude_setup_token     (auth)         │
+│    github_token           (dev tools)    │
+│    fly_api_token          (deploy tool)  │
 │    conn/<provider>/<id>   (connections)  │
 │    channel/<name>/token   (channels)     │
 └──────────────────────────────────────────┘
@@ -301,6 +303,43 @@ OnChannelChange callback signals router → agent restarts automatically
 │    CLAUDE_CODE_OAUTH_TOKEN → token  │
 └─────────────────────────────────────┘
 ```
+
+### Seeding Secrets from Fly
+
+MCP tools read credentials from the per-user encrypted secret store. In production, the secret store lives on the Fly volume — tools can't read Fly secrets (env vars) directly because the subprocess env is stripped. The **seeding pattern** bridges this gap: the router reads a per-user env var at boot and writes it into the encrypted store.
+
+**How it works:**
+
+1. Deploy a Fly secret with a per-user name: `fly secrets set GITHUB_TOKEN_THEO=<value> -a tclaw`
+2. On boot, the router checks for `GITHUB_TOKEN_<USER_ID>` in the environment
+3. If found, seeds it into the user's encrypted store under the tool's key (e.g. `github_token`)
+4. The env var is scrubbed from the subprocess environment (never reaches the claude CLI)
+5. MCP tools read from the encrypted store as normal
+
+**Env var naming:** `<PREFIX>_<USER_ID>` where the user ID is uppercased with non-alphanumeric chars replaced by underscores. Examples:
+- User `theo` → `GITHUB_TOKEN_THEO`, `FLY_TOKEN_THEO`
+- User `my-user` → `GITHUB_TOKEN_MY_USER`, `FLY_TOKEN_MY_USER`
+
+**Currently seeded secrets:**
+
+| Fly secret | Store key | Used by |
+|------------|-----------|---------|
+| `GITHUB_TOKEN_<USER>` | `github_token` | `dev_start`, `dev_end`, `deploy` (git fetch) |
+| `FLY_TOKEN_<USER>` | `fly_api_token` | `deploy` (fly deploy) |
+| `CLAUDE_SETUP_TOKEN_<USER>` | `claude_setup_token` | Claude CLI auth |
+
+**When to use seeding vs runtime prompting:**
+
+- **Seeding** — for secrets that should be pre-provisioned without user interaction (deploy tokens, CI tokens). Deploy once via `fly secrets set`, available on every boot.
+- **Runtime prompting** — for secrets the user provides interactively (API keys entered in chat, OAuth flows). The tool returns an error, the agent prompts the user, stores the value.
+- **Both work together** — a seeded secret can be overwritten by a runtime-provided one (e.g. user passes `fly_api_token` to the deploy tool). The most recent write wins.
+
+**Adding a new seeded secret:**
+
+1. Add a const key in the tool package (e.g. `flyTokenKey = "fly_api_token"`)
+2. Add `<Prefix>EnvVarName(userID)` in `agent/auth.go` using `sanitizeEnvSuffix`
+3. Add seeding block in `router/router.go` `startUser()` (same pattern as GitHub token)
+4. Deploy the secret: `fly secrets set <ENV_VAR>=<value> -a tclaw`
 
 ## Environment Configuration
 
@@ -439,6 +478,8 @@ Credentials are encrypted at rest using NaCl secretbox with per-user derived key
 Secret store keys follow a hierarchical naming convention:
 - `anthropic_api_key` — user's Anthropic API key
 - `claude_setup_token` — OAuth setup token
+- `github_token` — GitHub PAT for dev workflow (push, PR creation)
+- `fly_api_token` — Fly.io API token for deploys
 - `conn/<provider>/<id>` — OAuth connection credentials
 - `channel/<name>/token` — dynamic channel secrets (e.g. Telegram bot tokens)
 
