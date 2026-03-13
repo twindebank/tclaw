@@ -399,7 +399,7 @@ Active worktree directories are passed to the Claude subprocess via `--add-dir` 
 
 ### System prompt integration
 
-Active dev sessions are listed in the system prompt so the agent knows which worktrees are available and how to use them.
+Active dev sessions are listed in the system prompt so the agent knows which worktrees are available and how to use them. The system prompt also instructs the agent to read the project's documentation (CLAUDE.md, referenced `@` files, README.md) from the worktree before making any code changes, ensuring it follows the repo's conventions and patterns.
 
 ## Secret Management
 
