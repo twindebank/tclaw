@@ -278,8 +278,8 @@ func (t *Telegram) Markup() Markup {
 	return MarkupHTML
 }
 
-func (t *Telegram) ThinkingWrap() ThinkingWrap {
-	return ThinkingWrap{Open: "<tg-spoiler>", Close: "</tg-spoiler>"}
+func (t *Telegram) StatusWrap() StatusWrap {
+	return StatusWrap{Open: "<tg-spoiler>", Close: "</tg-spoiler>"}
 }
 
 // markdownBold matches **text** that the model emits despite being told to use HTML.
