@@ -126,6 +126,16 @@ func (tw *turnWriter) thinkingSuffix(content string) string {
 	return content
 }
 
+// thinkingPrefix prepends the thinking open tag when we're inside an open
+// thinking block. Used when message rotation resets the buffer mid-thinking
+// so the new message starts with a valid open tag.
+func (tw *turnWriter) thinkingPrefix(content string) string {
+	if tw.thinkingOpen && tw.thinkingWrap.Open != "" {
+		return tw.thinkingWrap.Open + content
+	}
+	return content
+}
+
 // writeSplit routes to separate status and response messages.
 // It proactively rotates to a new message when the buffer approaches
 // Telegram's character limit, and reactively recovers from Edit failures
@@ -135,22 +145,29 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 	case phaseStatus:
 		// Once response text has appeared, start a fresh status message
 		// so subsequent status (later-turn thinking, tools, stats) shows
-		// below the response in chat order.
+		// below the response in chat order. Re-prepend the spoiler open
+		// tag if we're mid-thinking so the new message has valid markup.
 		if tw.statusSealed {
 			tw.statusBuf.Reset()
 			tw.statusID = ""
 			tw.statusSealed = false
+			if tw.thinkingOpen && tw.thinkingWrap.Open != "" {
+				tw.statusBuf.WriteString(tw.thinkingWrap.Open)
+			}
 		}
 
 		tw.statusBuf.WriteString(text)
 		content := tw.thinkingSuffix(tw.statusBuf.String())
 
 		// Proactive split: rotate to a new message before hitting the limit.
+		// Re-prepend the spoiler open tag when rotating mid-thinking so the
+		// new message starts with valid markup.
 		if tw.statusID != "" && len(content) > maxMessageLen {
+			freshText := tw.thinkingPrefix(text)
 			tw.statusBuf.Reset()
-			tw.statusBuf.WriteString(text)
+			tw.statusBuf.WriteString(freshText)
 			tw.statusID = ""
-			content = tw.thinkingSuffix(text)
+			content = tw.thinkingSuffix(freshText)
 		}
 
 		if tw.statusID == "" {
@@ -165,12 +182,14 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 		}
 
 		if err := tw.ch.Edit(tw.ctx, tw.statusID, content); err != nil {
-			// Reactive recovery: start a fresh message.
+			// Reactive recovery: start a fresh message. Re-prepend the
+			// spoiler open tag when recovering mid-thinking.
 			slog.Warn("failed to edit status message, starting new message", "err", err)
+			freshText := tw.thinkingPrefix(text)
 			tw.statusBuf.Reset()
-			tw.statusBuf.WriteString(text)
+			tw.statusBuf.WriteString(freshText)
 			tw.statusID = ""
-			recoveryContent := tw.thinkingSuffix(text)
+			recoveryContent := tw.thinkingSuffix(freshText)
 			id, err := tw.ch.Send(tw.ctx, recoveryContent)
 			if err != nil {
 				// Status is informational — log and swallow.
