@@ -20,11 +20,11 @@
 ## Permissions & Security
 - [x] Secret management — OS keychain (local) + encrypted FS (deployed), per-user isolation, ${secret:NAME} config syntax
 - [x] Channel descriptions — agent aware of current and other channels via config descriptions
+- [x] Per-channel tool allowlists — restrict which tools are available on each channel independently, with builtin command gating via `builtin__*` names
 - [ ] Clearly define session access boundaries — make it explicit what the agent can/can't access in terms of current session state vs other sessions (cross-session isolation model)
 - [ ] Tool permissions / 2FA — approve or deny tool calls via the chat channel
 - [ ] Privileged sessions — temporary elevated permissions with a timeout (e.g. user grants write access for 30 min)
 - [ ] Permission matching rules — expressive rules for tool permissions based on provider, read/write, resource scope, etc.
-- [ ] Per-channel tool allowlists — restrict which tools are available on each channel independently
 
 ## UX
 - [x] Split thinking and final message — separate thinking/tool-use status from response text into distinct messages (Telegram split mode)
@@ -32,7 +32,8 @@
 - [x] Timestamps on messages — show when each message was sent/received
 - [x] Visual message separation — clearer boundaries between messages in the chat UI
 - [x] Show tool arguments — display tool call parameters alongside tool use events
-- [ ] Chat keywords — special commands: `/model` (switch model), `/compact` (compact context), `/help` (list commands), `/cancel` (abort current response), `/nuke` (wipe all user data)
+- [x] Chat keywords — builtin commands: `stop` (abort current response), `compact` (compact context), `new`/`reset`/`clear`/`delete` (multi-level reset menu), `login`/`auth` (interactive auth flow)
+- [ ] Chat keywords (remaining) — `model` (switch model), `help` (list commands)
 - [ ] Render markdown in chat — parse and render markdown formatting in the TUI client
 - [ ] Web browser tool / Selenium — give the agent the ability to browse and interact with web pages
 
@@ -61,12 +62,12 @@
 - [x] Schedule management tools — MCP tools for create, list, edit, delete, pause, resume
 
 ## Self-Modification
-- [ ] Dev tools — MCP tools that let the agent make limited changes to its own codebase:
-  - `dev_start` — clones/mounts the repo into a temp worktree, creates a branch
-  - `dev_read_file` / `dev_write_file` / `dev_list_files` — scoped file operations
-  - `dev_finish` — commits, pushes, opens a PR
-  - `dev_cancel` — tears down the worktree without committing
-  - Deploy key for push access — never commits directly to main, always opens PRs
+- [x] Dev tools — MCP tools for dev workflow via git worktrees:
+  - `dev_start` — clones/fetches repo (bare clone), creates worktree on new/existing branch
+  - `dev_status` — shows branch, uncommitted changes, commit log, diff stat
+  - `dev_end` — commits, pushes, creates PR via `gh`, tears down worktree
+  - `dev_cancel` — removes worktree and branch without pushing
+  - `deploy` — two-phase Fly.io deploy with preview and confirmation
 
 ## Operations
 - [x] Deployment — Docker + Fly.io with persistent volume, health checks, CI workflow
@@ -74,4 +75,4 @@
 
 ## Documentation
 - [x] Project docs — [features](docs/features.md), [architecture](docs/architecture.md), README
-- [ ] Coding style guide — extract general patterns from CLAUDE.md into standalone docs
+- [x] Coding style guide — `docs/go-patterns.md` with comments, error handling, testing, function design, naming conventions
