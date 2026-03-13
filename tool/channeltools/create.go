@@ -9,6 +9,7 @@ import (
 
 	"tclaw/channel"
 	"tclaw/mcp"
+	"tclaw/role"
 )
 
 const (
@@ -54,15 +55,20 @@ func channelCreateDef() mcp.ToolDef {
 					},
 					"required": ["token"]
 				},
+				"role": {
+					"type": "string",
+					"enum": ["superuser", "developer", "assistant"],
+					"description": "Named preset of tool permissions. Mutually exclusive with allowed_tools — set one or the other. Roles resolve dynamically based on connections and remote MCPs on this channel."
+				},
 				"allowed_tools": {
 					"type": "array",
 					"items": {"type": "string"},
-					"description": "Tools this channel is allowed to use. Replaces user-level allowed_tools. Supports glob patterns (e.g. 'mcp__tclaw__google_*') and builtin commands (e.g. 'builtin__reset_session', 'builtin__stop')."
+					"description": "Tools this channel is allowed to use. Mutually exclusive with role. Supports glob patterns (e.g. 'mcp__tclaw__google_*') and builtin commands (e.g. 'builtin__reset_session', 'builtin__stop')."
 				},
 				"disallowed_tools": {
 					"type": "array",
 					"items": {"type": "string"},
-					"description": "Tools explicitly denied on this channel. Replaces user-level disallowed_tools."
+					"description": "Tools explicitly denied on this channel. Works alongside both role and allowed_tools for surgical removal."
 				}
 			},
 			"required": ["name", "description", "type"]
@@ -80,6 +86,7 @@ type channelCreateArgs struct {
 	Description     string                `json:"description"`
 	Type            string                `json:"type"`
 	TelegramConfig  *telegramCreateConfig `json:"telegram_config"`
+	Role            string                `json:"role"`
 	AllowedTools    []string              `json:"allowed_tools"`
 	DisallowedTools []string              `json:"disallowed_tools"`
 }
@@ -117,6 +124,18 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("unsupported channel type %q (must be 'socket' or 'telegram')", a.Type)
 		}
 
+		// Validate role / allowed_tools mutual exclusion.
+		var channelRole role.Role
+		if a.Role != "" {
+			channelRole = role.Role(a.Role)
+			if !channelRole.Valid() {
+				return nil, fmt.Errorf("unknown role %q (known: %v)", a.Role, role.ValidRoles())
+			}
+			if len(a.AllowedTools) > 0 {
+				return nil, fmt.Errorf("role and allowed_tools are mutually exclusive — set one or the other")
+			}
+		}
+
 		// Check uniqueness against static channels.
 		for _, info := range deps.StaticChannels {
 			if info.Name == a.Name {
@@ -134,6 +153,7 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			Type:            channelType,
 			Description:     a.Description,
 			CreatedAt:       time.Now(),
+			Role:            channelRole,
 			AllowedTools:    a.AllowedTools,
 			DisallowedTools: a.DisallowedTools,
 			AllowedUsers:    allowedUsers,

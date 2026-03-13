@@ -51,7 +51,7 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 |---------|----------------|
 | `oauth/` | Stateless OAuth 2.0 helpers (`BuildAuthURL`, `ExchangeCode`, `RefreshToken`). `CallbackServer` handles HTTP endpoints for OAuth callbacks, Telegram webhooks, and health checks. |
 | `provider/` | OAuth provider registry. Stateless lookup by provider ID. Currently: Google. |
-| `connection/` | Connection CRUD and credential management. Bridges `store.Store` (connection metadata) and `secret.Store` (encrypted credentials). Also manages remote MCP server configs. |
+| `connection/` | Connection CRUD and credential management. Bridges `store.Store` (connection metadata) and `secret.Store` (encrypted credentials). Also manages remote MCP server configs. Connections and remote MCPs support channel scoping via a `Channel` field. |
 
 ### Tools (MCP)
 
@@ -73,6 +73,7 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 | `libraries/store/` | Key-value `Store` interface with filesystem-backed implementation (`NewFS`). JSON serialization to disk. |
 | `libraries/secret/` | Encrypted secret storage. `Store` interface with two implementations: `EncryptedStore` (NaCl secretbox, for deployed) and `KeychainStore` (macOS Keychain, for local dev). `Resolve()` picks the right one. |
 | `libraries/id/` | TypeID generation (ULID-based). Used for schedule IDs. |
+| `role/` | Role definitions, validation, and resolution. Maps named presets (`superuser`, `developer`, `assistant`) to tool lists. `Resolve(role, ChannelContext)` dynamically includes provider tool patterns (e.g. `mcp__tclaw__google_*`) and remote MCP tool patterns based on channel-scoped connections and remote MCPs. |
 | `claudecli/` | Typed enums and event structs for the Claude CLI's stream-json output. Models, permission modes, tools, content block types. Pure data types, no I/O. |
 | `user/` | `user.ID` and `user.Config` types. Pure data, no I/O. |
 | `schedule/` | Cron schedule store and scheduler daemon. The scheduler runs at user lifetime and injects messages into channels when schedules fire. |
@@ -89,7 +90,7 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 Dependencies flow strictly downward — no circular imports.
 
 ```
-Layer 1:  Pure types (user, claudecli, store.Store interface, secret.Store interface)
+Layer 1:  Pure types (user, claudecli, role, store.Store interface, secret.Store interface)
 Layer 2:  Domain models (connection.Connection, schedule.Schedule, channel.Channel interface)
 Layer 3:  Managers (connection.Manager, schedule.Store, channel.DynamicStore)
 Layer 4:  Stateless handlers (oauth, mcp.Handler, mcp/discovery)
@@ -313,11 +314,7 @@ server:
 
 users:
   - id: myuser
-    allowed_tools:
-      - "mcp__tclaw__*"            # required for MCP tools (connections, channels, etc.)
-      - Bash
-      - Read
-      # ... other Claude Code tools
+    role: superuser                 # or use allowed_tools for fine-grained control
 ```
 
 - Secrets from OS keychain (`tclaw secret set NAME value`)
@@ -351,13 +348,13 @@ prod:
 - Secrets from `fly secrets set` (pushed via `tclaw deploy secrets`)
 - Setup token from `fly secrets set CLAUDE_SETUP_TOKEN_<USER>=<token>` (per-user OAuth)
 - Health check at `/healthz` every 30s
-- `allowed_tools` must include `"mcp__tclaw__*"` — same as local config
+- `allowed_tools` must include `"mcp__tclaw__*"` (or use a role like `superuser` that includes it) — same as local config
 
 ## MCP Architecture
 
 Each user gets their own MCP server on a random port (`127.0.0.1:0`). The server implements JSON-RPC over HTTP and registers tools from all `tool/` packages.
 
-**Important:** The user's `allowed_tools` must include `"mcp__tclaw__*"` for the agent to use any tclaw MCP tools (connections, channels, schedules, etc.). Without this, the CLI's permission system will block MCP tool calls.
+**Important:** The user's `allowed_tools` must include `"mcp__tclaw__*"` for the agent to use any tclaw MCP tools (connections, channels, schedules, etc.). Without this, the CLI's permission system will block MCP tool calls. Alternatively, using the `superuser` role automatically includes this pattern.
 
 The `mcp-config.json` file is generated at `<user>/state/mcp-config.json` and passed to the CLI via `--mcp-config`. It includes:
 
@@ -421,15 +418,15 @@ The agent interacts with tclaw state (connections, schedules, channels, secrets)
 
 ### Per-Channel Tool Permissions
 
-Tool permissions are resolved per-channel at each turn. Channels can define their own `allowed_tools` and `disallowed_tools` lists (in static config or dynamic channel configs). When a channel has overrides, they **replace** the user-level permissions entirely — no merging.
+Tool permissions are resolved per-channel at each turn. Channels can define their own `allowed_tools` and `disallowed_tools` lists, or use a **role** as a named preset (in static config or dynamic channel configs). Roles and explicit tool lists are mutually exclusive — setting a role clears explicit lists and vice versa. Roles are resolved via `role.Resolve()`, which dynamically includes provider tool patterns (e.g. `mcp__tclaw__google_*`) for channel-scoped connections and remote MCP tool patterns for channel-scoped remote MCPs. When a channel has overrides, they **replace** the user-level permissions entirely — no merging.
 
 This gates two layers:
-- **CLI tools** — `resolveToolsForChannel()` picks the channel-level or user-level allowed/disallowed lists, filters out `builtin__*` entries (which the CLI doesn't understand), and passes the result as `--allowedTools`/`--disallowedTools` flags to the subprocess.
-- **Builtin commands** — `isBuiltinAllowed()` checks whether `builtin__*` entries (e.g. `builtin__stop`, `builtin__compact`, `builtin__reset`, `builtin__login`, `builtin__auth`) are present in the channel's tool list. If no `builtin__*` entries exist at all (neither channel nor user level), everything is allowed for backwards compatibility. The reset menu is dynamic — `allowedResetLevels()` only includes levels whose corresponding builtin (e.g. `builtin__reset_session`, `builtin__reset_memories`) is permitted.
+- **CLI tools** — `resolveToolsForChannel()` picks the channel-level or user-level allowed/disallowed lists (resolving roles to tool lists first), filters out `builtin__*` entries (which the CLI doesn't understand), and passes the result as `--allowedTools`/`--disallowedTools` flags to the subprocess.
+- **Builtin commands** — `isBuiltinAllowed()` checks whether `builtin__*` entries (e.g. `builtin__stop`, `builtin__compact`, `builtin__reset`, `builtin__login`, `builtin__auth`) are present in the channel's resolved tool list. If no `builtin__*` entries exist at all (neither channel nor user level), everything is allowed for backwards compatibility. The reset menu is dynamic — `allowedResetLevels()` only includes levels whose corresponding builtin (e.g. `builtin__reset_session`, `builtin__reset_memories`) is permitted.
 
 The router builds the `ChannelToolOverrides` map from two sources:
-- **Static channels** — tool fields from `config.Channel` entries, matched to live channels by name
-- **Dynamic channels** — tool fields from `DynamicChannelConfig` in the store, matched to live channels by name
+- **Static channels** — tool fields (including role) from `config.Channel` entries, matched to live channels by name
+- **Dynamic channels** — tool fields (including role) from `DynamicChannelConfig` in the store, matched to live channels by name
 
 ### 4. Secret Boundary
 

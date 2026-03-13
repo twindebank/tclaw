@@ -55,10 +55,10 @@ Channel type is validated at creation time — attempting to create a socket cha
 
 **MCP tools:**
 
-- **channel_create** — creates a dynamic channel. Requires `name`, `description`, and `type` ("socket" or "telegram"). Telegram channels require a `telegram_config` with a `token` field and optionally an `allowed_users` list of Telegram user IDs. The bot token is stored in the encrypted secret store (not in the channel config JSON). Optionally accepts `allowed_tools` and `disallowed_tools` to set per-channel tool permissions. Returns an error if the channel type is not allowed in the current environment.
-- **channel_edit** — updates a dynamic channel's description, rotates its Telegram bot token (via `telegram_config`), updates `allowed_users`, and/or updates `allowed_tools` and `disallowed_tools`. At least one field must be provided. Cannot edit static channels.
+- **channel_create** — creates a dynamic channel. Requires `name`, `description`, and `type` ("socket" or "telegram"). Telegram channels require a `telegram_config` with a `token` field and optionally an `allowed_users` list of Telegram user IDs. The bot token is stored in the encrypted secret store (not in the channel config JSON). Optionally accepts a `role` or `allowed_tools` (mutually exclusive) and `disallowed_tools` to set per-channel tool permissions. Returns an error if the channel type is not allowed in the current environment.
+- **channel_edit** — updates a dynamic channel's description, role, tool permissions, rotates its Telegram bot token (via `telegram_config`), and/or updates `allowed_users`. Accepts `role`, `allowed_tools`, and `disallowed_tools` for permission changes. Setting a role clears explicit tool lists; setting allowed_tools clears the role. At least one field must be provided. Cannot edit static channels.
 - **channel_delete** — removes a dynamic channel and cleans up any associated secrets (e.g. Telegram bot token from the secret store). Cannot delete static channels.
-- **channel_list** — lists all channels (static and dynamic) with name, type, description, source, and tool permissions (`allowed_tools`/`disallowed_tools`).
+- **channel_list** — lists all channels (static and dynamic) with name, type, description, source, role, and tool permissions (`allowed_tools`/`disallowed_tools`).
 - **tool_list** — lists all available tool names that can be used in `allowed_tools` and `disallowed_tools`. Returns Claude Code tools, tclaw MCP tools, and builtin commands. Useful when setting up channel permissions.
 
 **Secret lifecycle:** Telegram bot tokens follow a strict lifecycle tied to their channel — created in the secret store on `channel_create`, rotated via `channel_edit`, and deleted on `channel_delete`. Tokens are never stored in the channel config JSON and are only read from the secret store when building the live Telegram channel on agent restart.
@@ -94,15 +94,58 @@ A warning is logged at startup if a Telegram channel has no `allowed_users` conf
 
 Each channel can specify which environments it's active in via the `envs` field. A channel with `envs: [prod]` only starts in production. Empty `envs` means active everywhere.
 
+### Roles
+
+Roles are named presets of tool permissions — a simpler alternative to listing individual tools. Three roles are available:
+
+| Role | Tools included |
+|------|----------------|
+| `superuser` | All Claude Code tools, all tclaw MCP tools (`mcp__tclaw__*`), all builtins, provider tools for channel connections, remote MCP tool patterns for channel remote MCPs |
+| `developer` | Bash, file tools, web tools, Agent, LSP, all builtins, dev workflow tools (`mcp__tclaw__dev_*`, `mcp__tclaw__deploy`), schedule tools |
+| `assistant` | File tools (Read, Edit, Write, Glob, Grep), web tools, basic builtins (stop, compact, session reset, memories reset), connection/remote MCP/schedule management tools, provider tools for channel connections, remote MCP tool patterns for channel remote MCPs |
+
+**How roles work:**
+
+- Roles and `allowed_tools` are **mutually exclusive** — set one or the other, never both. Setting a role clears any explicit tool list, and vice versa.
+- Roles can be set at the **user level** (default for all channels) or **per-channel** (overrides the user-level setting).
+- Role resolution is **dynamic** — the `superuser` and `assistant` roles include provider-specific tool patterns (e.g. `mcp__tclaw__google_*`) only when a connection exists on that channel, and remote MCP tool patterns (e.g. `mcp__linear__*`) only when a remote MCP is scoped to that channel.
+
+**Config example (static):**
+
+```yaml
+users:
+  - id: myuser
+    role: superuser           # default for all channels
+    channels:
+      - name: admin
+        type: telegram
+        role: superuser       # inherits from user, but can be overridden
+      - name: assistant
+        type: telegram
+        role: assistant       # restricted tool set
+```
+
+**Dynamic channel example:**
+
+```json
+{
+  "name": "assistant",
+  "type": "telegram",
+  "role": "assistant",
+  "telegram_config": { "token": "..." }
+}
+```
+
 ### Per-Channel Tool Permissions
 
-Channels can override the user-level `allowed_tools` and `disallowed_tools` to restrict or customize what the agent can do on each channel. This works for both static channels (in config) and dynamic channels (via MCP tools).
+Channels can override the user-level `allowed_tools` and `disallowed_tools` to restrict or customize what the agent can do on each channel. This works for both static channels (in config) and dynamic channels (via MCP tools). Alternatively, channels can use [roles](#roles) as a simpler preset-based approach.
 
 **How it works:**
 
-- Each channel can define `allowed_tools` and/or `disallowed_tools` lists.
-- When a channel sets tool permissions, they **replace** the user-level defaults entirely — there is no merging. This gives full control over what's available per channel.
-- When a channel has no tool overrides, the user-level `allowed_tools` and `disallowed_tools` apply as before.
+- Each channel can define `allowed_tools` and/or `disallowed_tools` lists, **or** a `role` — but not both `role` and `allowed_tools`.
+- `disallowed_tools` works alongside both `role` and `allowed_tools` for surgical removal of specific tools.
+- When a channel sets tool permissions (via role or explicit lists), they **replace** the user-level defaults entirely — there is no merging. This gives full control over what's available per channel.
+- When a channel has no tool overrides, the user-level `allowed_tools`, `disallowed_tools`, or `role` apply as before.
 
 **Builtin command gating:**
 
@@ -146,7 +189,7 @@ channels:
 
 **Dynamic channel example:**
 
-The `channel_create` and `channel_edit` MCP tools accept `allowed_tools` and `disallowed_tools` parameters. The `channel_list` tool includes these fields in its output.
+The `channel_create` and `channel_edit` MCP tools accept `role`, `allowed_tools`, and `disallowed_tools` parameters. The `channel_list` tool includes role and tool permission fields in its output.
 
 ### Channel Setup Patterns
 
@@ -159,10 +202,10 @@ The admin channel is defined statically in config with full tool access includin
 **Why this approach:** The admin creates and manages channels conversationally — no deploy needed to add/modify/remove channels. Tool permissions can be iterated on by editing the dynamic channel. Good for users who want flexibility and can manage their own channel setup.
 
 **Setup flow:**
-1. Static admin channel in config with full tools + `mcp__tclaw__channel_*` + all builtins
+1. Static admin channel in config with `role: superuser` + channel management tools
 2. User messages admin channel: "set up an assistant channel on Telegram"
 3. Agent guides user through @BotFather token creation
-4. Agent calls `channel_create` with restricted `allowed_tools` (no dev tools, no channel management, restricted reset)
+4. Agent calls `channel_create` with `role: assistant` (restricted tool set, no dev tools, no channel management)
 5. Agent restarts automatically, new channel is live
 
 **Example admin config:**
@@ -173,37 +216,16 @@ channels:
     description: Primary admin channel
     telegram:
       token: ${secret:TELEGRAM_ADMIN_TOKEN}
-    allowed_tools:
-      - Bash
-      - Read
-      - Edit
-      - Write
-      - Glob
-      - Grep
-      - WebFetch
-      - WebSearch
-      - Agent
-      - "mcp__tclaw__channel_*"
-      - "mcp__tclaw__schedule_*"
-      - "mcp__tclaw__connection_*"
-      - "mcp__tclaw__remote_mcp_*"
-      - "builtin__reset"
-      - "builtin__stop"
-      - "builtin__compact"
-      - "builtin__login"
+    role: superuser
 ```
 
-The assistant channel is then created dynamically with tools like:
+The assistant channel is then created dynamically with a role:
 ```json
 {
-  "allowed_tools": [
-    "Bash", "Read", "Edit", "Write", "Glob", "Grep",
-    "WebFetch", "WebSearch",
-    "mcp__tclaw__google_*", "mcp__tclaw__schedule_*",
-    "mcp__tclaw__connection_*",
-    "builtin__reset_session", "builtin__reset_memories",
-    "builtin__stop", "builtin__compact"
-  ]
+  "name": "assistant",
+  "type": "telegram",
+  "role": "assistant",
+  "telegram_config": { "token": "...", "allowed_users": [123456789] }
 }
 ```
 
@@ -222,41 +244,14 @@ channels:
     telegram:
       token: ${secret:TELEGRAM_ADMIN_TOKEN}
       allowed_users: [123456789]  # your Telegram user ID (get it from @userinfobot)
-    allowed_tools:
-      - Bash
-      - Read
-      - Edit
-      - Write
-      - WebFetch
-      - WebSearch
-      - "mcp__tclaw__schedule_*"
-      - "mcp__tclaw__connection_*"
-      - "builtin__reset"
-      - "builtin__stop"
-      - "builtin__compact"
-      - "builtin__login"
+    role: superuser
   - name: assistant
     type: telegram
     description: Mobile assistant — concise responses, no channel management
     telegram:
       token: ${secret:TELEGRAM_ASSISTANT_TOKEN}
       allowed_users: [123456789]
-    allowed_tools:
-      - Bash
-      - Read
-      - Edit
-      - Write
-      - Glob
-      - Grep
-      - WebFetch
-      - WebSearch
-      - "mcp__tclaw__google_*"
-      - "mcp__tclaw__schedule_*"
-      - "mcp__tclaw__connection_*"
-      - "builtin__reset_session"
-      - "builtin__reset_memories"
-      - "builtin__stop"
-      - "builtin__compact"
+    role: assistant
 ```
 
 #### Choosing an approach
@@ -318,11 +313,11 @@ When the CLI reports `authentication_failed`, the agent automatically starts an 
 
 ## Connections (OAuth Providers)
 
-Users can connect external services (currently Google Workspace) through OAuth flows managed via MCP tools:
+Users can connect external services (currently Google Workspace) through OAuth flows managed via MCP tools. Every connection is scoped to a specific channel so that provider tools (e.g. `google_*`) are only available on that channel.
 
-- **connection_add** — starts the OAuth flow for a provider. Opens a browser for consent.
+- **connection_add** — starts the OAuth flow for a provider. Requires `provider`, `label`, and `channel`. The provider's tools are only available on the specified channel. Opens a browser for consent.
 - **connection_remove** — disconnects and wipes credentials.
-- **connection_list** — lists all active connections.
+- **connection_list** — lists all active connections with their provider, label, channel association, and credential status.
 - **connection_auth_wait** — polls for OAuth completion (used by the agent after starting a flow).
 
 OAuth callbacks are handled by the HTTP server at `/oauth/callback`. The callback server includes rate limiting per state code to prevent brute-force attacks.
@@ -339,11 +334,11 @@ Tools are only registered when a Google connection exists and are removed when t
 
 ## Remote MCP Servers
 
-Users can connect to external MCP servers (like the Anthropic MCP directory) via MCP tools:
+Users can connect to external MCP servers (like the Anthropic MCP directory) via MCP tools. Every remote MCP is scoped to a specific channel — its tools are only included in that channel's MCP configuration.
 
-- **remote_mcp_add** — adds a remote MCP server URL with optional OAuth discovery (RFC 7591 dynamic client registration).
+- **remote_mcp_add** — adds a remote MCP server URL with optional OAuth discovery (RFC 7591 dynamic client registration). Requires a `channel` parameter to scope the remote MCP to a specific channel. The remote MCP's tools are only available on that channel.
 - **remote_mcp_remove** — disconnects a remote MCP.
-- **remote_mcp_list** — lists connected remote MCPs.
+- **remote_mcp_list** — lists connected remote MCPs with their name, URL, channel scope, and auth status.
 - **remote_mcp_auth_wait** — polls for OAuth completion on remote MCPs that require auth.
 
 Remote MCPs are included in the `mcp-config.json` file that's passed to the Claude CLI via `--mcp-config`. Bearer tokens from OAuth are automatically included.

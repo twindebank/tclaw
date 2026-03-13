@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"tclaw/libraries/store"
+	"tclaw/role"
 )
 
 const dynamicChannelsStoreKey = "dynamic_channels"
@@ -19,6 +20,10 @@ type DynamicChannelConfig struct {
 	Type        ChannelType `json:"type"`
 	Description string      `json:"description"`
 	CreatedAt   time.Time   `json:"created_at"`
+
+	// Role is a named preset of tool permissions for this channel.
+	// Mutually exclusive with AllowedTools.
+	Role role.Role `json:"role,omitempty"`
 
 	// AllowedTools overrides user-level tool permissions for this channel.
 	AllowedTools []string `json:"allowed_tools,omitempty"`

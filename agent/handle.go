@@ -247,11 +247,12 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		fmt.Sprintf("\n# Active Channel\n\nThis message is from **%s** (%s): %s\n", info.Name, info.Type, info.Description)
 
 	allowed, disallowed := resolveToolsForChannel(opts, msg.ChannelID)
+	mcpConfigPath := resolveMCPConfigPath(opts, msg.ChannelID)
 	if opts.Debug {
 		slog.Debug("resolved channel tools", "channel", msg.ChannelID,
-			"allowed", allowed, "disallowed", disallowed)
+			"allowed", allowed, "disallowed", disallowed, "mcp_config", mcpConfigPath)
 	}
-	args := buildArgs(opts, sessionID, systemPrompt, msg.Text, allowed, disallowed)
+	args := buildArgs(opts, sessionID, systemPrompt, msg.Text, allowed, disallowed, mcpConfigPath)
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Env = buildEnv(opts)
 
@@ -267,11 +268,11 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	// see explicitly bound paths. Locally (macOS) this is a no-op.
 	if sandboxEnabled() {
 		readOnly := systemReadOnlyPaths
-		if opts.MCPConfigPath != "" {
+		if mcpConfigPath != "" {
 			// The MCP config lives in state/ which is outside the user's
 			// home and memory dirs. Bind its parent directory read-only so
 			// the claude CLI can read --mcp-config.
-			readOnly = append(readOnly, filepath.Dir(opts.MCPConfigPath))
+			readOnly = append(readOnly, filepath.Dir(mcpConfigPath))
 		}
 		readWrite := []string{opts.MemoryDir, opts.HomeDir}
 		readWrite = append(readWrite, opts.AddDirs...)
@@ -357,6 +358,14 @@ func buildEnv(opts Options) []string {
 	// Disable Claude Code's auto-memory so the agent only writes to
 	// its own memory dir (CWD), not ~/.claude/projects/.../memory/.
 	overrides["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
+
+	// Cap the Node.js V8 heap to stay within the VM's memory budget.
+	// NODE_MAX_HEAP_MB is set in fly.toml [env] — see the comment there
+	// for sizing guidance. Without this, the claude CLI can consume all
+	// available memory and get OOM-killed mid-turn with no user feedback.
+	if maxHeap := os.Getenv("NODE_MAX_HEAP_MB"); maxHeap != "" {
+		overrides["NODE_OPTIONS"] = "--max-old-space-size=" + maxHeap
+	}
 
 	var env []string
 	for _, kv := range os.Environ() {

@@ -30,6 +30,7 @@ func remoteMCPListHandler(deps Deps) mcp.ToolHandler {
 		type mcpInfo struct {
 			Name     string `json:"name"`
 			URL      string `json:"url"`
+			Channel  string `json:"channel,omitempty"`
 			HasAuth  bool   `json:"has_auth"`
 			HasToken bool   `json:"has_token"`
 		}
@@ -41,8 +42,9 @@ func remoteMCPListHandler(deps Deps) mcp.ToolHandler {
 				slog.Warn("failed to get auth for remote MCP", "name", m.Name, "err", err)
 			}
 			info := mcpInfo{
-				Name: m.Name,
-				URL:  m.URL,
+				Name:    m.Name,
+				URL:     m.URL,
+				Channel: m.Channel,
 			}
 			if auth != nil {
 				info.HasAuth = true

@@ -56,8 +56,11 @@ func (m *Manager) Get(ctx context.Context, id ConnectionID) (*Connection, error)
 	return nil, nil
 }
 
-// Add creates a new connection. Returns an error if one with the same ID exists.
-func (m *Manager) Add(ctx context.Context, providerID provider.ProviderID, label string) (*Connection, error) {
+// Add creates a new connection scoped to a channel. Returns an error if one
+// with the same ID exists. The channel parameter associates the connection
+// with a specific channel — provider tools will only be available on that
+// channel.
+func (m *Manager) Add(ctx context.Context, providerID provider.ProviderID, label string, channel string) (*Connection, error) {
 	conns, err := m.List(ctx)
 	if err != nil {
 		return nil, err
@@ -74,6 +77,7 @@ func (m *Manager) Add(ctx context.Context, providerID provider.ProviderID, label
 		ID:         id,
 		ProviderID: providerID,
 		Label:      label,
+		Channel:    channel,
 		CreatedAt:  time.Now(),
 	}
 	conns = append(conns, conn)
@@ -82,6 +86,21 @@ func (m *Manager) Add(ctx context.Context, providerID provider.ProviderID, label
 		return nil, err
 	}
 	return &conn, nil
+}
+
+// ListByChannel returns connections scoped to the given channel name.
+func (m *Manager) ListByChannel(ctx context.Context, channelName string) ([]Connection, error) {
+	conns, err := m.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var result []Connection
+	for _, c := range conns {
+		if c.Channel == channelName {
+			result = append(result, c)
+		}
+	}
+	return result, nil
 }
 
 // Remove deletes a connection and its credentials.

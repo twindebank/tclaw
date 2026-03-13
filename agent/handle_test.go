@@ -242,6 +242,31 @@ func TestBuildEnv_OverridesAlwaysSet(t *testing.T) {
 	}
 }
 
+func TestBuildEnv_NodeMaxHeap(t *testing.T) {
+	t.Run("sets NODE_OPTIONS when env var present", func(t *testing.T) {
+		t.Setenv("NODE_MAX_HEAP_MB", "128")
+		env := buildEnv(Options{})
+		envMap := make(map[string]string)
+		for _, kv := range env {
+			key, val, _ := strings.Cut(kv, "=")
+			envMap[key] = val
+		}
+		if envMap["NODE_OPTIONS"] != "--max-old-space-size=128" {
+			t.Errorf("expected NODE_OPTIONS=--max-old-space-size=128, got %q", envMap["NODE_OPTIONS"])
+		}
+	})
+
+	t.Run("omits NODE_OPTIONS when env var absent", func(t *testing.T) {
+		env := buildEnv(Options{})
+		for _, kv := range env {
+			key, _, _ := strings.Cut(kv, "=")
+			if key == "NODE_OPTIONS" {
+				t.Error("NODE_OPTIONS should not be set when NODE_MAX_HEAP_MB is absent")
+			}
+		}
+	})
+}
+
 func TestWriteSplit_NoSplitBelowThreshold(t *testing.T) {
 	ch := &mockChannel{}
 	tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}

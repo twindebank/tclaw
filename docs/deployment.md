@@ -33,5 +33,20 @@ tclaw deploy resume      # Spin up (scale to 1)
 ## OAuth Callback URL
 `https://your-app.fly.dev/oauth/callback` — set this as the redirect URI in Google OAuth console.
 
+## Memory Tuning
+
+The Fly VM runs at 256MB (free tier). tclaw itself uses ~15MB; the claude CLI (Node.js) is the main consumer. To prevent the CLI from eating all available memory and getting OOM-killed silently:
+
+- **`NODE_MAX_HEAP_MB`** in `fly.toml` `[env]` caps the V8 heap via `NODE_OPTIONS=--max-old-space-size=<value>`. Currently set to `128`.
+- When the heap limit is hit, Node.js exits with a JS heap OOM error instead of the kernel OOM-killer firing. The agent catches this and notifies the user on the channel.
+- **To increase:** raise `NODE_MAX_HEAP_MB` in `fly.toml` and redeploy. If you also raise the VM memory (`[[vm]] memory`), you have more headroom — budget ~80MB for kernel + tclaw + system, the rest for the CLI.
+- **To disable:** remove `NODE_MAX_HEAP_MB` from `fly.toml`. The CLI will use whatever memory is available (and risk OOM-kill with no user notification).
+
+| VM memory | NODE_MAX_HEAP_MB | Notes |
+|-----------|-----------------|-------|
+| 256mb     | 128             | Free tier, tight but workable for most turns |
+| 512mb     | 350             | Comfortable for heavy turns (email triage, etc.) |
+| 1024mb    | 800             | No practical constraints |
+
 ## CI (optional)
 GitHub Actions workflow at `.github/workflows/deploy.yml` — manual trigger only (`workflow_dispatch`). Needs `FLY_API_TOKEN` GitHub secret from `fly tokens create deploy -x 999999h`.

@@ -13,8 +13,13 @@ const remoteMCPAuthKeyPrefix = "remote_mcp/"
 // RemoteMCP is a remote MCP server the user has connected.
 // Stored in the regular store, not the secret store.
 type RemoteMCP struct {
-	Name      string    `json:"name"`       // user-chosen label ("linear", "notion")
-	URL       string    `json:"url"`        // MCP server endpoint URL
+	Name string `json:"name"` // user-chosen label ("linear", "notion")
+	URL  string `json:"url"`  // MCP server endpoint URL
+
+	// Channel scopes this remote MCP to a specific channel. The remote MCP's
+	// tools are only included in that channel's MCP config.
+	Channel string `json:"channel"`
+
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -76,8 +81,11 @@ func (m *Manager) GetRemoteMCP(ctx context.Context, name string) (*RemoteMCP, er
 	return nil, nil
 }
 
-// AddRemoteMCP creates a new remote MCP entry. Returns an error if one with the same name exists.
-func (m *Manager) AddRemoteMCP(ctx context.Context, name, url string) (*RemoteMCP, error) {
+// AddRemoteMCP creates a new remote MCP entry scoped to a channel. Returns an
+// error if one with the same name exists. The channel parameter associates the
+// remote MCP with a specific channel — its tools are only available on that
+// channel.
+func (m *Manager) AddRemoteMCP(ctx context.Context, name, url, channel string) (*RemoteMCP, error) {
 	mcps, err := m.ListRemoteMCPs(ctx)
 	if err != nil {
 		return nil, err
@@ -92,6 +100,7 @@ func (m *Manager) AddRemoteMCP(ctx context.Context, name, url string) (*RemoteMC
 	entry := RemoteMCP{
 		Name:      name,
 		URL:       url,
+		Channel:   channel,
 		CreatedAt: time.Now(),
 	}
 	mcps = append(mcps, entry)
@@ -100,6 +109,21 @@ func (m *Manager) AddRemoteMCP(ctx context.Context, name, url string) (*RemoteMC
 		return nil, err
 	}
 	return &entry, nil
+}
+
+// ListRemoteMCPsByChannel returns remote MCPs scoped to the given channel.
+func (m *Manager) ListRemoteMCPsByChannel(ctx context.Context, channelName string) ([]RemoteMCP, error) {
+	mcps, err := m.ListRemoteMCPs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var result []RemoteMCP
+	for _, mcp := range mcps {
+		if mcp.Channel == channelName {
+			result = append(result, mcp)
+		}
+	}
+	return result, nil
 }
 
 // RemoveRemoteMCP deletes a remote MCP and its auth credentials.

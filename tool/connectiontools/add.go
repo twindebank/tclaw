@@ -25,9 +25,13 @@ func connectionAddDef() mcp.ToolDef {
 				"label": {
 					"type": "string",
 					"description": "Label to identify this connection (e.g. 'work', 'personal'). Must be unique per provider."
+				},
+				"channel": {
+					"type": "string",
+					"description": "Channel name to scope this connection to. The provider's tools (e.g. google_*) will only be available on this channel."
 				}
 			},
-			"required": ["provider", "label"]
+			"required": ["provider", "label", "channel"]
 		}`),
 	}
 }
@@ -35,6 +39,7 @@ func connectionAddDef() mcp.ToolDef {
 type connectionAddArgs struct {
 	Provider string `json:"provider"`
 	Label    string `json:"label"`
+	Channel  string `json:"channel"`
 }
 
 func connectionAddHandler(deps Deps) mcp.ToolHandler {
@@ -50,6 +55,9 @@ func connectionAddHandler(deps Deps) mcp.ToolHandler {
 		if a.Label == "" || len(a.Label) > 64 {
 			return nil, fmt.Errorf("label is required and must be under 64 characters")
 		}
+		if a.Channel == "" {
+			return nil, fmt.Errorf("channel is required — specify which channel this connection's tools should be available on")
+		}
 
 		providerID := provider.ProviderID(a.Provider)
 		p := deps.Registry.Get(providerID)
@@ -57,7 +65,7 @@ func connectionAddHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("unknown provider %q — use connection_providers to see available options", a.Provider)
 		}
 
-		conn, err := deps.Manager.Add(ctx, providerID, a.Label)
+		conn, err := deps.Manager.Add(ctx, providerID, a.Label, a.Channel)
 		if err != nil {
 			return nil, fmt.Errorf("add connection: %w", err)
 		}

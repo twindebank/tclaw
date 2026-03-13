@@ -10,6 +10,7 @@ import (
 
 	"tclaw/claudecli"
 	"tclaw/libraries/secret"
+	"tclaw/role"
 	"tclaw/user"
 
 	"gopkg.in/yaml.v3"
@@ -69,9 +70,16 @@ type User struct {
 	PermissionMode claudecli.PermissionMode `yaml:"permission_mode"`
 	MaxTurns       int                      `yaml:"max_turns"`
 	Debug          bool                     `yaml:"debug"`
-	AllowedTools   []claudecli.Tool         `yaml:"allowed_tools"`
-	DisallowedTools []claudecli.Tool        `yaml:"disallowed_tools"`
-	SystemPrompt   string                   `yaml:"system_prompt"`
+
+	// Role is a named preset of tool permissions. Mutually exclusive with
+	// AllowedTools — set one or the other. When set on the user, it applies
+	// as the default for all channels that don't specify their own role or
+	// allowed_tools.
+	Role role.Role `yaml:"role,omitempty"`
+
+	AllowedTools    []claudecli.Tool `yaml:"allowed_tools"`
+	DisallowedTools []claudecli.Tool `yaml:"disallowed_tools"`
+	SystemPrompt    string           `yaml:"system_prompt"`
 
 	Channels []Channel `yaml:"channels"`
 }
@@ -91,12 +99,18 @@ type Channel struct {
 	// Empty means the channel is active in all environments.
 	Envs []Env `yaml:"envs,omitempty"`
 
+	// Role is a named preset of tool permissions for this channel.
+	// Mutually exclusive with AllowedTools — set one or the other.
+	// When set, this replaces any user-level role or allowed_tools.
+	Role role.Role `yaml:"role,omitempty"`
+
 	// AllowedTools overrides the user-level allowed_tools for this channel.
-	// When set, this replaces (not merges with) the user-level list.
+	// Mutually exclusive with Role. When set, this replaces (not merges
+	// with) the user-level list.
 	AllowedTools []string `yaml:"allowed_tools,omitempty"`
 
-	// DisallowedTools overrides the user-level disallowed_tools for this channel.
-	// When set, this replaces (not merges with) the user-level list.
+	// DisallowedTools overrides user-level disallowed_tools for this channel.
+	// Works alongside both Role and AllowedTools for surgical removal.
 	DisallowedTools []string `yaml:"disallowed_tools,omitempty"`
 }
 
@@ -211,6 +225,13 @@ func validate(cfg *Config) error {
 
 		if u.PermissionMode != "" && !claudecli.ValidPermissionMode(u.PermissionMode) {
 			return fmt.Errorf("user %q: unknown permission_mode %q (known: %v)", u.ID, u.PermissionMode, claudecli.ValidPermissionModes())
+		}
+
+		if u.Role != "" && !u.Role.Valid() {
+			return fmt.Errorf("user %q: unknown role %q (known: %v)", u.ID, u.Role, role.ValidRoles())
+		}
+		if u.Role != "" && len(u.AllowedTools) > 0 {
+			return fmt.Errorf("user %q: role and allowed_tools are mutually exclusive", u.ID)
 		}
 
 		for j, t := range u.AllowedTools {
@@ -384,6 +405,7 @@ func (u *User) ToUserConfig() user.Config {
 		APIKey:          u.APIKey,
 		Model:           u.Model,
 		PermissionMode:  u.PermissionMode,
+		Role:            u.Role,
 		AllowedTools:    u.AllowedTools,
 		DisallowedTools: u.DisallowedTools,
 		MaxTurns:        u.MaxTurns,

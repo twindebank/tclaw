@@ -32,6 +32,7 @@ func connectionListHandler(mgr *connection.Manager) mcp.ToolHandler {
 			ID       connection.ConnectionID `json:"id"`
 			Provider provider.ProviderID     `json:"provider"`
 			Label    string                  `json:"label"`
+			Channel  string                  `json:"channel,omitempty"`
 			HasCreds bool                    `json:"has_credentials"`
 		}
 
@@ -45,6 +46,7 @@ func connectionListHandler(mgr *connection.Manager) mcp.ToolHandler {
 				ID:       c.ID,
 				Provider: c.ProviderID,
 				Label:    c.Label,
+				Channel:  c.Channel,
 				HasCreds: creds != nil && creds.AccessToken != "",
 			})
 		}
