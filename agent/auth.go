@@ -165,7 +165,7 @@ func startSetupToken(ctx context.Context, opts Options, flow *pendingAuth, chann
 				flow.oauthDone <- oauthResult{loginMessage: "Setup token generation was cancelled."}
 				return
 			}
-			slog.Error("claude setup-token failed", "err", err, "stdout", stdout.String())
+			slog.Error("claude setup-token failed", "err", err, "stdout_len", stdout.Len())
 			flow.oauthDone <- oauthResult{loginMessage: "Setup token generation failed. Check server logs."}
 			return
 		}
@@ -174,7 +174,7 @@ func startSetupToken(ctx context.Context, opts Options, flow *pendingAuth, chann
 
 		token := extractSetupToken(stdout.String())
 		if token == "" {
-			slog.Error("claude setup-token: no token found in output", "output", stdout.String())
+			slog.Error("claude setup-token: no token found in output", "stdout_len", stdout.Len())
 			flow.oauthDone <- oauthResult{loginMessage: "Setup token generation succeeded but no token found in output."}
 			return
 		}
@@ -270,6 +270,9 @@ func stripANSI(s string) string {
 // (alphanumeric, hyphens, underscores).
 var validTokenPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
+// validAPIKeyPattern matches the expected character set for Anthropic API keys.
+var validAPIKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
 // extractSetupToken parses the setup token from `claude setup-token` output.
 // The command outputs a banner, the token on its own line, and instructions.
 // We find the line containing the expected token prefix and extract it.
@@ -305,7 +308,7 @@ func validSetupToken(token string) bool {
 func handleAPIKeyEntry(ctx context.Context, opts Options, ch channel.Channel, key string) bool {
 	key = strings.TrimSpace(key)
 
-	if !strings.HasPrefix(key, apiKeyPrefix) || len(key) < 50 {
+	if !strings.HasPrefix(key, apiKeyPrefix) || len(key) < 50 || !validAPIKeyPattern.MatchString(key) {
 		m := ch.Markup()
 		if _, err := ch.Send(ctx, "❌ Invalid key — must start with "+code(m, "sk-ant-")+" and be a valid length. Try again or type "+bold(m, "stop")+" to cancel."); err != nil {
 			slog.Error("failed to send validation error", "err", err)

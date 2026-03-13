@@ -2,6 +2,8 @@
 
 tclaw is a multi-user Claude Code host that spawns isolated `claude` CLI subprocesses, managing communication through multiple channels (unix sockets, stdio, Telegram), with persistent memory, OAuth connections, scheduling, and MCP tool extensibility.
 
+> **Note:** The agent's runtime behavior (how it uses tools, formats messages, manages memory) is defined in `agent/system_prompt.md`. This file documents tclaw's features from the **developer's perspective** — how things are implemented, configured, and wired together. If you're looking for what the agent sees and how it behaves, read the system prompt.
+
 ## Multi-Turn Conversations
 
 - **Session continuity** — each channel gets its own Claude session. The agent resumes via `--resume <session-id>` so context carries across messages.
@@ -37,31 +39,19 @@ Each user gets a fully isolated environment:
 
 Channels are the transport layer between users and the agent.
 
-### Static Channels (from config)
+### Channel Types
 
 - **Socket** — unix domain sockets. The TUI chat client (`cmd/chat`) connects here. Supports streaming edits (send-then-edit pattern). **Local only** — blocked in non-local environments because sockets have no authentication.
 - **Stdio** — standard input/output for simple pipe-based usage. **Local only** — blocked in non-local environments.
 - **Telegram** — Telegram Bot API. Uses long polling locally, webhooks in production. Supports HTML markup for rich text. Status messages (thinking, tool use) are separated from response text into distinct messages. The only channel type allowed in production. Supports an `allowed_users` list to restrict which Telegram user IDs can interact with the bot.
 
-### Dynamic Channels (runtime-created)
+### Static vs Dynamic Channels
 
-The agent can create, edit, and delete channels at runtime via MCP tools. Dynamic channels persist across agent restarts (stored in the user's state directory). The agent sees both static and dynamic channels in its system prompt. Channel mutations (create, edit, delete) trigger an automatic agent restart so changes take effect immediately.
+**Static channels** are defined in the config file (`tclaw.yaml`). **Dynamic channels** are created at runtime via MCP tools (channel_create, channel_edit, channel_delete). Dynamic channels persist across agent restarts (stored in the user's state directory). Channel mutations trigger an automatic agent restart.
 
-Supported dynamic channel types:
-- **Socket** — local environments only (no authentication). Created with `type: "socket"`.
-- **Telegram** — all environments. Created with `type: "telegram"` and a nested `telegram_config` object containing the bot token. Optionally includes `allowed_users` to restrict which Telegram user IDs can message the bot.
+Dynamic channel types: Socket (local only) and Telegram (all environments). Type is validated at creation — socket channels in non-local environments return an error.
 
-Channel type is validated at creation time — attempting to create a socket channel in a non-local environment returns an error.
-
-**MCP tools:**
-
-- **channel_create** — creates a dynamic channel. Requires `name`, `description`, and `type` ("socket" or "telegram"). Telegram channels require a `telegram_config` with a `token` field and optionally an `allowed_users` list of Telegram user IDs. The bot token is stored in the encrypted secret store (not in the channel config JSON). Optionally accepts a `role` or `allowed_tools` (mutually exclusive) and `disallowed_tools` to set per-channel tool permissions. Returns an error if the channel type is not allowed in the current environment.
-- **channel_edit** — updates a dynamic channel's description, role, tool permissions, rotates its Telegram bot token (via `telegram_config`), and/or updates `allowed_users`. Accepts `role`, `allowed_tools`, and `disallowed_tools` for permission changes. Setting a role clears explicit tool lists; setting allowed_tools clears the role. At least one field must be provided. Cannot edit static channels.
-- **channel_delete** — removes a dynamic channel and cleans up any associated secrets (e.g. Telegram bot token from the secret store). Cannot delete static channels.
-- **channel_list** — lists all channels (static and dynamic) with name, type, description, source, role, and tool permissions (`allowed_tools`/`disallowed_tools`).
-- **tool_list** — lists all available tool names that can be used in `allowed_tools` and `disallowed_tools`. Returns Claude Code tools, tclaw MCP tools, and builtin commands. Useful when setting up channel permissions.
-
-**Secret lifecycle:** Telegram bot tokens follow a strict lifecycle tied to their channel — created in the secret store on `channel_create`, rotated via `channel_edit`, and deleted on `channel_delete`. Tokens are never stored in the channel config JSON and are only read from the secret store when building the live Telegram channel on agent restart.
+**Secret lifecycle:** Telegram bot tokens follow a strict lifecycle tied to their channel — created in the secret store on `channel_create`, rotated via `channel_edit`, and deleted on `channel_delete`. Tokens are never stored in the channel config JSON.
 
 ### Telegram User Allowlist
 
@@ -102,7 +92,7 @@ Roles are named presets of tool permissions — a simpler alternative to listing
 |------|----------------|
 | `superuser` | All Claude Code tools, all tclaw MCP tools (`mcp__tclaw__*`), all builtins, provider tools for channel connections, remote MCP tool patterns for channel remote MCPs |
 | `developer` | Bash, file tools, web tools, Agent, LSP, all builtins, dev workflow tools (`mcp__tclaw__dev_*`, `mcp__tclaw__deploy`), schedule tools |
-| `assistant` | File tools (Read, Edit, Write, Glob, Grep), web tools, basic builtins (stop, compact, session reset, memories reset), connection/remote MCP/schedule management tools, provider tools for channel connections, remote MCP tool patterns for channel remote MCPs |
+| `assistant` | File tools (Read, Edit, Write, Glob, Grep), web tools, basic builtins (stop, compact, session reset, memories reset), connection/remote MCP/schedule management tools, TfL tools, provider tools for channel connections, remote MCP tool patterns for channel remote MCPs |
 
 **How roles work:**
 
@@ -125,20 +115,9 @@ users:
         role: assistant       # restricted tool set
 ```
 
-**Dynamic channel example:**
-
-```json
-{
-  "name": "assistant",
-  "type": "telegram",
-  "role": "assistant",
-  "telegram_config": { "token": "..." }
-}
-```
-
 ### Per-Channel Tool Permissions
 
-Channels can override the user-level `allowed_tools` and `disallowed_tools` to restrict or customize what the agent can do on each channel. This works for both static channels (in config) and dynamic channels (via MCP tools). Alternatively, channels can use [roles](#roles) as a simpler preset-based approach.
+Channels can override the user-level `allowed_tools` and `disallowed_tools` to restrict or customize what the agent can do on each channel. Alternatively, channels can use [roles](#roles) as a simpler preset-based approach.
 
 **How it works:**
 
@@ -162,9 +141,7 @@ Builtin commands (stop, compact, reset, login/auth) can be gated using `builtin_
 | `builtin__reset_project` | Project reset only |
 | `builtin__reset_all` | Everything reset only |
 
-When a user tries a command that's not allowed on the current channel, the agent responds with "This command is not available on this channel."
-
-The reset menu adapts dynamically — it only shows reset levels that are allowed on the current channel. If only `builtin__reset_session` is allowed, the menu shows just the session option.
+The reset menu adapts dynamically — only shows levels allowed on the current channel.
 
 **Backwards compatibility:**
 
@@ -187,53 +164,24 @@ channels:
       - "builtin__login"
 ```
 
-**Dynamic channel example:**
-
-The `channel_create` and `channel_edit` MCP tools accept `role`, `allowed_tools`, and `disallowed_tools` parameters. The `channel_list` tool includes role and tool permission fields in its output.
-
 ### Channel Setup Patterns
 
 There are two approaches to setting up channels, each suited to different deployment scenarios.
 
 #### Approach 1: Admin + Dynamic Assistant (recommended for power users)
 
-The admin channel is defined statically in config with full tool access including `channel_create`. The admin channel then creates additional channels (like an "assistant" channel) at runtime via the `channel_create` MCP tool with a restricted tool set.
-
-**Why this approach:** The admin creates and manages channels conversationally — no deploy needed to add/modify/remove channels. Tool permissions can be iterated on by editing the dynamic channel. Good for users who want flexibility and can manage their own channel setup.
+The admin channel is defined statically in config with full tool access including `channel_create`. The admin channel then creates additional channels at runtime via `channel_create` with a restricted role.
 
 **Setup flow:**
-1. Static admin channel in config with `role: superuser` + channel management tools
+1. Static admin channel in config with `role: superuser`
 2. User messages admin channel: "set up an assistant channel on Telegram"
 3. Agent guides user through @BotFather token creation
-4. Agent calls `channel_create` with `role: assistant` (restricted tool set, no dev tools, no channel management)
+4. Agent calls `channel_create` with `role: assistant`
 5. Agent restarts automatically, new channel is live
-
-**Example admin config:**
-```yaml
-channels:
-  - name: admin
-    type: telegram
-    description: Primary admin channel
-    telegram:
-      token: ${secret:TELEGRAM_ADMIN_TOKEN}
-    role: superuser
-```
-
-The assistant channel is then created dynamically with a role:
-```json
-{
-  "name": "assistant",
-  "type": "telegram",
-  "role": "assistant",
-  "telegram_config": { "token": "...", "allowed_users": [123456789] }
-}
-```
 
 #### Approach 2: All Static Channels (recommended for managed deployments)
 
-All channels are defined in the config file. The assistant channel is pre-configured with its tool set. No channel management tools are needed.
-
-**Why this approach:** Simpler, more predictable. Good for deployments where the channel setup is known in advance and managed by whoever controls the config file. No risk of accidentally deleting a channel via a tool call.
+All channels are defined in the config file. Simpler, more predictable. No risk of accidentally deleting a channel via a tool call.
 
 **Example config:**
 ```yaml
@@ -243,7 +191,7 @@ channels:
     description: Primary admin channel
     telegram:
       token: ${secret:TELEGRAM_ADMIN_TOKEN}
-      allowed_users: [123456789]  # your Telegram user ID (get it from @userinfobot)
+      allowed_users: [123456789]
     role: superuser
   - name: assistant
     type: telegram
@@ -254,39 +202,36 @@ channels:
     role: assistant
 ```
 
-#### Choosing an approach
-
 | Consideration | Dynamic (Approach 1) | Static (Approach 2) |
 |---------------|---------------------|---------------------|
 | Adding/removing channels | Conversational, no deploy | Requires config change + deploy |
 | Iterating tool permissions | `channel_edit` at runtime | Config change + deploy |
 | Risk of accidental deletion | Possible via `channel_delete` | Not possible (static) |
-| Multi-user managed deployments | Less predictable | More controlled |
 | Best for | Power users, single-user setups | Managed/team deployments |
 
 ## Memory System
 
-### Directory Model
-
-Per-user data is split into four zones with clear access boundaries:
+Per-user data is split into four zones with clear access boundaries (see also `docs/architecture.md` for the full directory layout):
 
 1. **Agent memory** (`<user>/memory/`) — the agent reads and writes freely. This is the subprocess CWD and is also passed via `--add-dir`. Contains `CLAUDE.md` (the real file) and topic subfiles.
 2. **Claude Code state** (`<user>/home/.claude/`) — internal CLI state (conversation history, settings, plans). Off limits to the agent. A symlink at `home/.claude/CLAUDE.md` → `../../memory/CLAUDE.md` bridges the CLI's auto-load with the agent's sandbox.
 3. **tclaw state** (`<user>/state/`, `sessions/`, `secrets/`) — not mounted in the sandbox. Accessible only via MCP tools.
 4. **MCP config** (`<user>/mcp-config/`) — mounted read-only in the sandbox so the CLI can read `--mcp-config`. Contains only generated MCP config JSON files (no secrets or user data).
 
-### CLAUDE.md
-
-Each user's `CLAUDE.md` is seeded on first startup with a template that explains how to use it. The agent can update it to remember things across sessions. Topic-specific files can be created in the memory directory and referenced from `CLAUDE.md` using `@filename.md` syntax.
+Each user's `CLAUDE.md` is seeded on first startup with a template (`agent.DefaultMemoryTemplate`). The agent can update it to remember things across sessions. Topic-specific files can be created and referenced using `@filename.md` syntax.
 
 ## System Prompt
 
-The system prompt is built from a Go template (`agent/system_prompt.md`) and includes:
+The system prompt is the **single source of truth** for how the agent behaves at runtime. It's built from a Go template (`agent/system_prompt.md`) and includes:
 
+- Agent identity and behavioral rules
 - Today's date
 - A list of all channels with their names, types, descriptions, and sources
 - The currently active channel (appended per-turn)
+- Instructions for using tools, formatting messages, managing memory, and handling connections/schedules/dev workflow
 - User-defined custom prompt (from config `system_prompt` field)
+
+When adding or changing agent-facing behavior, update `agent/system_prompt.md` — not this file.
 
 ## Authentication
 
@@ -314,39 +259,19 @@ When the CLI reports `authentication_failed`, the agent automatically starts an 
 
 ## Connections (OAuth Providers)
 
-Users can connect external services (currently Google Workspace) through OAuth flows managed via MCP tools. Every connection is scoped to a specific channel so that provider tools (e.g. `google_*`) are only available on that channel.
-
-- **connection_add** — starts the OAuth flow for a provider. Requires `provider`, `label`, and `channel`. The provider's tools are only available on the specified channel. Opens a browser for consent.
-- **connection_remove** — disconnects and wipes credentials.
-- **connection_list** — lists all active connections with their provider, label, channel association, and credential status.
-- **connection_auth_wait** — polls for OAuth completion (used by the agent after starting a flow).
+Users can connect external services through OAuth flows managed via MCP tools. Every connection is scoped to a specific channel so that provider tools (e.g. `google_*`) are only available on that channel.
 
 OAuth callbacks are handled by the HTTP server at `/oauth/callback`. The callback server includes rate limiting per state code to prevent brute-force attacks.
 
-## Google Workspace Integration
+### Google Workspace
 
-When a Google connection is established, provider-specific MCP tools are registered:
+When a Google connection is established, provider-specific MCP tools are registered: `google_gmail_list`, `google_gmail_read`, `google_workspace`, `google_workspace_schema`. Tools are only registered when a connection exists and removed when the last connection is disconnected. Services available depend on the OAuth scopes granted during consent. See the system prompt for detailed tool usage guidance.
 
-- **google_gmail_list** — searches and lists Gmail messages with full metadata (subject, from, to, date, snippet, labels) in a single call. Gmail's list API only returns message IDs, so this wrapper automatically fetches metadata for each result concurrently. Defaults to 10 messages (max 25). Supports Gmail search syntax via the `query` parameter (e.g. `from:alice@example.com`, `is:unread`, `after:2026/03/01`). Use this for scanning/searching email; use `google_workspace` with `gmail users messages get` for reading a single email's full body.
-- **google_gmail_read** — fetches a single Gmail message and returns its body as clean plain text. Strips HTML formatting, signatures, and styling. Returns headers (from, to, subject, date) alongside the body. Much more context-efficient than fetching raw format=full responses.
-- **google_workspace** — sends commands to the `gws` binary (Google Workspace CLI) with the user's OAuth token. Supports Gmail, Drive, Calendar, Docs, Sheets, Slides, and Tasks. Use `google_workspace_schema` to discover available methods and parameters.
-- **google_workspace_schema** — looks up the schema for a Google Workspace API method (e.g. `gmail.users.messages.list`, `drive.files.list`). Returns parameter details, request/response schemas, and descriptions.
+### Monzo
 
-Tools are only registered when a Google connection exists and are removed when the last connection is disconnected. Services available depend on the OAuth scopes granted during consent.
+When a Monzo connection is established, tools are registered: `monzo_list_accounts`, `monzo_get_balance`, `monzo_list_pots`, `monzo_list_transactions`, `monzo_get_transaction`.
 
-## Monzo Integration
-
-When a Monzo connection is established, provider-specific MCP tools are registered:
-
-- **monzo_list_accounts** — lists Monzo bank accounts with IDs, types (uk_retail, uk_retail_joint, uk_monzo_flex), descriptions, and creation dates. Use the account ID from results in other Monzo tools.
-- **monzo_get_balance** — gets the balance for an account. Returns balance (current), total_balance (including pots), currency, and spend_today. All amounts in minor units (pence for GBP).
-- **monzo_list_pots** — lists pots (savings goals) for an account with names, balances, currency, and deleted/locked status.
-- **monzo_list_transactions** — lists recent transactions with amounts, descriptions, merchant info, categories, and timestamps. Supports `since`, `before`, and `limit` parameters. Merchant details are expanded automatically. Note: after 5 minutes post-authentication, only the last 90 days are accessible. Max 100 per request.
-- **monzo_get_transaction** — gets details of a single transaction with expanded merchant information (name, address, logo, category).
-
-Tools are only registered when a Monzo connection exists and are removed when the last connection is disconnected.
-
-**Setup:** Create a Monzo API client at [developers.monzo.com](https://developers.monzo.com/) (personal use only — you can only connect to your own account). Add the client ID and secret to the config:
+**Setup:** Create a Monzo API client at [developers.monzo.com](https://developers.monzo.com/) (personal use only). Add the client ID and secret to the config:
 
 ```yaml
 providers:
@@ -357,18 +282,11 @@ providers:
 
 The redirect URI must be set to your tclaw's OAuth callback URL (e.g. `https://your-app.fly.dev/oauth/callback` for production, `http://localhost:9876/oauth/callback` for local). Monzo uses Strong Customer Authentication — after the browser flow, the user must approve access via the Monzo app.
 
-## TfL (Transport for London) Integration
+### TfL (Transport for London)
 
 TfL tools are always registered — the API works without a key (rate-limited to ~50 req/min) but an API key raises the limit to ~500 req/min. Register for a free key at [api-portal.tfl.gov.uk](https://api-portal.tfl.gov.uk/).
 
-**Tools:**
-
-- **tfl_line_status** — status of tube, overground, elizabeth line, DLR, or tram lines. Defaults to all tube lines. Accepts specific modes or line names.
-- **tfl_journey** — journey planning between any two locations (postcodes, station names, coordinates). Supports date/time, departing/arriving, and mode filters.
-- **tfl_arrivals** — live arrivals at a stop or station. Use `tfl_stop_search` first to find the stop ID.
-- **tfl_stop_search** — search for stops/stations by name or bus stop code. Returns NaPTAN IDs for use with `tfl_arrivals`.
-- **tfl_disruptions** — current disruptions on lines with affected routes and severity.
-- **tfl_road_status** — traffic status for major London roads.
+Tools: `tfl_line_status`, `tfl_journey`, `tfl_arrivals`, `tfl_stop_search`, `tfl_disruptions`, `tfl_road_status`.
 
 **API key setup:** The key is stored per-user in the encrypted secret store (same pattern as GitHub/Fly tokens). Three ways to set it up:
 
@@ -379,11 +297,6 @@ TfL tools are always registered — the API works without a key (rate-limited to
 ## Remote MCP Servers
 
 Users can connect to external MCP servers (like the Anthropic MCP directory) via MCP tools. Every remote MCP is scoped to a specific channel — its tools are only included in that channel's MCP configuration.
-
-- **remote_mcp_add** — adds a remote MCP server URL with optional OAuth discovery (RFC 7591 dynamic client registration). Requires a `channel` parameter to scope the remote MCP to a specific channel. The remote MCP's tools are only available on that channel.
-- **remote_mcp_remove** — disconnects a remote MCP.
-- **remote_mcp_list** — lists connected remote MCPs with their name, URL, channel scope, and auth status.
-- **remote_mcp_auth_wait** — polls for OAuth completion on remote MCPs that require auth.
 
 Remote MCPs are included in the `mcp-config.json` file that's passed to the Claude CLI via `--mcp-config`. Bearer tokens from OAuth are automatically included.
 
@@ -397,29 +310,11 @@ The MCP discovery client (`mcp/discovery/safeclient.go`) validates that remote M
 
 ## Scheduling
 
-The agent can create and manage cron schedules that fire autonomously:
-
-- **schedule_create** — creates a cron schedule with a prompt, channel, and cron expression.
-- **schedule_edit** — modifies an existing schedule.
-- **schedule_delete** — removes a schedule.
-- **schedule_pause** / **schedule_resume** — pauses or resumes a schedule.
-- **schedule_list** — lists all schedules with their status and next fire time.
-
-When a schedule fires, it injects a message into the specified channel, waking the agent if it's idle. Schedules persist across agent restarts and are managed by a background goroutine that runs at user lifetime (not agent lifetime).
+The agent can create and manage cron schedules that fire autonomously. When a schedule fires, it injects a message into the specified channel, waking the agent if idle. Schedules persist across agent restarts and are managed by a background goroutine that runs at user lifetime (not agent lifetime).
 
 ## Dev Workflow
 
 The agent can manage code changes, PRs, and deployments through a dev session lifecycle built on git worktrees. Multiple concurrent sessions are supported.
-
-### Dev session tools
-
-- **dev_start** — starts a dev session. Clones/fetches the repo (bare clone at `<userDir>/repo/`), creates a git worktree on a new branch or checks out an existing one. Branch names are auto-generated as `YYYY-MM-DD-slugified-description`. Accepts optional `repo_url` and `github_token` on first use (persisted for subsequent calls).
-- **dev_status** — shows branch, uncommitted changes, commit log, and diff stat. Lists all active sessions when multiple exist.
-- **dev_end** — commits uncommitted changes, pushes the branch, creates a PR (or detects an existing one), and tears down the worktree. To iterate on PR feedback, `dev_start` again with the same branch name.
-- **dev_cancel** — removes the worktree and local branch without pushing. All uncommitted changes are lost.
-- **deploy** — two-phase deploy to Fly.io. Without `confirm=true`, shows a preview (commit log, changed files, current vs target commit). With `confirm=true`, runs `fly deploy --remote-only`. Tracks the deployed commit for future previews. Requires a Fly API token — accepts `fly_api_token` on first use (stored encrypted) or pre-provisioned via `FLY_TOKEN_<USER>` Fly secret (see architecture docs for the seeding pattern).
-- **dev_deployed** — shows the currently deployed commit, the latest `origin/main` commit, and whether they match. Reports how many commits behind the deploy is and lists the undeployed commits. Fetches the repo to get the latest state.
-- **dev_log** — shows recent commit history on `origin/main` (defaults to 20, configurable via `count`). Includes the deployed commit hash for reference so the agent can see what's been merged since the last deploy.
 
 ### Session lifecycle
 
@@ -440,7 +335,7 @@ Active worktree directories are passed to the Claude subprocess via `--add-dir` 
 
 ### System prompt integration
 
-Active dev sessions are listed in the system prompt so the agent knows which worktrees are available and how to use them. The system prompt also instructs the agent to read the project's documentation (CLAUDE.md, referenced `@` files, README.md) from the worktree before making any code changes, ensuring it follows the repo's conventions and patterns.
+Active dev sessions are listed in the system prompt so the agent knows which worktrees are available. The system prompt instructs the agent to read the project's documentation (CLAUDE.md, `@`-referenced files) from the worktree before making any code changes.
 
 ## Secret Management
 

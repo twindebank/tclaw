@@ -24,18 +24,47 @@
 3. **tclaw state** (`<user>/state/`, `sessions/`, `secrets/`) — not mounted in sandbox, MCP tool access only
 4. **MCP config** (`<user>/mcp-config/`) — mounted read-only in sandbox for `--mcp-config`
 
+## Documentation Guide
+
+This project has several documentation files serving different audiences. Understanding who reads what prevents duplication and keeps things in sync.
+
+### Audiences
+
+| Audience | Context | Primary docs |
+|----------|---------|-------------|
+| **Developer** (us, working on the repo) | Coding at repo root with full source access | This CLAUDE.md, @docs/go-patterns.md, @docs/architecture.md, @docs/features.md, @docs/deployment.md |
+| **Agent in assistant channel** | Runtime, no code access, restricted tools | `agent/system_prompt.md` (injected as system prompt) + user's memory CLAUDE.md |
+| **Agent in developer channel** | Runtime, with a cloned worktree via dev_start | `agent/system_prompt.md` + this CLAUDE.md and @docs/ (read from the worktree before making changes) |
+
+### What goes where
+
+| File | Owner | Purpose | Who reads it |
+|------|-------|---------|-------------|
+| `agent/system_prompt.md` | **Agent runtime behavior** — the single source of truth for how the agent operates. Tool usage, formatting rules, memory management, channel setup guidance, connection/schedule/dev workflow instructions. | Agent (all channels) |
+| `CLAUDE.md` (this file) | **Developer instructions** — code style, architecture overview, build/deploy commands, doc guide. | Developer (us), agent in dev worktree |
+| `docs/features.md` | **Developer feature reference** — what tclaw does and how it's configured. Implementation details, config examples, security model. Does NOT duplicate agent behavior docs. | Developer (us), agent in dev worktree |
+| `docs/architecture.md` | **Technical internals** — package map, dependency layers, data flows, security boundaries, directory layout. | Developer (us), agent in dev worktree |
+| `docs/deployment.md` | **Operations** — Fly.io deployment, secrets, commands, first-time setup, CI. | Developer/operator |
+| `docs/go-patterns.md` | **Code conventions** — comments, error handling, testing, function design, naming. | Developer (us), agent in dev worktree |
+| `agent.DefaultMemoryTemplate` | **User memory seed** — minimal scaffolding for the agent's per-user CLAUDE.md. NOT project docs. | Agent (loaded automatically each session) |
+
+### Key rule: no duplication between system prompt and docs/
+
+`agent/system_prompt.md` defines agent behavior. `docs/features.md` describes how tclaw works for developers. These serve different audiences and should NOT contain the same content. If you're documenting how the agent should use a tool → system prompt. If you're documenting how a feature is implemented or configured → features.md.
+
 ## Reference Docs
 - @docs/go-patterns.md — comments, error handling, testing, function design, naming
 - @docs/deployment.md — Fly.io deployment, secrets, commands, first-time setup, CI
-- @docs/features.md — complete feature documentation (channels, memory, auth, connections, scheduling, MCP tools)
+- @docs/features.md — feature reference for developers (config, implementation, security)
 - @docs/architecture.md — package map, dependency layers, data flows, auth flows, directory layout, secret management, environments
 
 ### Keeping Docs Up to Date
-- **When adding or changing a feature** — update @docs/features.md
+- **When adding or changing agent-facing behavior** (tool usage, formatting, memory rules) — update `agent/system_prompt.md`
+- **When adding or changing a feature** (implementation, config, wiring) — update @docs/features.md
 - **When changing architecture** (new packages, data flows, auth, directory layout) — update @docs/architecture.md
-- **When adding new MCP tools** — add to the relevant section in @docs/features.md
+- **When adding new MCP tools** — update `agent/system_prompt.md` (how the agent uses them) AND @docs/features.md (how they're implemented/configured)
 - **When changing deployment/config** — update @docs/architecture.md and @docs/deployment.md
-- **When adding a new channel type** — update @docs/features.md and @docs/architecture.md
+- **When adding a new channel type** — update @docs/features.md, @docs/architecture.md, and `agent/system_prompt.md`
 - **When changing Go conventions** — update @docs/go-patterns.md
 
 ## Fly.io Operations

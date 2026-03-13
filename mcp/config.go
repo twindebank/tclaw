@@ -30,32 +30,40 @@ type RemoteMCPEntry struct {
 // load via --mcp-config. Returns the file path.
 //
 // localAddr is the address of the local tclaw MCP server (e.g. "127.0.0.1:54321").
+// localToken is the bearer token for authenticating with the local MCP server.
 // dir is the directory to write the config file into.
 // remotes are optional remote MCP servers to include alongside the local server.
-func GenerateConfigFile(dir string, localAddr string, remotes []RemoteMCPEntry) (string, error) {
-	return writeConfigFile(filepath.Join(dir, "mcp-config.json"), localAddr, remotes)
+func GenerateConfigFile(dir string, localAddr string, localToken string, remotes []RemoteMCPEntry) (string, error) {
+	return writeConfigFile(filepath.Join(dir, "mcp-config.json"), localAddr, localToken, remotes)
 }
 
 // GenerateChannelConfigFile writes a per-channel MCP config JSON file.
 // The channel config includes only the remote MCPs scoped to that channel
 // (plus any globally-scoped remote MCPs). Returns the file path.
-func GenerateChannelConfigFile(dir string, localAddr string, channelName string, remotes []RemoteMCPEntry) (string, error) {
+func GenerateChannelConfigFile(dir string, localAddr string, localToken string, channelName string, remotes []RemoteMCPEntry) (string, error) {
 	filename := fmt.Sprintf("mcp-config-%s.json", channelName)
-	return writeConfigFile(filepath.Join(dir, filename), localAddr, remotes)
+	return writeConfigFile(filepath.Join(dir, filename), localAddr, localToken, remotes)
 }
 
-func writeConfigFile(path string, localAddr string, remotes []RemoteMCPEntry) (string, error) {
+func writeConfigFile(path string, localAddr string, localToken string, remotes []RemoteMCPEntry) (string, error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create config dir: %w", err)
 	}
 
+	localEntry := MCPServerConfig{
+		Type: "http",
+		URL:  fmt.Sprintf("http://%s/mcp", localAddr),
+	}
+	if localToken != "" {
+		localEntry.Headers = map[string]string{
+			"Authorization": "Bearer " + localToken,
+		}
+	}
+
 	cfg := ConfigFile{
 		MCPServers: map[string]MCPServerConfig{
-			"tclaw": {
-				Type: "http",
-				URL:  fmt.Sprintf("http://%s/mcp", localAddr),
-			},
+			"tclaw": localEntry,
 		},
 	}
 

@@ -94,6 +94,7 @@ const (
 	MCPToolRemoteMCPAll claudecli.Tool = "mcp__tclaw__remote_mcp_*"
 	MCPToolGoogleAll    claudecli.Tool = "mcp__tclaw__google_*"
 	MCPToolMonzoAll     claudecli.Tool = "mcp__tclaw__monzo_*"
+	MCPToolTflAll       claudecli.Tool = "mcp__tclaw__tfl_*"
 )
 
 // basic builtins for assistant.
@@ -162,11 +163,12 @@ func resolveAssistant(ctx ChannelContext) []claudecli.Tool {
 	tools = append(tools, fileTools...)
 	tools = append(tools, webTools...)
 	tools = append(tools, basicBuiltins...)
-	// Connection/remote MCP management + scheduling.
+	// Connection/remote MCP management, scheduling, and TfL.
 	tools = append(tools,
 		MCPToolConnectionAll,
 		MCPToolRemoteMCPAll,
 		MCPToolScheduleAll,
+		MCPToolTflAll,
 	)
 	// Provider tools for connections on this channel.
 	tools = append(tools, providerToolPatterns(ctx)...)

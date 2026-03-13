@@ -2,6 +2,8 @@ package router
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -195,6 +197,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	r.registerProviderTools(ctx, mcpHandler, connMgr, googleConns, monzoConns)
 
 	mcpServer := mcp.NewServer(mcpHandler)
+	mcpToken := mcpServer.Token()
 	// Bind to a random port on localhost.
 	mcpAddr, err := mcpServer.Start("127.0.0.1:0")
 	if err != nil {
@@ -239,7 +242,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Called after remote MCPs are added/removed/authorized.
 	configUpdater := func(ctx context.Context) error {
 		remotes := buildRemoteMCPEntries(ctx)
-		_, genErr := mcp.GenerateConfigFile(mcpConfigDir, mcpAddr, remotes)
+		_, genErr := mcp.GenerateConfigFile(mcpConfigDir, mcpAddr, mcpToken, remotes)
 		if genErr != nil {
 			return fmt.Errorf("regenerate mcp config: %w", genErr)
 		}
@@ -260,7 +263,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 	// Generate the MCP config file for --mcp-config (includes existing remote MCPs).
 	remotes := buildRemoteMCPEntries(ctx)
-	mcpConfigPath, err := mcp.GenerateConfigFile(mcpConfigDir, mcpAddr, remotes)
+	mcpConfigPath, err := mcp.GenerateConfigFile(mcpConfigDir, mcpAddr, mcpToken, remotes)
 	if err != nil {
 		slog.Error("failed to generate mcp config", "user", mu.cfg.ID, "err", err)
 		return
@@ -273,7 +276,8 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	setupTokenEnvVar := agent.SetupTokenEnvVarName(string(mu.cfg.ID))
 	setupToken := os.Getenv(setupTokenEnvVar)
 	if setupToken != "" {
-		slog.Info("found setup token", "user", mu.cfg.ID, "env_var", setupTokenEnvVar)
+		os.Unsetenv(setupTokenEnvVar)
+		slog.Info("found and scrubbed setup token", "user", mu.cfg.ID, "env_var", setupTokenEnvVar)
 	}
 
 	// Seed GitHub token from Fly secret (e.g. GITHUB_TOKEN_THEO) into the
@@ -286,7 +290,8 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		if seedErr := secretStore.Set(ctx, "github_token", githubToken); seedErr != nil {
 			slog.Error("failed to seed github token from env", "user", mu.cfg.ID, "err", seedErr)
 		} else {
-			slog.Info("seeded github token from env", "user", mu.cfg.ID, "env_var", githubTokenEnvVar)
+			os.Unsetenv(githubTokenEnvVar)
+			slog.Info("seeded and scrubbed github token from env", "user", mu.cfg.ID, "env_var", githubTokenEnvVar)
 		}
 	}
 
@@ -297,7 +302,8 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		if seedErr := secretStore.Set(ctx, "fly_api_token", flyToken); seedErr != nil {
 			slog.Error("failed to seed fly api token from env", "user", mu.cfg.ID, "err", seedErr)
 		} else {
-			slog.Info("seeded fly api token from env", "user", mu.cfg.ID, "env_var", flyTokenEnvVar)
+			os.Unsetenv(flyTokenEnvVar)
+			slog.Info("seeded and scrubbed fly api token from env", "user", mu.cfg.ID, "env_var", flyTokenEnvVar)
 		}
 	}
 
@@ -308,7 +314,8 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		if seedErr := secretStore.Set(ctx, tfltools.APIKeyStoreKey, tflKey); seedErr != nil {
 			slog.Error("failed to seed tfl api key from env", "user", mu.cfg.ID, "err", seedErr)
 		} else {
-			slog.Info("seeded tfl api key from env", "user", mu.cfg.ID, "env_var", tflKeyEnvVar)
+			os.Unsetenv(tflKeyEnvVar)
+			slog.Info("seeded and scrubbed tfl api key from env", "user", mu.cfg.ID, "env_var", tflKeyEnvVar)
 		}
 	}
 
@@ -394,7 +401,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// Regenerate the MCP config on each iteration. ResetAll clears
 		// mcp-config/, so the file must be recreated before the next agent spawn.
 		remotes := buildRemoteMCPEntries(ctx)
-		if p, genErr := mcp.GenerateConfigFile(mcpConfigDir, mcpAddr, remotes); genErr != nil {
+		if p, genErr := mcp.GenerateConfigFile(mcpConfigDir, mcpAddr, mcpToken, remotes); genErr != nil {
 			slog.Error("failed to regenerate mcp config", "user", mu.cfg.ID, "err", genErr)
 		} else {
 			mcpConfigPath = p
@@ -519,7 +526,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		channelToolOverrides := buildChannelToolOverrides(allChMap, configByName, dynamicStore, dynamicCtx, mu.cfg, connMgr)
 
 		// Generate per-channel MCP config files for channels with scoped remote MCPs.
-		mcpConfigPaths := buildMCPConfigPaths(dynamicCtx, allChMap, connMgr, mcpConfigDir, mcpAddr)
+		mcpConfigPaths := buildMCPConfigPaths(dynamicCtx, allChMap, connMgr, mcpConfigDir, mcpAddr, mcpToken)
 
 		// channelChangeNotify is closed when a channel change fires,
 		// telling the agent to finish its current turn then exit.
@@ -711,7 +718,11 @@ func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel, 
 		case config.ChannelTypeTelegram:
 			var opts channel.TelegramOptions
 			if r.publicURL != "" && r.callback != nil {
-				webhookPath := "/telegram/" + chCfg.Name
+				webhookSecret := make([]byte, 16)
+				if _, err := rand.Read(webhookSecret); err != nil {
+					return nil, fmt.Errorf("generate webhook path for %s: %w", chCfg.Name, err)
+				}
+				webhookPath := "/telegram/" + hex.EncodeToString(webhookSecret)
 				opts.WebhookURL = r.publicURL + webhookPath
 				opts.RegisterHandler = func(pattern string, handler http.Handler) {
 					r.callback.Handle(pattern, handler)

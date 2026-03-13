@@ -241,7 +241,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		opts.AddDirs = opts.AddDirsFunc()
 	}
 
-	slog.Info("handling message", "prompt", msg.Text, "channel", msg.ChannelID, "session_id", sessionID,
+	slog.Info("handling message", "prompt_len", len(msg.Text), "channel", msg.ChannelID, "session_id", sessionID,
 		"has_api_key", opts.APIKey != "", "home_dir", opts.HomeDir)
 
 	ch, ok := opts.Channels[msg.ChannelID]
@@ -289,11 +289,19 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 			// the claude CLI can read --mcp-config.
 			readOnly = append(readOnly, filepath.Dir(mcpConfigPath))
 		}
+
+		// Mount settings.json read-only to prevent prompt injection from
+		// creating malicious CLI hooks (SessionStart) via the agent's
+		// file access. The file is pre-seeded during seedUserMemory().
+		settingsPath := filepath.Join(opts.HomeDir, ".claude", "settings.json")
+		readOnlyOverlay := []string{settingsPath}
+
 		readWrite := []string{opts.MemoryDir, opts.HomeDir}
 		readWrite = append(readWrite, opts.AddDirs...)
 		paths := sandboxPaths{
-			ReadWrite: readWrite,
-			ReadOnly:  readOnly,
+			ReadWrite:       readWrite,
+			ReadOnly:        readOnly,
+			ReadOnlyOverlay: readOnlyOverlay,
 		}
 		cmd = wrapWithSandbox(ctx, cmd, paths)
 	}

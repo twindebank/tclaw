@@ -151,6 +151,7 @@ func buildMCPConfigPaths(
 	connMgr *connection.Manager,
 	mcpConfigDir string,
 	mcpAddr string,
+	mcpToken string,
 ) map[channel.ChannelID]string {
 	paths := make(map[channel.ChannelID]string)
 
@@ -189,7 +190,7 @@ func buildMCPConfigPaths(
 			entries = append(entries, entry)
 		}
 
-		path, err := mcp.GenerateChannelConfigFile(mcpConfigDir, mcpAddr, name, entries)
+		path, err := mcp.GenerateChannelConfigFile(mcpConfigDir, mcpAddr, mcpToken, name, entries)
 		if err != nil {
 			slog.Error("failed to generate channel mcp config", "channel", name, "err", err)
 			continue

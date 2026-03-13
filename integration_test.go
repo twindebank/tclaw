@@ -535,8 +535,8 @@ func TestIntegration_MCPToolGlobPermission(t *testing.T) {
 	}
 	t.Cleanup(func() { mcpServer.Stop(context.Background()) })
 
-	// Generate MCP config file.
-	mcpConfigPath, err := mcp.GenerateConfigFile(stateDir, mcpAddr, nil)
+	// Generate MCP config file with the server's bearer token.
+	mcpConfigPath, err := mcp.GenerateConfigFile(stateDir, mcpAddr, mcpServer.Token(), nil)
 	if err != nil {
 		t.Fatalf("generate MCP config: %v", err)
 	}

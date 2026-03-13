@@ -62,6 +62,7 @@ func TestResolve(t *testing.T) {
 		require.Contains(t, allowed, MCPToolConnectionAll)
 		require.Contains(t, allowed, MCPToolRemoteMCPAll)
 		require.Contains(t, allowed, MCPToolScheduleAll)
+		require.Contains(t, allowed, MCPToolTflAll)
 	})
 
 	t.Run("superuser includes all builtins", func(t *testing.T) {
