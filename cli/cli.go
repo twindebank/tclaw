@@ -14,6 +14,8 @@ Commands:
   serve --dev        Start with hot reload (requires air)
   chat               Connect a TUI chat session to the running server
   secret             Manage secrets in the OS keychain
+  logs               Show recent Fly.io logs (snapshot, most recent last)
+  logs -f            Follow (stream) Fly.io logs
   build              Build all binaries into bin/
   install            Install tclaw and tclaw-chat to $GOPATH/bin
   tidy               Run go mod tidy across all modules
@@ -48,6 +50,8 @@ func Run() {
 		runInstall()
 	case "tidy":
 		runTidy()
+	case "logs":
+		runLogs()
 	case "deploy":
 		runDeploy()
 	case "docker":

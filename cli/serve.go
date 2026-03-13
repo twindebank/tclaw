@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"tclaw/agent"
 	"tclaw/config"
 	"tclaw/oauth"
 	"tclaw/provider"
@@ -29,6 +30,10 @@ func runServe() {
 	}
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
+
+	// Lower our OOM score so the kernel kills child processes (claude CLI)
+	// before tclaw. Critical on memory-constrained VMs (256MB Fly.io).
+	agent.ProtectFromOOM()
 
 	cfg, err := config.Load(*configPath, config.Env(*envFlag))
 	if err != nil {
