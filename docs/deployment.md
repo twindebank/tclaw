@@ -19,7 +19,7 @@
 tclaw deploy             # Build locally + deploy to Fly
 tclaw deploy secrets     # Push keychain secrets to Fly
 tclaw deploy status      # Check app status
-tclaw deploy logs        # Tail logs
+tclaw deploy logs        # Show recent logs (same as tclaw logs)
 tclaw deploy suspend     # Spin down (scale to 0)
 tclaw deploy resume      # Spin up (scale to 1)
 ```
