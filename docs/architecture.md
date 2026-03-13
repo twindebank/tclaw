@@ -247,7 +247,8 @@ OnChannelChange callback signals router → agent restarts automatically
     memory/                    agent's sandbox (CWD + --add-dir)
       CLAUDE.md                real file, agent's persistent memory
       *.md                     topic files
-    state/                     tclaw persistent data (JSON files, mcp-config.json)
+    state/                     tclaw persistent data (JSON files) — NOT mounted in sandbox
+    mcp-config/                MCP config JSON files (mounted read-only in sandbox)
     sessions/                  Claude CLI session IDs per channel
     secrets/                   NaCl-encrypted credentials
     main.sock                  unix socket for "main" channel (local only)
@@ -356,7 +357,7 @@ Each user gets their own MCP server on a random port (`127.0.0.1:0`). The server
 
 **Important:** The user's `allowed_tools` must include `"mcp__tclaw__*"` for the agent to use any tclaw MCP tools (connections, channels, schedules, etc.). Without this, the CLI's permission system will block MCP tool calls. Alternatively, using the `superuser` role automatically includes this pattern.
 
-The `mcp-config.json` file is generated at `<user>/state/mcp-config.json` and passed to the CLI via `--mcp-config`. It includes:
+The `mcp-config.json` file is generated at `<user>/mcp-config/mcp-config.json` and passed to the CLI via `--mcp-config`. The `mcp-config/` directory is mounted read-only in the sandbox — `state/` is not mounted at all. It includes:
 
 1. The local tclaw MCP server (all built-in tools)
 2. Any remote MCP servers the user has connected
@@ -456,6 +457,7 @@ OAuth tokens are auto-refreshed and never exposed in logs or subprocess environm
 
 - Its own memory directory (read/write via CWD)
 - Claude Code internal state (via HOME)
+- MCP config files (read-only — `mcp-config/` directory)
 - The MCP server on localhost (tool calls)
 - Standard system utilities (via PATH)
 - Read-only system paths (libraries, certs, DNS)
@@ -468,7 +470,8 @@ OAuth tokens are auto-refreshed and never exposed in logs or subprocess environm
 - tclaw's master encryption key — excluded by env allowlist
 - Other users' data — invisible in bwrap mount namespace (deployed)
 - Host filesystem outside bound paths — invisible in bwrap (deployed)
-- tclaw state files — only accessible via MCP tools
+- tclaw state files (connections, schedules, channels, remote MCPs) — not mounted in sandbox, only accessible via MCP tools
+- Encrypted secrets (credentials, tokens) — not mounted in sandbox
 
 ## Scheduling Architecture
 
