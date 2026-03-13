@@ -29,6 +29,7 @@ func (m *mockChannel) Messages(_ context.Context) <-chan string        { return 
 func (m *mockChannel) Done(_ context.Context) error                    { return nil }
 func (m *mockChannel) SplitStatusMessages() bool                       { return true }
 func (m *mockChannel) Markup() channel.Markup                          { return channel.MarkupHTML }
+func (m *mockChannel) ThinkingWrap() channel.ThinkingWrap              { return channel.ThinkingWrap{} }
 
 func (m *mockChannel) Send(_ context.Context, text string) (channel.MessageID, error) {
 	m.nextID++

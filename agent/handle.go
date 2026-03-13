@@ -26,8 +26,9 @@ var ErrAuthRequired = errors.New("authentication required")
 type writePhase int
 
 const (
-	phaseStatus   writePhase = iota // thinking, tool use, tool results, init, stats
+	phaseStatus   writePhase = iota // tool use, tool results, init, stats
 	phaseResponse                   // assistant text content
+	phaseThinking                   // thinking content — routed to status but wrapped in spoiler tags
 )
 
 // maxMessageLen is the threshold at which split-mode messages are rotated
@@ -58,30 +59,71 @@ type turnWriter struct {
 	// content (later-turn thinking, tools, stats) appears below the
 	// response in chat order rather than above it.
 	statusSealed bool
+
+	// Thinking wrap tags from the channel. Empty strings when the
+	// channel doesn't support collapsible thinking.
+	thinkingWrap channel.ThinkingWrap
+	// thinkingOpen tracks whether we're inside an unclosed thinking
+	// block. When true, the close tag is appended to content before
+	// every send/edit so intermediate states render correctly.
+	thinkingOpen bool
 }
 
 func (tw *turnWriter) write(phase writePhase, text string) error {
+	if phase == phaseThinking {
+		// Open the thinking wrap on first thinking write.
+		if !tw.thinkingOpen && tw.thinkingWrap.Open != "" {
+			text = tw.thinkingWrap.Open + text
+			tw.thinkingOpen = true
+		}
+		// Route thinking to status destination.
+		phase = phaseStatus
+	}
 	if !tw.split {
 		return tw.writeSingle(text)
 	}
 	return tw.writeSplit(phase, text)
 }
 
+// closeThinking permanently writes the close tag into the buffer.
+// Call this when a thinking content block ends.
+func (tw *turnWriter) closeThinking() error {
+	if !tw.thinkingOpen {
+		return nil
+	}
+	tw.thinkingOpen = false
+	if tw.thinkingWrap.Close == "" {
+		return nil
+	}
+	return tw.write(phaseStatus, tw.thinkingWrap.Close)
+}
+
 // writeSingle appends to a single message (socket, stdio).
 func (tw *turnWriter) writeSingle(text string) error {
 	tw.buf.WriteString(text)
+	content := tw.thinkingSuffix(tw.buf.String())
 	if tw.id == "" {
-		id, err := tw.ch.Send(tw.ctx, tw.buf.String())
+		id, err := tw.ch.Send(tw.ctx, content)
 		if err != nil {
 			return fmt.Errorf("send: %w", err)
 		}
 		tw.id = id
 		return nil
 	}
-	if err := tw.ch.Edit(tw.ctx, tw.id, tw.buf.String()); err != nil {
+	if err := tw.ch.Edit(tw.ctx, tw.id, content); err != nil {
 		return fmt.Errorf("edit: %w", err)
 	}
 	return nil
+}
+
+// thinkingSuffix appends the thinking close tag to content when a thinking
+// block is open, so every intermediate send/edit renders valid markup.
+// The close tag is NOT written to the buffer — it's only in the sent content.
+func (tw *turnWriter) thinkingSuffix(content string) string {
+	if tw.thinkingOpen && tw.thinkingWrap.Close != "" {
+		return content + tw.thinkingWrap.Close
+	}
+	return content
 }
 
 // writeSplit routes to separate status and response messages.
@@ -101,14 +143,14 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 		}
 
 		tw.statusBuf.WriteString(text)
-		content := tw.statusBuf.String()
+		content := tw.thinkingSuffix(tw.statusBuf.String())
 
 		// Proactive split: rotate to a new message before hitting the limit.
 		if tw.statusID != "" && len(content) > maxMessageLen {
 			tw.statusBuf.Reset()
 			tw.statusBuf.WriteString(text)
 			tw.statusID = ""
-			content = text
+			content = tw.thinkingSuffix(text)
 		}
 
 		if tw.statusID == "" {
@@ -128,7 +170,8 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 			tw.statusBuf.Reset()
 			tw.statusBuf.WriteString(text)
 			tw.statusID = ""
-			id, err := tw.ch.Send(tw.ctx, text)
+			recoveryContent := tw.thinkingSuffix(text)
+			id, err := tw.ch.Send(tw.ctx, recoveryContent)
 			if err != nil {
 				// Status is informational — log and swallow.
 				slog.Warn("failed to send replacement status message", "err", err)
@@ -193,7 +236,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 
 	split := ch.SplitStatusMessages()
 
-	tw := &turnWriter{ch: ch, ctx: ctx, split: split}
+	tw := &turnWriter{ch: ch, ctx: ctx, split: split, thinkingWrap: ch.ThinkingWrap()}
 	if err := tw.write(phaseStatus, "🤔 Thinking...\n"); err != nil {
 		return "", fmt.Errorf("initial write: %w", err)
 	}
@@ -354,6 +397,9 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 	// message via content_block events. When true, the assistant event's
 	// blocks are redundant and should be skipped.
 	gotStreamedBlocks := false
+	// Track whether we've already emitted a text block so we can insert
+	// a newline separator before the next one.
+	hadTextBlock := false
 	for scanner.Scan() {
 		if ctx.Err() != nil {
 			return sessionID, nil
@@ -398,8 +444,15 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			gotStreamedBlocks = true
 			currentBlockType = start.ContentBlock.Type
 			switch currentBlockType {
+			case claudecli.ContentText:
+				// Separate consecutive text blocks with a newline.
+				if hadTextBlock {
+					if err := tw.write(phaseResponse, "\n\n"); err != nil {
+						return "", err
+					}
+				}
 			case claudecli.ContentThinking:
-				if err := tw.write(phaseStatus, "💭 "); err != nil {
+				if err := tw.write(phaseThinking, "💭 "); err != nil {
 					return "", err
 				}
 			case claudecli.ContentToolUse:
@@ -420,13 +473,19 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 					return "", err
 				}
 			case claudecli.DeltaThinking:
-				if err := tw.write(phaseStatus, delta.Delta.Thinking); err != nil {
+				if err := tw.write(phaseThinking, delta.Delta.Thinking); err != nil {
 					return "", err
 				}
 			}
 
 		case claudecli.EventContentBlockStop:
-			if currentBlockType == claudecli.ContentThinking {
+			switch currentBlockType {
+			case claudecli.ContentText:
+				hadTextBlock = true
+			case claudecli.ContentThinking:
+				if err := tw.closeThinking(); err != nil {
+					return "", err
+				}
 				if err := tw.write(phaseStatus, "\n"); err != nil {
 					return "", err
 				}
@@ -452,20 +511,35 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			if !gotStreamedBlocks {
 				// Fallback: no streaming events received, extract
 				// content from the full assistant message.
+				fallbackHadText := false
 				for _, block := range msg.Message.Content {
 					text := formatBlock(block)
 					if text != "" {
 						phase := phaseStatus
-						if block.Type == claudecli.ContentText {
+						switch block.Type {
+						case claudecli.ContentText:
+							// Separate consecutive text blocks with a newline.
+							if fallbackHadText {
+								text = "\n\n" + text
+							}
+							fallbackHadText = true
 							phase = phaseResponse
+						case claudecli.ContentThinking:
+							phase = phaseThinking
 						}
 						if err := tw.write(phase, text); err != nil {
 							return "", err
+						}
+						if block.Type == claudecli.ContentThinking {
+							if err := tw.closeThinking(); err != nil {
+								return "", err
+							}
 						}
 					}
 				}
 			}
 			gotStreamedBlocks = false
+			hadTextBlock = false
 
 		case claudecli.EventUser:
 			var user claudecli.UserEvent

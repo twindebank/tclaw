@@ -211,3 +211,7 @@ func (f *fakeChannel) SplitStatusMessages() bool {
 func (f *fakeChannel) Markup() channel.Markup {
 	return channel.MarkupMarkdown
 }
+
+func (f *fakeChannel) ThinkingWrap() channel.ThinkingWrap {
+	return channel.ThinkingWrap{}
+}
