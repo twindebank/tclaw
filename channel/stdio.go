@@ -63,6 +63,6 @@ func (s *Stdio) Markup() Markup {
 	return MarkupMarkdown
 }
 
-func (s *Stdio) ThinkingWrap() ThinkingWrap {
-	return ThinkingWrap{}
+func (s *Stdio) StatusWrap() StatusWrap {
+	return StatusWrap{}
 }
