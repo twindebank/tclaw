@@ -44,8 +44,8 @@ The Fly VM runs at 256MB (free tier). tclaw itself uses ~15MB; the claude CLI (N
 
 | VM memory | NODE_MAX_HEAP_MB | Notes |
 |-----------|-----------------|-------|
-| 256mb     | 128             | Free tier, tight but workable for most turns |
-| 512mb     | 350             | Comfortable for heavy turns (email triage, etc.) |
+| 256mb     | 128             | Too tight — OOM-kills on fresh sessions |
+| 512mb     | 350             | Current prod. Handles fresh sessions and heavy turns |
 | 1024mb    | 800             | No practical constraints |
 
 ## CI (optional)
