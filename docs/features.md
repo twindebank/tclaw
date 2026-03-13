@@ -431,6 +431,48 @@ The `cmd/secret` binary provides:
 - `secret delete <name>` — delete from keychain
 - `secret deploy-secrets <config> [app]` — scan config for `${secret:NAME}` refs, read each from keychain, push to Fly.io
 
+## Oneshot Mode
+
+`tclaw oneshot` sends a single message, prints the response, and exits. Useful for quick local testing without deploying or running the full server.
+
+```
+tclaw oneshot [flags] <message>
+```
+
+**Flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | `tclaw.yaml` | Path to config file |
+| `--env` | `local` | Environment to load from config |
+| `--user` | (first user) | User ID from config |
+| `--telegram` | `false` | Emulate Telegram formatting (split messages, HTML, spoiler tags) |
+| `--debug` | `false` | Log raw CLI event JSON |
+
+**Examples:**
+
+```bash
+# Quick test — clean response only (logs suppressed)
+tclaw oneshot "what is 2+2?" 2>/dev/null
+
+# See full logs + response together
+tclaw oneshot "check my schedules" 2>&1
+
+# Test Telegram formatting — shows exact send/edit pattern with labels
+tclaw oneshot --telegram "tell me a joke" 2>&1
+
+# Debug raw CLI events
+tclaw oneshot --debug "hello" 2>&1
+```
+
+**How it works:**
+
+- Reuses the same per-user directories as `tclaw serve` (memory, credentials, settings)
+- Starts a fresh session each time (no `--resume`)
+- In normal mode, output is streamed as deltas for clean display
+- In `--telegram` mode, every `Send` and `Edit` is printed verbatim with `[send msg-N]` / `[edit msg-N]` labels on stderr, so you can trace the exact message pattern that Telegram would receive
+- The agent exits after one turn — no idle timeout wait
+
 ## TUI Chat Client
 
 The `cmd/chat` binary is a Bubbletea-based terminal UI that connects to the agent via unix socket:

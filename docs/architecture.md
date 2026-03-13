@@ -39,7 +39,7 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 | Package | Responsibility |
 |---------|----------------|
 | `main.go` | Entry point: dispatches to `cli.Run()` |
-| `cli/` | CLI subcommand dispatch. `serve` (start server), `chat` (TUI client), `secret` (keychain management), `deploy` (Fly.io deployment, secrets, suspend/resume). |
+| `cli/` | CLI subcommand dispatch. `serve` (start server), `chat` (TUI client), `secret` (keychain management), `deploy` (Fly.io deployment, secrets, suspend/resume), `oneshot` (single-message test mode). |
 | `router/` | Per-user agent lifecycle management. Owns goroutine lifetimes, directory setup, MCP server creation, tool registration. Builds per-channel tool overrides from `config.Channel` (static) and `DynamicChannelConfig` (dynamic) tool fields. The only stateful orchestrator. |
 | `agent/` | Stateless package. `Run(ctx, opts)` reads messages from channels, handles auth flows, spawns CLI subprocess per turn, streams responses back. `ChannelToolOverrides` in `Options` enables per-channel tool permissions. `reset.go` computes `allowedResetLevels()` to build dynamic reset menus filtered by channel. |
 | `channel/` | Transport abstraction. `Channel` interface with implementations: Socket, Stdio, Telegram. `FanIn()` multiplexer, `ChannelMap()` helper. `DynamicStore` for runtime channel configs, `ChannelSecretKey()` for deriving secret store keys. |
