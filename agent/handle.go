@@ -28,7 +28,7 @@ type writePhase int
 const (
 	phaseStatus   writePhase = iota // tool use, tool results, init, stats
 	phaseResponse                   // assistant text content
-	phaseThinking                   // thinking content — routed to status but wrapped in spoiler tags
+	phaseThinking                   // thinking content — routed to status
 )
 
 // maxMessageLen is the threshold at which split-mode messages are rotated
@@ -60,22 +60,18 @@ type turnWriter struct {
 	// response in chat order rather than above it.
 	statusSealed bool
 
-	// Thinking wrap tags from the channel. Empty strings when the
-	// channel doesn't support collapsible thinking.
-	thinkingWrap channel.ThinkingWrap
-	// thinkingOpen tracks whether we're inside an unclosed thinking
-	// block. When true, the close tag is appended to content before
-	// every send/edit so intermediate states render correctly.
-	thinkingOpen bool
+	// Status wrap tags from the channel (e.g. <tg-spoiler>). Empty
+	// strings when the channel doesn't support collapsible content.
+	statusWrap channel.StatusWrap
+	// statusWrapOpen tracks whether we've opened the wrap tag in the
+	// current status message. When true, the close tag is appended to
+	// content before every send/edit so intermediate states render
+	// valid markup.
+	statusWrapOpen bool
 }
 
 func (tw *turnWriter) write(phase writePhase, text string) error {
 	if phase == phaseThinking {
-		// Open the thinking wrap on first thinking write.
-		if !tw.thinkingOpen && tw.thinkingWrap.Open != "" {
-			text = tw.thinkingWrap.Open + text
-			tw.thinkingOpen = true
-		}
 		// Route thinking to status destination.
 		phase = phaseStatus
 	}
@@ -85,23 +81,10 @@ func (tw *turnWriter) write(phase writePhase, text string) error {
 	return tw.writeSplit(phase, text)
 }
 
-// closeThinking permanently writes the close tag into the buffer.
-// Call this when a thinking content block ends.
-func (tw *turnWriter) closeThinking() error {
-	if !tw.thinkingOpen {
-		return nil
-	}
-	tw.thinkingOpen = false
-	if tw.thinkingWrap.Close == "" {
-		return nil
-	}
-	return tw.write(phaseStatus, tw.thinkingWrap.Close)
-}
-
 // writeSingle appends to a single message (socket, stdio).
 func (tw *turnWriter) writeSingle(text string) error {
 	tw.buf.WriteString(text)
-	content := tw.thinkingSuffix(tw.buf.String())
+	content := tw.statusSuffix(tw.buf.String())
 	if tw.id == "" {
 		id, err := tw.ch.Send(tw.ctx, content)
 		if err != nil {
@@ -116,22 +99,22 @@ func (tw *turnWriter) writeSingle(text string) error {
 	return nil
 }
 
-// thinkingSuffix appends the thinking close tag to content when a thinking
-// block is open, so every intermediate send/edit renders valid markup.
-// The close tag is NOT written to the buffer — it's only in the sent content.
-func (tw *turnWriter) thinkingSuffix(content string) string {
-	if tw.thinkingOpen && tw.thinkingWrap.Close != "" {
-		return content + tw.thinkingWrap.Close
+// statusSuffix appends the status wrap close tag to content when the wrap
+// is open, so every intermediate send/edit renders valid markup. The close
+// tag is NOT written to the buffer — it's only in the sent content.
+func (tw *turnWriter) statusSuffix(content string) string {
+	if tw.statusWrapOpen && tw.statusWrap.Close != "" {
+		return content + tw.statusWrap.Close
 	}
 	return content
 }
 
-// thinkingPrefix prepends the thinking open tag when we're inside an open
-// thinking block. Used when message rotation resets the buffer mid-thinking
-// so the new message starts with a valid open tag.
-func (tw *turnWriter) thinkingPrefix(content string) string {
-	if tw.thinkingOpen && tw.thinkingWrap.Open != "" {
-		return tw.thinkingWrap.Open + content
+// statusPrefix prepends the status wrap open tag when the wrap is active.
+// Used when message rotation resets the buffer mid-status so the new
+// message starts with a valid open tag.
+func (tw *turnWriter) statusPrefix(content string) string {
+	if tw.statusWrap.Open != "" {
+		return tw.statusWrap.Open + content
 	}
 	return content
 }
@@ -145,29 +128,31 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 	case phaseStatus:
 		// Once response text has appeared, start a fresh status message
 		// so subsequent status (later-turn thinking, tools, stats) shows
-		// below the response in chat order. Re-prepend the spoiler open
-		// tag if we're mid-thinking so the new message has valid markup.
+		// below the response in chat order.
 		if tw.statusSealed {
 			tw.statusBuf.Reset()
 			tw.statusID = ""
 			tw.statusSealed = false
-			if tw.thinkingOpen && tw.thinkingWrap.Open != "" {
-				tw.statusBuf.WriteString(tw.thinkingWrap.Open)
-			}
+			tw.statusWrapOpen = false
+		}
+
+		// Open the status wrap on first write to this message.
+		if !tw.statusWrapOpen && tw.statusWrap.Open != "" {
+			text = tw.statusWrap.Open + text
+			tw.statusWrapOpen = true
 		}
 
 		tw.statusBuf.WriteString(text)
-		content := tw.thinkingSuffix(tw.statusBuf.String())
+		content := tw.statusSuffix(tw.statusBuf.String())
 
 		// Proactive split: rotate to a new message before hitting the limit.
-		// Re-prepend the spoiler open tag when rotating mid-thinking so the
-		// new message starts with valid markup.
+		// Re-prepend the spoiler open tag so the new message has valid markup.
 		if tw.statusID != "" && len(content) > maxMessageLen {
-			freshText := tw.thinkingPrefix(text)
+			freshText := tw.statusPrefix(text)
 			tw.statusBuf.Reset()
 			tw.statusBuf.WriteString(freshText)
 			tw.statusID = ""
-			content = tw.thinkingSuffix(freshText)
+			content = tw.statusSuffix(freshText)
 		}
 
 		if tw.statusID == "" {
@@ -182,21 +167,16 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 		}
 
 		if err := tw.ch.Edit(tw.ctx, tw.statusID, content); err != nil {
-			// "message is not modified" means Telegram already has this
-			// exact content — not a real failure. This happens when
-			// closeThinking permanently writes the close tag that
-			// thinkingSuffix was already displaying.
 			if strings.Contains(err.Error(), "message is not modified") {
 				return nil
 			}
-			// Reactive recovery: start a fresh message. Re-prepend the
-			// spoiler open tag when recovering mid-thinking.
+			// Reactive recovery: start a fresh message with the wrap re-opened.
 			slog.Warn("failed to edit status message, starting new message", "err", err)
-			freshText := tw.thinkingPrefix(text)
+			freshText := tw.statusPrefix(text)
 			tw.statusBuf.Reset()
 			tw.statusBuf.WriteString(freshText)
 			tw.statusID = ""
-			recoveryContent := tw.thinkingSuffix(freshText)
+			recoveryContent := tw.statusSuffix(freshText)
 			id, err := tw.ch.Send(tw.ctx, recoveryContent)
 			if err != nil {
 				// Status is informational — log and swallow.
@@ -265,7 +245,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 
 	split := ch.SplitStatusMessages()
 
-	tw := &turnWriter{ch: ch, ctx: ctx, split: split, thinkingWrap: ch.ThinkingWrap()}
+	tw := &turnWriter{ch: ch, ctx: ctx, split: split, statusWrap: ch.StatusWrap()}
 	if err := tw.write(phaseStatus, "🤔 Thinking...\n"); err != nil {
 		return "", fmt.Errorf("initial write: %w", err)
 	}
@@ -531,9 +511,6 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			case claudecli.ContentText:
 				hadTextBlock = true
 			case claudecli.ContentThinking:
-				if err := tw.closeThinking(); err != nil {
-					return "", err
-				}
 				if err := tw.write(phaseStatus, "\n"); err != nil {
 					return "", err
 				}
@@ -577,11 +554,6 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 						}
 						if err := tw.write(phase, text); err != nil {
 							return "", err
-						}
-						if block.Type == claudecli.ContentThinking {
-							if err := tw.closeThinking(); err != nil {
-								return "", err
-							}
 						}
 					}
 				}

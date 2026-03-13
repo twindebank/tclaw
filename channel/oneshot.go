@@ -108,9 +108,9 @@ func (o *Oneshot) Markup() Markup {
 	return MarkupMarkdown
 }
 
-func (o *Oneshot) ThinkingWrap() ThinkingWrap {
+func (o *Oneshot) StatusWrap() StatusWrap {
 	if o.telegram {
-		return ThinkingWrap{Open: "<tg-spoiler>", Close: "</tg-spoiler>"}
+		return StatusWrap{Open: "<tg-spoiler>", Close: "</tg-spoiler>"}
 	}
-	return ThinkingWrap{}
+	return StatusWrap{}
 }
