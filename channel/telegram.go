@@ -279,7 +279,7 @@ func (t *Telegram) Markup() Markup {
 }
 
 func (t *Telegram) StatusWrap() StatusWrap {
-	return StatusWrap{Open: "<tg-spoiler>", Close: "</tg-spoiler>"}
+	return StatusWrap{Open: "<blockquote expandable>", Close: "</blockquote>"}
 }
 
 // markdownBold matches **text** that the model emits despite being told to use HTML.

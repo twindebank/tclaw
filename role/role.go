@@ -167,6 +167,8 @@ func providerToolPatterns(ctx ChannelContext) []claudecli.Tool {
 		switch pid {
 		case "google":
 			tools = append(tools, "mcp__tclaw__google_*")
+		case "monzo":
+			tools = append(tools, "mcp__tclaw__monzo_*")
 		}
 	}
 	return tools

@@ -24,7 +24,7 @@ func runOneshot() {
 	configPath := fs.String("config", "tclaw.yaml", "path to config file")
 	envFlag := fs.String("env", "local", "environment to load from config")
 	userFlag := fs.String("user", "", "user ID (defaults to first user in config)")
-	telegramMode := fs.Bool("telegram", false, "emulate Telegram formatting (split messages, HTML, spoiler tags)")
+	telegramMode := fs.Bool("telegram", false, "emulate Telegram formatting (split messages, HTML, expandable blockquotes)")
 	debug := fs.Bool("debug", false, "log raw CLI event JSON")
 	fs.Parse(os.Args[2:])
 

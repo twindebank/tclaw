@@ -73,10 +73,10 @@ type TaggedMessage struct {
 
 // StatusWrap holds the open and close tags for wrapping status content
 // (thinking, tool use, tool results, stats). Channels that don't support
-// collapsible/spoiler content return empty strings.
+// collapsible content return empty strings.
 type StatusWrap struct {
-	Open  string // e.g. "<tg-spoiler>"
-	Close string // e.g. "</tg-spoiler>"
+	Open  string // e.g. "<blockquote expandable>"
+	Close string // e.g. "</blockquote>"
 }
 
 // Channel is the interface every transport must implement.
@@ -98,7 +98,7 @@ type Channel interface {
 	// Markup returns the rich-text format the channel accepts.
 	Markup() Markup
 	// StatusWrap returns the open/close tags for wrapping all status
-	// content (thinking, tool use, stats) in a collapsible or spoiler
-	// block. Returns empty strings for channels that don't support this.
+	// content (thinking, tool use, stats) in a collapsible block.
+	// Returns empty strings for channels that don't support this.
 	StatusWrap() StatusWrap
 }

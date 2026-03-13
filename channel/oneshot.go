@@ -18,7 +18,7 @@ type Oneshot struct {
 	msgCount atomic.Int64
 
 	// telegram emulates Telegram channel behavior (split status messages,
-	// HTML markup, spoiler tags) so formatting can be tested locally.
+	// HTML markup, expandable blockquotes) so formatting can be tested locally.
 	// In telegram mode, every send/edit is printed verbatim with labels.
 	// In normal mode, only deltas are printed for clean output.
 	telegram bool
@@ -30,7 +30,7 @@ type Oneshot struct {
 
 // NewOneshot creates a channel that delivers message once and exits after the
 // first turn. If telegramMode is true, it emulates Telegram's formatting
-// behavior (split messages, HTML, spoiler tags).
+// behavior (split messages, HTML, expandable blockquotes).
 func NewOneshot(message string, cancel context.CancelFunc, telegramMode bool) *Oneshot {
 	return &Oneshot{
 		message:     message,
@@ -110,7 +110,7 @@ func (o *Oneshot) Markup() Markup {
 
 func (o *Oneshot) StatusWrap() StatusWrap {
 	if o.telegram {
-		return StatusWrap{Open: "<tg-spoiler>", Close: "</tg-spoiler>"}
+		return StatusWrap{Open: "<blockquote expandable>", Close: "</blockquote>"}
 	}
 	return StatusWrap{}
 }

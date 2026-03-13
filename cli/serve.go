@@ -52,6 +52,12 @@ func runServe() {
 			cfg.Providers.Google.ClientSecret,
 		))
 	}
+	if cfg.Providers.Monzo != nil {
+		reg.Register(provider.NewMonzoProvider(
+			cfg.Providers.Monzo.ClientID,
+			cfg.Providers.Monzo.ClientSecret,
+		))
+	}
 
 	// Start the HTTP server (health checks, OAuth callbacks, Telegram webhooks).
 	callback := oauth.NewCallbackServer(cfg.Server.Addr, cfg.Server.PublicURL)

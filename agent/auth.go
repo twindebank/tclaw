@@ -248,6 +248,13 @@ func FlyTokenEnvVarName(userID string) string {
 	return "FLY_TOKEN_" + sanitizeEnvSuffix(userID)
 }
 
+// TfLAPIKeyEnvVarName returns the environment variable name used to
+// pre-provision a user's TfL API key as a Fly secret. At boot, the router
+// seeds this into the encrypted secret store so TfL tools find it without prompting.
+func TfLAPIKeyEnvVarName(userID string) string {
+	return "TFL_API_KEY_" + sanitizeEnvSuffix(userID)
+}
+
 // setupTokenPrefix is the expected prefix for setup tokens from `claude setup-token`.
 const setupTokenPrefix = "sk-ant-oat01-"
 

@@ -334,6 +334,48 @@ When a Google connection is established, provider-specific MCP tools are registe
 
 Tools are only registered when a Google connection exists and are removed when the last connection is disconnected. Services available depend on the OAuth scopes granted during consent.
 
+## Monzo Integration
+
+When a Monzo connection is established, provider-specific MCP tools are registered:
+
+- **monzo_list_accounts** — lists Monzo bank accounts with IDs, types (uk_retail, uk_retail_joint, uk_monzo_flex), descriptions, and creation dates. Use the account ID from results in other Monzo tools.
+- **monzo_get_balance** — gets the balance for an account. Returns balance (current), total_balance (including pots), currency, and spend_today. All amounts in minor units (pence for GBP).
+- **monzo_list_pots** — lists pots (savings goals) for an account with names, balances, currency, and deleted/locked status.
+- **monzo_list_transactions** — lists recent transactions with amounts, descriptions, merchant info, categories, and timestamps. Supports `since`, `before`, and `limit` parameters. Merchant details are expanded automatically. Note: after 5 minutes post-authentication, only the last 90 days are accessible. Max 100 per request.
+- **monzo_get_transaction** — gets details of a single transaction with expanded merchant information (name, address, logo, category).
+
+Tools are only registered when a Monzo connection exists and are removed when the last connection is disconnected.
+
+**Setup:** Create a Monzo API client at [developers.monzo.com](https://developers.monzo.com/) (personal use only — you can only connect to your own account). Add the client ID and secret to the config:
+
+```yaml
+providers:
+  monzo:
+    client_id: ${secret:MONZO_CLIENT_ID}
+    client_secret: ${secret:MONZO_CLIENT_SECRET}
+```
+
+The redirect URI must be set to your tclaw's OAuth callback URL (e.g. `https://your-app.fly.dev/oauth/callback` for production, `http://localhost:9876/oauth/callback` for local). Monzo uses Strong Customer Authentication — after the browser flow, the user must approve access via the Monzo app.
+
+## TfL (Transport for London) Integration
+
+TfL tools are always registered — the API works without a key (rate-limited to ~50 req/min) but an API key raises the limit to ~500 req/min. Register for a free key at [api-portal.tfl.gov.uk](https://api-portal.tfl.gov.uk/).
+
+**Tools:**
+
+- **tfl_line_status** — status of tube, overground, elizabeth line, DLR, or tram lines. Defaults to all tube lines. Accepts specific modes or line names.
+- **tfl_journey** — journey planning between any two locations (postcodes, station names, coordinates). Supports date/time, departing/arriving, and mode filters.
+- **tfl_arrivals** — live arrivals at a stop or station. Use `tfl_stop_search` first to find the stop ID.
+- **tfl_stop_search** — search for stops/stations by name or bus stop code. Returns NaPTAN IDs for use with `tfl_arrivals`.
+- **tfl_disruptions** — current disruptions on lines with affected routes and severity.
+- **tfl_road_status** — traffic status for major London roads.
+
+**API key setup:** The key is stored per-user in the encrypted secret store (same pattern as GitHub/Fly tokens). Three ways to set it up:
+
+1. **Via any tool call** — pass `api_key` as a parameter on any TfL tool. It's stored encrypted and used for all future calls.
+2. **Via Telegram** — the agent prompts for the key if rate-limited.
+3. **Pre-provisioned via Fly secret** — `fly secrets set TFL_API_KEY_<USER>=<key> -a tclaw`. Seeded into the encrypted store on boot.
+
 ## Remote MCP Servers
 
 Users can connect to external MCP servers (like the Anthropic MCP directory) via MCP tools. Every remote MCP is scoped to a specific channel — its tools are only included in that channel's MCP configuration.
@@ -422,6 +464,7 @@ Secret store keys follow a hierarchical naming convention:
 - `claude_setup_token` — OAuth setup token
 - `github_token` — GitHub PAT for dev workflow (push, PR creation)
 - `fly_api_token` — Fly.io API token for deploys
+- `tfl_api_key` — TfL API key for Transport for London tools
 - `conn/<provider>/<id>` — OAuth connection credentials (auto-refreshed)
 - `channel/<name>/token` — dynamic channel secrets (lifecycle tied to channel CRUD)
 
@@ -449,7 +492,7 @@ tclaw oneshot [flags] <message>
 | `--config` | `tclaw.yaml` | Path to config file |
 | `--env` | `local` | Environment to load from config |
 | `--user` | (first user) | User ID from config |
-| `--telegram` | `false` | Emulate Telegram formatting (split messages, HTML, spoiler tags) |
+| `--telegram` | `false` | Emulate Telegram formatting (split messages, HTML, expandable blockquotes) |
 | `--debug` | `false` | Log raw CLI event JSON |
 
 **Examples:**
