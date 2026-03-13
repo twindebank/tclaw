@@ -426,8 +426,12 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 	var currentBlockType claudecli.ContentBlockType
 	// Track whether content was streamed for the current assistant
 	// message via content_block events. When true, the assistant event's
-	// blocks are redundant and should be skipped.
+	// thinking/text blocks are redundant and should be skipped.
 	gotStreamedBlocks := false
+	// Track whether tool_use blocks were seen in streaming events.
+	// The CLI may not stream tool_use (or may use a type we don't
+	// recognize), so we extract them from the assistant event if missing.
+	gotStreamedToolUse := false
 	// Track whether we've already emitted a text block so we can insert
 	// a newline separator before the next one.
 	hadTextBlock := false
@@ -487,9 +491,12 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 					return "", err
 				}
 			case claudecli.ContentToolUse:
+				gotStreamedToolUse = true
 				if err := tw.write(phaseStatus, formatToolUse(start.ContentBlock)); err != nil {
 					return "", err
 				}
+			default:
+				slog.Debug("unhandled content block type", "type", currentBlockType)
 			}
 
 		case claudecli.EventContentBlockDelta:
@@ -568,8 +575,22 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 						}
 					}
 				}
+			} else if !gotStreamedToolUse {
+				// Thinking/text were streamed but tool_use wasn't — extract
+				// tool_use from the assistant event as a safety net.
+				for _, block := range msg.Message.Content {
+					if block.Type == claudecli.ContentToolUse {
+						text := formatToolUse(block)
+						if text != "" {
+							if err := tw.write(phaseStatus, text); err != nil {
+								return "", err
+							}
+						}
+					}
+				}
 			}
 			gotStreamedBlocks = false
+			gotStreamedToolUse = false
 			hadTextBlock = false
 
 		case claudecli.EventUser:
