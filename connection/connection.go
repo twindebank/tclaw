@@ -19,10 +19,15 @@ func NewConnectionID(providerID provider.ProviderID, label string) ConnectionID 
 // A user may have multiple connections to the same provider
 // (e.g. "gmail/work" and "gmail/personal").
 type Connection struct {
-	ID         ConnectionID
-	ProviderID provider.ProviderID
-	Label      string // user-chosen namespace ("work", "personal")
-	CreatedAt  time.Time
+	ID         ConnectionID        `json:"id"`
+	ProviderID provider.ProviderID `json:"provider_id"`
+	Label      string              `json:"label"` // user-chosen namespace ("work", "personal")
+
+	// Channel scopes this connection to a specific channel. Provider tools
+	// (e.g. google_*) are only available on this channel.
+	Channel string `json:"channel"`
+
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // Credentials holds OAuth2 or API key credentials for a connection.

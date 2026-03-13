@@ -33,6 +33,19 @@ type RemoteMCPEntry struct {
 // dir is the directory to write the config file into.
 // remotes are optional remote MCP servers to include alongside the local server.
 func GenerateConfigFile(dir string, localAddr string, remotes []RemoteMCPEntry) (string, error) {
+	return writeConfigFile(filepath.Join(dir, "mcp-config.json"), localAddr, remotes)
+}
+
+// GenerateChannelConfigFile writes a per-channel MCP config JSON file.
+// The channel config includes only the remote MCPs scoped to that channel
+// (plus any globally-scoped remote MCPs). Returns the file path.
+func GenerateChannelConfigFile(dir string, localAddr string, channelName string, remotes []RemoteMCPEntry) (string, error) {
+	filename := fmt.Sprintf("mcp-config-%s.json", channelName)
+	return writeConfigFile(filepath.Join(dir, filename), localAddr, remotes)
+}
+
+func writeConfigFile(path string, localAddr string, remotes []RemoteMCPEntry) (string, error) {
+	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create config dir: %w", err)
 	}
@@ -64,7 +77,6 @@ func GenerateConfigFile(dir string, localAddr string, remotes []RemoteMCPEntry) 
 		return "", fmt.Errorf("marshal config: %w", err)
 	}
 
-	path := filepath.Join(dir, "mcp-config.json")
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return "", fmt.Errorf("write config: %w", err)
 	}

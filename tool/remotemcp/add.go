@@ -34,16 +34,21 @@ func remoteMCPAddDef() mcp.ToolDef {
 				"name": {
 					"type": "string",
 					"description": "A short label for this server (e.g. 'linear', 'notion'). Used as the MCP server name in tool prefixes."
+				},
+				"channel": {
+					"type": "string",
+					"description": "Channel name to scope this remote MCP to. Its tools will only be available on this channel."
 				}
 			},
-			"required": ["url", "name"]
+			"required": ["url", "name", "channel"]
 		}`),
 	}
 }
 
 type remoteMCPAddArgs struct {
-	URL  string `json:"url"`
-	Name string `json:"name"`
+	URL     string `json:"url"`
+	Name    string `json:"name"`
+	Channel string `json:"channel"`
 }
 
 func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
@@ -66,9 +71,12 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 		if parsed.Scheme != "https" {
 			return nil, fmt.Errorf("only HTTPS MCP server URLs are allowed")
 		}
+		if a.Channel == "" {
+			return nil, fmt.Errorf("channel is required — specify which channel this remote MCP's tools should be available on")
+		}
 
 		// Store the remote MCP entry.
-		entry, err := deps.Manager.AddRemoteMCP(ctx, a.Name, a.URL)
+		entry, err := deps.Manager.AddRemoteMCP(ctx, a.Name, a.URL, a.Channel)
 		if err != nil {
 			return nil, fmt.Errorf("add remote mcp: %w", err)
 		}

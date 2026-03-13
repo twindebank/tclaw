@@ -1,6 +1,10 @@
 package channel
 
-import "context"
+import (
+	"context"
+
+	"tclaw/role"
+)
 
 // MessageID identifies a sent message so it can be edited later.
 // The concrete value is transport-specific (e.g. telegram message ID,
@@ -47,6 +51,10 @@ type Info struct {
 	Name        string // human-readable label
 	Description string // explains the channel's purpose (e.g. "Desktop workstation", "Phone")
 	Source      Source // where this channel's config came from
+
+	// Role is a named preset of tool permissions. Mutually exclusive with
+	// AllowedTools — set one or the other.
+	Role role.Role
 
 	// AllowedTools overrides user-level tool permissions for this channel.
 	// Uses []string (not []claudecli.Tool) to avoid circular dependency.
