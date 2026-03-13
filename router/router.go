@@ -78,14 +78,16 @@ type managedUser struct {
 //	    memory/                -> agent's sandbox (CWD + --add-dir)
 //	      CLAUDE.md            -> real file, agent's persistent memory
 //	      *.md                 -> topic files (@filename.md refs from CLAUDE.md)
-//	    state/                 -> tclaw persistent data (connections, remote MCPs, channels, mcp-config.json)
-//	    sessions/              -> Claude CLI session IDs per channel
-//	    secrets/               -> encrypted credentials (NaCl secretbox)
+//	    state/                 -> tclaw persistent data (connections, remote MCPs, channels) — NOT mounted in sandbox
+//	    sessions/              -> Claude CLI session IDs per channel — NOT mounted in sandbox
+//	    secrets/               -> encrypted credentials (NaCl secretbox) — NOT mounted in sandbox
+//	    mcp-config/            -> MCP config JSON files (mounted read-only in sandbox)
 //	    *.sock                 -> unix socket files for channels
 //
 // Zone 1 (memory/): agent reads/writes freely, sandboxed via CWD + --add-dir.
 // Zone 2 (home/.claude/): Claude Code internal state, off limits to agent.
-// Zone 3 (state/, sessions/, secrets/): tclaw data, tool-only access via MCP.
+// Zone 3 (state/, sessions/, secrets/): tclaw data, tool-only access via MCP. Not mounted in sandbox.
+// Zone 4 (mcp-config/): MCP config files, mounted read-only so the CLI can read --mcp-config.
 //
 // callback may be nil if OAuth is not configured.
 func New(baseDir string, env config.Env, registry *provider.Registry, callback *oauth.CallbackServer, publicURL string) *Router {
@@ -135,11 +137,12 @@ func (r *Router) Register(ctx context.Context, cfg user.Config, channels []chann
 // until ctx is cancelled.
 func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap map[channel.ChannelID]channel.Channel, staticMsgs <-chan channel.TaggedMessage) {
 	userDir := filepath.Join(r.baseDir, string(mu.cfg.ID))
-	homeDir := filepath.Join(userDir, "home")       // Claude Code's territory (HOME env var)
-	memoryDir := filepath.Join(userDir, "memory")    // agent's sandboxed memory (CWD + --add-dir)
-	stateDir := filepath.Join(userDir, "state")      // tclaw persistent data
-	sessionsDir := filepath.Join(userDir, "sessions") // Claude CLI session IDs per channel
-	secretsDir := filepath.Join(userDir, "secrets")   // encrypted credentials
+	homeDir := filepath.Join(userDir, "home")            // Claude Code's territory (HOME env var)
+	memoryDir := filepath.Join(userDir, "memory")        // agent's sandboxed memory (CWD + --add-dir)
+	stateDir := filepath.Join(userDir, "state")          // tclaw persistent data (not mounted in sandbox)
+	sessionsDir := filepath.Join(userDir, "sessions")    // Claude CLI session IDs per channel
+	secretsDir := filepath.Join(userDir, "secrets")      // encrypted credentials
+	mcpConfigDir := filepath.Join(userDir, "mcp-config") // MCP config files (mounted read-only in sandbox)
 	
 	// State store for tclaw's own data (connections, remote MCPs, dynamic channels).
 	s, err := store.NewFS(stateDir)
@@ -235,7 +238,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Called after remote MCPs are added/removed/authorized.
 	configUpdater := func(ctx context.Context) error {
 		remotes := buildRemoteMCPEntries(ctx)
-		_, genErr := mcp.GenerateConfigFile(stateDir, mcpAddr, remotes)
+		_, genErr := mcp.GenerateConfigFile(mcpConfigDir, mcpAddr, remotes)
 		if genErr != nil {
 			return fmt.Errorf("regenerate mcp config: %w", genErr)
 		}
@@ -256,7 +259,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 	// Generate the MCP config file for --mcp-config (includes existing remote MCPs).
 	remotes := buildRemoteMCPEntries(ctx)
-	mcpConfigPath, err := mcp.GenerateConfigFile(stateDir, mcpAddr, remotes)
+	mcpConfigPath, err := mcp.GenerateConfigFile(mcpConfigDir, mcpAddr, remotes)
 	if err != nil {
 		slog.Error("failed to generate mcp config", "user", mu.cfg.ID, "err", err)
 		return
@@ -359,11 +362,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// ensures re-seeding after a reset that clears these files.
 		seedUserMemory(mu.cfg.ID, memoryDir, homeDir)
 
-		// Regenerate the MCP config on each iteration. ResetAll clears state/
-		// which contains mcp-config.json, so the file must be recreated before
-		// the next agent spawn.
+		// Regenerate the MCP config on each iteration. ResetAll clears
+		// mcp-config/, so the file must be recreated before the next agent spawn.
 		remotes := buildRemoteMCPEntries(ctx)
-		if p, genErr := mcp.GenerateConfigFile(stateDir, mcpAddr, remotes); genErr != nil {
+		if p, genErr := mcp.GenerateConfigFile(mcpConfigDir, mcpAddr, remotes); genErr != nil {
 			slog.Error("failed to regenerate mcp config", "user", mu.cfg.ID, "err", genErr)
 		} else {
 			mcpConfigPath = p
@@ -488,7 +490,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		channelToolOverrides := buildChannelToolOverrides(allChMap, configByName, dynamicStore, dynamicCtx, mu.cfg, connMgr)
 
 		// Generate per-channel MCP config files for channels with scoped remote MCPs.
-		mcpConfigPaths := buildMCPConfigPaths(dynamicCtx, allChMap, connMgr, stateDir, mcpAddr)
+		mcpConfigPaths := buildMCPConfigPaths(dynamicCtx, allChMap, connMgr, mcpConfigDir, mcpAddr)
 
 		// channelChangeNotify is closed when a channel change fires,
 		// telling the agent to finish its current turn then exit.
@@ -530,7 +532,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			SecretStore:     secretStore,
 			ChannelChangeCh: channelChangeNotify,
 			OnReset: func(level agent.ResetLevel) error {
-				return resetUser(level, memoryDir, homeDir, sessionsDir, stateDir, secretsDir)
+				return resetUser(level, memoryDir, homeDir, sessionsDir, stateDir, secretsDir, mcpConfigDir)
 			},
 			Env:        r.env,
 			UserID:     string(mu.cfg.ID),
@@ -922,7 +924,7 @@ func buildMCPConfigPaths(
 	ctx context.Context,
 	allChMap map[channel.ChannelID]channel.Channel,
 	connMgr *connection.Manager,
-	stateDir string,
+	mcpConfigDir string,
 	mcpAddr string,
 ) map[channel.ChannelID]string {
 	paths := make(map[channel.ChannelID]string)
@@ -962,7 +964,7 @@ func buildMCPConfigPaths(
 			entries = append(entries, entry)
 		}
 
-		path, err := mcp.GenerateChannelConfigFile(stateDir, mcpAddr, name, entries)
+		path, err := mcp.GenerateChannelConfigFile(mcpConfigDir, mcpAddr, name, entries)
 		if err != nil {
 			slog.Error("failed to generate channel mcp config", "channel", name, "err", err)
 			continue
