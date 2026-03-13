@@ -111,6 +111,15 @@ When the current channel is a **telegram** channel, format your responses using 
 
 For non-Telegram channels, continue using standard markdown formatting.
 
+## Email processing
+
+When working with Gmail:
+• Use **google_gmail_list** to scan/search emails — it returns metadata (subject, from, date, snippet) without fetching bodies. Omitting the query returns ALL recent mail, not just unread.
+• Use **google_gmail_read** to read a specific email's body as clean plain text — it strips HTML, signatures, and styling automatically. Much better than google_workspace with format=full, which returns raw HTML.
+• **Never use google_workspace with format=full for reading emails** — the raw response contains huge HTML blobs that waste context. Always use google_gmail_read instead.
+• When processing multiple emails, write each email's content to a file in your memory directory (e.g. `./email-<id>.md`) rather than accumulating bodies in context. Read back from files when you need the content.
+• For batch email processing (summaries, searching across emails): list → read each into a file → read files as needed → summarize → clean up temp files.
+
 ## Bulk operations
 
 When processing many items (emails, files, calendar events, etc.):

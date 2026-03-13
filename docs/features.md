@@ -328,6 +328,7 @@ OAuth callbacks are handled by the HTTP server at `/oauth/callback`. The callbac
 When a Google connection is established, provider-specific MCP tools are registered:
 
 - **google_gmail_list** — searches and lists Gmail messages with full metadata (subject, from, to, date, snippet, labels) in a single call. Gmail's list API only returns message IDs, so this wrapper automatically fetches metadata for each result concurrently. Defaults to 10 messages (max 25). Supports Gmail search syntax via the `query` parameter (e.g. `from:alice@example.com`, `is:unread`, `after:2026/03/01`). Use this for scanning/searching email; use `google_workspace` with `gmail users messages get` for reading a single email's full body.
+- **google_gmail_read** — fetches a single Gmail message and returns its body as clean plain text. Strips HTML formatting, signatures, and styling. Returns headers (from, to, subject, date) alongside the body. Much more context-efficient than fetching raw format=full responses.
 - **google_workspace** — sends commands to the `gws` binary (Google Workspace CLI) with the user's OAuth token. Supports Gmail, Drive, Calendar, Docs, Sheets, Slides, and Tasks. Use `google_workspace_schema` to discover available methods and parameters.
 - **google_workspace_schema** — looks up the schema for a Google Workspace API method (e.g. `gmail.users.messages.list`, `drive.files.list`). Returns parameter details, request/response schemas, and descriptions.
 
