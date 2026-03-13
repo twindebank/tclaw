@@ -42,6 +42,9 @@
 - `fly deploy --local-only --no-cache -a tclaw` to force a clean Docker rebuild (avoids stale cache issues).
 - Use `go run . deploy` for the standard deploy flow, but be aware it doesn't pass `--no-cache` by default.
 
+## Related Projects
+- **nanoclaw** — similar project (TypeScript, Docker containers, Anthropic Agent SDK). Repo: `https://github.com/qwibitai/nanoclaw`. Clone to `/tmp/nanoclaw` when asked about it.
+
 ## Memory
 - When I say "add to memory" or "remember this", update THIS file (CLAUDE.md), not the ~/.claude/ memory directory
 - **NEVER use project-level memory** (`~/.claude/projects/.../memory/`) — all memory goes in THIS file
