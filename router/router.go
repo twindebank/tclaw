@@ -16,14 +16,12 @@ import (
 
 	"tclaw/agent"
 	"tclaw/channel"
-	"tclaw/claudecli"
 	"tclaw/config"
 	"tclaw/connection"
 	"tclaw/dev"
 	"tclaw/mcp"
 	"tclaw/oauth"
 	"tclaw/provider"
-	"tclaw/role"
 	"tclaw/schedule"
 	"tclaw/libraries/secret"
 	"tclaw/libraries/store"
@@ -632,142 +630,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	}
 }
 
-// buildDynamicChannels loads dynamic channel configs from the store and creates
-// SocketServer instances for each. Returns a channel map and a fan-in of messages.
-// The caller should cancel dynamicCtx when the agent exits to close the listeners.
-func (r *Router) buildDynamicChannels(dynamicCtx context.Context, userID user.ID, dynamicStore *channel.DynamicStore, secretStore secret.Store) (map[channel.ChannelID]channel.Channel, <-chan channel.TaggedMessage) {
-	configs, err := dynamicStore.List(dynamicCtx)
-	if err != nil {
-		slog.Error("failed to load dynamic channels", "user", userID, "err", err)
-		return nil, nil
-	}
-	if len(configs) == 0 {
-		return nil, nil
-	}
-
-	channels := make(map[channel.ChannelID]channel.Channel, len(configs))
-	for _, cfg := range configs {
-		switch cfg.Type {
-		case channel.TypeSocket:
-			if !r.env.IsLocal() {
-				slog.Info("skipping dynamic socket channel (non-local env)", "channel", cfg.Name, "env", r.env)
-				continue
-			}
-			socketPath := filepath.Join(r.baseDir, string(userID), cfg.Name+".sock")
-			sock := channel.NewDynamicSocketServer(socketPath, cfg.Name, cfg.Description)
-			channels[sock.Info().ID] = sock
-		case channel.TypeTelegram:
-			token, tokenErr := secretStore.Get(dynamicCtx, channel.ChannelSecretKey(cfg.Name))
-			if tokenErr != nil {
-				slog.Error("failed to read telegram bot token from secret store", "channel", cfg.Name, "err", tokenErr)
-				continue
-			}
-			if token == "" {
-				slog.Error("telegram bot token not found in secret store", "channel", cfg.Name)
-				continue
-			}
-
-			var opts channel.TelegramOptions
-			if r.publicURL != "" && r.callback != nil {
-				webhookPath := "/telegram/" + cfg.Name
-				opts.WebhookURL = r.publicURL + webhookPath
-				opts.RegisterHandler = func(pattern string, handler http.Handler) {
-					r.callback.Handle(pattern, handler)
-				}
-			}
-			tg := channel.NewDynamicTelegram(token, cfg.Name, cfg.Description, cfg.AllowedUsers, opts)
-			channels[tg.Info().ID] = tg
-		default:
-			slog.Warn("skipping dynamic channel with unsupported type", "channel", cfg.Name, "type", cfg.Type)
-		}
-	}
-
-	slog.Info("built dynamic channels", "user", userID, "count", len(channels))
-	return channels, channel.FanIn(dynamicCtx, channels)
-}
-
-// registerProviderTools loads existing connections and registers
-// provider-specific MCP tools for connections that already have credentials stored.
-func (r *Router) registerProviderTools(ctx context.Context, h *mcp.Handler, mgr *connection.Manager, googleConns map[connection.ConnectionID]googletools.Deps, monzoConns map[connection.ConnectionID]monzotools.Deps) {
-	conns, err := mgr.List(ctx)
-	if err != nil {
-		slog.Error("failed to list connections for tool registration", "err", err)
-		return
-	}
-
-	for _, conn := range conns {
-		p := r.registry.Get(conn.ProviderID)
-		if p == nil {
-			continue
-		}
-
-		// Only register tools if the connection has valid credentials.
-		creds, err := mgr.GetCredentials(ctx, conn.ID)
-		if err != nil {
-			slog.Warn("failed to check credentials", "connection", conn.ID, "err", err)
-			continue
-		}
-		if creds == nil || creds.AccessToken == "" {
-			continue
-		}
-
-		r.registerToolsForProvider(h, conn.ID, mgr, p, googleConns, monzoConns)
-	}
-}
-
-// registerToolsForProvider adds a connection to the provider's tool set
-// and re-registers tools with the updated connection list.
-func (r *Router) registerToolsForProvider(h *mcp.Handler, connID connection.ConnectionID, mgr *connection.Manager, p *provider.Provider, googleConns map[connection.ConnectionID]googletools.Deps, monzoConns map[connection.ConnectionID]monzotools.Deps) {
-	switch p.ID {
-	case provider.GoogleProviderID:
-		googleConns[connID] = googletools.Deps{
-			ConnID:   connID,
-			Manager:  mgr,
-			Provider: p,
-		}
-		googletools.RegisterTools(h, googleConns)
-		slog.Info("registered google workspace tools", "connection", connID, "total_connections", len(googleConns))
-	case provider.MonzoProviderID:
-		monzoConns[connID] = monzotools.Deps{
-			ConnID:   connID,
-			Manager:  mgr,
-			Provider: p,
-		}
-		monzotools.RegisterTools(h, monzoConns)
-		slog.Info("registered monzo tools", "connection", connID, "total_connections", len(monzoConns))
-	}
-}
-
-// unregisterToolsForProvider removes a connection from the provider's tool set.
-// If no connections remain, the tools are removed entirely.
-func (r *Router) unregisterToolsForProvider(h *mcp.Handler, connID connection.ConnectionID, googleConns map[connection.ConnectionID]googletools.Deps, monzoConns map[connection.ConnectionID]monzotools.Deps) {
-	// Try Google first.
-	if _, ok := googleConns[connID]; ok {
-		delete(googleConns, connID)
-		if len(googleConns) == 0 {
-			googletools.UnregisterTools(h)
-			slog.Info("unregistered google workspace tools (no connections remain)")
-		} else {
-			googletools.RegisterTools(h, googleConns)
-			slog.Info("updated google workspace tools after disconnect", "removed", connID, "remaining", len(googleConns))
-		}
-		return
-	}
-
-	// Try Monzo.
-	if _, ok := monzoConns[connID]; ok {
-		delete(monzoConns, connID)
-		if len(monzoConns) == 0 {
-			monzotools.UnregisterTools(h)
-			slog.Info("unregistered monzo tools (no connections remain)")
-		} else {
-			monzotools.RegisterTools(h, monzoConns)
-			slog.Info("updated monzo tools after disconnect", "removed", connID, "remaining", len(monzoConns))
-		}
-		return
-	}
-}
-
 // StopUser cancels a user's agent and waits for it to finish.
 func (r *Router) StopUser(userID user.ID) {
 	r.mu.Lock()
@@ -776,13 +638,17 @@ func (r *Router) StopUser(userID user.ID) {
 		r.mu.Unlock()
 		return
 	}
+	// Copy cancel/done inside the lock to avoid racing with waitAndStart
+	// which nils these out after the agent exits.
+	cancel := u.cancel
+	done := u.done
 	delete(r.users, userID)
 	r.mu.Unlock()
 
 	// Agent may not have started yet.
-	if u.cancel != nil {
-		u.cancel()
-		<-u.done
+	if cancel != nil {
+		cancel()
+		<-done
 	}
 	slog.Info("user stopped", "user", userID)
 }
@@ -843,214 +709,4 @@ func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel, 
 		}
 	}
 	return channels, nil
-}
-
-// channelToolSource holds the role or explicit tool lists for a channel.
-// Exactly one of Role or AllowedTools should be set (they're mutually exclusive).
-type channelToolSource struct {
-	Role            role.Role
-	AllowedTools    []string
-	DisallowedTools []string
-}
-
-// buildChannelToolOverrides constructs the per-channel tool permission map.
-// For each channel it resolves the effective tools from either a role or
-// explicit allowed_tools lists. The resolution order is:
-//  1. Channel-level role or allowed_tools (from config or dynamic store)
-//  2. User-level role or allowed_tools (fallback)
-//
-// When a role is used, it's resolved via role.Resolve() with a ChannelContext
-// that includes which providers and remote MCPs are available on that channel.
-func buildChannelToolOverrides(
-	allChMap map[channel.ChannelID]channel.Channel,
-	configByName map[string]config.Channel,
-	dynamicStore *channel.DynamicStore,
-	ctx context.Context,
-	userCfg user.Config,
-	connMgr *connection.Manager,
-) map[channel.ChannelID]agent.ChannelToolPermissions {
-	overrides := make(map[channel.ChannelID]agent.ChannelToolPermissions)
-
-	// Load dynamic channel configs if available.
-	var dynamicByName map[string]channel.DynamicChannelConfig
-	if dynamicStore != nil {
-		configs, err := dynamicStore.List(ctx)
-		if err != nil {
-			slog.Error("failed to list dynamic channels for tool overrides", "err", err)
-		} else {
-			dynamicByName = make(map[string]channel.DynamicChannelConfig, len(configs))
-			for _, dc := range configs {
-				dynamicByName[dc.Name] = dc
-			}
-		}
-	}
-
-	for chID, ch := range allChMap {
-		name := ch.Info().Name
-
-		// Determine the tool source for this channel.
-		var src channelToolSource
-
-		// Check channel-level config first (static or dynamic).
-		if cc, ok := configByName[name]; ok {
-			src = channelToolSource{
-				Role:            cc.Role,
-				AllowedTools:    cc.AllowedTools,
-				DisallowedTools: cc.DisallowedTools,
-			}
-		} else if dc, ok := dynamicByName[name]; ok {
-			src = channelToolSource{
-				Role:            dc.Role,
-				AllowedTools:    dc.AllowedTools,
-				DisallowedTools: dc.DisallowedTools,
-			}
-		}
-
-		// Fall back to user-level if channel has neither role nor allowed_tools.
-		if src.Role == "" && len(src.AllowedTools) == 0 {
-			src.Role = userCfg.Role
-			if src.Role == "" {
-				// User-level explicit tools — convert to strings.
-				src.AllowedTools = toolsToStrings(userCfg.AllowedTools)
-				src.DisallowedTools = toolsToStrings(userCfg.DisallowedTools)
-			}
-		}
-
-		// Resolve the final tool lists.
-		var allowed, disallowed []claudecli.Tool
-
-		if src.Role != "" {
-			channelCtx := buildChannelContext(ctx, connMgr, name)
-			allowed, disallowed = role.Resolve(src.Role, channelCtx)
-			// Append channel-level disallowed_tools for surgical removal
-			// alongside a role.
-			disallowed = append(disallowed, toTools(src.DisallowedTools)...)
-		} else {
-			allowed = toTools(src.AllowedTools)
-			disallowed = toTools(src.DisallowedTools)
-		}
-
-		if len(allowed) == 0 && len(disallowed) == 0 {
-			continue
-		}
-		overrides[chID] = agent.ChannelToolPermissions{
-			AllowedTools:    allowed,
-			DisallowedTools: disallowed,
-		}
-	}
-
-	return overrides
-}
-
-// buildChannelContext constructs the ChannelContext for role resolution by
-// looking up which provider connections and remote MCPs are scoped to this
-// channel.
-func buildChannelContext(ctx context.Context, connMgr *connection.Manager, channelName string) role.ChannelContext {
-	var channelCtx role.ChannelContext
-
-	conns, err := connMgr.ListByChannel(ctx, channelName)
-	if err != nil {
-		slog.Error("failed to list connections for channel context", "channel", channelName, "err", err)
-	} else {
-		seen := make(map[string]bool)
-		for _, c := range conns {
-			pid := string(c.ProviderID)
-			if !seen[pid] {
-				channelCtx.ProviderIDs = append(channelCtx.ProviderIDs, pid)
-				seen[pid] = true
-			}
-		}
-	}
-
-	mcps, err := connMgr.ListRemoteMCPsByChannel(ctx, channelName)
-	if err != nil {
-		slog.Error("failed to list remote mcps for channel context", "channel", channelName, "err", err)
-	} else {
-		for _, m := range mcps {
-			channelCtx.RemoteMCPNames = append(channelCtx.RemoteMCPNames, m.Name)
-		}
-	}
-
-	return channelCtx
-}
-
-// buildMCPConfigPaths generates per-channel MCP config files for channels that
-// have channel-scoped remote MCPs. Returns a map of channel ID to config path.
-func buildMCPConfigPaths(
-	ctx context.Context,
-	allChMap map[channel.ChannelID]channel.Channel,
-	connMgr *connection.Manager,
-	mcpConfigDir string,
-	mcpAddr string,
-) map[channel.ChannelID]string {
-	paths := make(map[channel.ChannelID]string)
-
-	for chID, ch := range allChMap {
-		name := ch.Info().Name
-
-		mcps, err := connMgr.ListRemoteMCPsByChannel(ctx, name)
-		if err != nil {
-			slog.Error("failed to list remote mcps for channel config", "channel", name, "err", err)
-			continue
-		}
-
-		// Only generate a per-channel config if there are channel-specific
-		// remote MCPs. If all remote MCPs are global, the default config works.
-		hasChannelScoped := false
-		for _, m := range mcps {
-			if m.Channel != "" {
-				hasChannelScoped = true
-				break
-			}
-		}
-		if !hasChannelScoped {
-			continue
-		}
-
-		var entries []mcp.RemoteMCPEntry
-		for _, m := range mcps {
-			entry := mcp.RemoteMCPEntry{Name: m.Name, URL: m.URL}
-			auth, authErr := connMgr.GetRemoteMCPAuth(ctx, m.Name)
-			if authErr != nil {
-				slog.Warn("failed to load remote mcp auth for channel config", "name", m.Name, "err", authErr)
-			}
-			if auth != nil && auth.AccessToken != "" {
-				entry.BearerToken = auth.AccessToken
-			}
-			entries = append(entries, entry)
-		}
-
-		path, err := mcp.GenerateChannelConfigFile(mcpConfigDir, mcpAddr, name, entries)
-		if err != nil {
-			slog.Error("failed to generate channel mcp config", "channel", name, "err", err)
-			continue
-		}
-		paths[chID] = path
-	}
-
-	return paths
-}
-
-// toolsToStrings converts a claudecli.Tool slice to strings.
-func toolsToStrings(tools []claudecli.Tool) []string {
-	if len(tools) == 0 {
-		return nil
-	}
-	ss := make([]string, len(tools))
-	for i, t := range tools {
-		ss[i] = string(t)
-	}
-	return ss
-}
-
-// toTools converts a string slice to a claudecli.Tool slice.
-func toTools(ss []string) []claudecli.Tool {
-	if len(ss) == 0 {
-		return nil
-	}
-	tools := make([]claudecli.Tool, len(ss))
-	for i, s := range ss {
-		tools[i] = claudecli.Tool(s)
-	}
-	return tools
 }
