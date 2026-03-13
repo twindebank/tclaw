@@ -19,6 +19,7 @@ Commands:
   build              Build all binaries into bin/
   install            Install tclaw and tclaw-chat to $GOPATH/bin
   tidy               Run go mod tidy across all modules
+  oneshot            Send a single message and print the response
   deploy             Build and deploy to Fly.io
   deploy secrets     Push keychain secrets to Fly.io
   deploy suspend     Spin down the Fly.io deployment
@@ -40,6 +41,8 @@ func Run() {
 	switch command {
 	case "serve":
 		runServe()
+	case "oneshot":
+		runOneshot()
 	case "chat":
 		runChat()
 	case "secret":
