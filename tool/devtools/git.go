@@ -18,12 +18,30 @@ func cloneOrFetch(repoDir string, repoURL string, token string) error {
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("git clone: %s: %w", string(out), err)
 		}
+		// Bare clones don't set up remote tracking refs (origin/*) by default.
+		// Configure the fetch refspec so that `git fetch origin` populates
+		// refs/remotes/origin/*, which worktreeAdd relies on.
+		cmd = exec.Command("git", "-C", repoDir, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("git config fetch refspec: %s: %w", string(out), err)
+		}
+		cmd = exec.Command("git", "-C", repoDir, "fetch", "origin")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("git initial fetch: %s: %w", string(out), err)
+		}
 		return nil
 	}
 
 	cmd := exec.Command("git", "-C", repoDir, "remote", "set-url", "origin", authURL)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git set-url: %s: %w", string(out), err)
+	}
+
+	// Ensure the fetch refspec is configured (may be missing on bare repos
+	// created before this fix was added).
+	cmd = exec.Command("git", "-C", repoDir, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git config fetch refspec: %s: %w", string(out), err)
 	}
 
 	cmd = exec.Command("git", "-C", repoDir, "fetch", "origin")
