@@ -418,6 +418,8 @@ The agent can manage code changes, PRs, and deployments through a dev session li
 - **dev_end** — commits uncommitted changes, pushes the branch, creates a PR (or detects an existing one), and tears down the worktree. To iterate on PR feedback, `dev_start` again with the same branch name.
 - **dev_cancel** — removes the worktree and local branch without pushing. All uncommitted changes are lost.
 - **deploy** — two-phase deploy to Fly.io. Without `confirm=true`, shows a preview (commit log, changed files, current vs target commit). With `confirm=true`, runs `fly deploy --remote-only`. Tracks the deployed commit for future previews. Requires a Fly API token — accepts `fly_api_token` on first use (stored encrypted) or pre-provisioned via `FLY_TOKEN_<USER>` Fly secret (see architecture docs for the seeding pattern).
+- **dev_deployed** — shows the currently deployed commit, the latest `origin/main` commit, and whether they match. Reports how many commits behind the deploy is and lists the undeployed commits. Fetches the repo to get the latest state.
+- **dev_log** — shows recent commit history on `origin/main` (defaults to 20, configurable via `count`). Includes the deployed commit hash for reference so the agent can see what's been merged since the last deploy.
 
 ### Session lifecycle
 
