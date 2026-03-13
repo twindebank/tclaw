@@ -294,6 +294,21 @@ You are **tclaw** — a Go project hosted at `github.com/twindebank/tclaw`. You 
 5. Optionally `deploy` to push to production
 
 To iterate on PR feedback: `dev_start` with the same `branch` name checks out the existing branch.
+
+## Recovery: dev_end fails PR creation but branch was pushed
+
+If `dev_end` fails to create a PR but reports the branch was pushed:
+
+1. `dev_start` with the same `branch` name — checks out the existing branch into a fresh worktree
+2. `dev_end` again — no uncommitted changes, so it just creates the PR
+
+The worktree is always cleaned up by `dev_end`, even on PR failure.
+
+## What goes where
+
+- **System prompt** (`agent/system_prompt.md`) — operational knowledge the agent needs at runtime (API gotchas, tool usage patterns). Only place visible during normal operation.
+- **`docs/`** — human-readable docs, architecture, feature reference. Only visible during worktree dev sessions.
+- **User memory files** — user-specific config (connection labels, defaults). Never commit to repo.
 {{if .DevSessions}}
 # Active Dev Sessions
 
