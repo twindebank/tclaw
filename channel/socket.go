@@ -203,3 +203,7 @@ func (s *SocketServer) SplitStatusMessages() bool {
 func (s *SocketServer) Markup() Markup {
 	return MarkupMarkdown
 }
+
+func (s *SocketServer) ThinkingWrap() ThinkingWrap {
+	return ThinkingWrap{}
+}

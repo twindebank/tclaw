@@ -62,3 +62,7 @@ func (s *Stdio) SplitStatusMessages() bool {
 func (s *Stdio) Markup() Markup {
 	return MarkupMarkdown
 }
+
+func (s *Stdio) ThinkingWrap() ThinkingWrap {
+	return ThinkingWrap{}
+}
