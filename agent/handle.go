@@ -60,8 +60,8 @@ type turnWriter struct {
 	// response in chat order rather than above it.
 	statusSealed bool
 
-	// Status wrap tags from the channel (e.g. <tg-spoiler>). Empty
-	// strings when the channel doesn't support collapsible content.
+	// Status wrap tags from the channel (e.g. <blockquote expandable>).
+	// Empty strings when the channel doesn't support collapsible content.
 	statusWrap channel.StatusWrap
 	// statusWrapOpen tracks whether we've opened the wrap tag in the
 	// current status message. When true, the close tag is appended to
@@ -146,7 +146,7 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 		content := tw.statusSuffix(tw.statusBuf.String())
 
 		// Proactive split: rotate to a new message before hitting the limit.
-		// Re-prepend the spoiler open tag so the new message has valid markup.
+		// Re-prepend the wrap open tag so the new message has valid markup.
 		if tw.statusID != "" && len(content) > maxMessageLen {
 			freshText := tw.statusPrefix(text)
 			tw.statusBuf.Reset()

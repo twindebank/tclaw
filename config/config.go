@@ -54,10 +54,17 @@ type ServerConfig struct {
 // ProvidersConfig holds per-provider configuration.
 type ProvidersConfig struct {
 	Google *GoogleProviderCredentials `yaml:"google"`
+	Monzo  *MonzoProviderCredentials  `yaml:"monzo"`
 }
 
 // GoogleProviderCredentials holds OAuth client credentials for Google Workspace.
 type GoogleProviderCredentials struct {
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+}
+
+// MonzoProviderCredentials holds OAuth client credentials for Monzo.
+type MonzoProviderCredentials struct {
 	ClientID     string `yaml:"client_id"`
 	ClientSecret string `yaml:"client_secret"`
 }
@@ -353,6 +360,26 @@ func resolveSecrets(cfg *Config) ([]string, error) {
 			return nil, fmt.Errorf("providers.google.client_secret: %w", err)
 		}
 		cfg.Providers.Google.ClientSecret = val
+		if envVar != "" {
+			envVars = append(envVars, envVar)
+		}
+	}
+
+	if cfg.Providers.Monzo != nil {
+		val, envVar, err := resolveRef(cfg.Providers.Monzo.ClientID)
+		if err != nil {
+			return nil, fmt.Errorf("providers.monzo.client_id: %w", err)
+		}
+		cfg.Providers.Monzo.ClientID = val
+		if envVar != "" {
+			envVars = append(envVars, envVar)
+		}
+
+		val, envVar, err = resolveRef(cfg.Providers.Monzo.ClientSecret)
+		if err != nil {
+			return nil, fmt.Errorf("providers.monzo.client_secret: %w", err)
+		}
+		cfg.Providers.Monzo.ClientSecret = val
 		if envVar != "" {
 			envVars = append(envVars, envVar)
 		}

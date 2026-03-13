@@ -31,7 +31,9 @@ import (
 	"tclaw/tool/connectiontools"
 	"tclaw/tool/devtools"
 	googletools "tclaw/tool/google"
+	monzotools "tclaw/tool/monzo"
 	"tclaw/tool/remotemcp"
+	tfltools "tclaw/tool/tfl"
 	"tclaw/tool/scheduletools"
 	"tclaw/user"
 )
@@ -173,6 +175,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Track active Google connections so tools can list all available
 	// connections in their enum. Shared across connect/disconnect callbacks.
 	googleConns := make(map[connection.ConnectionID]googletools.Deps)
+	monzoConns := make(map[connection.ConnectionID]monzotools.Deps)
 
 	connectiontools.RegisterTools(mcpHandler, connectiontools.Deps{
 		Manager:  connMgr,
@@ -180,10 +183,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		Callback: r.callback,
 		Handler:  mcpHandler,
 		OnProviderConnect: func(connID connection.ConnectionID, mgr *connection.Manager, p *provider.Provider) {
-			r.registerToolsForProvider(mcpHandler, connID, mgr, p, googleConns)
+			r.registerToolsForProvider(mcpHandler, connID, mgr, p, googleConns, monzoConns)
 		},
 		OnProviderDisconnect: func(connID connection.ConnectionID) {
-			r.unregisterToolsForProvider(mcpHandler, connID, googleConns)
+			r.unregisterToolsForProvider(mcpHandler, connID, googleConns, monzoConns)
 		},
 	})
 	if r.callback != nil {
@@ -191,7 +194,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	}
 
 	// Register provider-specific tools for existing connections.
-	r.registerProviderTools(ctx, mcpHandler, connMgr, googleConns)
+	r.registerProviderTools(ctx, mcpHandler, connMgr, googleConns, monzoConns)
 
 	mcpServer := mcp.NewServer(mcpHandler)
 	// Bind to a random port on localhost.
@@ -300,6 +303,17 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		}
 	}
 
+	// Seed TfL API key from Fly secret (e.g. TFL_API_KEY_THEO) into the
+	// encrypted secret store, same pattern as the GitHub/Fly tokens above.
+	tflKeyEnvVar := agent.TfLAPIKeyEnvVarName(string(mu.cfg.ID))
+	if tflKey := os.Getenv(tflKeyEnvVar); tflKey != "" {
+		if seedErr := secretStore.Set(ctx, tfltools.APIKeyStoreKey, tflKey); seedErr != nil {
+			slog.Error("failed to seed tfl api key from env", "user", mu.cfg.ID, "err", seedErr)
+		} else {
+			slog.Info("seeded tfl api key from env", "user", mu.cfg.ID, "env_var", tflKeyEnvVar)
+		}
+	}
+
 	// Create dynamic channel store and register channel management tools.
 	dynamicStore := channel.NewDynamicStore(s)
 
@@ -359,6 +373,12 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		Store:       devStore,
 		SecretStore: secretStore,
 		UserDir:     userDir,
+	})
+
+	// Register TfL tools unconditionally — they work without an API key
+	// (rate-limited to ~50 req/min) and prompt for one if not stored.
+	tfltools.RegisterTools(mcpHandler, tfltools.Deps{
+		SecretStore: secretStore,
 	})
 
 	// Register tool_list last so it can see all MCP tools from every package.
@@ -668,7 +688,7 @@ func (r *Router) buildDynamicChannels(dynamicCtx context.Context, userID user.ID
 
 // registerProviderTools loads existing connections and registers
 // provider-specific MCP tools for connections that already have credentials stored.
-func (r *Router) registerProviderTools(ctx context.Context, h *mcp.Handler, mgr *connection.Manager, googleConns map[connection.ConnectionID]googletools.Deps) {
+func (r *Router) registerProviderTools(ctx context.Context, h *mcp.Handler, mgr *connection.Manager, googleConns map[connection.ConnectionID]googletools.Deps, monzoConns map[connection.ConnectionID]monzotools.Deps) {
 	conns, err := mgr.List(ctx)
 	if err != nil {
 		slog.Error("failed to list connections for tool registration", "err", err)
@@ -691,13 +711,13 @@ func (r *Router) registerProviderTools(ctx context.Context, h *mcp.Handler, mgr 
 			continue
 		}
 
-		r.registerToolsForProvider(h, conn.ID, mgr, p, googleConns)
+		r.registerToolsForProvider(h, conn.ID, mgr, p, googleConns, monzoConns)
 	}
 }
 
 // registerToolsForProvider adds a connection to the provider's tool set
 // and re-registers tools with the updated connection list.
-func (r *Router) registerToolsForProvider(h *mcp.Handler, connID connection.ConnectionID, mgr *connection.Manager, p *provider.Provider, googleConns map[connection.ConnectionID]googletools.Deps) {
+func (r *Router) registerToolsForProvider(h *mcp.Handler, connID connection.ConnectionID, mgr *connection.Manager, p *provider.Provider, googleConns map[connection.ConnectionID]googletools.Deps, monzoConns map[connection.ConnectionID]monzotools.Deps) {
 	switch p.ID {
 	case provider.GoogleProviderID:
 		googleConns[connID] = googletools.Deps{
@@ -707,20 +727,45 @@ func (r *Router) registerToolsForProvider(h *mcp.Handler, connID connection.Conn
 		}
 		googletools.RegisterTools(h, googleConns)
 		slog.Info("registered google workspace tools", "connection", connID, "total_connections", len(googleConns))
+	case provider.MonzoProviderID:
+		monzoConns[connID] = monzotools.Deps{
+			ConnID:   connID,
+			Manager:  mgr,
+			Provider: p,
+		}
+		monzotools.RegisterTools(h, monzoConns)
+		slog.Info("registered monzo tools", "connection", connID, "total_connections", len(monzoConns))
 	}
 }
 
 // unregisterToolsForProvider removes a connection from the provider's tool set.
 // If no connections remain, the tools are removed entirely.
-func (r *Router) unregisterToolsForProvider(h *mcp.Handler, connID connection.ConnectionID, googleConns map[connection.ConnectionID]googletools.Deps) {
-	delete(googleConns, connID)
-	if len(googleConns) == 0 {
-		googletools.UnregisterTools(h)
-		slog.Info("unregistered google workspace tools (no connections remain)")
+func (r *Router) unregisterToolsForProvider(h *mcp.Handler, connID connection.ConnectionID, googleConns map[connection.ConnectionID]googletools.Deps, monzoConns map[connection.ConnectionID]monzotools.Deps) {
+	// Try Google first.
+	if _, ok := googleConns[connID]; ok {
+		delete(googleConns, connID)
+		if len(googleConns) == 0 {
+			googletools.UnregisterTools(h)
+			slog.Info("unregistered google workspace tools (no connections remain)")
+		} else {
+			googletools.RegisterTools(h, googleConns)
+			slog.Info("updated google workspace tools after disconnect", "removed", connID, "remaining", len(googleConns))
+		}
 		return
 	}
-	googletools.RegisterTools(h, googleConns)
-	slog.Info("updated google workspace tools after disconnect", "removed", connID, "remaining", len(googleConns))
+
+	// Try Monzo.
+	if _, ok := monzoConns[connID]; ok {
+		delete(monzoConns, connID)
+		if len(monzoConns) == 0 {
+			monzotools.UnregisterTools(h)
+			slog.Info("unregistered monzo tools (no connections remain)")
+		} else {
+			monzotools.RegisterTools(h, monzoConns)
+			slog.Info("updated monzo tools after disconnect", "removed", connID, "remaining", len(monzoConns))
+		}
+		return
+	}
 }
 
 // StopUser cancels a user's agent and waits for it to finish.
