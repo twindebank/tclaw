@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -21,6 +22,10 @@ func deployDef() mcp.ToolDef {
 				"confirm": {
 					"type": "boolean",
 					"description": "Set to true to execute the deploy after reviewing the preview. Omit or false to get a preview."
+				},
+				"fly_api_token": {
+					"type": "string",
+					"description": "Fly.io API token for deploy access. Only needed on first use — stored encrypted for subsequent calls."
 				}
 			}
 		}`),
@@ -28,7 +33,8 @@ func deployDef() mcp.ToolDef {
 }
 
 type deployArgs struct {
-	Confirm bool `json:"confirm"`
+	Confirm     bool   `json:"confirm"`
+	FlyAPIToken string `json:"fly_api_token"`
 }
 
 func deployHandler(deps Deps) mcp.ToolHandler {
@@ -116,8 +122,24 @@ func deployHandler(deps Deps) mcp.ToolHandler {
 			return json.Marshal(result)
 		}
 
-		// Execute deploy.
+		// Resolve and persist Fly API token.
+		flyToken, err := deps.SecretStore.Get(ctx, flyTokenKey)
+		if err != nil {
+			return nil, fmt.Errorf("read fly api token: %w", err)
+		}
+		if a.FlyAPIToken != "" {
+			flyToken = a.FlyAPIToken
+			if err := deps.SecretStore.Set(ctx, flyTokenKey, flyToken); err != nil {
+				return nil, fmt.Errorf("persist fly api token: %w", err)
+			}
+		}
+		if flyToken == "" {
+			return nil, fmt.Errorf("no Fly API token configured — provide fly_api_token parameter (create one with: fly tokens create deploy -x 999999h)")
+		}
+
+		// Execute deploy with the token scoped to this command only.
 		cmd = exec.Command("fly", "deploy", "--remote-only", "-a", "tclaw")
+		cmd.Env = append(cmd.Env, "FLY_API_TOKEN="+flyToken, "PATH="+os.Getenv("PATH"), "HOME="+os.Getenv("HOME"))
 		deployOut, err := cmd.CombinedOutput()
 		if err != nil {
 			return nil, fmt.Errorf("fly deploy failed: %s: %w", string(deployOut), err)
