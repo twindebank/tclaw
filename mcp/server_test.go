@@ -16,6 +16,7 @@ func TestHandleMCP_RejectsOversizedBody(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(oversized))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+server.Token())
 	rr := httptest.NewRecorder()
 
 	server.handleMCP(rr, req)
@@ -39,6 +40,7 @@ func TestHandleMCP_RejectsNonPost(t *testing.T) {
 	server := NewServer(handler)
 
 	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
+	req.Header.Set("Authorization", "Bearer "+server.Token())
 	rr := httptest.NewRecorder()
 
 	server.handleMCP(rr, req)

@@ -18,6 +18,12 @@ type sandboxPaths struct {
 	ReadWrite []string
 	// ReadOnly system paths the subprocess needs to function.
 	ReadOnly []string
+
+	// ReadOnlyOverlay paths are bound read-only AFTER read-write paths,
+	// allowing specific files within read-write directories to be protected.
+	// Use this to lock down individual files (e.g. settings.json) inside
+	// an otherwise writable directory.
+	ReadOnlyOverlay []string
 }
 
 // systemReadOnlyPaths are the minimal system paths needed for the claude CLI
@@ -61,6 +67,13 @@ func wrapWithSandbox(ctx context.Context, original *exec.Cmd, paths sandboxPaths
 	// Read-write user paths.
 	for _, p := range paths.ReadWrite {
 		bwrapArgs = append(bwrapArgs, "--bind", p, p)
+	}
+
+	// Read-only overlays — protect specific files within read-write dirs.
+	// These are bound AFTER read-write paths so bwrap overlays them,
+	// making the files immutable even though their parent dir is writable.
+	for _, p := range paths.ReadOnlyOverlay {
+		bwrapArgs = append(bwrapArgs, "--ro-bind-try", p, p)
 	}
 
 	// Kernel filesystems and private /tmp.

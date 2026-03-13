@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -23,10 +24,49 @@ const (
 var safeClient = &http.Client{
 	Timeout: httpTimeout,
 	Transport: &http.Transport{
-		DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+		DialContext:           safeDialContext,
 		TLSHandshakeTimeout:  10 * time.Second,
 		ResponseHeaderTimeout: 10 * time.Second,
 	},
+}
+
+// safeDialContext resolves DNS and validates that the target IP is not
+// private/loopback before connecting. This prevents DNS rebinding attacks
+// where a domain resolves to a public IP during validation but to a
+// private IP when the actual connection is made.
+func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid address %q: %w", addr, err)
+	}
+
+	ips, err := net.DefaultResolver.LookupHost(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("DNS lookup failed for %q: %w", host, err)
+	}
+
+	// Try each resolved IP, rejecting private addresses.
+	var lastErr error
+	for _, ipStr := range ips {
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			continue
+		}
+		if isPrivateIP(ip) {
+			lastErr = fmt.Errorf("refusing to connect to private IP %s for host %q", ipStr, host)
+			continue
+		}
+		conn, err := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, network, net.JoinHostPort(ipStr, port))
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return conn, nil
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("no valid IPs for host %q", host)
 }
 
 // validateExternalURL checks that a URL is safe to fetch during discovery:
