@@ -5,6 +5,13 @@ primary_region = "lhr"
 
 [env]
   TCLAW_STORE_PATH = "/data/store"
+  # Cap the Node.js V8 heap for the claude CLI subprocess. The CLI is the main
+  # memory consumer — tclaw itself uses ~15MB. Set this low enough to leave
+  # room for the Go process + kernel inside the VM's total memory budget.
+  # At 256MB VM: ~200MB usable, ~30MB system/tclaw, ~170MB for claude CLI.
+  # V8 heap is only part of Node.js memory (add ~30-50MB for native allocations).
+  # Raise this if turns OOM frequently; lower if you shrink the VM.
+  NODE_MAX_HEAP_MB = "128"
 
 [http_service]
   internal_port = 9876
@@ -31,4 +38,4 @@ primary_region = "lhr"
 
 [[vm]]
   size = "shared-cpu-1x"
-  memory = "512mb"
+  memory = "256mb"
