@@ -240,6 +240,14 @@ func GitHubTokenEnvVarName(userID string) string {
 	return "GITHUB_TOKEN_" + sanitizeEnvSuffix(userID)
 }
 
+// FlyTokenEnvVarName returns the environment variable name used to
+// pre-provision a user's Fly.io API token as a Fly secret. At boot, the router
+// seeds this into the encrypted secret store so the deploy tool finds it
+// without prompting.
+func FlyTokenEnvVarName(userID string) string {
+	return "FLY_TOKEN_" + sanitizeEnvSuffix(userID)
+}
+
 // setupTokenPrefix is the expected prefix for setup tokens from `claude setup-token`.
 const setupTokenPrefix = "sk-ant-oat01-"
 

@@ -374,7 +374,7 @@ The agent can manage code changes, PRs, and deployments through a dev session li
 - **dev_status** — shows branch, uncommitted changes, commit log, and diff stat. Lists all active sessions when multiple exist.
 - **dev_end** — commits uncommitted changes, pushes the branch, creates a PR (or detects an existing one), and tears down the worktree. To iterate on PR feedback, `dev_start` again with the same branch name.
 - **dev_cancel** — removes the worktree and local branch without pushing. All uncommitted changes are lost.
-- **deploy** — two-phase deploy to Fly.io. Without `confirm=true`, shows a preview (commit log, changed files, current vs target commit). With `confirm=true`, runs `fly deploy --remote-only`. Tracks the deployed commit for future previews.
+- **deploy** — two-phase deploy to Fly.io. Without `confirm=true`, shows a preview (commit log, changed files, current vs target commit). With `confirm=true`, runs `fly deploy --remote-only`. Tracks the deployed commit for future previews. Requires a Fly API token — accepts `fly_api_token` on first use (stored encrypted) or pre-provisioned via `FLY_TOKEN_<USER>` Fly secret (see architecture docs for the seeding pattern).
 
 ### Session lifecycle
 
@@ -419,6 +419,8 @@ Per-user encrypted storage using NaCl secretbox:
 Secret store keys follow a hierarchical naming convention:
 - `anthropic_api_key` — user's Anthropic API key
 - `claude_setup_token` — OAuth setup token
+- `github_token` — GitHub PAT for dev workflow (push, PR creation)
+- `fly_api_token` — Fly.io API token for deploys
 - `conn/<provider>/<id>` — OAuth connection credentials (auto-refreshed)
 - `channel/<name>/token` — dynamic channel secrets (lifecycle tied to channel CRUD)
 
