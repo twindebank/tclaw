@@ -2,6 +2,7 @@ package user
 
 import (
 	"tclaw/claudecli"
+	"tclaw/role"
 )
 
 // ID uniquely identifies a user across the system.
@@ -19,6 +20,11 @@ type Config struct {
 	DisallowedTools []claudecli.Tool
 	MaxTurns        int
 	Debug           bool
+
+	// Role is a named preset of tool permissions. Mutually exclusive with
+	// AllowedTools — set one or the other. Applies as the default for
+	// channels that don't specify their own role or allowed_tools.
+	Role role.Role
 
 	// SystemPrompt is custom text appended after tclaw's default system prompt.
 	// Configured per-user in tclaw.yaml.

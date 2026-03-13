@@ -126,8 +126,15 @@ type Options struct {
 
 	// MCPConfigPath points to a JSON file for --mcp-config, connecting
 	// Claude to the local tclaw MCP server (and any remote MCPs).
-	// Empty means no MCP tools are available.
+	// Empty means no MCP tools are available. Used as the default when
+	// no per-channel config exists in MCPConfigPaths.
 	MCPConfigPath string
+
+	// MCPConfigPaths maps channel IDs to per-channel MCP config file paths.
+	// Channels with scoped remote MCPs get their own config file containing
+	// only the remote MCPs available on that channel. Channels not in this
+	// map fall back to MCPConfigPath.
+	MCPConfigPaths map[channel.ChannelID]string
 
 	// MCPToolNames returns the current list of tool names registered on
 	// the local MCP server (e.g. "channel_create", "schedule_list"). Called
@@ -613,7 +620,16 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				}
 
 				if result.err != nil && turnCtx.Err() == nil {
+					// Turn failed unexpectedly (not cancelled by user). Notify
+					// the channel so the user knows — especially important for
+					// scheduled turns where nobody is watching.
 					slog.Error("handle failed", "err", result.err)
+					if errCh, errChOK := opts.Channels[msg.ChannelID]; errChOK {
+						errText := "⚠️ Turn failed: " + result.err.Error()
+						if _, sendErr := errCh.Send(ctx, errText); sendErr != nil {
+							slog.Error("failed to send error notification", "err", sendErr)
+						}
+					}
 				}
 				if result.sessionID != "" && result.sessionID != sessionID {
 					slog.Info("session started", "channel", msg.ChannelID, "session_id", result.sessionID)
@@ -847,7 +863,16 @@ func filterOutBuiltins(tools []claudecli.Tool) []claudecli.Tool {
 	return out
 }
 
-func buildArgs(opts Options, sessionID string, systemPrompt string, prompt string, allowed []claudecli.Tool, disallowed []claudecli.Tool) []string {
+// resolveMCPConfigPath returns the MCP config file path for the given channel.
+// Per-channel configs take priority, then the default config path.
+func resolveMCPConfigPath(opts Options, channelID channel.ChannelID) string {
+	if p, ok := opts.MCPConfigPaths[channelID]; ok {
+		return p
+	}
+	return opts.MCPConfigPath
+}
+
+func buildArgs(opts Options, sessionID string, systemPrompt string, prompt string, allowed []claudecli.Tool, disallowed []claudecli.Tool, mcpConfigPath string) []string {
 	args := []string{
 		"--output-format", "stream-json",
 		"--verbose",
@@ -872,8 +897,8 @@ func buildArgs(opts Options, sessionID string, systemPrompt string, prompt strin
 	for _, t := range disallowed {
 		args = append(args, "--disallowedTools", string(t))
 	}
-	if opts.MCPConfigPath != "" {
-		args = append(args, "--mcp-config", opts.MCPConfigPath)
+	if mcpConfigPath != "" {
+		args = append(args, "--mcp-config", mcpConfigPath)
 	}
 	if opts.MemoryDir != "" {
 		args = append(args, "--add-dir", opts.MemoryDir)
