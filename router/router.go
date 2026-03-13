@@ -483,6 +483,11 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// Build per-channel tool overrides from config (static) and store (dynamic).
 		channelToolOverrides := buildChannelToolOverrides(staticChMap, configByName, dynamicChMap, dynamicCtx, dynamicStore)
 
+		// channelChangeNotify is closed when a channel change fires,
+		// telling the agent to finish its current turn then exit.
+		// Created per iteration because a closed channel can't be reused.
+		channelChangeNotify := make(chan struct{})
+
 		opts := agent.Options{
 			PermissionMode:  mu.cfg.PermissionMode,
 			Model:           mu.cfg.Model,
@@ -513,8 +518,9 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				}
 				return names
 			},
-			SystemPrompt:         systemPrompt,
-			SecretStore:          secretStore,
+			SystemPrompt:    systemPrompt,
+			SecretStore:     secretStore,
+			ChannelChangeCh: channelChangeNotify,
 			OnReset: func(level agent.ResetLevel) error {
 				return resetUser(level, memoryDir, homeDir, sessionsDir, stateDir, secretsDir)
 			},
@@ -538,17 +544,19 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		case err = <-agentErr:
 			// Agent exited normally.
 		case <-channelChangeCh:
-			// Channel created/edited/deleted — restart agent to pick up changes.
-			slog.Info("channel changed, restarting agent", "user", mu.cfg.ID)
-			cancel()
-			<-done
-			<-bridgeDone
-			cancelDynamic()
-			r.mu.Lock()
-			mu.cancel = nil
-			mu.done = nil
-			r.mu.Unlock()
-			continue
+			// Channel created/edited/deleted — let the agent finish its
+			// current turn so it can send a restart notice, then exit.
+			slog.Info("channel changed, waiting for agent to finish turn", "user", mu.cfg.ID)
+			close(channelChangeNotify)
+			select {
+			case err = <-agentErr:
+				// Agent finished the turn and exited gracefully.
+			case <-time.After(30 * time.Second):
+				// Safety timeout — force cancel if the turn is stuck.
+				slog.Warn("agent did not exit after channel change, forcing", "user", mu.cfg.ID)
+				cancel()
+				err = <-agentErr
+			}
 		}
 
 		cancel()
@@ -570,6 +578,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		}
 		if errors.Is(err, agent.ErrResetRequested) {
 			slog.Info("agent reset requested, restarting", "user", mu.cfg.ID)
+			continue
+		}
+		if errors.Is(err, agent.ErrChannelChanged) {
+			slog.Info("agent restarting after channel change", "user", mu.cfg.ID)
 			continue
 		}
 		if err != nil {

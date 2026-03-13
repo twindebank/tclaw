@@ -63,6 +63,10 @@ var ErrIdleTimeout = errors.New("agent idle timeout")
 // requires the agent to restart (project or full reset).
 var ErrResetRequested = errors.New("reset requested")
 
+// ErrChannelChanged is returned by RunWithMessages when a channel was
+// created/edited/deleted and the agent needs to restart to pick up changes.
+var ErrChannelChanged = errors.New("channel changed")
+
 // ChannelToolPermissions holds per-channel tool permission overrides.
 // When set, these replace (not merge with) the user-level permissions.
 type ChannelToolPermissions struct {
@@ -160,6 +164,12 @@ type Options struct {
 	// passed to the subprocess as CLAUDE_CODE_OAUTH_TOKEN. On prod, loaded
 	// from the per-user Fly secret; locally, captured from `claude setup-token`.
 	SetupToken string
+
+	// ChannelChangeCh is closed by the router when a channel is created,
+	// edited, or deleted. The agent finishes the current turn, sends a
+	// restart notice, and returns ErrChannelChanged so the router can
+	// rebuild channels and restart.
+	ChannelChangeCh <-chan struct{}
 }
 
 type handleResult struct {
@@ -224,6 +234,8 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			select {
 			case <-ctx.Done():
 				return nil
+			case <-opts.ChannelChangeCh:
+				return ErrChannelChanged
 			case <-idle.C():
 				slog.Info("agent idle timeout, shutting down", "timeout", agentIdleTimeout)
 				return ErrIdleTimeout
@@ -263,6 +275,14 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			if !isBuiltinAllowed(opts, msg.ChannelID, claudecli.BuiltinCompact) {
 				sendDenied(ctx, opts, msg.ChannelID)
 				continue
+			}
+			if ch, ok := opts.Channels[msg.ChannelID]; ok {
+				if _, err := ch.Send(ctx, "🗜️ Compacting conversation context..."); err != nil {
+					slog.Error("failed to send compact notice", "err", err)
+				}
+				if err := ch.Done(ctx); err != nil {
+					slog.Error("failed to close turn after compact notice", "err", err)
+				}
 			}
 			msg.Text = compactPrompt
 			// Fall through to handle() below.
@@ -628,6 +648,25 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		if ok {
 			if err := ch.Done(ctx); err != nil {
 				slog.Error("failed to close turn", "err", err)
+			}
+		}
+
+		// Check if a channel change happened during this turn.
+		// The router closed ChannelChangeCh instead of killing us,
+		// so we get to finish the turn and send a notice first.
+		if opts.ChannelChangeCh != nil {
+			select {
+			case <-opts.ChannelChangeCh:
+				if ch != nil {
+					if _, err := ch.Send(ctx, "🔄 Restarting to apply channel changes..."); err != nil {
+						slog.Error("failed to send restart notice", "err", err)
+					}
+					if err := ch.Done(ctx); err != nil {
+						slog.Error("failed to close turn after restart notice", "err", err)
+					}
+				}
+				return ErrChannelChanged
+			default:
 			}
 		}
 	}
