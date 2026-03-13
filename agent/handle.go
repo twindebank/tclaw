@@ -573,7 +573,10 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			}
 			gotStreamedBlocks = false
 			gotStreamedToolUse = false
-			hadTextBlock = false
+			// hadTextBlock intentionally NOT reset — the response buffer
+			// accumulates across assistant events, so the separator logic
+			// must persist to insert \n\n between text blocks from
+			// different events.
 
 		case claudecli.EventUser:
 			var user claudecli.UserEvent
