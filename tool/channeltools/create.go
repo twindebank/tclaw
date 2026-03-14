@@ -53,7 +53,7 @@ func channelCreateDef() mcp.ToolDef {
 							"description": "Telegram user IDs allowed to interact with this bot. When set, messages from other users are silently ignored. Get your user ID from @userinfobot on Telegram."
 						}
 					},
-					"required": ["token"]
+					"required": ["token", "allowed_users"]
 				},
 				"role": {
 					"type": "string",
@@ -118,6 +118,9 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 		case "telegram":
 			if a.TelegramConfig == nil || a.TelegramConfig.Token == "" {
 				return nil, fmt.Errorf("telegram_config with a bot token is required for telegram channels (get a token from @BotFather)")
+			}
+			if len(a.TelegramConfig.AllowedUsers) == 0 {
+				return nil, fmt.Errorf("telegram_config.allowed_users is required — at least one Telegram user ID must be specified (get your user ID from @userinfobot on Telegram)")
 			}
 			channelType = channel.TypeTelegram
 		default:
