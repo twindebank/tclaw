@@ -22,6 +22,11 @@ type TelegramOptions struct {
 	// If empty, the bot uses long polling instead.
 	WebhookURL string
 
+	// WebhookPath is the local HTTP path to register the handler at (e.g. "/telegram/abc123").
+	// Must match the path component of WebhookURL so the HTTP server routes
+	// Telegram's POSTs to the correct handler.
+	WebhookPath string
+
 	// RegisterHandler adds an HTTP handler to the shared server.
 	// Required when WebhookURL is set.
 	RegisterHandler func(pattern string, handler http.Handler)
@@ -191,9 +196,8 @@ func (t *Telegram) startPolling(ctx context.Context, b *bot.Bot) {
 
 // startWebhook registers a webhook with Telegram and serves updates via HTTP.
 func (t *Telegram) startWebhook(ctx context.Context, b *bot.Bot) {
-	// Register the HTTP handler on the shared server.
-	webhookPath := "/telegram/" + t.name
-	t.opts.RegisterHandler(webhookPath, b.WebhookHandler())
+	// Register the HTTP handler at the same path the router told Telegram to POST to.
+	t.opts.RegisterHandler(t.opts.WebhookPath, b.WebhookHandler())
 
 	// Tell Telegram to send updates to our webhook URL.
 	// SecretToken tells Telegram to include this value in the
