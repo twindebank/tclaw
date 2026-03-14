@@ -93,6 +93,7 @@ func runOneshot() {
 		}},
 		nil,
 		userCfg.SystemPrompt,
+		nil, // no onboarding in oneshot mode
 	)
 
 	// Create the oneshot channel. Its Done() cancels agentCtx to exit
