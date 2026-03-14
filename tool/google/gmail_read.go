@@ -21,11 +21,11 @@ type gmailReadArgs struct {
 
 // gmailFullMessage is the full message response from the Gmail API.
 type gmailFullMessage struct {
-	ID       string          `json:"id"`
-	ThreadID string          `json:"threadId"`
-	Snippet  string          `json:"snippet"`
-	Payload  *gmailFullPart  `json:"payload"`
-	LabelIDs []string        `json:"labelIds"`
+	ID       string         `json:"id"`
+	ThreadID string         `json:"threadId"`
+	Snippet  string         `json:"snippet"`
+	Payload  *gmailFullPart `json:"payload"`
+	LabelIDs []string       `json:"labelIds"`
 }
 
 type gmailFullPart struct {

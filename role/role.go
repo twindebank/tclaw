@@ -86,16 +86,16 @@ var allBuiltins = []claudecli.Tool{
 
 // MCP tool patterns for tclaw tools.
 const (
-	MCPToolAll          claudecli.Tool = "mcp__tclaw__*"
-	MCPToolDevAll       claudecli.Tool = "mcp__tclaw__dev_*"
-	MCPToolDeploy       claudecli.Tool = "mcp__tclaw__deploy"
-	MCPToolScheduleAll  claudecli.Tool = "mcp__tclaw__schedule_*"
+	MCPToolAll           claudecli.Tool = "mcp__tclaw__*"
+	MCPToolDevAll        claudecli.Tool = "mcp__tclaw__dev_*"
+	MCPToolDeploy        claudecli.Tool = "mcp__tclaw__deploy"
+	MCPToolScheduleAll   claudecli.Tool = "mcp__tclaw__schedule_*"
 	MCPToolConnectionAll claudecli.Tool = "mcp__tclaw__connection_*"
-	MCPToolRemoteMCPAll claudecli.Tool = "mcp__tclaw__remote_mcp_*"
-	MCPToolGoogleAll    claudecli.Tool = "mcp__tclaw__google_*"
-	MCPToolMonzoAll     claudecli.Tool = "mcp__tclaw__monzo_*"
-	MCPToolTflAll         claudecli.Tool = "mcp__tclaw__tfl_*"
-	MCPToolOnboardingAll  claudecli.Tool = "mcp__tclaw__onboarding_*"
+	MCPToolRemoteMCPAll  claudecli.Tool = "mcp__tclaw__remote_mcp_*"
+	MCPToolGoogleAll     claudecli.Tool = "mcp__tclaw__google_*"
+	MCPToolMonzoAll      claudecli.Tool = "mcp__tclaw__monzo_*"
+	MCPToolTflAll        claudecli.Tool = "mcp__tclaw__tfl_*"
+	MCPToolOnboardingAll claudecli.Tool = "mcp__tclaw__onboarding_*"
 )
 
 // basic builtins for assistant.
