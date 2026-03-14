@@ -388,7 +388,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 					}
 
 					levelName := resetLevelName(flow.level)
-				if _, err := ch.Send(ctx, "✅ "+bold(ch.Markup(), strings.ToUpper(levelName[:1])+levelName[1:])+" reset complete."); err != nil {
+					if _, err := ch.Send(ctx, "✅ "+bold(ch.Markup(), strings.ToUpper(levelName[:1])+levelName[1:])+" reset complete."); err != nil {
 						slog.Error("failed to send reset confirmation", "err", err)
 					}
 					delete(resetFlows, msg.ChannelID)

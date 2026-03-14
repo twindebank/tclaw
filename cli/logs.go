@@ -140,4 +140,3 @@ func stripANSI(s string) string {
 	}
 	return out.String()
 }
-

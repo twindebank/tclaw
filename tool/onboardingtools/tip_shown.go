@@ -83,9 +83,9 @@ func onboardingTipShownHandler(deps Deps) mcp.ToolHandler {
 		}
 
 		result := map[string]any{
-			"recorded":        a.TipID,
-			"tips_remaining":  len(onboarding.FeatureAreas) - len(state.TipsShown),
-			"all_tips_done":   allDone,
+			"recorded":       a.TipID,
+			"tips_remaining": len(onboarding.FeatureAreas) - len(state.TipsShown),
+			"all_tips_done":  allDone,
 		}
 		if allDone {
 			result["message"] = "All tips delivered! Onboarding is complete."
