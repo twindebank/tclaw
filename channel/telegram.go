@@ -30,6 +30,13 @@ type TelegramOptions struct {
 	// RegisterHandler adds an HTTP handler to the shared server.
 	// Required when WebhookURL is set.
 	RegisterHandler func(pattern string, handler http.Handler)
+
+	// ChatID seeds the chat ID so the bot can send outbound messages
+	// before any inbound message arrives (e.g. schedule-fired prompts).
+	ChatID int64
+
+	// OnChatID is called when the chat ID is first set or changes.
+	OnChatID func(chatID int64)
 }
 
 // Telegram connects to the Telegram Bot API using either long polling or webhooks.
@@ -83,6 +90,7 @@ func newTelegram(token, name, description string, allowedUsers []int64, source S
 		opts:          opts,
 		allowedUsers:  allowed,
 		webhookSecret: generateWebhookSecret(),
+		currentChatID: opts.ChatID,
 	}
 }
 
@@ -143,8 +151,13 @@ func (t *Telegram) Messages(ctx context.Context) <-chan string {
 				)
 
 				t.mu.Lock()
+				changed := t.currentChatID != chatID
 				t.currentChatID = chatID
 				t.mu.Unlock()
+
+				if changed && t.opts.OnChatID != nil {
+					t.opts.OnChatID(chatID)
+				}
 
 				select {
 				case out <- text:
@@ -170,12 +183,6 @@ func (t *Telegram) Messages(ctx context.Context) <-chan string {
 		t.mu.Lock()
 		t.bot = b
 		t.mu.Unlock()
-
-		if len(t.allowedUsers) == 0 {
-			slog.Warn("telegram bot has no allowed_users set — anyone who finds the bot username can message it",
-				"channel", t.name,
-			)
-		}
 
 		if t.opts.WebhookURL != "" {
 			t.startWebhook(ctx, b)
