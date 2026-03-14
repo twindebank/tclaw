@@ -333,6 +333,16 @@ GitHub PAT stored in the encrypted secret store (key: `github_token`). On first 
 
 Active worktree directories are passed to the Claude subprocess via `--add-dir` flags and added to the bwrap sandbox's read-write paths (Linux). On macOS (local dev), the agent can access worktrees immediately. On Linux (production), a restart is needed after `dev_start` so the sandbox picks up the new paths.
 
+### Application logs
+
+The `dev_logs` tool provides access to tclaw's own application logs from the running instance. Logs are captured in an in-process ring buffer (5000 lines) that tees slog output alongside stderr.
+
+**Multi-user isolation:** Logs are filtered by the calling user's ID — each user only sees log lines tagged with their `user=<id>` field. System-wide logs (startup, shutdown, HTTP server) are hidden by default and can be included with `include_system: true`. The user ID is injected server-side from the router's config, not from user input.
+
+**Filters:** level (DEBUG/INFO/WARN/ERROR), substring search, max line count. Defaults to 100 most recent lines at all levels.
+
+**Scope:** Only captures logs from the current instance since boot. Previous instance logs (before a restart/deploy) are not available — use `fly logs` from the CLI for those.
+
 ### System prompt integration
 
 Active dev sessions are listed in the system prompt so the agent knows which worktrees are available. The system prompt instructs the agent to read the project's documentation (CLAUDE.md, `@`-referenced files) from the worktree before making any code changes.
