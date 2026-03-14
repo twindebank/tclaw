@@ -21,6 +21,10 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o 
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*
 
+# Fly.io CLI — needed by deploy tool for `fly deploy --remote-only`.
+RUN curl -fsSL https://fly.io/install.sh | sh
+ENV PATH="/root/.fly/bin:${PATH}"
+
 # Install claude CLI and Google Workspace CLI globally.
 RUN npm install -g @anthropic-ai/claude-code @googleworkspace/cli
 
