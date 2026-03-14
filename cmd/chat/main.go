@@ -43,8 +43,8 @@ type wireMsg struct {
 
 // chatMsg is a single message in the conversation (user or agent).
 type chatMsg struct {
-	isUser bool
-	text   string
+	isUser    bool
+	text      string
 	timestamp string
 }
 
@@ -84,7 +84,6 @@ func (ms *messages) addUser(text string) {
 	ms.byID[id] = msg
 }
 
-
 func (ms *messages) send(id, text string) {
 	msg := &chatMsg{text: text, timestamp: time.Now().Format("15:04:05")}
 	ms.order = append(ms.order, id)
@@ -117,7 +116,6 @@ func (ms *messages) render() string {
 	return b.String()
 }
 
-
 type model struct {
 	input    textinput.Model
 	viewport viewport.Model
@@ -127,7 +125,6 @@ type model struct {
 
 	// incoming receives wire protocol messages from background socket readers.
 	incoming chan wireMsg
-
 }
 
 func initialModel() model {

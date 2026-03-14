@@ -135,7 +135,7 @@ var toolDefs = []mcp.ToolDef{
 		}`),
 	},
 	{
-		Name: "tfl_road_status",
+		Name:        "tfl_road_status",
 		Description: "Get traffic status for major London roads. Returns current severity, status description, and any active closures or restrictions.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
