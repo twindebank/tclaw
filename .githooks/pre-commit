@@ -1,0 +1,14 @@
+#!/bin/sh
+# Auto-format staged Go files (excluding vendor/) before commit.
+
+staged=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' | grep -v '^vendor/')
+
+if [ -z "$staged" ]; then
+    exit 0
+fi
+
+# Format and re-stage
+echo "$staged" | xargs gofmt -w
+echo "$staged" | xargs git add
+
+exit 0
