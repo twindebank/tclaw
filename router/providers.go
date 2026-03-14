@@ -11,6 +11,7 @@ import (
 	"tclaw/channel"
 	"tclaw/connection"
 	"tclaw/libraries/secret"
+	"tclaw/libraries/store"
 	"tclaw/mcp"
 	"tclaw/provider"
 	googletools "tclaw/tool/google"
@@ -21,7 +22,7 @@ import (
 // buildDynamicChannels loads dynamic channel configs from the store and creates
 // SocketServer instances for each. Returns a channel map and a fan-in of messages.
 // The caller should cancel dynamicCtx when the agent exits to close the listeners.
-func (r *Router) buildDynamicChannels(dynamicCtx context.Context, userID user.ID, dynamicStore *channel.DynamicStore, secretStore secret.Store) (map[channel.ChannelID]channel.Channel, <-chan channel.TaggedMessage) {
+func (r *Router) buildDynamicChannels(dynamicCtx context.Context, userID user.ID, dynamicStore *channel.DynamicStore, secretStore secret.Store, stateStore store.Store) (map[channel.ChannelID]channel.Channel, <-chan channel.TaggedMessage) {
 	configs, err := dynamicStore.List(dynamicCtx)
 	if err != nil {
 		slog.Error("failed to load dynamic channels", "user", userID, "err", err)
@@ -67,6 +68,8 @@ func (r *Router) buildDynamicChannels(dynamicCtx context.Context, userID user.ID
 					r.callback.Handle(pattern, handler)
 				}
 			}
+			opts.ChatID = loadChatID(dynamicCtx, stateStore, cfg.Name)
+			opts.OnChatID = saveChatIDFunc(stateStore, cfg.Name)
 			tg := channel.NewDynamicTelegram(token, cfg.Name, cfg.Description, cfg.AllowedUsers, opts)
 			channels[tg.Info().ID] = tg
 		default:
