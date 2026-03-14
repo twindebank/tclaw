@@ -18,6 +18,28 @@ type systemPromptData struct {
 	Channels    []ChannelInfo
 	DevSessions []DevSessionInfo
 	UserPrompt  string
+	Onboarding  *OnboardingInfo
+}
+
+// OnboardingInfo describes the current onboarding state for the system prompt.
+// Nil means onboarding is complete or not applicable.
+type OnboardingInfo struct {
+	Phase           string
+	InfoGathered    map[string]bool
+	InfoMissing     []string
+	TipsShown       int
+	TipsTotal       int
+	NextTip         string
+
+	// RemainingAreas lists feature areas not yet covered during tips phase.
+	RemainingAreas []OnboardingFeatureArea
+}
+
+// OnboardingFeatureArea is a feature the agent can teach about.
+type OnboardingFeatureArea struct {
+	ID          string
+	Name        string
+	Description string
 }
 
 // ChannelInfo describes a channel for the system prompt template.
@@ -40,12 +62,13 @@ type DevSessionInfo struct {
 
 // BuildSystemPrompt executes the system_prompt.md template with runtime
 // state and user config. The result is passed to --append-system-prompt.
-func BuildSystemPrompt(channels []ChannelInfo, devSessions []DevSessionInfo, userPrompt string) string {
+func BuildSystemPrompt(channels []ChannelInfo, devSessions []DevSessionInfo, userPrompt string, onboarding *OnboardingInfo) string {
 	data := systemPromptData{
 		Date:        time.Now().Format("Monday, January 2, 2006"),
 		Channels:    channels,
 		DevSessions: devSessions,
 		UserPrompt:  userPrompt,
+		Onboarding:  onboarding,
 	}
 
 	var buf bytes.Buffer
