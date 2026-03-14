@@ -62,6 +62,7 @@ func (r *Router) buildDynamicChannels(dynamicCtx context.Context, userID user.ID
 				}
 				webhookPath := "/telegram/" + hex.EncodeToString(webhookSecret)
 				opts.WebhookURL = r.publicURL + webhookPath
+				opts.WebhookPath = webhookPath
 				opts.RegisterHandler = func(pattern string, handler http.Handler) {
 					r.callback.Handle(pattern, handler)
 				}

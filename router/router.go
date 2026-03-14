@@ -724,6 +724,7 @@ func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel, 
 				}
 				webhookPath := "/telegram/" + hex.EncodeToString(webhookSecret)
 				opts.WebhookURL = r.publicURL + webhookPath
+				opts.WebhookPath = webhookPath
 				opts.RegisterHandler = func(pattern string, handler http.Handler) {
 					r.callback.Handle(pattern, handler)
 				}
