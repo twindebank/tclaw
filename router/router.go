@@ -21,6 +21,7 @@ import (
 	"tclaw/config"
 	"tclaw/connection"
 	"tclaw/dev"
+	"tclaw/libraries/logbuffer"
 	"tclaw/libraries/secret"
 	"tclaw/libraries/store"
 	"tclaw/mcp"
@@ -54,6 +55,9 @@ type Router struct {
 
 	// Per-user MCP servers, keyed by user ID.
 	mcpServers map[user.ID]*mcp.Server
+
+	// Shared log ring buffer for the dev_logs MCP tool. May be nil.
+	logBuffer *logbuffer.Buffer
 }
 
 type managedUser struct {
@@ -94,7 +98,7 @@ type managedUser struct {
 // Zone 4 (mcp-config/): MCP config files, mounted read-only so the CLI can read --mcp-config.
 //
 // callback may be nil if OAuth is not configured.
-func New(baseDir string, env config.Env, registry *provider.Registry, callback *oauth.CallbackServer, publicURL string) *Router {
+func New(baseDir string, env config.Env, registry *provider.Registry, callback *oauth.CallbackServer, publicURL string, logBuffer *logbuffer.Buffer) *Router {
 	return &Router{
 		users:      make(map[user.ID]*managedUser),
 		mcpServers: make(map[user.ID]*mcp.Server),
@@ -103,6 +107,7 @@ func New(baseDir string, env config.Env, registry *provider.Registry, callback *
 		registry:   registry,
 		callback:   callback,
 		publicURL:  publicURL,
+		logBuffer:  logBuffer,
 	}
 }
 
@@ -380,6 +385,8 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		Store:       devStore,
 		SecretStore: secretStore,
 		UserDir:     userDir,
+		UserID:      mu.cfg.ID,
+		LogBuffer:   r.logBuffer,
 	})
 
 	// Register TfL tools unconditionally — they work without an API key
