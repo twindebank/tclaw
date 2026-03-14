@@ -345,7 +345,6 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	return sessionID, nil
 }
 
-
 // allowedEnvPrefixes are env var prefixes the subprocess is allowed to inherit.
 // Everything not matching is excluded. Overrides (HOME, ANTHROPIC_API_KEY, etc.)
 // are always set regardless of this list.
