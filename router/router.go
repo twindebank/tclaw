@@ -23,6 +23,7 @@ import (
 	"tclaw/dev"
 	"tclaw/mcp"
 	"tclaw/oauth"
+	"tclaw/onboarding"
 	"tclaw/provider"
 	"tclaw/schedule"
 	"tclaw/libraries/secret"
@@ -32,6 +33,7 @@ import (
 	"tclaw/tool/devtools"
 	googletools "tclaw/tool/google"
 	monzotools "tclaw/tool/monzo"
+	"tclaw/tool/onboardingtools"
 	"tclaw/tool/remotemcp"
 	tfltools "tclaw/tool/tfl"
 	"tclaw/tool/scheduletools"
@@ -386,6 +388,14 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		SecretStore: secretStore,
 	})
 
+	// Set up onboarding state tracking and tools.
+	onboardingStore := onboarding.NewStore(s)
+	onboardingtools.RegisterTools(mcpHandler, onboardingtools.Deps{
+		Store:         onboardingStore,
+		ScheduleStore: scheduleStore,
+		Scheduler:     scheduler,
+	})
+
 	// Register tool_list last so it can see all MCP tools from every package.
 	channeltools.RegisterToolListTool(mcpHandler)
 
@@ -457,7 +467,46 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			addDirs = append(addDirs, sess.WorktreeDir)
 		}
 
-		systemPrompt := agent.BuildSystemPrompt(chInfos, devSessionInfos, mu.cfg.SystemPrompt)
+		// Build onboarding info for the system prompt. Initialize state on first
+		// encounter — this is idempotent, like seedUserMemory.
+		var onboardingInfo *agent.OnboardingInfo
+		obState, _, obErr := onboardingStore.Initialize(ctx)
+		if obErr != nil {
+			slog.Error("failed to initialize onboarding", "user", mu.cfg.ID, "err", obErr)
+		}
+		if obState != nil && obState.Phase != onboarding.PhaseComplete {
+			var missing []string
+			for _, f := range onboarding.AllInfoFields {
+				if !obState.InfoGathered[f] {
+					missing = append(missing, f)
+				}
+			}
+			nextArea := onboarding.NextArea(obState.TipsShown)
+			var nextAreaID string
+			if nextArea != nil {
+				nextAreaID = nextArea.ID
+			}
+			remaining := onboarding.UnshownAreas(obState.TipsShown)
+			var remainingAreas []agent.OnboardingFeatureArea
+			for _, area := range remaining {
+				remainingAreas = append(remainingAreas, agent.OnboardingFeatureArea{
+					ID:          area.ID,
+					Name:        area.Name,
+					Description: area.Description,
+				})
+			}
+			onboardingInfo = &agent.OnboardingInfo{
+				Phase:          string(obState.Phase),
+				InfoGathered:   obState.InfoGathered,
+				InfoMissing:    missing,
+				TipsShown:      len(obState.TipsShown),
+				TipsTotal:      len(onboarding.FeatureAreas),
+				NextTip:        nextAreaID,
+				RemainingAreas: remainingAreas,
+			}
+		}
+
+		systemPrompt := agent.BuildSystemPrompt(chInfos, devSessionInfos, mu.cfg.SystemPrompt, onboardingInfo)
 
 		// Wait for a message or shutdown.
 		var firstMsg channel.TaggedMessage

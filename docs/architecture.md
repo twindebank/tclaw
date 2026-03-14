@@ -67,6 +67,7 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 | `tool/monzo/` | Monzo banking tools registered when a Monzo connection exists. Direct HTTP calls to the Monzo API. |
 | `tool/tfl/` | Transport for London tools (line status, journey planning, arrivals, disruptions). Always registered — API key stored per-user in secret store. |
 | `tool/devtools/` | MCP tools for dev workflow (dev_start, dev_status, dev_end, dev_cancel, deploy). Git worktree management, PR creation via `gh`, Fly.io deployment. |
+| `tool/onboardingtools/` | MCP tools for new user onboarding (status, set_info, advance, tip_shown, skip). Tracks onboarding progress and manages the daily tips schedule. |
 
 ### Infrastructure
 
@@ -79,6 +80,7 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 | `claudecli/` | Typed enums and event structs for the Claude CLI's stream-json output. Models, permission modes, tools, content block types. Pure data types, no I/O. |
 | `user/` | `user.ID` and `user.Config` types. Pure data, no I/O. |
 | `schedule/` | Cron schedule store and scheduler daemon. The scheduler runs at user lifetime and injects messages into channels when schedules fire. |
+| `onboarding/` | Onboarding state model and store. Tracks phase progression, info gathered, and feature areas covered. Persisted as JSON in the user's state store. |
 | `dev/` | Dev session types and store. Tracks active git worktree sessions, cached repo URL, GitHub token, and deployed commit hash. |
 
 ### CLI Tools
