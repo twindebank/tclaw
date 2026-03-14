@@ -72,6 +72,7 @@
 ## Operations
 - [x] Deployment — Docker + Fly.io with persistent volume, health checks, CI workflow
 - [ ] Monitoring — metrics, alerting, cost tracking (logging is in place via slog)
+- [ ] Email monitoring — set up BetterStack or Fly.io native email alerts for downtime/errors
 
 ## Documentation
 - [x] Project docs — [features](docs/features.md), [architecture](docs/architecture.md), README
