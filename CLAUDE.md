@@ -1,5 +1,11 @@
 # tclaw
 
+## TODO
+- Periodic jobs to check Claude Code changelog and dynamically update agent/CLI behavior
+- Check CVEs and dynamically update dependencies
+- Generally update dependencies (go mod tidy, bump versions)
+- Other periodic maintenance tasks (e.g. rotate secrets, audit configs)
+
 ## Code Style
 - Comment code that isn't obvious, prefer readability over clever code
 - Prefer inline docs on individual items over big block comments at the top of a group
