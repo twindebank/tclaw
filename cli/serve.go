@@ -4,14 +4,19 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
 	"syscall"
 
+	"path/filepath"
+
 	"tclaw/agent"
 	"tclaw/config"
+	"tclaw/libraries/logbuffer"
+	"tclaw/libraries/store"
 	"tclaw/oauth"
 	"tclaw/provider"
 	"tclaw/router"
@@ -29,7 +34,9 @@ func runServe() {
 		return
 	}
 
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	logBuf := logbuffer.New(5000)
+	logWriter := io.MultiWriter(os.Stderr, logBuf)
+	slog.SetDefault(slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
 	// Lower our OOM score so the kernel kills child processes (claude CLI)
 	// before tclaw. Critical on memory-constrained VMs (256MB Fly.io).
@@ -67,11 +74,16 @@ func runServe() {
 	}
 	defer callback.Stop(context.Background())
 
-	r := router.New(cfg.BaseDir, cfg.Env, reg, callback, cfg.Server.PublicURL)
+	r := router.New(cfg.BaseDir, cfg.Env, reg, callback, cfg.Server.PublicURL, logBuf)
 	defer r.StopAll()
 
 	for _, u := range cfg.Users {
-		channels, err := r.BuildChannels(u.ID, u.Channels, cfg.Env)
+		stateStore, err := store.NewFS(filepath.Join(cfg.BaseDir, string(u.ID), "state"))
+		if err != nil {
+			slog.Error("failed to create state store for channels", "user", u.ID, "err", err)
+			os.Exit(1)
+		}
+		channels, err := r.BuildChannels(u.ID, u.Channels, cfg.Env, stateStore)
 		if err != nil {
 			slog.Error("failed to build channels", "user", u.ID, "err", err)
 			os.Exit(1)

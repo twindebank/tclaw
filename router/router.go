@@ -420,7 +420,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// Build dynamic channels from the store each iteration so
 		// creates/deletes from the previous agent session take effect.
 		dynamicCtx, cancelDynamic := context.WithCancel(ctx)
-		dynamicChMap, dynamicMsgs := r.buildDynamicChannels(dynamicCtx, mu.cfg.ID, dynamicStore, secretStore)
+		dynamicChMap, dynamicMsgs := r.buildDynamicChannels(dynamicCtx, mu.cfg.ID, dynamicStore, secretStore, s)
 
 		// Merge static + dynamic into a combined view for this iteration.
 		allChMap := make(map[channel.ChannelID]channel.Channel, len(staticChMap)+len(dynamicChMap))
@@ -743,7 +743,7 @@ func (r *Router) StopAll() {
 // BuildChannels creates channel instances from config for a given user.
 // Channels whose Envs list doesn't include env are skipped.
 // System-derived paths (socket paths) are computed from the base directory.
-func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel, env config.Env) ([]channel.Channel, error) {
+func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel, env config.Env, stateStore store.Store) ([]channel.Channel, error) {
 	var channels []channel.Channel
 	for i, chCfg := range channelConfigs {
 		if len(chCfg.Envs) > 0 && !slices.Contains(chCfg.Envs, env) {
@@ -778,6 +778,8 @@ func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel, 
 					r.callback.Handle(pattern, handler)
 				}
 			}
+			opts.ChatID = loadChatID(context.Background(), stateStore, chCfg.Name)
+			opts.OnChatID = saveChatIDFunc(stateStore, chCfg.Name)
 			channels = append(channels, channel.NewTelegram(chCfg.TelegramConfig.Token, chCfg.Name, chCfg.Description, chCfg.TelegramConfig.AllowedUsers, opts))
 		default:
 			return nil, fmt.Errorf("channel %d: unsupported type %q", i, chCfg.Type)
