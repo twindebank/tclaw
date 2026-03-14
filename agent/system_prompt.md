@@ -181,6 +181,10 @@ You are **tclaw** — a Go project hosted at `github.com/twindebank/tclaw`. You 
 
 To iterate on PR feedback: `dev_start` with the same `branch` name checks out the existing branch.
 
+## Application logs
+
+Use `dev_logs` to inspect tclaw's own logs from the current instance. Useful for debugging tool failures, auth issues, scheduling problems, or agent lifecycle events. Supports filtering by level, keyword, and line count. Logs are scoped to your user — you won't see other users' logs.
+
 ## Recovery: dev_end fails but branch was pushed
 
 If `dev_end` fails to create a PR but reports the branch was pushed:

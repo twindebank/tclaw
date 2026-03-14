@@ -66,7 +66,7 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 | `tool/google/` | Google Workspace tools registered when a Google connection exists. Delegates to `gws` binary. |
 | `tool/monzo/` | Monzo banking tools registered when a Monzo connection exists. Direct HTTP calls to the Monzo API. |
 | `tool/tfl/` | Transport for London tools (line status, journey planning, arrivals, disruptions). Always registered — API key stored per-user in secret store. |
-| `tool/devtools/` | MCP tools for dev workflow (dev_start, dev_status, dev_end, dev_cancel, deploy). Git worktree management, PR creation via `gh`, Fly.io deployment. |
+| `tool/devtools/` | MCP tools for dev workflow (dev_start, dev_status, dev_end, dev_cancel, deploy, dev_logs). Git worktree management, PR creation via `gh`, Fly.io deployment, application log inspection. |
 | `tool/onboardingtools/` | MCP tools for new user onboarding (status, set_info, advance, tip_shown, skip). Tracks onboarding progress and manages the daily tips schedule. |
 
 ### Infrastructure
@@ -75,6 +75,7 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 |---------|----------------|
 | `libraries/store/` | Key-value `Store` interface with filesystem-backed implementation (`NewFS`). JSON serialization to disk. |
 | `libraries/secret/` | Encrypted secret storage. `Store` interface with two implementations: `EncryptedStore` (NaCl secretbox, for deployed) and `KeychainStore` (macOS Keychain, for local dev). `Resolve()` picks the right one. |
+| `libraries/logbuffer/` | Thread-safe ring buffer (`io.Writer`) for capturing slog output. Supports querying by user ID, log level, and substring. Used by `dev_logs` tool — each user only sees their own logs. |
 | `libraries/id/` | TypeID generation (ULID-based). Used for schedule IDs. |
 | `role/` | Role definitions, validation, and resolution. Maps named presets (`superuser`, `developer`, `assistant`) to tool lists. `Resolve(role, ChannelContext)` dynamically includes provider tool patterns (e.g. `mcp__tclaw__google_*`) and remote MCP tool patterns based on channel-scoped connections and remote MCPs. |
 | `claudecli/` | Typed enums and event structs for the Claude CLI's stream-json output. Models, permission modes, tools, content block types. Pure data types, no I/O. |
