@@ -284,7 +284,7 @@ The redirect URI must be set to your tclaw's OAuth callback URL (e.g. `https://t
 
 ### TfL (Transport for London)
 
-TfL tools are always registered — the API works without a key (rate-limited to ~50 req/min) but an API key raises the limit to ~500 req/min. Register for a free key at [api-portal.tfl.gov.uk](https://api-portal.tfl.gov.uk/).
+TfL tools are always registered — the API works without a key (rate-limited to ~50 req/min) but an API key raises the limit to ~500 req/min. Register for a free key at [api-portal.tfl.gov.uk](https://api-portal.tfl.gov.uk/products).
 
 Tools: `tfl_line_status`, `tfl_journey`, `tfl_arrivals`, `tfl_stop_search`, `tfl_disruptions`, `tfl_road_status`.
 
@@ -426,6 +426,51 @@ The `cmd/chat` binary is a Bubbletea-based terminal UI that connects to the agen
 - Visual separation between user and assistant messages
 - Auto-reconnect on socket connection
 - Shows streaming output in real time via edit-in-place
+
+## Onboarding
+
+New users are guided through a structured onboarding flow that progressively teaches features. State is tracked in the user's state store (`onboarding` key) and persisted across agent restarts.
+
+### Phases
+
+| Phase | Description |
+|-------|-------------|
+| `welcome` | First interaction ever. Agent sends a brief welcome and asks for the user's name. |
+| `info_gathering` | Conversational collection of preferences: name, home/work locations, timezone. All optional — the agent moves on if the user skips. Info is stored in CLAUDE.md and progress tracked via `onboarding_set_info`. |
+| `tips_active` | A daily cron schedule (10:00 AM) fires tip prompts. The agent generates tip content on the fly from a set of feature areas, tailored to what it knows about the user. Feature area IDs are tracked to prevent repeats. |
+| `complete` | All tips delivered (or user skipped). Tips schedule auto-deleted. |
+
+### MCP Tools
+
+| Tool | Purpose |
+|------|---------|
+| `onboarding_status` | Read current phase, info gathered, tips shown/remaining |
+| `onboarding_set_info` | Record that a piece of user info was collected |
+| `onboarding_advance` | Move to the next phase. Creates tips schedule when entering `tips_active`. |
+| `onboarding_tip_shown` | Record a delivered tip. Auto-completes onboarding when all tips are done. |
+| `onboarding_skip` | Skip onboarding entirely — marks complete immediately. |
+
+### Implementation
+
+- **State store**: `onboarding.Store` wraps the user's `store.Store`, persisted as JSON under the `"onboarding"` key.
+- **System prompt injection**: The system prompt includes an `# Onboarding` section (only when incomplete) with phase-specific instructions for the agent.
+- **Tips schedule**: Created by `onboarding_advance` when entering `tips_active`. Uses the existing schedule system — the tips prompt tells the agent to check `onboarding_status` and generate a personalized tip for the next uncovered feature area.
+- **Reset behavior**: `ResetAll` clears the state store, so onboarding restarts from `welcome` on the next interaction.
+- **Oneshot mode**: Onboarding is skipped (nil OnboardingInfo passed to the system prompt).
+
+### Feature Areas (suggested order)
+
+The agent covers these areas during the tips phase. Tip content is generated dynamically — only the area IDs are tracked to prevent repeats.
+
+1. **memory** — Memory system (CLAUDE.md, topic files, @references)
+2. **connections** — Service connections (Google Workspace, Monzo, built-in vs remote MCPs)
+3. **scheduling** — Scheduled prompts (cron, recurring tasks, daily briefings)
+4. **channels** — Multiple channels (Telegram bots, roles, per-channel permissions)
+5. **tfl** — Transport for London (line status, journey planning, arrivals)
+6. **web_search** — Web access (search, weather, news, current events)
+7. **remote_mcps** — MCP ecosystem (remote servers, directory)
+8. **compact_reset** — Context management (compact, reset, session management)
+9. **dev_workflow** — Dev workflow (self-modification, git worktrees, deployment)
 
 ## HTTP Server
 

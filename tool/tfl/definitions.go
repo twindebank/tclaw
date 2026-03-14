@@ -25,7 +25,7 @@ var toolDefs = []mcp.ToolDef{
 				},
 				"api_key": {
 					"type": "string",
-					"description": "TfL API key. Only needed on first use — stored encrypted for subsequent calls. Register free at https://api-portal.tfl.gov.uk/."
+					"description": "TfL API key. Only needed on first use — stored encrypted for subsequent calls. Register free at https://api-portal.tfl.gov.uk/products."
 				}
 			}
 		}`),

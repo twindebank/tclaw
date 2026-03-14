@@ -74,7 +74,7 @@ func apiGet(ctx context.Context, deps Deps, path string, query url.Values) (json
 	}
 
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return nil, fmt.Errorf("TfL API rate limit exceeded — provide an api_key to increase the limit (register free at https://api-portal.tfl.gov.uk/)")
+		return nil, fmt.Errorf("TfL API rate limit exceeded — provide an api_key to increase the limit (register free at https://api-portal.tfl.gov.uk/products)")
 	}
 
 	if resp.StatusCode != http.StatusOK {
