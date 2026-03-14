@@ -10,9 +10,9 @@ import (
 
 	"tclaw/channel"
 	"tclaw/connection"
+	"tclaw/libraries/secret"
 	"tclaw/mcp"
 	"tclaw/provider"
-	"tclaw/libraries/secret"
 	googletools "tclaw/tool/google"
 	monzotools "tclaw/tool/monzo"
 	"tclaw/user"

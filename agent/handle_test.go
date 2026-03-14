@@ -12,10 +12,10 @@ import (
 
 // mockChannel records Send/Edit calls and can be configured to fail.
 type mockChannel struct {
-	sends     []string          // text of each Send call
-	edits     []mockEdit        // (id, text) of each Edit call
-	nextID    int               // auto-increment for message IDs
-	editError error             // if set, Edit returns this error
+	sends     []string   // text of each Send call
+	edits     []mockEdit // (id, text) of each Edit call
+	nextID    int        // auto-increment for message IDs
+	editError error      // if set, Edit returns this error
 	info      channel.Info
 }
 
@@ -24,12 +24,12 @@ type mockEdit struct {
 	text string
 }
 
-func (m *mockChannel) Info() channel.Info                              { return m.info }
-func (m *mockChannel) Messages(_ context.Context) <-chan string        { return nil }
-func (m *mockChannel) Done(_ context.Context) error                    { return nil }
-func (m *mockChannel) SplitStatusMessages() bool                       { return true }
-func (m *mockChannel) Markup() channel.Markup                          { return channel.MarkupHTML }
-func (m *mockChannel) StatusWrap() channel.StatusWrap                   { return channel.StatusWrap{} }
+func (m *mockChannel) Info() channel.Info                       { return m.info }
+func (m *mockChannel) Messages(_ context.Context) <-chan string { return nil }
+func (m *mockChannel) Done(_ context.Context) error             { return nil }
+func (m *mockChannel) SplitStatusMessages() bool                { return true }
+func (m *mockChannel) Markup() channel.Markup                   { return channel.MarkupHTML }
+func (m *mockChannel) StatusWrap() channel.StatusWrap           { return channel.StatusWrap{} }
 
 func (m *mockChannel) Send(_ context.Context, text string) (channel.MessageID, error) {
 	m.nextID++
@@ -156,7 +156,7 @@ func TestBuildEnv_AllowlistExcludesDangerousVars(t *testing.T) {
 		"AWS_SECRET_ACCESS_KEY":          "secret",
 		"GITHUB_TOKEN":                   "ghp_fake",
 		"GH_TOKEN":                       "ghp_fake",
-		"SSH_AUTH_SOCK":                   "/tmp/ssh-agent",
+		"SSH_AUTH_SOCK":                  "/tmp/ssh-agent",
 		"GOOGLE_APPLICATION_CREDENTIALS": "/path/to/creds.json",
 		"TCLAW_SECRET_KEY":               "masterkey",
 		"CLAUDECODE":                     "1",

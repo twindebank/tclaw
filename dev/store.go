@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	sessionsKey      = "dev_sessions"
-	repoURLKey       = "dev_repo_url"
+	sessionsKey       = "dev_sessions"
+	repoURLKey        = "dev_repo_url"
 	deployedCommitKey = "dev_deployed_commit"
 )
 

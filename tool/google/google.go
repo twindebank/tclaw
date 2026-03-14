@@ -66,10 +66,10 @@ func findGWSBinary() string {
 		// Common global install locations for npm/nvm.
 		home, _ := os.UserHomeDir()
 		candidates := []string{
-			home + "/.nvm/versions/node/*/bin/gws",  // nvm
-			"/usr/local/bin/gws",                     // system npm
-			home + "/.local/bin/gws",                 // user-local
-			home + "/.npm-global/bin/gws",            // npm prefix
+			home + "/.nvm/versions/node/*/bin/gws", // nvm
+			"/usr/local/bin/gws",                   // system npm
+			home + "/.local/bin/gws",               // user-local
+			home + "/.npm-global/bin/gws",          // npm prefix
 		}
 
 		for _, pattern := range candidates {

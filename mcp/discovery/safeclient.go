@@ -25,7 +25,7 @@ var safeClient = &http.Client{
 	Timeout: httpTimeout,
 	Transport: &http.Transport{
 		DialContext:           safeDialContext,
-		TLSHandshakeTimeout:  10 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 10 * time.Second,
 	},
 }
@@ -129,7 +129,7 @@ func isPrivateIP(ip net.IP) bool {
 		{"10.0.0.0/8"},
 		{"172.16.0.0/12"},
 		{"192.168.0.0/16"},
-		{"fc00::/7"},     // unique local addresses
+		{"fc00::/7"},      // unique local addresses
 		{"100.64.0.0/10"}, // carrier-grade NAT (RFC 6598)
 	}
 

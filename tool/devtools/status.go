@@ -51,9 +51,9 @@ func devStatusHandler(deps Deps) mcp.ToolHandler {
 			var summaries []map[string]any
 			for branch, sess := range sessions {
 				summaries = append(summaries, map[string]any{
-					"branch":      branch,
-					"worktree":    sess.WorktreeDir,
-					"age":         time.Since(sess.CreatedAt).Truncate(time.Minute).String(),
+					"branch":   branch,
+					"worktree": sess.WorktreeDir,
+					"age":      time.Since(sess.CreatedAt).Truncate(time.Minute).String(),
 				})
 			}
 			return json.Marshal(map[string]any{
@@ -83,12 +83,12 @@ func devStatusHandler(deps Deps) mcp.ToolHandler {
 		}
 
 		result := map[string]any{
-			"branch":        sess.Branch,
-			"worktree_dir":  sess.WorktreeDir,
-			"age":           time.Since(sess.CreatedAt).Truncate(time.Minute).String(),
-			"uncommitted":   status,
-			"commit_log":    log,
-			"diff_stat":     diffStat,
+			"branch":       sess.Branch,
+			"worktree_dir": sess.WorktreeDir,
+			"age":          time.Since(sess.CreatedAt).Truncate(time.Minute).String(),
+			"uncommitted":  status,
+			"commit_log":   log,
+			"diff_stat":    diffStat,
 		}
 		return json.Marshal(result)
 	}

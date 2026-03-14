@@ -103,8 +103,8 @@ func listTransactionsHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolH
 		}
 
 		query := url.Values{
-			"account_id":       {p.AccountID},
-			"expand[]":         {"merchant"},
+			"account_id": {p.AccountID},
+			"expand[]":   {"merchant"},
 		}
 		if p.Since != "" {
 			query.Set("since", p.Since)

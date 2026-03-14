@@ -39,8 +39,8 @@ var systemReadOnlyPaths = []string{
 	"/etc/hosts",
 	"/etc/nsswitch.conf",
 	"/etc/localtime",
-	"/etc/passwd",    // getpwnam for USER lookups
-	"/etc/group",     // getgrnam
+	"/etc/passwd", // getpwnam for USER lookups
+	"/etc/group",  // getgrnam
 	"/usr/share/zoneinfo",
 	"/usr/local/bin", // claude, gws binaries
 	"/usr/local/lib", // node modules (npm -g)
@@ -85,9 +85,9 @@ func wrapWithSandbox(ctx context.Context, original *exec.Cmd, paths sandboxPaths
 
 	// Namespace isolation.
 	bwrapArgs = append(bwrapArgs,
-		"--unshare-pid",   // own PID namespace
-		"--unshare-uts",   // own hostname
-		"--share-net",     // keep network (MCP server on localhost)
+		"--unshare-pid", // own PID namespace
+		"--unshare-uts", // own hostname
+		"--share-net",   // keep network (MCP server on localhost)
 		"--die-with-parent",
 	)
 

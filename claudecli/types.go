@@ -6,10 +6,10 @@ import "strings"
 type PermissionMode string
 
 const (
-	PermissionDefault     PermissionMode = "default"          // prompts for approval on everything
-	PermissionAcceptEdits PermissionMode = "acceptEdits"      // auto-approves file edits, prompts for rest
-	PermissionPlan        PermissionMode = "plan"             // read-only, can't execute anything
-	PermissionDontAsk     PermissionMode = "dontAsk"          // auto-approves allowed tools, skips others
+	PermissionDefault     PermissionMode = "default"           // prompts for approval on everything
+	PermissionAcceptEdits PermissionMode = "acceptEdits"       // auto-approves file edits, prompts for rest
+	PermissionPlan        PermissionMode = "plan"              // read-only, can't execute anything
+	PermissionDontAsk     PermissionMode = "dontAsk"           // auto-approves allowed tools, skips others
 	PermissionBypass      PermissionMode = "bypassPermissions" // auto-approves everything, ignores allowed list
 )
 
@@ -75,7 +75,7 @@ const (
 // Builtin tool constants — evaluated by tclaw only, never passed to the CLI.
 // The builtin__ prefix lets them coexist with Claude Code tools in allowed_tools lists.
 const (
-	BuiltinReset         Tool = "builtin__reset"           // wildcard: all reset levels
+	BuiltinReset         Tool = "builtin__reset" // wildcard: all reset levels
 	BuiltinResetSession  Tool = "builtin__reset_session"
 	BuiltinResetMemories Tool = "builtin__reset_memories"
 	BuiltinResetProject  Tool = "builtin__reset_project"
@@ -100,8 +100,8 @@ func (t Tool) Scoped(pattern string) Tool {
 var validModels = map[Model]bool{
 	ModelOpus46: true, ModelSonnet46: true,
 	ModelHaiku45: true,
-	ModelOpus4: true, ModelSonnet4: true,
-	ModelSonnet37: true,
+	ModelOpus4:   true, ModelSonnet4: true,
+	ModelSonnet37:   true,
 	ModelSonnet35v2: true, ModelSonnet35: true, ModelHaiku35: true,
 	ModelOpus3: true, ModelHaiku3: true,
 }

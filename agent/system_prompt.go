@@ -24,12 +24,12 @@ type systemPromptData struct {
 // OnboardingInfo describes the current onboarding state for the system prompt.
 // Nil means onboarding is complete or not applicable.
 type OnboardingInfo struct {
-	Phase           string
-	InfoGathered    map[string]bool
-	InfoMissing     []string
-	TipsShown       int
-	TipsTotal       int
-	NextTip         string
+	Phase        string
+	InfoGathered map[string]bool
+	InfoMissing  []string
+	TipsShown    int
+	TipsTotal    int
+	NextTip      string
 
 	// RemainingAreas lists feature areas not yet covered during tips phase.
 	RemainingAreas []OnboardingFeatureArea

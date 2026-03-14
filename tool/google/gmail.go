@@ -31,9 +31,9 @@ type gmailListArgs struct {
 
 // gmailListResponse matches the Gmail API's users.messages.list response.
 type gmailListResponse struct {
-	Messages        []gmailMessageRef `json:"messages"`
-	NextPageToken   string            `json:"nextPageToken,omitempty"`
-	ResultSizeEstimate int            `json:"resultSizeEstimate,omitempty"`
+	Messages           []gmailMessageRef `json:"messages"`
+	NextPageToken      string            `json:"nextPageToken,omitempty"`
+	ResultSizeEstimate int               `json:"resultSizeEstimate,omitempty"`
 }
 
 type gmailMessageRef struct {
@@ -43,12 +43,12 @@ type gmailMessageRef struct {
 
 // gmailMessageMetadata is a subset of the full message response.
 type gmailMessageMetadata struct {
-	ID           string            `json:"id"`
-	ThreadID     string            `json:"threadId"`
-	LabelIDs     []string          `json:"labelIds"`
-	Snippet      string            `json:"snippet"`
-	InternalDate string            `json:"internalDate"`
-	Payload      *gmailPayload     `json:"payload"`
+	ID           string        `json:"id"`
+	ThreadID     string        `json:"threadId"`
+	LabelIDs     []string      `json:"labelIds"`
+	Snippet      string        `json:"snippet"`
+	InternalDate string        `json:"internalDate"`
+	Payload      *gmailPayload `json:"payload"`
 }
 
 type gmailPayload struct {
@@ -73,11 +73,11 @@ type gmailSummary struct {
 }
 
 type gmailListToolResponse struct {
-	Messages           []gmailSummary `json:"messages"`
-	TotalEstimate      int            `json:"total_estimate,omitempty"`
-	NextPageToken      string         `json:"next_page_token,omitempty"`
-	FetchedCount       int            `json:"fetched_count"`
-	FetchErrorCount    int            `json:"fetch_error_count,omitempty"`
+	Messages        []gmailSummary `json:"messages"`
+	TotalEstimate   int            `json:"total_estimate,omitempty"`
+	NextPageToken   string         `json:"next_page_token,omitempty"`
+	FetchedCount    int            `json:"fetched_count"`
+	FetchErrorCount int            `json:"fetch_error_count,omitempty"`
 }
 
 // gmailListHandler returns an MCP handler that searches/lists Gmail messages
