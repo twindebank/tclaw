@@ -129,9 +129,9 @@ type TelegramChannelConfig struct {
 	Token string `yaml:"token"`
 
 	// AllowedUsers restricts which Telegram user IDs can interact with this bot.
-	// When non-empty, messages from users not in this list are silently ignored.
-	// Find your user ID by messaging @userinfobot on Telegram.
-	AllowedUsers []int64 `yaml:"allowed_users,omitempty"`
+	// At least one user ID is required — messages from users not in this list are
+	// silently ignored. Find your user ID by messaging @userinfobot on Telegram.
+	AllowedUsers []int64 `yaml:"allowed_users"`
 }
 
 // Env identifies the runtime environment.
@@ -292,6 +292,9 @@ func validate(cfg *Config) error {
 			case ChannelTypeTelegram:
 				if ch.TelegramConfig == nil || ch.TelegramConfig.Token == "" {
 					return fmt.Errorf("user %q channel %q: telegram channel requires telegram.token", u.ID, ch.Name)
+				}
+				if len(ch.TelegramConfig.AllowedUsers) == 0 {
+					return fmt.Errorf("user %q channel %q: telegram channel requires at least one allowed_users entry (get your user ID from @userinfobot on Telegram)", u.ID, ch.Name)
 				}
 			case "":
 				return fmt.Errorf("user %q channel %q: missing type", u.ID, ch.Name)

@@ -32,7 +32,8 @@ type DynamicChannelConfig struct {
 	DisallowedTools []string `json:"disallowed_tools,omitempty"`
 
 	// AllowedUsers restricts which Telegram user IDs can interact with this channel.
-	// When non-empty, messages from users not in this list are silently ignored.
+	// At least one user ID is required for Telegram channels — messages from users
+	// not in this list are silently ignored.
 	AllowedUsers []int64 `json:"allowed_users,omitempty"`
 }
 

@@ -36,7 +36,7 @@ func channelEditDef() mcp.ToolDef {
 						"allowed_users": {
 							"type": "array",
 							"items": {"type": "integer"},
-							"description": "Telegram user IDs allowed to interact with this bot. Replaces existing list. Pass empty array to remove restrictions."
+							"description": "Telegram user IDs allowed to interact with this bot. Replaces existing list. At least one user ID is required."
 						}
 					}
 				},
@@ -171,6 +171,9 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 
 			// Update allowed users if provided.
 			if a.TelegramConfig.AllowedUsers != nil {
+				if len(*a.TelegramConfig.AllowedUsers) == 0 {
+					return nil, fmt.Errorf("allowed_users cannot be empty — at least one Telegram user ID is required")
+				}
 				if err := deps.DynamicStore.Update(ctx, a.Name, func(c *channel.DynamicChannelConfig) {
 					c.AllowedUsers = *a.TelegramConfig.AllowedUsers
 				}); err != nil {
