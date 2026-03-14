@@ -62,7 +62,7 @@ func channelEditDef() mcp.ToolDef {
 }
 
 type telegramEditConfig struct {
-	Token        string  `json:"token"`
+	Token        string   `json:"token"`
 	AllowedUsers *[]int64 `json:"allowed_users"`
 }
 

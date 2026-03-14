@@ -21,13 +21,13 @@ import (
 	"tclaw/config"
 	"tclaw/connection"
 	"tclaw/dev"
+	"tclaw/libraries/secret"
+	"tclaw/libraries/store"
 	"tclaw/mcp"
 	"tclaw/oauth"
 	"tclaw/onboarding"
 	"tclaw/provider"
 	"tclaw/schedule"
-	"tclaw/libraries/secret"
-	"tclaw/libraries/store"
 	"tclaw/tool/channeltools"
 	"tclaw/tool/connectiontools"
 	"tclaw/tool/devtools"
@@ -35,8 +35,8 @@ import (
 	monzotools "tclaw/tool/monzo"
 	"tclaw/tool/onboardingtools"
 	"tclaw/tool/remotemcp"
-	tfltools "tclaw/tool/tfl"
 	"tclaw/tool/scheduletools"
+	tfltools "tclaw/tool/tfl"
 	"tclaw/user"
 )
 
@@ -147,7 +147,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	sessionsDir := filepath.Join(userDir, "sessions")    // Claude CLI session IDs per channel
 	secretsDir := filepath.Join(userDir, "secrets")      // encrypted credentials
 	mcpConfigDir := filepath.Join(userDir, "mcp-config") // MCP config files (mounted read-only in sandbox)
-	
+
 	// State store for tclaw's own data (connections, remote MCPs, dynamic channels).
 	s, err := store.NewFS(stateDir)
 	if err != nil {
@@ -583,14 +583,14 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		channelChangeNotify := make(chan struct{})
 
 		opts := agent.Options{
-			PermissionMode:  mu.cfg.PermissionMode,
-			Model:           mu.cfg.Model,
-			MaxTurns:        mu.cfg.MaxTurns,
-			Debug:           mu.cfg.Debug,
-			APIKey:          mu.cfg.APIKey,
-			HomeDir:         homeDir,
-			MemoryDir:       memoryDir,
-			AddDirs: addDirs,
+			PermissionMode: mu.cfg.PermissionMode,
+			Model:          mu.cfg.Model,
+			MaxTurns:       mu.cfg.MaxTurns,
+			Debug:          mu.cfg.Debug,
+			APIKey:         mu.cfg.APIKey,
+			HomeDir:        homeDir,
+			MemoryDir:      memoryDir,
+			AddDirs:        addDirs,
 			AddDirsFunc: func() []string {
 				// Read from the dev store each turn so worktrees created
 				// mid-session (via dev_start) are immediately accessible.
@@ -605,8 +605,8 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				}
 				return dirs
 			},
-			Channels:        allChMap,
-			Sessions:        sessions,
+			Channels: allChMap,
+			Sessions: sessions,
 			OnSessionUpdate: func(chID channel.ChannelID, sessionID string) {
 				if saveErr := saveSession(ctx, sessionStore, chID, sessionID); saveErr != nil {
 					slog.Error("failed to save session", "err", saveErr)

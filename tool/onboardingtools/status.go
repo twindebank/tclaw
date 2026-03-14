@@ -37,13 +37,13 @@ func onboardingStatusHandler(deps Deps) mcp.ToolHandler {
 		}
 
 		result := map[string]any{
-			"phase":             string(state.Phase),
-			"started_at":        state.StartedAt,
-			"info_gathered":     state.InfoGathered,
-			"tips_shown":        state.TipsShown,
-			"tips_remaining":    len(onboarding.FeatureAreas) - len(state.TipsShown),
-			"next_tip":          nextTipID,
-			"tips_schedule_id":  state.TipsScheduleID,
+			"phase":            string(state.Phase),
+			"started_at":       state.StartedAt,
+			"info_gathered":    state.InfoGathered,
+			"tips_shown":       state.TipsShown,
+			"tips_remaining":   len(onboarding.FeatureAreas) - len(state.TipsShown),
+			"next_tip":         nextTipID,
+			"tips_schedule_id": state.TipsScheduleID,
 		}
 		if !state.CompletedAt.IsZero() {
 			result["completed_at"] = state.CompletedAt
