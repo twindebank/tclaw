@@ -61,6 +61,10 @@ func apiGet(ctx context.Context, deps Deps, path string, query url.Values) (json
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 
+	// Go's default User-Agent ("Go-http-client/2.0") gets blocked by
+	// Cloudflare on some datacenter IPs. Use a browser-like UA to avoid this.
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; tclaw/1.0; +https://github.com/twindebank/tclaw)")
+
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
