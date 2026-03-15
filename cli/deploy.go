@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"regexp"
+	"strings"
 	"syscall"
 
 	"tclaw/libraries/secret"
@@ -65,7 +66,11 @@ func deployApp() {
 		dockerHost = "unix://" + home + "/.docker/run/docker.sock"
 	}
 
-	cmd := exec.Command("fly", "deploy", "--local-only", "-a", flyApp)
+	// Pass the git commit as a build arg since .git is excluded from the Docker context.
+	commit, _ := exec.Command("git", "rev-parse", "--short", "HEAD").Output()
+
+	cmd := exec.Command("fly", "deploy", "--local-only", "-a", flyApp,
+		"--build-arg", "COMMIT="+strings.TrimSpace(string(commit)))
 	cmd.Env = append(os.Environ(), "DOCKER_HOST="+dockerHost)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
