@@ -460,7 +460,15 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 		// Build dev session info for the system prompt and AddDirs for sandbox access.
 		var devSessionInfos []agent.DevSessionInfo
-		var addDirs []string
+		// Always mount the worktrees parent dir so new worktrees created mid-session
+		// (via dev_start) are visible in the sandbox on the very next turn — bwrap
+		// can only bind paths that exist at invocation time, so the parent must be
+		// present before any child dirs are bound.
+		worktreesDir := filepath.Join(userDir, "worktrees")
+		if mkErr := os.MkdirAll(worktreesDir, 0o755); mkErr != nil {
+			slog.Warn("failed to create worktrees dir", "err", mkErr, "user", mu.cfg.ID)
+		}
+		addDirs := []string{worktreesDir}
 		devSessions, devErr := devStore.ListSessions(ctx)
 		if devErr != nil {
 			slog.Error("failed to list dev sessions", "err", devErr)
@@ -601,12 +609,13 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			AddDirsFunc: func() []string {
 				// Read from the dev store each turn so worktrees created
 				// mid-session (via dev_start) are immediately accessible.
+				// Always include the parent worktrees dir so bwrap can bind it.
+				dirs := []string{worktreesDir}
 				sessions, err := devStore.ListSessions(ctx)
 				if err != nil {
 					slog.Error("failed to list dev sessions for add-dirs", "err", err)
-					return addDirs
+					return dirs
 				}
-				var dirs []string
 				for _, sess := range sessions {
 					dirs = append(dirs, sess.WorktreeDir)
 				}
