@@ -42,6 +42,7 @@ func (s *Scheduler) Reload() {
 // Run blocks until ctx is cancelled. It loads active schedules, sleeps until
 // the earliest fires, then injects the prompt into the output channel.
 func (s *Scheduler) Run(ctx context.Context) {
+	slog.Info("scheduler: started")
 	for {
 		schedules, err := s.store.List(ctx)
 		if err != nil {
@@ -83,7 +84,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 			waitDuration = 0
 		}
 
-		slog.Debug("scheduler: sleeping until next fire", "next", earliest, "wait", waitDuration)
+		slog.Info("scheduler: sleeping until next fire", "next", earliest, "wait", waitDuration)
 
 		timer := time.NewTimer(waitDuration)
 		select {
@@ -149,8 +150,15 @@ func (s *Scheduler) fireReadySchedules(ctx context.Context) {
 		select {
 		case s.output <- msg:
 			slog.Info("scheduler: fired schedule", "schedule", sched.ID, "channel", sched.ChannelName)
-		case <-ctx.Done():
-			return
+		default:
+			// Buffer full — log before blocking so we can diagnose delays.
+			slog.Warn("scheduler: output buffer full, blocking", "schedule", sched.ID, "channel", sched.ChannelName)
+			select {
+			case s.output <- msg:
+				slog.Info("scheduler: fired schedule (after buffer wait)", "schedule", sched.ID, "channel", sched.ChannelName)
+			case <-ctx.Done():
+				return
+			}
 		}
 	}
 }

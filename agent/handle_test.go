@@ -150,6 +150,60 @@ func TestWriteSplit_EditFailureRecovery_Response(t *testing.T) {
 	}
 }
 
+func TestWriteSplit_ResponseSealedAfterInterleavedStatus(t *testing.T) {
+	ch := &mockChannel{}
+	tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
+
+	// 1. Status write creates msg 1.
+	if err := tw.writeSplit(phaseStatus, "🤔 Thinking...\n"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ch.sends) != 1 {
+		t.Fatalf("expected 1 send after status, got %d", len(ch.sends))
+	}
+
+	// 2. Response write creates msg 2 and seals status.
+	if err := tw.writeSplit(phaseResponse, "Here is the answer"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ch.sends) != 2 {
+		t.Fatalf("expected 2 sends after response, got %d", len(ch.sends))
+	}
+	if !tw.statusSealed {
+		t.Fatal("expected statusSealed to be true after first response")
+	}
+
+	// 3. New status write creates msg 3 (statusSealed resets) and seals response.
+	if err := tw.writeSplit(phaseStatus, "🔧 Using tool\n"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ch.sends) != 3 {
+		t.Fatalf("expected 3 sends after second status, got %d", len(ch.sends))
+	}
+	if !tw.respSealed {
+		t.Fatal("expected respSealed to be true after status sent below response")
+	}
+
+	// 4. Next response write must create msg 4 (not edit msg 2).
+	if err := tw.writeSplit(phaseResponse, "More answer text"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ch.sends) != 4 {
+		t.Fatalf("expected 4 sends (linear ordering), got %d", len(ch.sends))
+	}
+	if ch.sends[3] != "More answer text" {
+		t.Fatalf("expected 4th message to be new response text, got %q", ch.sends[3])
+	}
+
+	// No response edits should have happened — each response was a fresh message.
+	for _, edit := range ch.edits {
+		if edit.id == "mm" {
+			// "mm" is the ID of the 2nd send (response msg 2).
+			t.Fatal("response msg 2 was edited after a status message appeared below it")
+		}
+	}
+}
+
 func TestBuildEnv_AllowlistExcludesDangerousVars(t *testing.T) {
 	// Set dangerous env vars that should NOT leak to the subprocess.
 	dangerous := map[string]string{

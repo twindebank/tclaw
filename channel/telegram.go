@@ -239,7 +239,7 @@ func (t *Telegram) Send(ctx context.Context, text string) (MessageID, error) {
 
 	msg, err := b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:    chatID,
-		Text:      markdownToTelegramHTML(text),
+		Text:      sanitizeTelegramHTML(markdownToTelegramHTML(text)),
 		ParseMode: models.ParseModeHTML,
 	})
 	if err != nil {
@@ -267,7 +267,7 @@ func (t *Telegram) Edit(ctx context.Context, msgID MessageID, text string) error
 	_, err = b.EditMessageText(ctx, &bot.EditMessageTextParams{
 		ChatID:    chatID,
 		MessageID: telegramMsgID,
-		Text:      markdownToTelegramHTML(text),
+		Text:      sanitizeTelegramHTML(markdownToTelegramHTML(text)),
 		ParseMode: models.ParseModeHTML,
 	})
 	if err != nil {
