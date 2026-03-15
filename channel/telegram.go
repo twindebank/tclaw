@@ -299,17 +299,48 @@ var markdownBold = regexp.MustCompile(`\*\*(.+?)\*\*`)
 // markdownInlineCode matches `text` (single backtick, not triple).
 var markdownInlineCode = regexp.MustCompile("(?s)`([^`]+)`")
 
+// htmlTagRe matches HTML-like opening and closing tags.
+var htmlTagRe = regexp.MustCompile(`<(/?[a-zA-Z][a-zA-Z0-9-]*)(\s[^>]*)?>`)
+
+// supportedTelegramTags is the set of tag names that Telegram's HTML parser accepts.
+var supportedTelegramTags = map[string]bool{
+	"b": true, "i": true, "u": true, "s": true,
+	"code": true, "pre": true, "a": true,
+	"blockquote": true, "tg-spoiler": true,
+}
+
+// escapeUnsupportedTags replaces any HTML-like tag whose name is not in
+// Telegram's supported set with its entity-escaped equivalent so Telegram
+// doesn't reject the message with a parse error.
+func escapeUnsupportedTags(s string) string {
+	return htmlTagRe.ReplaceAllStringFunc(s, func(match string) string {
+		sub := htmlTagRe.FindStringSubmatch(match)
+		if sub == nil {
+			return match
+		}
+		// sub[1] is the tag name, with an optional leading "/" for closing tags.
+		tagName := strings.ToLower(strings.TrimPrefix(sub[1], "/"))
+		if supportedTelegramTags[tagName] {
+			return match
+		}
+		return strings.ReplaceAll(strings.ReplaceAll(match, "<", "&lt;"), ">", "&gt;")
+	})
+}
+
 // markdownToTelegramHTML converts common markdown patterns the model may
 // produce into Telegram-compatible HTML. This is a best-effort fallback —
 // the system prompt asks for HTML, but models sometimes slip into markdown.
+// It also escapes any HTML-like tags that Telegram doesn't support so they
+// don't cause parse errors.
 func markdownToTelegramHTML(s string) string {
-	// Skip conversion if the text already contains HTML tags — the model
-	// followed the instructions and we shouldn't double-convert.
-	if strings.Contains(s, "<b>") || strings.Contains(s, "<code>") || strings.Contains(s, "<pre>") {
-		return s
+	// Only convert markdown if no HTML tags are present — if the model
+	// followed the instructions we shouldn't double-convert.
+	if !strings.Contains(s, "<b>") && !strings.Contains(s, "<code>") && !strings.Contains(s, "<pre>") {
+		s = markdownBold.ReplaceAllString(s, "<b>$1</b>")
+		s = markdownInlineCode.ReplaceAllString(s, "<code>$1</code>")
 	}
 
-	s = markdownBold.ReplaceAllString(s, "<b>$1</b>")
-	s = markdownInlineCode.ReplaceAllString(s, "<code>$1</code>")
-	return s
+	// Always escape unsupported tags — the model may include path-like strings
+	// such as <userDir> that Telegram's HTML parser rejects.
+	return escapeUnsupportedTags(s)
 }
