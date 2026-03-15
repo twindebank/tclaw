@@ -1,5 +1,8 @@
 # tclaw
 
+## MANDATORY: Read Before Writing Any Code
+**EVERY time you write or modify code — including in resumed/continued sessions — you MUST read @docs/go-patterns.md first.** No exceptions. This includes tests, one-line fixes, and refactors. Don't rely on memory or assumptions about conventions; read the file.
+
 ## TODO
 - Periodic jobs to check Claude Code changelog and dynamically update agent/CLI behavior
 - Check CVEs and dynamically update dependencies
