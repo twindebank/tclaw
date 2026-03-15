@@ -12,7 +12,7 @@ import (
 func devEndDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name:        "dev_end",
-		Description: "End a dev session: commits any uncommitted changes, pushes the branch, creates a PR (or reports the existing PR URL), and tears down the worktree. To iterate on a PR later, use dev_start with the same branch name.",
+		Description: "End a dev session: commits any uncommitted changes, pushes the branch, creates a PR (or reports the existing PR URL), and tears down the worktree. If PR creation fails after a successful push, the session is preserved — call dev_end again to retry. To iterate on a PR later, use dev_start with the same branch name.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -91,11 +91,17 @@ func devEndHandler(deps Deps) mcp.ToolHandler {
 			}
 			newURL, prErr := ghPRCreate(sess.WorktreeDir, sess.Branch, a.Title, body, token)
 			if prErr != nil {
-				// Push succeeded but PR creation failed — report but don't fail.
-				prURL = "PR creation failed: " + prErr.Error() + " (branch was pushed successfully)"
-			} else {
-				prURL = newURL
+				// Push succeeded but PR creation failed — leave the session intact so
+				// the agent can retry dev_end directly without needing dev_start first.
+				result := map[string]any{
+					"branch":    sess.Branch,
+					"committed": committed,
+					"pr_url":    "",
+					"message":   fmt.Sprintf("Branch %q pushed successfully but PR creation failed: %s. Call dev_end again to retry PR creation.", sess.Branch, prErr.Error()),
+				}
+				return json.Marshal(result)
 			}
+			prURL = newURL
 		}
 
 		// Cleanup worktree and session. Non-fatal since PR/push already succeeded.
