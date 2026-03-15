@@ -19,7 +19,7 @@ func onboardingSetInfoDef() mcp.ToolDef {
 				"field": {
 					"type": "string",
 					"description": "The info field that was gathered.",
-					"enum": ["name", "home_location", "work_location", "timezone"]
+					"enum": ["name", "home_location", "work_location"]
 				}
 			},
 			"required": ["field"]

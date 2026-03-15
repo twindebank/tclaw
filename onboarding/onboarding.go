@@ -53,14 +53,13 @@ type State struct {
 
 // Known info fields that onboarding collects.
 const (
-	InfoName     = "name"
-	InfoHome     = "home_location"
-	InfoWork     = "work_location"
-	InfoTimezone = "timezone"
+	InfoName = "name"
+	InfoHome = "home_location"
+	InfoWork = "work_location"
 )
 
 // AllInfoFields is the complete set of info the agent should try to gather.
-var AllInfoFields = []string{InfoName, InfoHome, InfoWork, InfoTimezone}
+var AllInfoFields = []string{InfoName, InfoHome, InfoWork}
 
 // Store manages onboarding state persistence.
 type Store struct {

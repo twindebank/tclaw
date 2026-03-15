@@ -238,11 +238,11 @@ You're collecting basic preferences to personalize the experience. This should f
 - **name** — how to address them
 - **home_location** — for commute/journey planning (address, station, or area)
 - **work_location** — for commute/journey planning
-- **timezone** — for scheduling (can often be inferred from location)
 
 **Guidelines:**
 - Ask naturally within conversation, don't rapid-fire all questions at once
 - If they answer something, call `onboarding_set_info` to record it, then write the info to their CLAUDE.md memory
+- **Infer timezone from location** — when the user provides a home or work location, infer their timezone and write it to CLAUDE.md. Don't ask them for it separately.
 - All fields are optional — if they skip one, move on
 - When you've gathered what you can (or they want to move on), call `onboarding_advance` with the current channel name to start daily tips
 - If they say they want to skip onboarding entirely, call `onboarding_skip`
