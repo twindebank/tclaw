@@ -137,17 +137,23 @@ func deployHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("no Fly API token configured — provide fly_api_token parameter (create one with: fly tokens create deploy -x 999999h)")
 		}
 
-		// Execute deploy with the token scoped to this command only.
-		cmd = exec.Command("fly", "deploy", "--remote-only", "-a", "tclaw")
+		// Execute deploy from the repo root so fly can find the Dockerfile.
+		const appName = "tclaw"
+		cmd = exec.Command("fly", "deploy", "--remote-only", "-a", appName)
+		cmd.Dir = repoDir
 		cmd.Env = append(cmd.Env, "FLY_API_TOKEN="+flyToken, "PATH="+os.Getenv("PATH"), "HOME="+os.Getenv("HOME"))
 		deployOut, err := cmd.CombinedOutput()
 		if err != nil {
 			return nil, fmt.Errorf("fly deploy failed: %s: %w", string(deployOut), err)
 		}
 
-		// Record the deployed commit. Non-fatal since deploy already succeeded.
+		// Record the deployed commit and app URL. Non-fatal since deploy already succeeded.
 		if setErr := deps.Store.SetDeployedCommit(ctx, mainShort); setErr != nil {
 			slog.Warn("failed to record deployed commit", "commit", mainShort, "err", setErr)
+		}
+		appURL := "https://" + appName + ".fly.dev"
+		if setErr := deps.Store.SetAppURL(ctx, appURL); setErr != nil {
+			slog.Warn("failed to record app url", "url", appURL, "err", setErr)
 		}
 
 		result := map[string]any{
