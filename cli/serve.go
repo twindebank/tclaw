@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -20,6 +21,7 @@ import (
 	"tclaw/oauth"
 	"tclaw/provider"
 	"tclaw/router"
+	"tclaw/version"
 )
 
 func runServe() {
@@ -73,6 +75,12 @@ func runServe() {
 		os.Exit(1)
 	}
 	defer callback.Stop(context.Background())
+
+	// Expose the embedded git commit hash so external tools (e.g. dev_deployed)
+	// can determine what's running without relying on deploy records.
+	callback.Handle("/version", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, version.Commit)
+	}))
 
 	r := router.New(cfg.BaseDir, cfg.Env, reg, callback, cfg.Server.PublicURL, logBuf)
 	defer r.StopAll()
