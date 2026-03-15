@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"tclaw/channel"
 	"tclaw/claudecli"
@@ -59,6 +61,11 @@ type turnWriter struct {
 	// content (later-turn thinking, tools, stats) appears below the
 	// response in chat order rather than above it.
 	statusSealed bool
+
+	// respSealed is set when a new status message is sent after response
+	// text. The next phaseResponse write starts a fresh response message
+	// so it appears below the intervening status in chat order.
+	respSealed bool
 
 	// Status wrap tags from the channel (e.g. <blockquote expandable>).
 	// Empty strings when the channel doesn't support collapsible content.
@@ -163,6 +170,12 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 				return nil
 			}
 			tw.statusID = id
+			if tw.respID != "" {
+				// A new status message was sent below the current response,
+				// so the next response text must start a fresh message to
+				// maintain linear chat order.
+				tw.respSealed = true
+			}
 			return nil
 		}
 
@@ -187,6 +200,14 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 		}
 
 	case phaseResponse:
+		if tw.respSealed {
+			// A status message appeared below the previous response.
+			// Start fresh so the next response text is below it.
+			tw.respBuf.Reset()
+			tw.respID = ""
+			tw.respSealed = false
+		}
+
 		// Seal the current status message so future status content
 		// appears below this response in chat order.
 		if tw.respID == "" {
@@ -269,6 +290,12 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	}
 	args := buildArgs(opts, sessionID, systemPrompt, msg.Text, allowed, disallowed, mcpConfigPath)
 	cmd := exec.CommandContext(ctx, "claude", args...)
+	// Send SIGTERM on context cancel instead of the default SIGKILL, giving
+	// the CLI and its Node.js child processes a chance to exit cleanly.
+	cmd.Cancel = func() error {
+		return cmd.Process.Signal(syscall.SIGTERM)
+	}
+	cmd.WaitDelay = 3 * time.Second
 	cmd.Env = buildEnv(opts)
 
 	// Set CWD to the memory directory so the agent's file operations
