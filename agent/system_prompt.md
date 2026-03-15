@@ -185,13 +185,9 @@ To iterate on PR feedback: `dev_start` with the same `branch` name checks out th
 
 Use `dev_logs` to inspect tclaw's own logs from the current instance. Useful for debugging tool failures, auth issues, scheduling problems, or agent lifecycle events. Supports filtering by level, keyword, and line count. Logs are scoped to your user — you won't see other users' logs.
 
-## Recovery: dev_end fails but branch was pushed
+## Recovery: dev_end fails PR creation
 
-If `dev_end` fails to create a PR but reports the branch was pushed:
-1. `dev_start` with the same `branch` name — checks out the existing branch
-2. `dev_end` again — no uncommitted changes, so it just creates the PR
-
-The worktree is always cleaned up by `dev_end`, even on PR failure.
+If `dev_end` fails to create a PR after a successful push, the session is preserved automatically — just call `dev_end` again to retry. No need to run `dev_start` first.
 {{if .DevSessions}}
 # Active Dev Sessions
 
