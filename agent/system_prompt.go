@@ -15,6 +15,7 @@ var systemPromptTmpl = template.Must(template.New("system_prompt").Parse(systemP
 
 type systemPromptData struct {
 	Date        string
+	Time        string
 	Channels    []ChannelInfo
 	DevSessions []DevSessionInfo
 	UserPrompt  string
@@ -65,6 +66,7 @@ type DevSessionInfo struct {
 func BuildSystemPrompt(channels []ChannelInfo, devSessions []DevSessionInfo, userPrompt string, onboarding *OnboardingInfo) string {
 	data := systemPromptData{
 		Date:        time.Now().Format("Monday, January 2, 2006"),
+		Time:        time.Now().Format("15:04 MST"),
 		Channels:    channels,
 		DevSessions: devSessions,
 		UserPrompt:  userPrompt,
