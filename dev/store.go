@@ -12,6 +12,7 @@ const (
 	sessionsKey       = "dev_sessions"
 	repoURLKey        = "dev_repo_url"
 	deployedCommitKey = "dev_deployed_commit"
+	appURLKey         = "dev_app_url"
 )
 
 // Store manages dev session state, repo URL, and deployed commit tracking.
@@ -140,4 +141,18 @@ func (s *Store) GetDeployedCommit(ctx context.Context) (string, error) {
 // SetDeployedCommit persists the deployed commit hash.
 func (s *Store) SetDeployedCommit(ctx context.Context, hash string) error {
 	return s.store.Set(ctx, deployedCommitKey, []byte(hash))
+}
+
+// GetAppURL returns the deployed app's base URL (e.g. "https://your-app.fly.dev"), or empty if not set.
+func (s *Store) GetAppURL(ctx context.Context) (string, error) {
+	data, err := s.store.Get(ctx, appURLKey)
+	if err != nil {
+		return "", fmt.Errorf("read app url: %w", err)
+	}
+	return string(data), nil
+}
+
+// SetAppURL persists the deployed app's base URL.
+func (s *Store) SetAppURL(ctx context.Context, url string) error {
+	return s.store.Set(ctx, appURLKey, []byte(url))
 }

@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
+	"time"
 
+	"tclaw/dev"
 	"tclaw/mcp"
 )
 
@@ -40,9 +44,13 @@ func devDeployedHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("fetch: %w", err)
 		}
 
+		// Try fetching the live /version endpoint — works for any deploy, not just tool-triggered ones.
 		deployedCommit, err := deps.Store.GetDeployedCommit(ctx)
 		if err != nil {
 			return nil, err
+		}
+		if liveCommit := fetchLiveVersion(ctx, deps.Store); liveCommit != "" {
+			deployedCommit = liveCommit
 		}
 
 		mainHead, err := gitHeadCommitRef(repoDir, "origin/main")
@@ -85,4 +93,29 @@ func devDeployedHandler(deps Deps) mcp.ToolHandler {
 
 		return json.Marshal(result)
 	}
+}
+
+// fetchLiveVersion hits the running app's /version endpoint and returns the
+// commit hash. Returns empty string if the app URL is not configured or the
+// request fails — callers should fall back to the stored deployed commit.
+func fetchLiveVersion(ctx context.Context, store *dev.Store) string {
+	appURL, err := store.GetAppURL(ctx)
+	if err != nil || appURL == "" {
+		return ""
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, appURL+"/version", nil)
+	if err != nil {
+		return ""
+	}
+	resp, err := client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(body))
 }
