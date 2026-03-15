@@ -4,7 +4,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /bin/tclaw .
+RUN CGO_ENABLED=0 go build -ldflags "-X tclaw/version.Commit=$(git rev-parse --short HEAD)" -o /bin/tclaw .
 
 # ---
 
