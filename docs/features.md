@@ -347,6 +347,43 @@ The `dev_logs` tool provides access to tclaw's own application logs from the run
 
 Active dev sessions are listed in the system prompt so the agent knows which worktrees are available. The system prompt instructs the agent to read the project's documentation (CLAUDE.md, `@`-referenced files) from the worktree before making any code changes.
 
+## Repo Exploration
+
+The agent can monitor arbitrary remote git repositories for changes via `repo_*` MCP tools. This is read-only — for making changes to tclaw itself, use the dev workflow.
+
+### Tools
+
+| Tool | Purpose |
+|------|---------|
+| `repo_add` | Register a repo by name and URL |
+| `repo_sync` | Fetch latest, report new commits since last check, update checkout |
+| `repo_log` | Show detailed commit history with optional diffstat |
+| `repo_list` | List all tracked repos and their status |
+| `repo_remove` | Stop tracking and clean up all cached data |
+
+### Storage
+
+- **Bare repo cache** at `<userDir>/repos/<name>/bare/` — shallow single-branch clone for efficiency
+- **Read-only checkout** at `<userDir>/repos/<name>/checkout/` — detached worktree for file exploration via Read/Grep/Glob
+- **Tracking state** in the user's state store under `"tracked_repos"` — name, URL, branch, last-seen commit SHA, timestamps
+
+### Lifecycle
+
+1. `repo_add` registers metadata and creates directories (no network I/O)
+2. `repo_sync` does the actual clone/fetch, updates the checkout, and advances the last-seen commit cursor
+3. The agent explores files directly using Read/Grep/Glob/Bash on the checkout path
+4. `repo_remove` deletes all cached data (bare repo, checkout, store entry)
+
+No automatic cleanup or TTL — the agent manages lifecycle explicitly. Combine with `schedule_create` for periodic monitoring (e.g. daily sync + summarize).
+
+### Authentication
+
+Reuses the same `github_token` from the encrypted secret store as the dev workflow. Public repos work without a token. Private repos fail with a clear error if no token is available.
+
+### Sandbox access
+
+The `<userDir>/repos/` parent directory is pre-mounted in the bwrap sandbox, so new repo checkouts created via `repo_sync` are immediately accessible on the next turn without an agent restart.
+
 ## Secret Management
 
 ### Config-level secrets

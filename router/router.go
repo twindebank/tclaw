@@ -28,6 +28,7 @@ import (
 	"tclaw/oauth"
 	"tclaw/onboarding"
 	"tclaw/provider"
+	"tclaw/repo"
 	"tclaw/schedule"
 	"tclaw/tool/channeltools"
 	"tclaw/tool/connectiontools"
@@ -36,6 +37,7 @@ import (
 	monzotools "tclaw/tool/monzo"
 	"tclaw/tool/onboardingtools"
 	"tclaw/tool/remotemcp"
+	"tclaw/tool/repotools"
 	"tclaw/tool/scheduletools"
 	tfltools "tclaw/tool/tfl"
 	"tclaw/user"
@@ -389,6 +391,14 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		LogBuffer:   r.logBuffer,
 	})
 
+	// Set up repo exploration tools for monitoring external repositories.
+	repoStore := repo.NewStore(s)
+	repotools.RegisterTools(mcpHandler, repotools.Deps{
+		Store:       repoStore,
+		SecretStore: secretStore,
+		UserDir:     userDir,
+	})
+
 	// Register TfL tools unconditionally — they work without an API key
 	// (rate-limited to ~50 req/min) and prompt for one if not stored.
 	tfltools.RegisterTools(mcpHandler, tfltools.Deps{
@@ -468,7 +478,12 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		if mkErr := os.MkdirAll(worktreesDir, 0o755); mkErr != nil {
 			slog.Warn("failed to create worktrees dir", "err", mkErr, "user", mu.cfg.ID)
 		}
-		addDirs := []string{worktreesDir}
+		// Mount repos dir so read-only checkouts from repo_sync are accessible.
+		reposDir := filepath.Join(userDir, "repos")
+		if mkErr := os.MkdirAll(reposDir, 0o755); mkErr != nil {
+			slog.Warn("failed to create repos dir", "err", mkErr, "user", mu.cfg.ID)
+		}
+		addDirs := []string{worktreesDir, reposDir}
 		devSessions, devErr := devStore.ListSessions(ctx)
 		if devErr != nil {
 			slog.Error("failed to list dev sessions", "err", devErr)
