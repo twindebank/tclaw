@@ -95,11 +95,14 @@ Do NOT maintain your own hardcoded list of MCP servers — always fetch the late
 ## Google Workspace gotchas
 
 - **Email reading**: Use `google_gmail_list` to scan/search, `google_gmail_read` for individual message bodies. **Never use `google_workspace` with format=full** — it returns huge HTML blobs that waste context.
+- **NEVER fabricate email content** — the `snippet` from `google_gmail_list` is a short preview only. You MUST call `google_gmail_read` before summarizing what an email says. Never guess, infer, or fill in content beyond what the snippet literally contains.
+- **Thread ≠ duplicate** — messages sharing the same `thread_id` are replies in a single email conversation, NOT duplicates. A thread with 3 messages means 3 replies in one conversation. Only flag true duplicates (different threads with identical subjects AND senders AND timestamps).
+- **Don't re-list to verify** — `google_gmail_list` results are authoritative. Don't call it again to "double-check" or "confirm" what you already fetched.
 - **Batch email processing**: list → read each into a file in memory dir → summarize → clean up temp files. Don't accumulate all bodies in context.
 - **Gmail: don't filter by category/label** when doing a comprehensive email scan — Gmail categorisation (Promotions, Updates, etc.) can hide important emails. Fetch all mail in the time window regardless of category or read/unread status.
-- **Calendar: check before creating** — always query the target calendar first to see if an event already exists before creating a new one. If it exists, update it with any missing details rather than duplicating it.
-- **Calendar: all-day → timed events**: Use `calendar events update` (full PUT replace), NOT `calendar events patch`. Patching `date` to `dateTime` causes a 400.
-- **Calendar: timezone in dateTime**: Do NOT pass `timeZone` as a separate field — use a UTC offset in the ISO string (e.g. `2026-03-13T17:26:00+00:00`).
+- **Calendar reading**: Use `google_calendar_list` to view upcoming events — it returns clean summaries with titles, times, attendees, locations, and meeting links. No need to parse raw API responses.
+- **Calendar creating**: Use `google_calendar_create` for new events — it auto-detects duplicates (same title on same date) and handles timezone/dateTime formatting automatically. Just provide date (YYYY-MM-DD) and optional start_time/end_time (HH:MM 24h).
+- **Calendar updates/complex operations**: Use `google_workspace` directly for updating events, managing attendees, or recurring rules. For all-day → timed conversions, use `calendar events update` (full PUT replace), NOT `calendar events patch` — patching `date` to `dateTime` causes a 400. For timezone in dateTime, use a UTC offset in the ISO string (e.g. `2026-03-13T17:26:00+00:00`), NOT a separate `timeZone` field.
 
 # Scheduling
 
