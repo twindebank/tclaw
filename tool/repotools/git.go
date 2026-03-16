@@ -58,19 +58,34 @@ func readOnlyCheckout(repoDir string, checkoutDir string, branch string) error {
 	ref := "origin/" + branch
 
 	if _, err := os.Stat(checkoutDir); os.IsNotExist(err) {
-		// First checkout — create the worktree.
-		cmd := exec.Command("git", "-c", "core.hooksPath=/dev/null", "-C", repoDir,
-			"worktree", "add", "--detach", checkoutDir, ref)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("git worktree add: %s: %w", string(out), err)
-		}
-		return nil
+		return worktreeAdd(repoDir, checkoutDir, ref)
 	}
 
-	// Worktree exists — update to latest.
+	// Worktree exists — update to latest. If this fails, the worktree is
+	// stale (e.g. bare repo was re-cloned after a volume wipe). Remove
+	// the stale directory and recreate from scratch.
 	cmd := exec.Command("git", "-C", checkoutDir, "checkout", "--detach", ref)
+	if _, err := cmd.CombinedOutput(); err != nil {
+		slog.Debug("checkout failed on existing worktree, recreating", "err", err)
+		if err := os.RemoveAll(checkoutDir); err != nil {
+			return fmt.Errorf("remove stale worktree: %w", err)
+		}
+		// Also prune the bare repo's worktree list so git doesn't reject
+		// the re-add with "already registered".
+		prune := exec.Command("git", "-C", repoDir, "worktree", "prune")
+		if out, err := prune.CombinedOutput(); err != nil {
+			return fmt.Errorf("git worktree prune: %s: %w", string(out), err)
+		}
+		return worktreeAdd(repoDir, checkoutDir, ref)
+	}
+	return nil
+}
+
+func worktreeAdd(repoDir string, checkoutDir string, ref string) error {
+	cmd := exec.Command("git", "-c", "core.hooksPath=/dev/null", "-C", repoDir,
+		"worktree", "add", "--detach", checkoutDir, ref)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git checkout: %s: %w", string(out), err)
+		return fmt.Errorf("git worktree add: %s: %w", string(out), err)
 	}
 	return nil
 }

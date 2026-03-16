@@ -146,6 +146,34 @@ func TestReadOnlyCheckout_UpdatesExistingWorktree(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestReadOnlyCheckout_RecreatesStaleWorktree(t *testing.T) {
+	// Reproduces the prod bug: bare repo is re-cloned after a volume wipe
+	// but the checkout dir still exists as a stale (non-git) directory.
+	remote := createTestRemote(t, "main")
+
+	bareDir := filepath.Join(t.TempDir(), "bare")
+	require.NoError(t, os.MkdirAll(bareDir, 0o755))
+	require.NoError(t, shallowCloneOrFetch(bareDir, remote, "main", "", 50))
+
+	checkoutDir := filepath.Join(t.TempDir(), "checkout")
+
+	// Create a valid worktree first.
+	require.NoError(t, readOnlyCheckout(bareDir, checkoutDir, "main"))
+
+	// Simulate volume wipe + re-clone: replace the bare repo entirely.
+	require.NoError(t, os.RemoveAll(bareDir))
+	require.NoError(t, os.MkdirAll(bareDir, 0o755))
+	require.NoError(t, shallowCloneOrFetch(bareDir, remote, "main", "", 50))
+
+	// checkoutDir still exists but is now stale — the bare repo it was
+	// linked to is gone. readOnlyCheckout should recover automatically.
+	require.NoError(t, readOnlyCheckout(bareDir, checkoutDir, "main"))
+
+	// Files from the remote should be present.
+	_, err := os.Stat(filepath.Join(checkoutDir, "init.txt"))
+	require.NoError(t, err)
+}
+
 func TestCommitLogSince(t *testing.T) {
 	remote := createTestRemote(t, "main")
 	bareDir := filepath.Join(t.TempDir(), "bare")
