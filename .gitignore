@@ -1,7 +1,7 @@
 .env
+tclaw.yaml
 bin/
 tmp/
-# tclaw.yaml is now tracked (secrets use ${secret:NAME} references, no raw values)
 .idea/
 
 # Compiled binaries
