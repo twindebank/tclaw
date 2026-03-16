@@ -59,6 +59,10 @@ type DevSessionInfo struct {
 	Branch      string
 	WorktreeDir string
 	Age         string
+
+	// Stale is true when the session is older than the staleness threshold,
+	// signaling that the agent should suggest cleanup rather than investigate.
+	Stale bool
 }
 
 // BuildSystemPrompt executes the system_prompt.md template with runtime

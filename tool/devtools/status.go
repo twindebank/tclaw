@@ -9,6 +9,8 @@ import (
 	"tclaw/mcp"
 )
 
+const staleSessionThreshold = 4 * time.Hour
+
 func devStatusDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name:        "dev_status",
@@ -50,11 +52,16 @@ func devStatusHandler(deps Deps) mcp.ToolHandler {
 		if a.Session == "" && len(sessions) > 1 {
 			var summaries []map[string]any
 			for branch, sess := range sessions {
-				summaries = append(summaries, map[string]any{
+				summary := map[string]any{
 					"branch":   branch,
 					"worktree": sess.WorktreeDir,
 					"age":      time.Since(sess.CreatedAt).Truncate(time.Minute).String(),
-				})
+				}
+				if time.Since(sess.CreatedAt) > staleSessionThreshold {
+					summary["stale"] = true
+					summary["stale_warning"] = fmt.Sprintf("This session is %s old. If the work is done, use dev_end to push and open a PR, or dev_cancel to discard.", time.Since(sess.CreatedAt).Truncate(time.Minute))
+				}
+				summaries = append(summaries, summary)
 			}
 			return json.Marshal(map[string]any{
 				"sessions": summaries,
@@ -89,6 +96,10 @@ func devStatusHandler(deps Deps) mcp.ToolHandler {
 			"uncommitted":  status,
 			"commit_log":   log,
 			"diff_stat":    diffStat,
+		}
+		if time.Since(sess.CreatedAt) > staleSessionThreshold {
+			result["stale"] = true
+			result["stale_warning"] = fmt.Sprintf("This session is %s old. If the work is done, use dev_end to push and open a PR, or dev_cancel to discard.", time.Since(sess.CreatedAt).Truncate(time.Minute))
 		}
 		return json.Marshal(result)
 	}
