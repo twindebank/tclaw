@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -14,7 +15,9 @@ func shallowCloneOrFetch(repoDir string, repoURL string, branch string, token st
 	authURL := authenticatedURL(repoURL, token)
 	depthArg := fmt.Sprintf("--depth=%d", depth)
 
-	if _, err := os.Stat(repoDir); os.IsNotExist(err) {
+	// Check for the HEAD file rather than the directory — repo_add creates the
+	// directory eagerly, so a missing HEAD means we haven't cloned yet.
+	if _, err := os.Stat(filepath.Join(repoDir, "HEAD")); os.IsNotExist(err) {
 		cmd := exec.Command("git", "-c", "core.hooksPath=/dev/null",
 			"clone", "--bare", depthArg, "--single-branch", "--branch", branch,
 			authURL, repoDir)
