@@ -95,6 +95,7 @@ const (
 	MCPToolGoogleAll     claudecli.Tool = "mcp__tclaw__google_*"
 	MCPToolMonzoAll      claudecli.Tool = "mcp__tclaw__monzo_*"
 	MCPToolTflAll        claudecli.Tool = "mcp__tclaw__tfl_*"
+	MCPToolModelAll      claudecli.Tool = "mcp__tclaw__model_*"
 	MCPToolOnboardingAll claudecli.Tool = "mcp__tclaw__onboarding_*"
 	MCPToolRepoAll       claudecli.Tool = "mcp__tclaw__repo_*"
 )
@@ -151,12 +152,13 @@ func resolveDeveloper() []claudecli.Tool {
 	tools = append(tools, fileTools...)
 	tools = append(tools, webTools...)
 	tools = append(tools, allBuiltins...)
-	// Dev workflow, schedule, repo monitoring, and onboarding tools.
+	// Dev workflow, schedule, repo monitoring, model, and onboarding tools.
 	tools = append(tools,
 		MCPToolDevAll,
 		MCPToolDeploy,
 		MCPToolScheduleAll,
 		MCPToolRepoAll,
+		MCPToolModelAll,
 		MCPToolOnboardingAll,
 	)
 	return tools
@@ -167,12 +169,13 @@ func resolveAssistant(ctx ChannelContext) []claudecli.Tool {
 	tools = append(tools, fileTools...)
 	tools = append(tools, webTools...)
 	tools = append(tools, basicBuiltins...)
-	// Connection/remote MCP management, scheduling, repo monitoring, TfL, and onboarding.
+	// Connection/remote MCP management, scheduling, repo monitoring, model, TfL, and onboarding.
 	tools = append(tools,
 		MCPToolConnectionAll,
 		MCPToolRemoteMCPAll,
 		MCPToolScheduleAll,
 		MCPToolRepoAll,
+		MCPToolModelAll,
 		MCPToolTflAll,
 		MCPToolOnboardingAll,
 	)

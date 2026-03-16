@@ -126,4 +126,17 @@ type ResultEvent struct {
 	NumTurns   int       `json:"num_turns"`
 	SessionID  string    `json:"session_id"`
 	CostUSD    float64   `json:"total_cost_usd"`
+
+	// ModelUsage is a per-model breakdown of token usage and cost.
+	// Keys are model identifiers (may include context window suffix, e.g. "claude-opus-4-6[1m]").
+	ModelUsage map[string]ModelUsage `json:"modelUsage,omitempty"`
+}
+
+// ModelUsage holds token counts and cost for a single model within a turn.
+type ModelUsage struct {
+	InputTokens              int     `json:"inputTokens"`
+	OutputTokens             int     `json:"outputTokens"`
+	CacheReadInputTokens     int     `json:"cacheReadInputTokens"`
+	CacheCreationInputTokens int     `json:"cacheCreationInputTokens"`
+	CostUSD                  float64 `json:"costUSD"`
 }

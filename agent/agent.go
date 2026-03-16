@@ -79,6 +79,11 @@ type Options struct {
 	PermissionMode claudecli.PermissionMode
 	Model          claudecli.Model
 
+	// ModelFunc returns the current model to use, checked each turn.
+	// Takes precedence over Model when set. Allows runtime model changes
+	// via MCP tools without restarting the agent.
+	ModelFunc func() claudecli.Model
+
 	// MaxTurns limits agentic turns per invocation. Defaults to defaultMaxTurns.
 	MaxTurns int
 
@@ -907,8 +912,14 @@ func buildArgs(opts Options, sessionID string, systemPrompt string, prompt strin
 	if opts.PermissionMode != "" {
 		args = append(args, "--permission-mode", string(opts.PermissionMode))
 	}
-	if opts.Model != "" {
-		args = append(args, "--model", string(opts.Model))
+	model := opts.Model
+	if opts.ModelFunc != nil {
+		if m := opts.ModelFunc(); m != "" {
+			model = m
+		}
+	}
+	if model != "" {
+		args = append(args, "--model", string(model))
 	}
 	args = append(args, "--max-turns", fmt.Sprintf("%d", maxTurns(opts)))
 	for _, t := range allowed {

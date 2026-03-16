@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -645,6 +646,9 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				result.DurationMs/1000,
 				result.CostUSD,
 			)
+			if summary := modelSummary(result.ModelUsage); summary != "" {
+				stats += " " + summary
+			}
 			maxTurns := opts.MaxTurns
 			if maxTurns == 0 {
 				maxTurns = defaultMaxTurns
@@ -656,11 +660,19 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			if err := tw.write(phaseStatus, stats); err != nil {
 				return "", err
 			}
-			slog.Info("turn complete",
+			logArgs := []any{
 				"turns", result.NumTurns,
 				"duration_ms", result.DurationMs,
 				"cost_usd", result.CostUSD,
-			)
+			}
+			for model, usage := range result.ModelUsage {
+				logArgs = append(logArgs,
+					"model."+shortModelName(model)+".input_tokens", usage.InputTokens,
+					"model."+shortModelName(model)+".output_tokens", usage.OutputTokens,
+					"model."+shortModelName(model)+".cost_usd", usage.CostUSD,
+				)
+			}
+			slog.Info("turn complete", logArgs...)
 		}
 	}
 
@@ -668,4 +680,28 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 		return "", fmt.Errorf("scanner: %w", err)
 	}
 	return sessionID, nil
+}
+
+// modelSummary builds a parenthesized string of model short names from the
+// usage map, e.g. "(opus-4.6, sonnet-4.6)". Returns empty if no models.
+func modelSummary(usage map[string]claudecli.ModelUsage) string {
+	if len(usage) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(usage))
+	for model := range usage {
+		names = append(names, shortModelName(model))
+	}
+	sort.Strings(names)
+	return "(" + strings.Join(names, ", ") + ")"
+}
+
+// shortModelName converts a full model ID (possibly with context window suffix)
+// into a human-friendly short name, e.g. "claude-opus-4-6[1m]" → "opus-4.6".
+func shortModelName(model string) string {
+	// Strip context window suffix like "[1m]".
+	if idx := strings.Index(model, "["); idx >= 0 {
+		model = model[:idx]
+	}
+	return claudecli.Model(model).ShortName()
 }

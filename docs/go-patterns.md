@@ -35,7 +35,9 @@
 - **Never return data alongside an error** — on error paths, return zero values for all non-error returns
 
 ## Testing
-- **Use testify require/assert** (not suites) — `require.NoError(t, err)`, `require.Equal(t, expected, actual)`
+
+### General Rules
+- **Use testify `require`** (not `assert`, not suites, not `t.Fatalf`) — `require.NoError(t, err)`, `require.Equal(t, expected, actual)`
 - **Use `t.Run` for subtests** — keeps test output organized and allows targeted test runs
 - **Table-driven tests for simple cases** — `tests := []struct{name, input, expected}` with a range loop
 - **Individual `t.Run` for complex cases** — when tests have different assertion logic or setup
@@ -43,8 +45,155 @@
 - **Test the public contract** — test what callers will actually call and expect
 - **Validate all expected outputs** — don't just check that a function doesn't error, verify the actual results
 - **Check errors first** — `require.Error(t, err)` before checking error content
-- **Helper functions go at the bottom** of test files
+- **Helper functions go at the bottom** of test files, after a `// --- helpers ---` comment
 - **Run tests**: `go test ./...` or `go test -v -run TestName ./path/to/package/...`
+
+### Package Naming
+- **Use `_test` suffix** (`package foo_test`) for MCP tool tests and anything that tests the public API from the outside. This ensures you're testing the exported interface, not relying on internal access.
+- **Use same package** (`package foo`) only when you need to test unexported functions directly (e.g. `git_test.go` testing internal git helpers).
+
+### Test File Structure
+Every test file follows the same layout:
+1. Test functions at the top
+2. `// --- helpers ---` comment
+3. Setup functions (`setup()`, `setupHarness()`, etc.)
+4. Tool call helpers (`callTool()`, `callToolExpectError()`)
+5. Mock types at the bottom
+
+### MCP Tool Test Pattern
+This is the primary test pattern in the codebase. All MCP tool tests follow this exact structure (see `channeltools_test.go`, `scheduletools_test.go`):
+
+```go
+package mytools_test
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"tclaw/libraries/store"
+	"tclaw/mcp"
+	"tclaw/tool/mytools"
+)
+
+func TestMyTool_DoesAThing(t *testing.T) {
+	t.Run("success case", func(t *testing.T) {
+		h, myStore := setup(t)
+
+		result := callTool(t, h, "my_tool", map[string]any{
+			"name": "value",
+		})
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(result, &got))
+		require.Equal(t, "expected", got["field"])
+
+		// Verify side effects in the store.
+		item, err := myStore.Get(context.Background(), "key")
+		require.NoError(t, err)
+		require.NotNil(t, item)
+	})
+
+	t.Run("rejects invalid input", func(t *testing.T) {
+		h, _ := setup(t)
+
+		err := callToolExpectError(t, h, "my_tool", map[string]any{
+			"name": "",
+		})
+		require.Contains(t, err.Error(), "required")
+	})
+}
+
+// --- helpers ---
+
+func setup(t *testing.T) (*mcp.Handler, *mypackage.Store) {
+	t.Helper()
+	s, err := store.NewFS(t.TempDir())
+	require.NoError(t, err)
+
+	myStore := mypackage.NewStore(s)
+	handler := mcp.NewHandler()
+	mytools.RegisterTools(handler, mytools.Deps{
+		Store: myStore,
+	})
+
+	return handler, myStore
+}
+
+func callTool(t *testing.T, h *mcp.Handler, name string, args any) json.RawMessage {
+	t.Helper()
+	argsJSON, err := json.Marshal(args)
+	require.NoError(t, err)
+	result, err := h.Call(context.Background(), name, argsJSON)
+	require.NoError(t, err, "call %s", name)
+	return result
+}
+
+func callToolExpectError(t *testing.T, h *mcp.Handler, name string, args any) error {
+	t.Helper()
+	argsJSON, err := json.Marshal(args)
+	require.NoError(t, err)
+	_, err = h.Call(context.Background(), name, argsJSON)
+	require.Error(t, err, "expected error from %s", name)
+	return err
+}
+```
+
+### Mock Patterns
+- **Only mock interfaces you don't own or that do I/O** — use real `store.NewFS(t.TempDir())` for stores, real handlers for MCP
+- **In-memory mocks for secret.Store** — simple map-backed implementation:
+  ```go
+  type memorySecretStore struct {
+  	data map[string]string
+  }
+
+  func (m *memorySecretStore) Get(_ context.Context, key string) (string, error) {
+  	return m.data[key], nil
+  }
+
+  func (m *memorySecretStore) Set(_ context.Context, key, value string) error {
+  	m.data[key] = value
+  	return nil
+  }
+
+  func (m *memorySecretStore) Delete(_ context.Context, key string) error {
+  	delete(m.data, key)
+  	return nil
+  }
+  ```
+- **Never mock the filesystem** — use `t.TempDir()` for real temp directories
+- **Never mock MCP handlers** — use real `mcp.NewHandler()` with `RegisterTools()`
+
+### Git Integration Tests
+When testing code that calls git commands, create real repos in temp dirs:
+```go
+func createTestRemote(t *testing.T, branch string) string {
+	t.Helper()
+	dir := t.TempDir()
+	gitRun(t, dir, "init", "--initial-branch", branch)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "init.txt"), []byte("hello"), 0o644))
+	gitRun(t, dir, "add", ".")
+	gitRun(t, dir, "commit", "-m", "initial commit")
+	return dir
+}
+
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+	)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git %v: %s", args, string(out))
+}
+```
+
+### Test Naming
+- **Pattern**: `Test{Subject}_{Scenario}` — e.g. `TestRepoSync_FullLifecycle`, `TestChannelCreate`
+- When a test function uses `t.Run` for multiple scenarios, the top-level name is just `Test{Subject}` and scenarios go in the subtests
 
 ## Function Design
 - **Prefer returning new values over mutating inputs** — makes data flow clearer
