@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -57,6 +58,12 @@ func repoSyncHandler(deps Deps) mcp.ToolHandler {
 		depth := a.Depth
 		if depth <= 0 {
 			depth = defaultSyncDepth
+		}
+
+		// Ensure directories exist — they may be gone if the volume was
+		// wiped while the store entries survived.
+		if err := os.MkdirAll(tracked.RepoDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create repo dir: %w", err)
 		}
 
 		// Read GitHub token for private repos. Public repos work without one.

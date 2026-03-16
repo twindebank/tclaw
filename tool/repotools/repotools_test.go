@@ -284,6 +284,25 @@ func TestRepoSync_NoTrackedRepos(t *testing.T) {
 	callToolExpectError(t, h, "repo_sync", map[string]any{})
 }
 
+func TestRepoSync_RecreatesDeletedDirectories(t *testing.T) {
+	// Reproduces the prod issue: store has repo entries but the filesystem
+	// directories were wiped (e.g. volume reset). Sync should recreate them.
+	h, repoStore, userDir := setup(t)
+	remote := createTestRemote(t, "main")
+
+	addLocalRepo(t, repoStore, userDir, "recovered", remote, "main")
+
+	// Delete the bare directory to simulate a volume wipe.
+	repoDir := filepath.Join(userDir, "repos", "recovered", "bare")
+	require.NoError(t, os.RemoveAll(repoDir))
+
+	// Sync should still work — it recreates missing directories.
+	result := callTool(t, h, "repo_sync", map[string]string{"name": "recovered"})
+	var syncResult map[string]any
+	require.NoError(t, json.Unmarshal(result, &syncResult))
+	require.NotEmpty(t, syncResult["head_commit"])
+}
+
 func TestRepoLog_RequiresSync(t *testing.T) {
 	h, _, _ := setup(t)
 
