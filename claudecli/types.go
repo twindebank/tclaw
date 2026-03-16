@@ -39,7 +39,47 @@ const (
 	// Claude 3.0
 	ModelOpus3  Model = "claude-3-opus-20240229"
 	ModelHaiku3 Model = "claude-3-haiku-20240307"
+
+	// ModelAuto means no --model flag is passed, letting the CLI choose.
+	ModelAuto Model = ""
 )
+
+// ShortName returns a human-friendly short name for the model,
+// e.g. "opus-4.6" for ModelOpus46. Returns the raw model string
+// for unrecognized models, stripping the "claude-" prefix.
+func (m Model) ShortName() string {
+	if short, ok := modelShortNames[m]; ok {
+		return short
+	}
+	return strings.TrimPrefix(string(m), "claude-")
+}
+
+// modelShortNames maps model identifiers to short display names.
+var modelShortNames = map[Model]string{
+	ModelOpus46:     "opus-4.6",
+	ModelSonnet46:   "sonnet-4.6",
+	ModelHaiku45:    "haiku-4.5",
+	ModelOpus4:      "opus-4",
+	ModelSonnet4:    "sonnet-4",
+	ModelSonnet37:   "sonnet-3.7",
+	ModelSonnet35v2: "sonnet-3.5v2",
+	ModelSonnet35:   "sonnet-3.5",
+	ModelHaiku35:    "haiku-3.5",
+	ModelOpus3:      "opus-3",
+	ModelHaiku3:     "haiku-3",
+}
+
+// ShortNameToModel maps short display names back to Model constants.
+// Includes both short names and full model IDs for flexible lookups.
+var ShortNameToModel = func() map[string]Model {
+	m := make(map[string]Model, len(modelShortNames)*2+1)
+	for model, short := range modelShortNames {
+		m[short] = model
+		m[string(model)] = model
+	}
+	m["auto"] = ModelAuto
+	return m
+}()
 
 // Tool identifies a Claude Code built-in tool.
 // Supports pattern syntax for scoped permissions, e.g. Tool("Bash(git *)").
