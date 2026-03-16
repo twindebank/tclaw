@@ -58,15 +58,18 @@ func readOnlyCheckout(repoDir string, checkoutDir string, branch string) error {
 	ref := "origin/" + branch
 
 	if _, err := os.Stat(checkoutDir); os.IsNotExist(err) {
+		slog.Info("checkout dir does not exist, creating worktree", "checkout_dir", checkoutDir, "repo_dir", repoDir, "ref", ref)
 		return worktreeAdd(repoDir, checkoutDir, ref)
 	}
+
+	slog.Info("checkout dir exists, updating", "checkout_dir", checkoutDir, "ref", ref)
 
 	// Worktree exists — update to latest. If this fails, the worktree is
 	// stale (e.g. bare repo was re-cloned after a volume wipe). Remove
 	// the stale directory and recreate from scratch.
 	cmd := exec.Command("git", "-C", checkoutDir, "checkout", "--detach", ref)
-	if _, err := cmd.CombinedOutput(); err != nil {
-		slog.Debug("checkout failed on existing worktree, recreating", "err", err)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		slog.Warn("checkout failed on existing worktree, recreating", "err", err, "output", string(out), "checkout_dir", checkoutDir)
 		if err := os.RemoveAll(checkoutDir); err != nil {
 			return fmt.Errorf("remove stale worktree: %w", err)
 		}
@@ -82,10 +85,20 @@ func readOnlyCheckout(repoDir string, checkoutDir string, branch string) error {
 }
 
 func worktreeAdd(repoDir string, checkoutDir string, ref string) error {
+	slog.Info("creating worktree", "checkout_dir", checkoutDir)
 	cmd := exec.Command("git", "-c", "core.hooksPath=/dev/null", "-C", repoDir,
 		"worktree", "add", "--detach", checkoutDir, ref)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("git worktree add: %s: %w", string(out), err)
+	}
+
+	// Verify the checkout dir was actually created.
+	entries, statErr := os.ReadDir(checkoutDir)
+	if statErr != nil {
+		slog.Error("worktree add succeeded but checkout dir unreadable", "err", statErr, "checkout_dir", checkoutDir)
+	} else {
+		slog.Info("worktree created successfully", "checkout_dir", checkoutDir, "file_count", len(entries))
 	}
 	return nil
 }
