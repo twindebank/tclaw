@@ -96,6 +96,8 @@ Do NOT maintain your own hardcoded list of MCP servers — always fetch the late
 
 - **Email reading**: Use `google_gmail_list` to scan/search, `google_gmail_read` for individual message bodies. **Never use `google_workspace` with format=full** — it returns huge HTML blobs that waste context.
 - **Batch email processing**: list → read each into a file in memory dir → summarize → clean up temp files. Don't accumulate all bodies in context.
+- **Gmail: don't filter by category/label** when doing a comprehensive email scan — Gmail categorisation (Promotions, Updates, etc.) can hide important emails. Fetch all mail in the time window regardless of category or read/unread status.
+- **Calendar: check before creating** — always query the target calendar first to see if an event already exists before creating a new one. If it exists, update it with any missing details rather than duplicating it.
 - **Calendar: all-day → timed events**: Use `calendar events update` (full PUT replace), NOT `calendar events patch`. Patching `date` to `dateTime` causes a 400.
 - **Calendar: timezone in dateTime**: Do NOT pass `timeZone` as a separate field — use a UTC offset in the ISO string (e.g. `2026-03-13T17:26:00+00:00`).
 
