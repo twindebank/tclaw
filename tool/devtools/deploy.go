@@ -137,10 +137,27 @@ func deployHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("no Fly API token configured — provide fly_api_token parameter (create one with: fly tokens create deploy -x 999999h)")
 		}
 
-		// Execute deploy from the repo root so fly can find the Dockerfile.
+		// Create a temporary checkout from the bare repo so fly can find the Dockerfile.
+		// The bare repo has no working tree — fly deploy needs actual files.
 		const appName = "tclaw"
+		checkoutDir := repoDir + "-deploy-checkout"
+		if err := os.RemoveAll(checkoutDir); err != nil {
+			return nil, fmt.Errorf("clean deploy checkout: %w", err)
+		}
+		cmd = exec.Command("git", "-c", "core.hooksPath=/dev/null", "-C", repoDir, "worktree", "add", "--detach", checkoutDir, "origin/main")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return nil, fmt.Errorf("create deploy checkout: %s: %w", string(out), err)
+		}
+		defer func() {
+			// Clean up the temporary worktree.
+			rmCmd := exec.Command("git", "-C", repoDir, "worktree", "remove", "--force", checkoutDir)
+			if out, err := rmCmd.CombinedOutput(); err != nil {
+				slog.Warn("failed to remove deploy worktree", "err", err, "output", string(out))
+			}
+		}()
+
 		cmd = exec.Command("fly", "deploy", "--remote-only", "-a", appName)
-		cmd.Dir = repoDir
+		cmd.Dir = checkoutDir
 		cmd.Env = append(cmd.Env, "FLY_API_TOKEN="+flyToken, "PATH="+os.Getenv("PATH"), "HOME="+os.Getenv("HOME"))
 		deployOut, err := cmd.CombinedOutput()
 		if err != nil {
