@@ -144,6 +144,13 @@ func (t *Telegram) Messages(ctx context.Context) <-chan string {
 				chatID := update.Message.Chat.ID
 				text := update.Message.Text
 
+				// Prepend a short snippet of the replied-to message so the
+				// agent knows what the user is referring to.
+				if reply := update.Message.ReplyToMessage; reply != nil && reply.Text != "" {
+					snippet := truncateReplySnippet(reply.Text, 100)
+					text = "[replying to: \"" + snippet + "\"]\n" + text
+				}
+
 				slog.Info("telegram message received",
 					"chat_id", chatID,
 					"length", len(text),
@@ -343,4 +350,14 @@ func markdownToTelegramHTML(s string) string {
 	// Always escape unsupported tags — the model may include path-like strings
 	// such as <userDir> that Telegram's HTML parser rejects.
 	return escapeUnsupportedTags(s)
+}
+
+// truncateReplySnippet returns the first maxLen characters of s, appending "…"
+// if truncated. Newlines are collapsed to spaces for a compact single-line preview.
+func truncateReplySnippet(s string, maxLen int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len([]rune(s)) <= maxLen {
+		return s
+	}
+	return string([]rune(s)[:maxLen]) + "…"
 }
