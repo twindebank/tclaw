@@ -50,7 +50,7 @@ func deployHandler(deps Deps) mcp.ToolHandler {
 			return nil, err
 		}
 		if repoURL == "" {
-			return nil, fmt.Errorf("no repo URL configured — run dev_start first to set up the repo")
+			return nil, fmt.Errorf("no repo URL configured — run dev_start once to configure the repo, then you can deploy independently")
 		}
 
 		token, err := deps.SecretStore.Get(ctx, githubTokenKey)

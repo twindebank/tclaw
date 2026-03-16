@@ -493,6 +493,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				Branch:      sess.Branch,
 				WorktreeDir: sess.WorktreeDir,
 				Age:         time.Since(sess.CreatedAt).Truncate(time.Minute).String(),
+				Stale:       time.Since(sess.CreatedAt) > 4*time.Hour,
 			})
 			addDirs = append(addDirs, sess.WorktreeDir)
 		}

@@ -136,7 +136,7 @@ func devStartHandler(deps Deps) mcp.ToolHandler {
 		result := map[string]any{
 			"branch":       branch,
 			"worktree_dir": worktreeDir,
-			"message":      fmt.Sprintf("Dev session started on branch %q. Make changes in %s using Bash/Read/Edit/Write. When done, use dev_end to commit, push, and open a PR. On Linux (production), send 'stop' to restart the agent so the worktree directory becomes accessible in the sandbox.", branch, worktreeDir),
+			"message":      fmt.Sprintf("Dev session started on branch %q. Make changes in %s using Bash/Read/Edit/Write. When done, use dev_end to commit, push, and open a PR.", branch, worktreeDir),
 		}
 		return json.Marshal(result)
 	}
