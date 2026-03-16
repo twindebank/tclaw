@@ -1,7 +1,7 @@
 # Deployment (Fly.io)
 
 ## Overview
-- Hosted on Fly.io in `lhr` (London), app name: `tclaw`
+- Hosted on Fly.io, app name configured in `fly.toml`
 - Local Docker builds only (`tclaw deploy`) — no auto-deploy on push
 - Persistent volume `tclaw_data` at `/data` for per-user state
 - Health check at `/healthz` on port 9876
@@ -26,13 +26,13 @@ tclaw deploy resume      # Spin up (scale to 1)
 
 ## First-Time Setup
 1. `brew install flyctl && fly auth login`
-2. `fly apps create tclaw`
-3. `fly volumes create tclaw_data --region lhr --size 1 -a ${{ vars.FLY_APP_NAME }} -y`
+2. `fly apps create your-app-name`
+3. `fly volumes create tclaw_data --region lhr --size 1 -a your-app-name -y`
 4. Set secrets: `tclaw secret set NAME value`, then `tclaw deploy secrets`
 5. `tclaw deploy`
 
 ## OAuth Callback URL
-`https://your-app.fly.dev/oauth/callback` — set this as the redirect URI in Google OAuth console.
+`https://your-app.fly.dev/oauth/callback` — set this as the redirect URI in your OAuth provider console (e.g. Google Cloud Console).
 
 ## Memory Tuning
 

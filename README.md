@@ -2,6 +2,16 @@
 
 Multi-user Claude Code host. Spawns isolated `claude` CLI subprocesses with persistent memory, multi-channel communication, OAuth connections, scheduling, and MCP tool extensibility.
 
+Self-hosted, single binary, drives the `claude` CLI directly (not the Agent SDK).
+
+## Prerequisites
+
+- **Go 1.26+** — [install](https://go.dev/dl/)
+- **Node.js 22+** — required by the `claude` CLI
+- **Claude Code CLI** — `npm install -g @anthropic-ai/claude-code`
+- **Anthropic API key** or Claude Pro/Teams subscription (for OAuth)
+- **macOS or Linux** — bubblewrap sandboxing is Linux-only; macOS runs unsandboxed locally
+
 ## Quick Start
 
 ```bash
@@ -23,6 +33,12 @@ tclaw serve
 
 # 6. Connect the chat client (in another terminal)
 tclaw chat
+```
+
+For a quick smoke test without running the server:
+
+```bash
+tclaw oneshot "hello, what can you do?" 2>/dev/null
 ```
 
 ## Installation
@@ -55,6 +71,7 @@ make uninstall   # removes both binaries and shell functions (safe if either is 
 - **[Features](docs/features.md)** — what tclaw can do: channels, memory, auth, connections, scheduling, MCP tools, etc.
 - **[Architecture](docs/architecture.md)** — package map, dependency layers, data flows, auth flows, directory layout, secret management, environment configuration.
 - **[Deployment](docs/deployment.md)** — Fly.io deployment, secrets, commands, first-time setup.
+- **[Contributing](CONTRIBUTING.md)** — development setup, running tests, code style.
 
 ## Commands
 
@@ -63,6 +80,7 @@ make uninstall   # removes both binaries and shell functions (safe if either is 
 | `tclaw serve` | Start the agent server |
 | `tclaw serve --dev` | Hot-reload server (restarts on `.go` changes, requires `air`) |
 | `tclaw chat` | Connect a TUI chat session to the running server |
+| `tclaw oneshot "msg"` | Send a single message and exit (no server needed) |
 | `tclaw secret set NAME value` | Store a secret in the OS keychain |
 | `tclaw secret get NAME` | Retrieve a secret |
 | `tclaw secret delete NAME` | Remove a secret |
@@ -97,6 +115,10 @@ Secrets use `${secret:NAME}` syntax — tries OS keychain first, falls back to e
 | `compact` | Compact conversation context |
 | `quit` / `exit` | Disconnect chat client |
 
+## Security
+
+See [SECURITY.md](SECURITY.md) for reporting vulnerabilities.
+
 ## License
 
-Private.
+[MIT](LICENSE)
