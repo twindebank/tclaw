@@ -33,8 +33,9 @@ RUN npm install -g @anthropic-ai/claude-code @googleworkspace/cli
 # Copy the Go binaries.
 COPY --from=builder /bin/tclaw /usr/local/bin/tclaw
 
-# Config file — multi-env, prod section selected at runtime.
-COPY tclaw.yaml /etc/tclaw/tclaw.yaml
+# Default config — override by mounting your own tclaw.yaml:
+#   docker run -v /path/to/tclaw.yaml:/etc/tclaw/tclaw.yaml ...
+COPY tclaw.example.yaml /etc/tclaw/tclaw.yaml
 
 # Persistent volume at /data holds all per-user state (store, home dirs, etc.).
 VOLUME ["/data"]
