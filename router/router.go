@@ -18,6 +18,7 @@ import (
 
 	"tclaw/agent"
 	"tclaw/channel"
+	"tclaw/claudecli"
 	"tclaw/config"
 	"tclaw/connection"
 	"tclaw/dev"
@@ -34,6 +35,7 @@ import (
 	"tclaw/tool/connectiontools"
 	"tclaw/tool/devtools"
 	googletools "tclaw/tool/google"
+	"tclaw/tool/modeltools"
 	monzotools "tclaw/tool/monzo"
 	"tclaw/tool/onboardingtools"
 	"tclaw/tool/remotemcp"
@@ -413,6 +415,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		Scheduler:     scheduler,
 	})
 
+	modeltools.RegisterTools(mcpHandler, modeltools.Deps{
+		Store: s,
+	})
+
 	// Register tool_list last so it can see all MCP tools from every package.
 	channeltools.RegisterToolListTool(mcpHandler)
 
@@ -616,12 +622,15 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		opts := agent.Options{
 			PermissionMode: mu.cfg.PermissionMode,
 			Model:          mu.cfg.Model,
-			MaxTurns:       mu.cfg.MaxTurns,
-			Debug:          mu.cfg.Debug,
-			APIKey:         mu.cfg.APIKey,
-			HomeDir:        homeDir,
-			MemoryDir:      memoryDir,
-			AddDirs:        addDirs,
+			ModelFunc: func() claudecli.Model {
+				return modeltools.LoadModel(s, mu.cfg.Model)
+			},
+			MaxTurns:  mu.cfg.MaxTurns,
+			Debug:     mu.cfg.Debug,
+			APIKey:    mu.cfg.APIKey,
+			HomeDir:   homeDir,
+			MemoryDir: memoryDir,
+			AddDirs:   addDirs,
 			AddDirsFunc: func() []string {
 				// Read from the dev store each turn so worktrees created
 				// mid-session (via dev_start) are immediately accessible.

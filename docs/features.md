@@ -8,7 +8,7 @@ tclaw is a multi-user Claude Code host that spawns isolated `claude` CLI subproc
 
 - **Session continuity** — each channel gets its own Claude session. The agent resumes via `--resume <session-id>` so context carries across messages.
 - **Streaming responses** — text deltas, thinking blocks, tool calls, and tool results are streamed to the channel in real time as the CLI emits them.
-- **Turn stats** — after each turn the agent reports turn count, wall-clock time, and cost.
+- **Turn stats** — after each turn the agent reports turn count, wall-clock time, cost, and which model(s) were used.
 - **Max turns** — configurable per user (defaults to 10) to limit agentic loops.
 - **Stop/interrupt** — typing `stop` cancels the active turn immediately via context cancellation.
 - **Reset menu** — typing `new`, `reset`, `clear`, or `delete` opens a multi-option reset menu. The menu is dynamic — only reset levels allowed on the current channel are shown (see [Per-Channel Tool Permissions](#per-channel-tool-permissions)):
@@ -91,8 +91,8 @@ Roles are named presets of tool permissions — a simpler alternative to listing
 | Role | Tools included |
 |------|----------------|
 | `superuser` | All Claude Code tools, all tclaw MCP tools (`mcp__tclaw__*`), all builtins, provider tools for channel connections, remote MCP tool patterns for channel remote MCPs |
-| `developer` | Bash, file tools, web tools, Agent, LSP, all builtins, dev workflow tools (`mcp__tclaw__dev_*`, `mcp__tclaw__deploy`), schedule tools |
-| `assistant` | File tools (Read, Edit, Write, Glob, Grep), web tools, basic builtins (stop, compact, session reset, memories reset), connection/remote MCP/schedule management tools, TfL tools, provider tools for channel connections, remote MCP tool patterns for channel remote MCPs |
+| `developer` | Bash, file tools, web tools, Agent, LSP, all builtins, dev workflow tools (`mcp__tclaw__dev_*`, `mcp__tclaw__deploy`), schedule tools, model tools |
+| `assistant` | File tools (Read, Edit, Write, Glob, Grep), web tools, basic builtins (stop, compact, session reset, memories reset), connection/remote MCP/schedule/model management tools, TfL tools, provider tools for channel connections, remote MCP tool patterns for channel remote MCPs |
 
 **How roles work:**
 
@@ -311,6 +311,20 @@ The MCP discovery client (`mcp/discovery/safeclient.go`) validates that remote M
 ## Scheduling
 
 The agent can create and manage cron schedules that fire autonomously. When a schedule fires, it injects a message into the specified channel, waking the agent if idle. Schedules persist across agent restarts and are managed by a background goroutine that runs at user lifetime (not agent lifetime).
+
+## Model Management
+
+The model can be viewed and changed at runtime via MCP tools without restarting the agent:
+
+| Tool | Purpose |
+|------|---------|
+| `model_list` | List all available models with short names and full IDs |
+| `model_get` | Get the currently configured model |
+| `model_set` | Change the model (takes effect on the next turn) |
+
+By default, no `--model` flag is passed to the CLI, allowing it to auto-select based on the user's subscription ("auto" mode). Users can set a specific model using short names (e.g. `opus-4.6`, `sonnet-4.6`) or full model IDs. The override is stored in the user's state store and persists across agent restarts.
+
+The config file's `model` field sets a default — the runtime override (via `model_set`) takes precedence when set.
 
 ## Dev Workflow
 
