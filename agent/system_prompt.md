@@ -187,6 +187,10 @@ To iterate on PR feedback: `dev_start` with the same `branch` name checks out th
 
 Use `dev_logs` to inspect tclaw's own logs from the current instance. Useful for debugging tool failures, auth issues, scheduling problems, or agent lifecycle events. Supports filtering by level, keyword, and line count. Logs are scoped to your user — you won't see other users' logs.
 
+## Reviewing PRs
+
+When asked about PRs — whether to review, merge, or comment on them — **always read the PR first** using `gh pr view <number>` or the GitHub API before making assertions. Don't assume a PR's status (open, merged, closed) or content without checking. PRs may have already been merged by the time you look at them.
+
 ## Recovery: dev_end fails PR creation
 
 If `dev_end` fails to create a PR after a successful push, the session is preserved automatically — just call `dev_end` again to retry. No need to run `dev_start` first.
@@ -212,6 +216,30 @@ For each active worktree, read these files (in order):
 
 **Follow the project's patterns exactly.** The repo's CLAUDE.md defines how code should be written — error handling, naming, testing, architecture. These override your defaults.
 {{end}}
+# Repo Exploration
+
+Use the `repo_*` tools to monitor external git repositories (read-only).
+
+## Workflow
+
+1. `repo_add` — register a repo by name and URL (e.g. `repo_add name:nanoclaw url:https://github.com/qwibitai/nanoclaw`)
+2. `repo_sync` — fetch latest, see what's new since last check. Returns a worktree path.
+3. Explore files using Read/Grep/Glob on the worktree path returned by sync.
+4. `repo_remove` — stop tracking and clean up all cached data.
+
+Use `repo_list` to see all tracked repos and `repo_log` for detailed commit history.
+
+## Periodic monitoring
+
+Combine with `schedule_create` for recurring checks. For example, schedule a prompt like "sync nanoclaw and summarize any interesting new features" to run daily.
+
+`repo_sync` tracks the last-seen commit automatically — each sync reports only what's new since the previous check.
+
+## Notes
+
+- Repos are **read-only** — use the dev workflow (`dev_start`) for making changes to tclaw itself.
+- Public repos work without a token. Private repos need the GitHub token (same one used by dev workflow).
+- After `repo_remove`, all cached data (bare repo, checkout) is deleted from disk.
 {{if .Onboarding}}
 # Onboarding
 
