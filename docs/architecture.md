@@ -67,6 +67,7 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 | `tool/monzo/` | Monzo banking tools registered when a Monzo connection exists. Direct HTTP calls to the Monzo API. |
 | `tool/tfl/` | Transport for London tools (line status, journey planning, arrivals, disruptions). Always registered — API key stored per-user in secret store. |
 | `tool/devtools/` | MCP tools for dev workflow (dev_start, dev_status, dev_end, dev_cancel, deploy, dev_logs). Git worktree management, PR creation via `gh`, Fly.io deployment, application log inspection. |
+| `tool/repotools/` | MCP tools for read-only monitoring of external git repos (add, sync, log, list, remove). Shallow clones with last-seen commit tracking. |
 | `tool/onboardingtools/` | MCP tools for new user onboarding (status, set_info, advance, tip_shown, skip). Tracks onboarding progress and manages the daily tips schedule. |
 
 ### Infrastructure
@@ -82,6 +83,7 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 | `user/` | `user.ID` and `user.Config` types. Pure data, no I/O. |
 | `schedule/` | Cron schedule store and scheduler daemon. The scheduler runs at user lifetime and injects messages into channels when schedules fire. |
 | `onboarding/` | Onboarding state model and store. Tracks phase progression, info gathered, and feature areas covered. Persisted as JSON in the user's state store. |
+| `repo/` | Tracked repo model and store. Persists repo name, URL, branch, last-seen commit SHA, and directory paths. Backed by the user's state store. |
 | `dev/` | Dev session types and store. Tracks active git worktree sessions, cached repo URL, GitHub token, and deployed commit hash. |
 
 ### CLI Tools
@@ -256,6 +258,7 @@ OnChannelChange callback signals router → agent restarts automatically
     mcp-config/                MCP config JSON files (mounted read-only in sandbox)
     sessions/                  Claude CLI session IDs per channel
     secrets/                   NaCl-encrypted credentials
+    repos/                     read-only repo clones (bare/ + checkout/ per repo)
     main.sock                  unix socket for "main" channel (local only)
     *.sock                     unix sockets for other channels (local only)
 ```
