@@ -66,10 +66,12 @@ type gmailSummary struct {
 	ThreadID string   `json:"thread_id"`
 	From     string   `json:"from"`
 	To       string   `json:"to"`
+	CC       string   `json:"cc,omitempty"`
 	Subject  string   `json:"subject"`
 	Date     string   `json:"date"`
 	Snippet  string   `json:"snippet"`
 	Labels   []string `json:"labels"`
+	IsUnread bool     `json:"is_unread"`
 }
 
 type gmailListToolResponse struct {
@@ -167,7 +169,7 @@ func gmailListHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler 
 					"userId":          "me",
 					"id":              msgID,
 					"format":          "metadata",
-					"metadataHeaders": "Subject,From,To,Date",
+					"metadataHeaders": "Subject,From,To,Cc,Date",
 				})
 
 				output, err := runGWS(ctx, deps, "gmail", "users", "messages", "get", "--params", string(getParams))
@@ -224,6 +226,13 @@ func extractSummary(meta gmailMessageMetadata) gmailSummary {
 		Labels:   meta.LabelIDs,
 	}
 
+	for _, label := range meta.LabelIDs {
+		if label == "UNREAD" {
+			s.IsUnread = true
+			break
+		}
+	}
+
 	if meta.Payload != nil {
 		for _, h := range meta.Payload.Headers {
 			switch h.Name {
@@ -231,6 +240,8 @@ func extractSummary(meta gmailMessageMetadata) gmailSummary {
 				s.From = h.Value
 			case "To":
 				s.To = h.Value
+			case "Cc":
+				s.CC = h.Value
 			case "Subject":
 				s.Subject = h.Value
 			case "Date":
