@@ -82,7 +82,7 @@ func runServe() {
 		fmt.Fprintln(w, version.Commit)
 	}))
 
-	r := router.New(cfg.BaseDir, cfg.Env, reg, callback, cfg.Server.PublicURL, logBuf)
+	r := router.New(cfg.BaseDir, cfg.Env, reg, callback, cfg.Server.PublicURL, logBuf, *configPath)
 	defer r.StopAll()
 
 	for _, u := range cfg.Users {
