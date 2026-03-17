@@ -33,9 +33,11 @@ RUN npm install -g @anthropic-ai/claude-code @googleworkspace/cli
 # Copy the Go binaries.
 COPY --from=builder /bin/tclaw /usr/local/bin/tclaw
 
-# Default config — override by mounting your own tclaw.yaml:
-#   docker run -v /path/to/tclaw.yaml:/etc/tclaw/tclaw.yaml ...
+# Config: copy example first, then overwrite with real config if present.
+# tclaw.yaml is gitignored but exists locally for deploy — if missing (CI, fresh
+# clone), the example provides a safe fallback.
 COPY tclaw.example.yaml /etc/tclaw/tclaw.yaml
+COPY tclaw.yam[l] /etc/tclaw/tclaw.yaml
 
 # Persistent volume at /data holds all per-user state (store, home dirs, etc.).
 VOLUME ["/data"]

@@ -57,6 +57,11 @@ type Router struct {
 	callback  *oauth.CallbackServer // nil if OAuth is not configured
 	publicURL string                // externally-reachable base URL, enables Telegram webhooks
 
+	// configPath is the path to the active tclaw.yaml config file. The deploy
+	// tool copies it into the git checkout so remote builds include the real
+	// config (tclaw.yaml is gitignored, so checkouts only have the example).
+	configPath string
+
 	// Per-user MCP servers, keyed by user ID.
 	mcpServers map[user.ID]*mcp.Server
 
@@ -102,7 +107,7 @@ type managedUser struct {
 // Zone 4 (mcp-config/): MCP config files, mounted read-only so the CLI can read --mcp-config.
 //
 // callback may be nil if OAuth is not configured.
-func New(baseDir string, env config.Env, registry *provider.Registry, callback *oauth.CallbackServer, publicURL string, logBuffer *logbuffer.Buffer) *Router {
+func New(baseDir string, env config.Env, registry *provider.Registry, callback *oauth.CallbackServer, publicURL string, logBuffer *logbuffer.Buffer, configPath string) *Router {
 	return &Router{
 		users:      make(map[user.ID]*managedUser),
 		mcpServers: make(map[user.ID]*mcp.Server),
@@ -112,6 +117,7 @@ func New(baseDir string, env config.Env, registry *provider.Registry, callback *
 		callback:   callback,
 		publicURL:  publicURL,
 		logBuffer:  logBuffer,
+		configPath: configPath,
 	}
 }
 
@@ -391,6 +397,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		UserDir:     userDir,
 		UserID:      mu.cfg.ID,
 		LogBuffer:   r.logBuffer,
+		ConfigPath:  r.configPath,
 	})
 
 	// Set up repo exploration tools for monitoring external repositories.
