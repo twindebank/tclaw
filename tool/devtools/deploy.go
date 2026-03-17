@@ -144,6 +144,12 @@ func deployHandler(deps Deps) mcp.ToolHandler {
 		if err := os.RemoveAll(checkoutDir); err != nil {
 			return nil, fmt.Errorf("clean deploy checkout: %w", err)
 		}
+		// Prune stale worktree refs so git doesn't reject the re-add with
+		// "already registered" after a volume wipe and bare repo re-clone.
+		pruneCmd := exec.Command("git", "-C", repoDir, "worktree", "prune")
+		if out, err := pruneCmd.CombinedOutput(); err != nil {
+			return nil, fmt.Errorf("git worktree prune: %s: %w", string(out), err)
+		}
 		cmd = exec.Command("git", "-c", "core.hooksPath=/dev/null", "-C", repoDir, "worktree", "add", "--detach", checkoutDir, "origin/main")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return nil, fmt.Errorf("create deploy checkout: %s: %w", string(out), err)
