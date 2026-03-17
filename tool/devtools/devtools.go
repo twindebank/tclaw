@@ -23,6 +23,10 @@ type Deps struct {
 	UserDir     string // base directory for this user (worktrees live under <UserDir>/worktrees/)
 	UserID      user.ID
 	LogBuffer   *logbuffer.Buffer // shared log ring buffer, nil if unavailable
+
+	// ConfigPath is the path to the active tclaw.yaml. Copied into deploy
+	// checkouts so remote Fly builds include the real config (it's gitignored).
+	ConfigPath string
 }
 
 // RegisterTools adds dev workflow tools to the MCP handler.
