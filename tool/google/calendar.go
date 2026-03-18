@@ -2,6 +2,7 @@ package google
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -182,6 +183,9 @@ type calendarCreateArgs struct {
 	Description string `json:"description"`
 	Location    string `json:"location"`
 	CalendarID  string `json:"calendar_id"`
+
+	// AddMeet adds a Google Meet video conference link to the event.
+	AddMeet bool `json:"add_meet"`
 }
 
 type calendarCreateToolResponse struct {
@@ -287,15 +291,30 @@ func calendarCreateHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHan
 		if a.Location != "" {
 			eventBody["location"] = a.Location
 		}
+		if a.AddMeet {
+			// conferenceDataVersion=1 must be set as a query param for the API to process conferenceData.
+			requestID, err := generateMeetRequestID()
+			if err != nil {
+				return nil, err
+			}
+			eventBody["conferenceData"] = map[string]any{
+				"createRequest": map[string]any{
+					"requestId":             requestID,
+					"conferenceSolutionKey": map[string]any{"type": "hangoutsMeet"},
+				},
+			}
+		}
 
 		bodyJSON, err := json.Marshal(eventBody)
 		if err != nil {
 			return nil, fmt.Errorf("marshal event body: %w", err)
 		}
 
-		paramsJSON, err := json.Marshal(map[string]any{
-			"calendarId": calendarID,
-		})
+		calendarParams := map[string]any{"calendarId": calendarID}
+		if a.AddMeet {
+			calendarParams["conferenceDataVersion"] = 1
+		}
+		paramsJSON, err := json.Marshal(calendarParams)
 		if err != nil {
 			return nil, fmt.Errorf("marshal params: %w", err)
 		}
@@ -430,4 +449,14 @@ func abs(n int) int {
 		return -n
 	}
 	return n
+}
+
+// generateMeetRequestID returns a random UUID-format string used as the conferenceData
+// requestId. Google Calendar uses this to deduplicate conference creation on retries.
+func generateMeetRequestID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate meet request ID: %w", err)
+	}
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
 }
