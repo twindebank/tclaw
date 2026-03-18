@@ -79,7 +79,8 @@ func devEndHandler(deps Deps) mcp.ToolHandler {
 		// Check for existing PR.
 		prURL, err := ghPRFind(sess.WorktreeDir, sess.Branch, token)
 		if err != nil {
-			// Non-fatal: gh might not be available.
+			// Non-fatal: gh might not be available or the repo may not be on GitHub.
+			slog.Warn("failed to check for existing PR", "branch", sess.Branch, "err", err)
 			prURL = ""
 		}
 

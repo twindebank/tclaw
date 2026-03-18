@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"tclaw/mcp"
@@ -68,7 +69,7 @@ func onboardingAdvanceHandler(deps Deps) mcp.ToolHandler {
 			if state.TipsScheduleID != "" {
 				if err := deps.ScheduleStore.Remove(ctx, schedule.ScheduleID(state.TipsScheduleID)); err != nil {
 					// Non-fatal — schedule may have been manually deleted.
-					fmt.Printf("warning: failed to remove tips schedule: %v\n", err)
+					slog.Warn("failed to remove tips schedule", "schedule_id", state.TipsScheduleID, "err", err)
 				}
 				deps.Scheduler.Reload()
 			}

@@ -23,9 +23,6 @@ func remoteMCPListHandler(deps Deps) mcp.ToolHandler {
 		if err != nil {
 			return nil, fmt.Errorf("list remote mcps: %w", err)
 		}
-		if len(mcps) == 0 {
-			return json.Marshal("No remote MCP servers connected. Use remote_mcp_add to connect one.")
-		}
 
 		type mcpInfo struct {
 			Name     string `json:"name"`
@@ -35,7 +32,7 @@ func remoteMCPListHandler(deps Deps) mcp.ToolHandler {
 			HasToken bool   `json:"has_token"`
 		}
 
-		var result []mcpInfo
+		result := make([]mcpInfo, 0, len(mcps))
 		for _, m := range mcps {
 			auth, err := deps.Manager.GetRemoteMCPAuth(ctx, m.Name)
 			if err != nil {

@@ -44,16 +44,23 @@ func scheduleResumeHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("id is required")
 		}
 
+		var cronParseErr error
 		err := deps.Store.Update(ctx, schedule.ScheduleID(a.ID), func(sched *schedule.Schedule) {
 			sched.Status = schedule.StatusActive
-			// Recalculate next run time from now.
 			parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
-			if cronSched, parseErr := parser.Parse(sched.CronExpr); parseErr == nil {
-				sched.NextRunAt = cronSched.Next(time.Now())
+			cronSched, parseErr := parser.Parse(sched.CronExpr)
+			if parseErr != nil {
+				// Can't return from inside the update func — capture for the caller.
+				cronParseErr = parseErr
+				return
 			}
+			sched.NextRunAt = cronSched.Next(time.Now())
 		})
 		if err != nil {
 			return nil, fmt.Errorf("resume schedule: %w", err)
+		}
+		if cronParseErr != nil {
+			return nil, fmt.Errorf("schedule has invalid cron expression: %w", cronParseErr)
 		}
 
 		deps.Scheduler.Reload()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"time"
 
@@ -169,7 +170,9 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 		if a.TelegramConfig != nil {
 			if err := deps.SecretStore.Set(ctx, channel.ChannelSecretKey(a.Name), a.TelegramConfig.Token); err != nil {
 				// Roll back the channel config if we can't store the secret.
-				_ = deps.DynamicStore.Remove(ctx, a.Name)
+				if rollbackErr := deps.DynamicStore.Remove(ctx, a.Name); rollbackErr != nil {
+					slog.Warn("failed to roll back channel config after secret store error", "channel", a.Name, "err", rollbackErr)
+				}
 				return nil, fmt.Errorf("store channel secret: %w", err)
 			}
 		}

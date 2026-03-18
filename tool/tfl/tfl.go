@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"time"
@@ -46,7 +47,10 @@ func apiGet(ctx context.Context, deps Deps, path string, query url.Values) (json
 	}
 
 	// Add API key if stored — TfL works without one but is rate-limited.
-	apiKey, _ := deps.SecretStore.Get(ctx, APIKeyStoreKey)
+	apiKey, keyErr := deps.SecretStore.Get(ctx, APIKeyStoreKey)
+	if keyErr != nil {
+		slog.Debug("failed to read TfL API key from store", "err", keyErr)
+	}
 	if apiKey != "" {
 		query.Set("app_key", apiKey)
 	}

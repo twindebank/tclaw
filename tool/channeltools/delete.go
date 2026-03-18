@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"tclaw/channel"
 	"tclaw/mcp"
@@ -57,12 +58,12 @@ func channelDeleteHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("delete channel: %w", err)
 		}
 
-		// Clean up any associated secrets (e.g. Telegram bot token).
+		// Clean up any associated secrets (e.g. Telegram bot token). Non-fatal
+		// since the channel config is already removed — an orphaned secret is
+		// less harmful than telling the agent the delete failed.
 		if cfg.Type == channel.TypeTelegram {
 			if err := deps.SecretStore.Delete(ctx, channel.ChannelSecretKey(a.Name)); err != nil {
-				// Log but don't fail — the channel config is already removed.
-				// An orphaned secret is less harmful than a failed delete.
-				return nil, fmt.Errorf("channel deleted but failed to remove secret: %w", err)
+				slog.Warn("failed to clean up channel secret after delete", "channel", a.Name, "err", err)
 			}
 		}
 
@@ -70,6 +71,10 @@ func channelDeleteHandler(deps Deps) mcp.ToolHandler {
 			deps.OnChannelChange()
 		}
 
-		return json.Marshal(fmt.Sprintf("Channel %q deleted. The agent will restart automatically to apply the change.", a.Name))
+		result := map[string]any{
+			"name":    a.Name,
+			"message": fmt.Sprintf("Channel %q deleted. The agent will restart automatically to apply the change.", a.Name),
+		}
+		return json.Marshal(result)
 	}
 }

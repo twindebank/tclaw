@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/url"
 
 	"tclaw/mcp"
@@ -20,7 +21,9 @@ func persistAPIKey(ctx context.Context, deps Deps, key string) {
 		return
 	}
 	// Best-effort — don't fail the tool call if we can't persist.
-	_ = deps.SecretStore.Set(ctx, APIKeyStoreKey, key)
+	if err := deps.SecretStore.Set(ctx, APIKeyStoreKey, key); err != nil {
+		slog.Warn("failed to persist TfL API key", "err", err)
+	}
 }
 
 // makeHandler returns a ToolHandler that dispatches to the correct handler

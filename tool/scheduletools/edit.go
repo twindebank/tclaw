@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -74,9 +75,13 @@ func scheduleEditHandler(deps Deps) mcp.ToolHandler {
 			}
 			if a.CronExpr != "" {
 				sched.CronExpr = a.CronExpr
-				// Recalculate next run time with the new expression.
+				// Recalculate next run time. The cron was already validated above,
+				// so this parse should not fail — but surface it if it does.
 				parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
-				if cronSched, parseErr := parser.Parse(a.CronExpr); parseErr == nil {
+				cronSched, parseErr := parser.Parse(a.CronExpr)
+				if parseErr != nil {
+					slog.Error("cron parse failed after validation", "cron", a.CronExpr, "err", parseErr)
+				} else {
 					sched.NextRunAt = cronSched.Next(time.Now())
 				}
 			}

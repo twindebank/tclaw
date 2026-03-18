@@ -3,7 +3,6 @@ package remotemcp
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"tclaw/connection"
@@ -54,7 +53,7 @@ func (f *pendingRemoteMCPFlow) Complete(ctx context.Context, code string, callba
 
 	// Regenerate MCP config so the remote server's tools become available.
 	if err := f.configUpdater(ctx); err != nil {
-		slog.Error("failed to update mcp config after remote MCP auth", "name", f.name, "err", err)
+		return fmt.Errorf("tokens stored but config update failed for %q — tools won't be available until restart: %w", f.name, err)
 	}
 
 	f.result = fmt.Sprintf("Remote MCP %q authorized successfully", f.name)
