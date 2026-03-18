@@ -117,6 +117,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 				"if a duplicate is found, returns the existing event instead of creating a new one. " +
 				"For all-day events, provide only date. For timed events, provide date + start_time + end_time. " +
 				"Times use 24h format (HH:MM). The local timezone offset is applied automatically — do NOT include timezone info in times. " +
+				"Set add_meet=true to automatically attach a Google Meet video conference link. " +
 				"For complex operations (updating events, managing attendees, recurring rules), use google_workspace directly.",
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
@@ -153,6 +154,10 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 					"calendar_id": {
 						"type": "string",
 						"description": "Calendar ID. Defaults to 'primary'."
+					},
+					"add_meet": {
+						"type": "boolean",
+						"description": "If true, attaches a Google Meet video conference link to the event."
 					}
 				},
 				"required": ["connection", "title", "date"]
