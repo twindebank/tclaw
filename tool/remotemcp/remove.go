@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 
 	"tclaw/mcp"
 )
@@ -41,11 +40,16 @@ func remoteMCPRemoveHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("remove remote mcp: %w", err)
 		}
 
-		// Regenerate config to remove the entry.
+		// Regenerate config to remove the entry. If this fails, the MCP is
+		// deleted from storage but may still appear in config until restart.
 		if updateErr := deps.ConfigUpdater(ctx); updateErr != nil {
-			slog.Error("failed to update mcp config after remove", "err", updateErr)
+			return nil, fmt.Errorf("remote MCP %q removed from storage but config update failed — tools may persist until restart: %w", a.Name, updateErr)
 		}
 
-		return json.Marshal(fmt.Sprintf("Remote MCP %q removed. Its tools will no longer be available on the next message.", a.Name))
+		result := map[string]any{
+			"name":    a.Name,
+			"message": fmt.Sprintf("Remote MCP %q removed. Its tools will no longer be available on the next message.", a.Name),
+		}
+		return json.Marshal(result)
 	}
 }

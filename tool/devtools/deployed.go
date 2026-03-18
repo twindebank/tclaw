@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -109,12 +110,18 @@ func fetchLiveVersion(ctx context.Context, store *dev.Store) string {
 		return ""
 	}
 	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
+	if err != nil {
+		slog.Debug("failed to fetch live version", "url", appURL, "err", err)
 		return ""
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		slog.Debug("live version endpoint returned non-200", "url", appURL, "status", resp.StatusCode)
+		return ""
+	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 64))
 	if err != nil {
+		slog.Debug("failed to read live version response", "url", appURL, "err", err)
 		return ""
 	}
 	return strings.TrimSpace(string(body))

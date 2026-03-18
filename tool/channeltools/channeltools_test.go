@@ -75,7 +75,8 @@ func TestChannelCreate(t *testing.T) {
 			"description": "Personal Telegram bot",
 			"type":        "telegram",
 			"telegram_config": map[string]any{
-				"token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+				"token":         "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+				"allowed_users": []any{float64(123456789)},
 			},
 		})
 
@@ -170,7 +171,7 @@ func TestChannelEdit(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "mybot", "description": "Telegram bot", "type": "telegram",
-			"telegram_config": map[string]any{"token": "old-token"},
+			"telegram_config": map[string]any{"token": "old-token", "allowed_users": []any{float64(123456789)}},
 		})
 
 		result := callTool(t, th.handler, "channel_edit", map[string]any{
@@ -288,7 +289,7 @@ func TestChannelDelete(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "mybot", "description": "Telegram bot", "type": "telegram",
-			"telegram_config": map[string]any{"token": "secret-token"},
+			"telegram_config": map[string]any{"token": "secret-token", "allowed_users": []any{float64(123456789)}},
 		})
 
 		// Verify secret exists before delete.
