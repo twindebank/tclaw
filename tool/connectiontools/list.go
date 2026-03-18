@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"tclaw/connection"
 	"tclaw/mcp"
@@ -24,10 +25,6 @@ func connectionListHandler(mgr *connection.Manager) mcp.ToolHandler {
 		if err != nil {
 			return nil, fmt.Errorf("list connections: %w", err)
 		}
-		if len(conns) == 0 {
-			return json.Marshal("No connections configured. Use connection_add to connect a service.")
-		}
-
 		type connInfo struct {
 			ID       connection.ConnectionID `json:"id"`
 			Provider provider.ProviderID     `json:"provider"`
@@ -36,19 +33,22 @@ func connectionListHandler(mgr *connection.Manager) mcp.ToolHandler {
 			HasCreds bool                    `json:"has_credentials"`
 		}
 
-		var result []connInfo
+		result := make([]connInfo, 0, len(conns))
 		for _, c := range conns {
-			creds, err := mgr.GetCredentials(ctx, c.ID)
-			if err != nil {
-				return nil, fmt.Errorf("get credentials for %s: %w", c.ID, err)
-			}
-			result = append(result, connInfo{
+			info := connInfo{
 				ID:       c.ID,
 				Provider: c.ProviderID,
 				Label:    c.Label,
 				Channel:  c.Channel,
-				HasCreds: creds != nil && creds.AccessToken != "",
-			})
+			}
+			creds, err := mgr.GetCredentials(ctx, c.ID)
+			if err != nil {
+				// Log but continue — one broken credential shouldn't hide all connections.
+				slog.Warn("failed to read credentials for connection", "id", c.ID, "err", err)
+			} else {
+				info.HasCreds = creds != nil && creds.AccessToken != ""
+			}
+			result = append(result, info)
 		}
 
 		return json.Marshal(result)

@@ -68,7 +68,10 @@ func findGWSBinary() string {
 		}
 
 		// Common global install locations for npm/nvm.
-		home, _ := os.UserHomeDir()
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			slog.Debug("failed to get home dir for gws binary search", "err", homeErr)
+		}
 		candidates := []string{
 			home + "/.nvm/versions/node/*/bin/gws", // nvm
 			"/usr/local/bin/gws",                   // system npm
@@ -77,7 +80,11 @@ func findGWSBinary() string {
 		}
 
 		for _, pattern := range candidates {
-			matches, _ := filepath.Glob(pattern)
+			matches, globErr := filepath.Glob(pattern)
+			if globErr != nil {
+				slog.Debug("gws binary glob failed", "pattern", pattern, "err", globErr)
+				continue
+			}
 			if len(matches) > 0 {
 				gwsBinaryPath = matches[len(matches)-1] // latest version if nvm glob matches multiple
 				return

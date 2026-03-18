@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -167,12 +168,10 @@ func generateBranchName(description string) string {
 
 // configureGitUser sets a default git user for the worktree so commits don't fail.
 func configureGitUser(worktreeDir string) {
-	run("git", "-C", worktreeDir, "config", "user.email", "tclaw@localhost")
-	run("git", "-C", worktreeDir, "config", "user.name", "tclaw")
-}
-
-// run executes a command silently, ignoring errors.
-func run(name string, args ...string) {
-	cmd := exec.Command(name, args...)
-	_ = cmd.Run()
+	if out, err := exec.Command("git", "-C", worktreeDir, "config", "user.email", "tclaw@localhost").CombinedOutput(); err != nil {
+		slog.Warn("failed to configure git user.email", "worktree", worktreeDir, "err", err, "output", string(out))
+	}
+	if out, err := exec.Command("git", "-C", worktreeDir, "config", "user.name", "tclaw").CombinedOutput(); err != nil {
+		slog.Warn("failed to configure git user.name", "worktree", worktreeDir, "err", err, "output", string(out))
+	}
 }
