@@ -165,12 +165,16 @@ func gmailListHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler 
 				semaphore <- struct{}{}
 				defer func() { <-semaphore }()
 
-				getParams, _ := json.Marshal(map[string]any{
+				getParams, marshalErr := json.Marshal(map[string]any{
 					"userId":          "me",
 					"id":              msgID,
 					"format":          "metadata",
 					"metadataHeaders": "Subject,From,To,Cc,Date",
 				})
+				if marshalErr != nil {
+					results[idx] = indexedResult{index: idx, err: marshalErr}
+					return
+				}
 
 				output, err := runGWS(ctx, deps, "gmail", "users", "messages", "get", "--params", string(getParams))
 				if err != nil {

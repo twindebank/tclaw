@@ -88,7 +88,7 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 		if err != nil {
 			slog.Warn("auth discovery failed, adding without auth", "name", a.Name, "err", err)
 			if updateErr := deps.ConfigUpdater(ctx); updateErr != nil {
-				slog.Error("failed to update mcp config", "err", updateErr)
+				return nil, fmt.Errorf("remote MCP %q added but config update failed — tools won't be available until next restart: %w", a.Name, updateErr)
 			}
 			result := map[string]any{
 				"name":    entry.Name,
@@ -102,7 +102,7 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 		// No auth needed — just add it and update the config.
 		if authMeta == nil {
 			if updateErr := deps.ConfigUpdater(ctx); updateErr != nil {
-				slog.Error("failed to update mcp config", "err", updateErr)
+				return nil, fmt.Errorf("remote MCP %q added but config update failed — tools won't be available until next restart: %w", a.Name, updateErr)
 			}
 			result := map[string]any{
 				"name":    entry.Name,
@@ -177,7 +177,7 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 			"url":      entry.URL,
 			"status":   "pending_auth",
 			"auth_url": authURL,
-			"message":  fmt.Sprintf("Send this authorization URL to the user. After they authorize, use connection_auth_wait with connection_id=%q to confirm completion. Once authorized, the remote MCP's tools will be available on the next message.", a.Name),
+			"message":  fmt.Sprintf("Send this authorization URL to the user. After they authorize, use remote_mcp_auth_wait with name=%q to confirm completion. Once authorized, the remote MCP's tools will be available on the next message.", a.Name),
 		}
 		return json.Marshal(result)
 	}
