@@ -104,7 +104,8 @@ func repoSyncHandler(deps Deps) mcp.ToolHandler {
 		}
 
 		// Update the read-only checkout.
-		if err := readOnlyCheckout(tracked.RepoDir, tracked.WorktreeDir, tracked.Branch); err != nil {
+		checkout, err := readOnlyCheckout(tracked.RepoDir, tracked.WorktreeDir, tracked.Branch)
+		if err != nil {
 			return nil, fmt.Errorf("checkout: %w", err)
 		}
 
@@ -115,18 +116,22 @@ func repoSyncHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("save repo: %w", err)
 		}
 
-		message := fmt.Sprintf("Repo %q synced. %d new commit(s). Explore files at %s", tracked.Name, newCommitCount, tracked.WorktreeDir)
+		message := fmt.Sprintf("Repo %q synced. %d new commit(s). Checkout %s (%d files, %s). Explore files at %s",
+			tracked.Name, newCommitCount, checkout.Action, checkout.FileCount, tracked.WorktreeDir, tracked.WorktreeDir)
 		if newCommitCount == 0 {
-			message = fmt.Sprintf("Repo %q synced — no new commits since last check. Files at %s", tracked.Name, tracked.WorktreeDir)
+			message = fmt.Sprintf("Repo %q synced — no new commits since last check. Checkout %s (%d files). Explore files at %s",
+				tracked.Name, checkout.Action, checkout.FileCount, tracked.WorktreeDir)
 		}
 
 		result := map[string]any{
-			"name":             tracked.Name,
-			"new_commit_count": newCommitCount,
-			"new_commits":      newCommitLog,
-			"head_commit":      newHead,
-			"worktree_dir":     tracked.WorktreeDir,
-			"message":          message,
+			"name":                tracked.Name,
+			"new_commit_count":    newCommitCount,
+			"new_commits":         newCommitLog,
+			"head_commit":         newHead,
+			"worktree_dir":        tracked.WorktreeDir,
+			"checkout_action":     checkout.Action,
+			"checkout_file_count": checkout.FileCount,
+			"message":             message,
 		}
 		return json.Marshal(result)
 	}

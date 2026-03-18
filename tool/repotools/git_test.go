@@ -46,132 +46,130 @@ func TestSanitizeGitOutput(t *testing.T) {
 	})
 }
 
-func TestShallowCloneOrFetch_FirstClone(t *testing.T) {
-	// Create a local "remote" repo with a commit to clone from.
-	remote := createTestRemote(t, "main")
+func TestShallowCloneOrFetch(t *testing.T) {
+	t.Run("first clone creates bare repo with HEAD", func(t *testing.T) {
+		remote := createTestRemote(t, "main")
+		bareDir := filepath.Join(t.TempDir(), "bare")
+		require.NoError(t, os.MkdirAll(bareDir, 0o755))
 
-	bareDir := filepath.Join(t.TempDir(), "bare")
-	require.NoError(t, os.MkdirAll(bareDir, 0o755))
+		require.NoError(t, shallowCloneOrFetch(bareDir, remote, "main", "", 50))
 
-	err := shallowCloneOrFetch(bareDir, remote, "main", "", 50)
-	require.NoError(t, err)
+		_, err := os.Stat(filepath.Join(bareDir, "HEAD"))
+		require.NoError(t, err)
 
-	// HEAD file should exist after clone.
-	_, err = os.Stat(filepath.Join(bareDir, "HEAD"))
-	require.NoError(t, err)
+		sha, err := headCommitSHA(bareDir, "main")
+		require.NoError(t, err)
+		require.NotEmpty(t, sha)
+	})
 
-	// origin/main ref should be resolvable.
-	sha, err := headCommitSHA(bareDir, "main")
-	require.NoError(t, err)
-	require.NotEmpty(t, sha)
+	t.Run("subsequent fetch advances HEAD", func(t *testing.T) {
+		remote := createTestRemote(t, "main")
+		bareDir := filepath.Join(t.TempDir(), "bare")
+		require.NoError(t, os.MkdirAll(bareDir, 0o755))
+
+		require.NoError(t, shallowCloneOrFetch(bareDir, remote, "main", "", 50))
+		sha1, err := headCommitSHA(bareDir, "main")
+		require.NoError(t, err)
+
+		addCommitToRemote(t, remote, "main", "second.txt", "second commit")
+
+		require.NoError(t, shallowCloneOrFetch(bareDir, remote, "main", "", 50))
+		sha2, err := headCommitSHA(bareDir, "main")
+		require.NoError(t, err)
+		require.NotEqual(t, sha1, sha2, "HEAD should advance after fetch")
+	})
+
+	t.Run("pre-created dir without HEAD still clones", func(t *testing.T) {
+		// Reproduces the bug from commit 5356c57: repo_add creates the
+		// directory eagerly, so shallowCloneOrFetch must check for HEAD,
+		// not just the directory's existence.
+		remote := createTestRemote(t, "main")
+		bareDir := filepath.Join(t.TempDir(), "bare")
+		require.NoError(t, os.MkdirAll(bareDir, 0o755))
+
+		_, err := os.Stat(filepath.Join(bareDir, "HEAD"))
+		require.True(t, os.IsNotExist(err), "HEAD should not exist before clone")
+
+		require.NoError(t, shallowCloneOrFetch(bareDir, remote, "main", "", 50))
+
+		sha, err := headCommitSHA(bareDir, "main")
+		require.NoError(t, err)
+		require.NotEmpty(t, sha)
+	})
 }
 
-func TestShallowCloneOrFetch_SubsequentFetch(t *testing.T) {
-	remote := createTestRemote(t, "main")
-	bareDir := filepath.Join(t.TempDir(), "bare")
-	require.NoError(t, os.MkdirAll(bareDir, 0o755))
+func TestReadOnlyCheckout(t *testing.T) {
+	t.Run("creates worktree from scratch", func(t *testing.T) {
+		remote, bareDir := clonedBareRepo(t, "main")
+		_ = remote
+		checkoutDir := filepath.Join(t.TempDir(), "checkout")
 
-	// First clone.
-	require.NoError(t, shallowCloneOrFetch(bareDir, remote, "main", "", 50))
-	sha1, err := headCommitSHA(bareDir, "main")
-	require.NoError(t, err)
+		result, err := readOnlyCheckout(bareDir, checkoutDir, "main")
+		require.NoError(t, err)
+		require.Equal(t, "created", result.Action)
+		require.Greater(t, result.FileCount, 0)
 
-	// Add a new commit to the remote.
-	addCommitToRemote(t, remote, "main", "second.txt", "second commit")
+		_, err = os.Stat(filepath.Join(checkoutDir, "init.txt"))
+		require.NoError(t, err)
+	})
 
-	// Fetch again.
-	require.NoError(t, shallowCloneOrFetch(bareDir, remote, "main", "", 50))
-	sha2, err := headCommitSHA(bareDir, "main")
-	require.NoError(t, err)
+	t.Run("updates existing worktree with new commits", func(t *testing.T) {
+		remote, bareDir := clonedBareRepo(t, "main")
+		checkoutDir := filepath.Join(t.TempDir(), "checkout")
 
-	require.NotEqual(t, sha1, sha2, "HEAD should advance after fetch")
-}
+		_, err := readOnlyCheckout(bareDir, checkoutDir, "main")
+		require.NoError(t, err)
 
-func TestShallowCloneOrFetch_PreCreatedDirWithoutHEAD(t *testing.T) {
-	// Reproduces the bug from commit 5356c57: repo_add creates the
-	// directory eagerly, so shallowCloneOrFetch must check for HEAD,
-	// not just the directory's existence.
-	remote := createTestRemote(t, "main")
+		addCommitToRemote(t, remote, "main", "new.txt", "new commit")
+		require.NoError(t, shallowCloneOrFetch(bareDir, remote, "main", "", 50))
 
-	bareDir := filepath.Join(t.TempDir(), "bare")
-	require.NoError(t, os.MkdirAll(bareDir, 0o755))
+		result, err := readOnlyCheckout(bareDir, checkoutDir, "main")
+		require.NoError(t, err)
+		require.Equal(t, "updated", result.Action)
+		require.Greater(t, result.FileCount, 0)
 
-	// Directory exists but HEAD does not — should still clone successfully.
-	_, err := os.Stat(filepath.Join(bareDir, "HEAD"))
-	require.True(t, os.IsNotExist(err), "HEAD should not exist before clone")
+		_, err = os.Stat(filepath.Join(checkoutDir, "new.txt"))
+		require.NoError(t, err)
+	})
 
-	require.NoError(t, shallowCloneOrFetch(bareDir, remote, "main", "", 50))
+	t.Run("recreates stale worktree after bare repo re-clone", func(t *testing.T) {
+		remote, bareDir := clonedBareRepo(t, "main")
+		checkoutDir := filepath.Join(t.TempDir(), "checkout")
 
-	sha, err := headCommitSHA(bareDir, "main")
-	require.NoError(t, err)
-	require.NotEmpty(t, sha)
-}
+		_, err := readOnlyCheckout(bareDir, checkoutDir, "main")
+		require.NoError(t, err)
 
-func TestReadOnlyCheckout_CreatesWorktree(t *testing.T) {
-	remote := createTestRemote(t, "main")
-	bareDir := filepath.Join(t.TempDir(), "bare")
-	require.NoError(t, os.MkdirAll(bareDir, 0o755))
-	require.NoError(t, shallowCloneOrFetch(bareDir, remote, "main", "", 50))
+		// Simulate volume wipe + re-clone: replace the bare repo entirely.
+		require.NoError(t, os.RemoveAll(bareDir))
+		require.NoError(t, os.MkdirAll(bareDir, 0o755))
+		require.NoError(t, shallowCloneOrFetch(bareDir, remote, "main", "", 50))
 
-	checkoutDir := filepath.Join(t.TempDir(), "checkout")
+		// checkoutDir still exists but is stale — the bare repo it was
+		// linked to is gone.
+		result, err := readOnlyCheckout(bareDir, checkoutDir, "main")
+		require.NoError(t, err)
+		require.Equal(t, "recreated", result.Action)
+		require.Greater(t, result.FileCount, 0)
 
-	err := readOnlyCheckout(bareDir, checkoutDir, "main")
-	require.NoError(t, err)
+		_, err = os.Stat(filepath.Join(checkoutDir, "init.txt"))
+		require.NoError(t, err)
+	})
 
-	// The file from the initial commit should be in the checkout.
-	_, err = os.Stat(filepath.Join(checkoutDir, "init.txt"))
-	require.NoError(t, err)
-}
+	t.Run("recreates empty pre-created dir from repo_add", func(t *testing.T) {
+		// repo_add pre-creates the checkout dir as an empty directory. If
+		// repo_sync never ran, the dir exists but isn't a worktree.
+		_, bareDir := clonedBareRepo(t, "main")
+		checkoutDir := filepath.Join(t.TempDir(), "checkout")
+		require.NoError(t, os.MkdirAll(checkoutDir, 0o755))
 
-func TestReadOnlyCheckout_UpdatesExistingWorktree(t *testing.T) {
-	remote := createTestRemote(t, "main")
-	bareDir := filepath.Join(t.TempDir(), "bare")
-	require.NoError(t, os.MkdirAll(bareDir, 0o755))
-	require.NoError(t, shallowCloneOrFetch(bareDir, remote, "main", "", 50))
+		result, err := readOnlyCheckout(bareDir, checkoutDir, "main")
+		require.NoError(t, err)
+		require.Equal(t, "recreated", result.Action)
+		require.Greater(t, result.FileCount, 0)
 
-	checkoutDir := filepath.Join(t.TempDir(), "checkout")
-
-	// First checkout.
-	require.NoError(t, readOnlyCheckout(bareDir, checkoutDir, "main"))
-
-	// New commit on remote.
-	addCommitToRemote(t, remote, "main", "new.txt", "new commit")
-	require.NoError(t, shallowCloneOrFetch(bareDir, remote, "main", "", 50))
-
-	// Update checkout.
-	require.NoError(t, readOnlyCheckout(bareDir, checkoutDir, "main"))
-
-	// New file should appear.
-	_, err := os.Stat(filepath.Join(checkoutDir, "new.txt"))
-	require.NoError(t, err)
-}
-
-func TestReadOnlyCheckout_RecreatesStaleWorktree(t *testing.T) {
-	// Reproduces the prod bug: bare repo is re-cloned after a volume wipe
-	// but the checkout dir still exists as a stale (non-git) directory.
-	remote := createTestRemote(t, "main")
-
-	bareDir := filepath.Join(t.TempDir(), "bare")
-	require.NoError(t, os.MkdirAll(bareDir, 0o755))
-	require.NoError(t, shallowCloneOrFetch(bareDir, remote, "main", "", 50))
-
-	checkoutDir := filepath.Join(t.TempDir(), "checkout")
-
-	// Create a valid worktree first.
-	require.NoError(t, readOnlyCheckout(bareDir, checkoutDir, "main"))
-
-	// Simulate volume wipe + re-clone: replace the bare repo entirely.
-	require.NoError(t, os.RemoveAll(bareDir))
-	require.NoError(t, os.MkdirAll(bareDir, 0o755))
-	require.NoError(t, shallowCloneOrFetch(bareDir, remote, "main", "", 50))
-
-	// checkoutDir still exists but is now stale — the bare repo it was
-	// linked to is gone. readOnlyCheckout should recover automatically.
-	require.NoError(t, readOnlyCheckout(bareDir, checkoutDir, "main"))
-
-	// Files from the remote should be present.
-	_, err := os.Stat(filepath.Join(checkoutDir, "init.txt"))
-	require.NoError(t, err)
+		_, err = os.Stat(filepath.Join(checkoutDir, "init.txt"))
+		require.NoError(t, err)
+	})
 }
 
 func TestCommitLogSince(t *testing.T) {
@@ -204,7 +202,6 @@ func TestCommitLogSince(t *testing.T) {
 	})
 
 	t.Run("pruned SHA falls back to recent", func(t *testing.T) {
-		// A bogus SHA that doesn't exist in the shallow clone.
 		logOutput, err := commitLogSince(bareDir, "main", "0000000000000000000000000000000000000000", 5)
 		require.NoError(t, err)
 		require.NotEmpty(t, logOutput, "should fall back to recent commits")
@@ -228,14 +225,23 @@ func TestCommitLogRecent(t *testing.T) {
 }
 
 func TestHeadCommitSHA(t *testing.T) {
-	remote := createTestRemote(t, "main")
-	bareDir := filepath.Join(t.TempDir(), "bare")
-	require.NoError(t, os.MkdirAll(bareDir, 0o755))
-	require.NoError(t, shallowCloneOrFetch(bareDir, remote, "main", "", 50))
+	_, bareDir := clonedBareRepo(t, "main")
 
 	sha, err := headCommitSHA(bareDir, "main")
 	require.NoError(t, err)
 	require.Len(t, sha, 40, "should be a full 40-char SHA")
+}
+
+// --- helpers ---
+
+// clonedBareRepo creates a test remote and a shallow bare clone of it.
+func clonedBareRepo(t *testing.T, branch string) (remoteDir string, bareDir string) {
+	t.Helper()
+	remote := createTestRemote(t, branch)
+	bare := filepath.Join(t.TempDir(), "bare")
+	require.NoError(t, os.MkdirAll(bare, 0o755))
+	require.NoError(t, shallowCloneOrFetch(bare, remote, branch, "", 50))
+	return remote, bare
 }
 
 // createTestRemote creates a non-bare git repo with one commit, usable as a
