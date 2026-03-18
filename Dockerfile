@@ -33,11 +33,10 @@ RUN npm install -g @anthropic-ai/claude-code @googleworkspace/cli
 # Copy the Go binaries.
 COPY --from=builder /bin/tclaw /usr/local/bin/tclaw
 
-# Config: copy example first, then overwrite with real config if present.
-# tclaw.yaml is gitignored but exists locally for deploy — if missing (CI, fresh
-# clone), the example provides a safe fallback.
-COPY tclaw.example.yaml /etc/tclaw/tclaw.yaml
-COPY tclaw.yam[l] /etc/tclaw/tclaw.yaml
+# tclaw.yaml is gitignored — the deploy tool copies it into the build context.
+# Fail the build if it's missing rather than falling back to the example config,
+# which lacks the prod environment and causes a crash loop.
+COPY tclaw.yaml /etc/tclaw/tclaw.yaml
 
 # Persistent volume at /data holds all per-user state (store, home dirs, etc.).
 VOLUME ["/data"]
