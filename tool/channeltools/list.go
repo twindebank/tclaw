@@ -65,7 +65,7 @@ func channelListHandler(deps Deps) mcp.ToolHandler {
 		}
 
 		if len(entries) == 0 {
-			return json.Marshal("No channels configured.")
+			return json.Marshal([]channelListEntry{})
 		}
 
 		return json.Marshal(entries)

@@ -193,7 +193,7 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 		if a.Description != "" {
 			result["description"] = a.Description
 		}
-		if a.TelegramConfig != nil {
+		if a.TelegramConfig != nil && a.TelegramConfig.Token != "" {
 			result["token_rotated"] = true
 		}
 		return json.Marshal(result)
