@@ -163,18 +163,18 @@ func deployHandler(deps Deps) mcp.ToolHandler {
 			}
 		}()
 
-		// Copy the real config into the checkout so the remote Fly builder
-		// includes it. tclaw.yaml is gitignored, so git checkouts only have
-		// tclaw.example.yaml — the Dockerfile's glob COPY picks up tclaw.yaml
-		// when present and overwrites the example.
-		if deps.ConfigPath != "" {
-			configData, readErr := os.ReadFile(deps.ConfigPath)
-			if readErr != nil {
-				return nil, fmt.Errorf("read config for deploy: %w", readErr)
-			}
-			if writeErr := os.WriteFile(filepath.Join(checkoutDir, "tclaw.yaml"), configData, 0o600); writeErr != nil {
-				return nil, fmt.Errorf("copy config to checkout: %w", writeErr)
-			}
+		// tclaw.yaml is gitignored, so the git checkout won't have it. Copy the
+		// real config into the checkout so the Dockerfile COPY finds it — the
+		// build fails without it.
+		if deps.ConfigPath == "" {
+			return nil, fmt.Errorf("config path is required for deploy — tclaw.yaml must be available")
+		}
+		configData, readErr := os.ReadFile(deps.ConfigPath)
+		if readErr != nil {
+			return nil, fmt.Errorf("read config for deploy: %w", readErr)
+		}
+		if writeErr := os.WriteFile(filepath.Join(checkoutDir, "tclaw.yaml"), configData, 0o600); writeErr != nil {
+			return nil, fmt.Errorf("copy config to checkout: %w", writeErr)
 		}
 
 		cmd = exec.Command("fly", "deploy", "--remote-only", "-a", appName)
