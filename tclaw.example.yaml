@@ -27,34 +27,22 @@ users:
     permission_mode: dontAsk
     # Optional: custom system prompt appended after tclaw's default.
     # system_prompt: |
-    #   You are Theo's personal assistant. Be concise and direct.
-    #   Prefer Go for code examples.
+    #   You are a personal assistant. Be concise and direct.
+
+    # Role-based permissions (superuser | developer | assistant).
+    # Roles are simpler than listing individual tools — see docs/features.md for details.
+    role: superuser
+
     channels:
       - type: socket
         name: main
         description: Primary desktop workstation
-    allowed_tools:
-      - Bash
-      - Read
-      - Edit
-      - Write
-      - Glob
-      - Grep
-      - LS
-      - LSP
-      - WebFetch
-      - WebSearch
-      - NotebookEdit
-      - Agent
-      - Task
-      - TaskOutput
-      - TaskStop
-      - TodoWrite
-      - ToolSearch
-      - Skill
-      - AskUserQuestion
-      - EnterPlanMode
-      - ExitPlanMode
-      - EnterWorktree
-      - ListMcpResources
-      - ReadMcpResource
+
+      # Additional channels can override the user-level role:
+      # - type: telegram
+      #   name: mobile
+      #   description: Mobile assistant — concise responses
+      #   role: assistant
+      #   telegram:
+      #     token: ${secret:TELEGRAM_BOT_TOKEN}
+      #     allowed_users: [123456789]  # your Telegram user ID
