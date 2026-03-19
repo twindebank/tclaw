@@ -22,7 +22,7 @@ base_dir: /tmp/tclaw
 
 users:
   - id: default
-    api_key: ${secret:ANTHROPIC_API_KEY}
+    # api_key: ${secret:ANTHROPIC_API_KEY}  # uncomment if using an API key instead of OAuth
     model: claude-sonnet-4-6
     permission_mode: dontAsk
     # Optional: custom system prompt appended after tclaw's default.
