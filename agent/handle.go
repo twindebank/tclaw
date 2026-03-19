@@ -629,6 +629,21 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				return "", err
 			}
 
+		case claudecli.EventRateLimit:
+			var rl claudecli.RateLimitEvent
+			if err := json.Unmarshal(line, &rl); err != nil {
+				slog.Warn("failed to parse rate_limit_event", "err", err)
+				continue
+			}
+			slog.Info("rate limit event received", "retry_after_ms", rl.RetryAfterMs)
+			notice := "⏳ Rate limited — retrying..."
+			if rl.RetryAfterMs > 0 {
+				notice = fmt.Sprintf("⏳ Rate limited — retrying in %ds...", rl.RetryAfterMs/1000)
+			}
+			if err := tw.write(phaseStatus, notice+"\n"); err != nil {
+				return "", err
+			}
+
 		case claudecli.EventResult:
 			var result claudecli.ResultEvent
 			if err := json.Unmarshal(line, &result); err != nil {
@@ -636,7 +651,7 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				continue
 			}
 			if result.IsError {
-				return "", fmt.Errorf("claude error: %s", result.Result)
+				return "", fmt.Errorf("%s", friendlyErrorMessage(result.Result))
 			}
 			if result.SessionID != "" && sessionID == "" {
 				sessionID = result.SessionID
@@ -694,6 +709,23 @@ func modelSummary(usage map[string]claudecli.ModelUsage) string {
 	}
 	sort.Strings(names)
 	return "(" + strings.Join(names, ", ") + ")"
+}
+
+// friendlyErrorMessage converts a raw CLI error string into a user-facing message.
+// Detects known error categories (rate limit, context length, auth) and returns
+// a more actionable message; falls back to the raw text for unknown errors.
+func friendlyErrorMessage(raw string) string {
+	lower := strings.ToLower(raw)
+	switch {
+	case strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit") || strings.Contains(lower, "429"):
+		return "rate limit reached — please wait a moment before sending another message"
+	case strings.Contains(lower, "context") && (strings.Contains(lower, "length") || strings.Contains(lower, "too long") || strings.Contains(lower, "limit")):
+		return "context too long — use 'compact' to reduce conversation size and try again"
+	case strings.Contains(lower, "authentication") || strings.Contains(lower, "auth") || strings.Contains(lower, "unauthorized") || strings.Contains(lower, "401"):
+		return "authentication error — use 'login' to re-authenticate"
+	default:
+		return "claude error: " + raw
+	}
 }
 
 // shortModelName converts a full model ID (possibly with context window suffix)
