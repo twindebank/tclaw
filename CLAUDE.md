@@ -9,6 +9,7 @@
 - Check CVEs and dynamically update dependencies
 - Generally update dependencies (go mod tidy, bump versions)
 - Other periodic maintenance tasks (e.g. rotate secrets, audit configs)
+- Support attachments (files, images)
 
 ## Code Style
 - Comment code that isn't obvious, prefer readability over clever code
