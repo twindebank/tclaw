@@ -98,6 +98,11 @@ func devStartHandler(deps Deps) mcp.ToolHandler {
 			branch = generateBranchName(a.Description)
 		}
 
+		// Validate branch name to prevent path traversal (e.g. "../../../etc").
+		if strings.Contains(branch, "..") || strings.ContainsAny(branch, "/\\") {
+			return nil, fmt.Errorf("invalid branch name %q — must not contain path separators or '..'", branch)
+		}
+
 		// Check if a session already exists for this branch.
 		existing, err := deps.Store.GetSession(ctx, branch)
 		if err != nil {

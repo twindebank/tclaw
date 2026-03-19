@@ -177,6 +177,9 @@ func deployHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("copy config to checkout: %w", writeErr)
 		}
 
+		// fly deploy reads FLY_API_TOKEN from env (no stdin alternative). The token is
+		// only visible to this subprocess — the claude CLI runs in a separate PID namespace
+		// (--unshare-pid in sandbox.go) and cannot read /proc/<pid>/environ.
 		cmd = exec.Command("fly", "deploy", "--remote-only", "-a", appName)
 		cmd.Dir = checkoutDir
 		cmd.Env = append(cmd.Env, "FLY_API_TOKEN="+flyToken, "PATH="+os.Getenv("PATH"), "HOME="+os.Getenv("HOME"))
