@@ -117,6 +117,13 @@ type Delta struct {
 	Thinking string    `json:"thinking,omitempty"`
 }
 
+// RateLimitEvent is emitted when the CLI encounters a rate limit and is waiting to retry.
+// The CLI typically retries automatically; this event is informational for the UI.
+type RateLimitEvent struct {
+	Type         EventType `json:"type"`
+	RetryAfterMs int       `json:"retryAfterMs,omitempty"`
+}
+
 // ResultEvent is the final summary emitted when the CLI finishes.
 type ResultEvent struct {
 	Type       EventType `json:"type"`
