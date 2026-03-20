@@ -24,6 +24,22 @@ import (
 // authentication_failed. The caller should start the interactive auth flow.
 var ErrAuthRequired = errors.New("authentication required")
 
+// ErrRateLimited is returned by streamResponse when the CLI's result indicates
+// a rate limit error. The caller retries the turn with exponential backoff.
+var ErrRateLimited = errors.New("rate limited")
+
+// ToolsDeniedError is returned by streamResponse when the agent tried to use
+// tools that aren't in the channel's allowed list. The caller can prompt the
+// user and retry with the denied tools temporarily enabled.
+type ToolsDeniedError struct {
+	Tools     []string
+	SessionID string
+}
+
+func (e *ToolsDeniedError) Error() string {
+	return fmt.Sprintf("tools denied: %s", strings.Join(e.Tools, ", "))
+}
+
 // writePhase distinguishes status output (thinking, tools, stats) from
 // the actual response text so they can be rendered in separate messages.
 type writePhase int
@@ -358,7 +374,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		}
 	}()
 
-	newSessionID, err := streamResponse(ctx, opts, tw, stdout)
+	newSessionID, err := streamResponse(ctx, opts, tw, stdout, allowed)
 	if err != nil {
 		return "", fmt.Errorf("stream response: %w", err)
 	}
@@ -449,7 +465,10 @@ func allowedEnvVar(key string) bool {
 
 // streamResponse parses stream-json events and sends them to the channel in
 // real time. Returns the session ID captured from init/result events.
-func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Reader) (string, error) {
+// allowedTools is the resolved allowed tool list for the channel — when
+// non-empty, tool_use events for tools not in this list are tracked and
+// returned as a ToolsDeniedError after the turn completes.
+func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Reader, allowedTools []claudecli.Tool) (string, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 256*1024), 10*1024*1024)
 
@@ -466,6 +485,13 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 	// Track whether we've already emitted a text block so we can insert
 	// a newline separator before the next one.
 	hadTextBlock := false
+
+	// Track tools the model tried to use that aren't in the allowed list.
+	allowedSet := make(map[claudecli.Tool]bool, len(allowedTools))
+	for _, t := range allowedTools {
+		allowedSet[t] = true
+	}
+	deniedToolSet := make(map[string]bool)
 	for scanner.Scan() {
 		if ctx.Err() != nil {
 			return sessionID, nil
@@ -525,6 +551,14 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				gotStreamedToolUse = true
 				if err := tw.write(phaseStatus, formatToolUse(start.ContentBlock)); err != nil {
 					return "", err
+				}
+				// Track tools the model tried to use that aren't in the allowed list.
+				// Only applies when an allowlist is configured (non-empty).
+				if len(allowedSet) > 0 && start.ContentBlock.Name != "" {
+					toolName := claudecli.Tool(start.ContentBlock.Name)
+					if !allowedSet[toolName] {
+						deniedToolSet[start.ContentBlock.Name] = true
+					}
 				}
 			default:
 				slog.Debug("unhandled content block type", "type", currentBlockType)
@@ -651,6 +685,10 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				continue
 			}
 			if result.IsError {
+				if isRateLimitError(result.Result) {
+					// Return the session ID so retries can resume the same session.
+					return sessionID, ErrRateLimited
+				}
 				return "", fmt.Errorf("%s", friendlyErrorMessage(result.Result))
 			}
 			if result.SessionID != "" && sessionID == "" {
@@ -694,6 +732,16 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 	if err := scanner.Err(); err != nil {
 		return "", fmt.Errorf("scanner: %w", err)
 	}
+
+	if len(deniedToolSet) > 0 {
+		denied := make([]string, 0, len(deniedToolSet))
+		for tool := range deniedToolSet {
+			denied = append(denied, tool)
+		}
+		sort.Strings(denied)
+		return sessionID, &ToolsDeniedError{Tools: denied, SessionID: sessionID}
+	}
+
 	return sessionID, nil
 }
 
@@ -709,6 +757,14 @@ func modelSummary(usage map[string]claudecli.ModelUsage) string {
 	}
 	sort.Strings(names)
 	return "(" + strings.Join(names, ", ") + ")"
+}
+
+// isRateLimitError checks whether a CLI error string indicates a rate limit.
+func isRateLimitError(raw string) bool {
+	lower := strings.ToLower(raw)
+	return strings.Contains(lower, "rate limit") ||
+		strings.Contains(lower, "rate_limit") ||
+		strings.Contains(lower, "429")
 }
 
 // friendlyErrorMessage converts a raw CLI error string into a user-facing message.
