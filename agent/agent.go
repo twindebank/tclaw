@@ -55,6 +55,14 @@ func isResetCommand(text string) bool {
 const defaultMaxTurns = 10
 const agentIdleTimeout = 10 * time.Minute
 
+// Rate limit retry parameters. When the CLI returns a rate limit error,
+// the turn is retried with exponential backoff.
+const (
+	rateLimitMaxRetries    = 3
+	rateLimitInitialDelay  = 30 * time.Second
+	rateLimitBackoffFactor = 2
+)
+
 // ErrIdleTimeout is returned by RunWithMessages when the agent shuts down
 // due to no messages arriving within the idle timeout.
 var ErrIdleTimeout = errors.New("agent idle timeout")
@@ -72,6 +80,16 @@ var ErrChannelChanged = errors.New("channel changed")
 type ChannelToolPermissions struct {
 	AllowedTools    []claudecli.Tool
 	DisallowedTools []claudecli.Tool
+}
+
+// pendingToolApproval tracks a tool permission denial awaiting user confirmation.
+// When the model tries a tool not in the channel's allowed list, the user is
+// prompted to approve it. If approved, the original message is re-run with the
+// denied tools temporarily added to the allowed list.
+type pendingToolApproval struct {
+	originalMsg channel.TaggedMessage
+	deniedTools []string
+	sessionID   string
 }
 
 // Options configures the agent. All fields are immutable after creation.
@@ -238,12 +256,19 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 	// Per-channel reset flow state.
 	resetFlows := make(map[channel.ChannelID]*pendingReset)
 
+	// Per-channel tool approval state for when the model tries denied tools.
+	toolApprovals := make(map[channel.ChannelID]*pendingToolApproval)
+
 	// oauthNotify wakes the main loop when a background OAuth goroutine
 	// finishes. It carries the channel ID that completed auth so we can
 	// inject a synthetic message and let the state machine process it.
 	oauthNotify := make(chan channel.ChannelID, 4)
 
 	for {
+		// restoreOverride reverts temporary tool expansions after a tool
+		// approval retry. Reset each iteration; set by the approval handler.
+		var restoreOverride func()
+
 		var msg channel.TaggedMessage
 		if len(queue) > 0 {
 			msg = queue[0]
@@ -597,13 +622,115 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			continue
 		}
 
+		// Handle pending tool approval responses (per-channel).
+		if approval, ok := toolApprovals[msg.ChannelID]; ok {
+			ch, chOK := opts.Channels[msg.ChannelID]
+			if !chOK {
+				delete(toolApprovals, msg.ChannelID)
+				continue
+			}
+
+			answer := strings.TrimSpace(strings.ToLower(msg.Text))
+			switch answer {
+			case "approve", "yes", "y":
+				// Re-run the original message with denied tools temporarily allowed.
+				slog.Info("tool approval granted, retrying",
+					"channel", msg.ChannelID, "tools", approval.deniedTools)
+
+				extraTools := make([]claudecli.Tool, len(approval.deniedTools))
+				for i, t := range approval.deniedTools {
+					extraTools[i] = claudecli.Tool(t)
+				}
+				sessions[msg.ChannelID] = approval.sessionID
+				msg = approval.originalMsg
+				delete(toolApprovals, msg.ChannelID)
+
+				// Temporarily expand the allowed tools for this channel.
+				// When a channel override exists, expand that. When it doesn't,
+				// use the user-level AllowedTools as the base so we don't
+				// accidentally restrict the channel to only the denied tools.
+				originalOverride, hadOverride := opts.ChannelToolOverrides[msg.ChannelID]
+				var base []claudecli.Tool
+				if hadOverride {
+					base = originalOverride.AllowedTools
+				} else {
+					base = opts.AllowedTools
+				}
+				expanded := make([]claudecli.Tool, 0, len(base)+len(extraTools))
+				expanded = append(expanded, base...)
+				expanded = append(expanded, extraTools...)
+
+				override := originalOverride
+				override.AllowedTools = expanded
+				if opts.ChannelToolOverrides == nil {
+					opts.ChannelToolOverrides = make(map[channel.ChannelID]ChannelToolPermissions)
+				}
+				opts.ChannelToolOverrides[msg.ChannelID] = override
+
+				// restoreOverride reverts the temporary expansion after the turn.
+				restoreOverride = func() {
+					if hadOverride {
+						opts.ChannelToolOverrides[msg.ChannelID] = originalOverride
+					} else {
+						delete(opts.ChannelToolOverrides, msg.ChannelID)
+					}
+				}
+				// Fall through to the normal handle() dispatch below.
+			default:
+				// Any other message clears the pending approval and is processed normally.
+				delete(toolApprovals, msg.ChannelID)
+				if answer == "no" || answer == "n" || answer == "cancel" {
+					if _, err := ch.Send(ctx, "↩️ Tool approval cancelled."); err != nil {
+						slog.Error("failed to send approval cancel", "err", err)
+					}
+					if err := ch.Done(ctx); err != nil {
+						slog.Error("failed to close turn after approval cancel", "err", err)
+					}
+					continue
+				}
+				// Non-cancel, non-approval: fall through to handle() with the new message.
+			}
+		}
+
 		sessionID := sessions[msg.ChannelID]
 		turnCtx, cancelTurn := context.WithCancel(ctx)
 
 		handleDone := make(chan handleResult, 1)
 		go func() {
-			newSessionID, err := handle(turnCtx, opts, sessionID, msg)
-			handleDone <- handleResult{sessionID: newSessionID, err: err}
+			currentSessionID := sessionID
+			delay := rateLimitInitialDelay
+
+			for attempt := 0; attempt <= rateLimitMaxRetries; attempt++ {
+				newSessionID, err := handle(turnCtx, opts, currentSessionID, msg)
+				if newSessionID != "" {
+					currentSessionID = newSessionID
+				}
+
+				if !errors.Is(err, ErrRateLimited) || attempt == rateLimitMaxRetries {
+					handleDone <- handleResult{sessionID: currentSessionID, err: err}
+					return
+				}
+
+				slog.Info("rate limited, scheduling retry",
+					"attempt", attempt+1, "max_retries", rateLimitMaxRetries,
+					"delay", delay, "channel", msg.ChannelID)
+
+				if retryCh, ok := opts.Channels[msg.ChannelID]; ok {
+					notice := fmt.Sprintf("⏳ Rate limited — retrying in %ds (attempt %d/%d)...",
+						int(delay.Seconds()), attempt+1, rateLimitMaxRetries)
+					if _, sendErr := retryCh.Send(turnCtx, notice); sendErr != nil {
+						slog.Error("failed to send retry notice", "err", sendErr)
+					}
+				}
+
+				select {
+				case <-turnCtx.Done():
+					handleDone <- handleResult{sessionID: currentSessionID, err: turnCtx.Err()}
+					return
+				case <-time.After(delay):
+				}
+				delay *= time.Duration(rateLimitBackoffFactor)
+			}
 		}()
 
 		// While the turn runs, keep reading messages.
@@ -625,6 +752,29 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 					if chOK {
 						if _, sendErr := ch.Send(ctx, authPrompt(ch.Markup())); sendErr != nil {
 							slog.Error("failed to send auth prompt", "err", sendErr)
+						}
+					}
+					goto done
+				}
+
+				// Tool denial: the model tried tools not in the channel's allowed
+				// list. Prompt the user to approve and retry.
+				var denied *ToolsDeniedError
+				if errors.As(result.err, &denied) {
+					slog.Info("tools denied, prompting for approval",
+						"channel", msg.ChannelID, "tools", denied.Tools)
+					toolApprovals[msg.ChannelID] = &pendingToolApproval{
+						originalMsg: msg,
+						deniedTools: denied.Tools,
+						sessionID:   denied.SessionID,
+					}
+					if approvalCh, chOK := opts.Channels[msg.ChannelID]; chOK {
+						m := approvalCh.Markup()
+						toolList := strings.Join(denied.Tools, ", ")
+						prompt := fmt.Sprintf("⚠️ %s was not available on this channel.\nReply %s to retry with %s enabled, or send any other message to continue.",
+							bold(m, toolList), bold(m, "approve"), bold(m, toolList))
+						if _, sendErr := approvalCh.Send(ctx, prompt); sendErr != nil {
+							slog.Error("failed to send tool approval prompt", "err", sendErr)
 						}
 					}
 					goto done
@@ -684,6 +834,9 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 
 	done:
 		cancelTurn()
+		if restoreOverride != nil {
+			restoreOverride()
+		}
 		idle.Reset()
 		ch, ok := opts.Channels[msg.ChannelID]
 		if ok {
