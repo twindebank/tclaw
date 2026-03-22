@@ -41,7 +41,7 @@ func repoListHandler(deps Deps) mcp.ToolHandler {
 			Branch         string `json:"branch"`
 			LastSynced     string `json:"last_synced"`
 			LastSeenCommit string `json:"last_seen_commit"`
-			WorktreeDir    string `json:"worktree_dir"`
+			RepoDir        string `json:"repo_dir"`
 			Age            string `json:"age"`
 		}
 
@@ -64,7 +64,7 @@ func repoListHandler(deps Deps) mcp.ToolHandler {
 				Branch:         r.Branch,
 				LastSynced:     lastSynced,
 				LastSeenCommit: commit,
-				WorktreeDir:    r.WorktreeDir,
+				RepoDir:        r.RepoDir,
 				Age:            time.Since(r.AddedAt).Truncate(time.Minute).String(),
 			})
 		}

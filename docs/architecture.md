@@ -258,7 +258,7 @@ OnChannelChange callback signals router → agent restarts automatically
     mcp-config/                MCP config JSON files (mounted read-only in sandbox)
     sessions/                  Claude CLI session IDs per channel
     secrets/                   NaCl-encrypted credentials
-    repos/                     read-only repo clones (bare/ + checkout/ per repo)
+    repos/                     read-only repo clones (one clone per tracked repo)
     main.sock                  unix socket for "main" channel (local only)
     *.sock                     unix sockets for other channels (local only)
 ```
