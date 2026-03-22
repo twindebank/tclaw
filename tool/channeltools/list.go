@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"tclaw/channel"
 	"tclaw/mcp"
 	"tclaw/role"
 )
@@ -26,48 +25,31 @@ type channelListEntry struct {
 	Role            role.Role `json:"role,omitempty"`
 	AllowedTools    []string  `json:"allowed_tools,omitempty"`
 	DisallowedTools []string  `json:"disallowed_tools,omitempty"`
-	AllowedUsers    []int64   `json:"allowed_users,omitempty"`
 }
 
 func channelListHandler(deps Deps) mcp.ToolHandler {
 	return func(ctx context.Context, _ json.RawMessage) (json.RawMessage, error) {
-		var entries []channelListEntry
-
-		// Static channels from config.
-		for _, info := range deps.StaticChannels {
-			entries = append(entries, channelListEntry{
-				Name:            info.Name,
-				Type:            string(info.Type),
-				Description:     info.Description,
-				Source:          string(channel.SourceStatic),
-				Role:            info.Role,
-				AllowedTools:    info.AllowedTools,
-				DisallowedTools: info.DisallowedTools,
-			})
-		}
-
-		// Dynamic channels from user store.
-		dynamics, err := deps.DynamicStore.List(ctx)
+		entries, err := deps.Registry.All(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("list dynamic channels: %w", err)
+			return nil, fmt.Errorf("list channels: %w", err)
 		}
-		for _, cfg := range dynamics {
-			entries = append(entries, channelListEntry{
-				Name:            cfg.Name,
-				Type:            string(cfg.Type),
-				Description:     cfg.Description,
-				Source:          string(channel.SourceDynamic),
-				Role:            cfg.Role,
-				AllowedTools:    cfg.AllowedTools,
-				DisallowedTools: cfg.DisallowedTools,
-				AllowedUsers:    cfg.AllowedUsers,
+
+		var result []channelListEntry
+		for _, e := range entries {
+			result = append(result, channelListEntry{
+				Name:            e.Name,
+				Type:            string(e.Type),
+				Description:     e.Description,
+				Source:          string(e.Source),
+				Role:            e.Role,
+				AllowedTools:    e.AllowedTools,
+				DisallowedTools: e.DisallowedTools,
 			})
 		}
 
-		if len(entries) == 0 {
+		if len(result) == 0 {
 			return json.Marshal([]channelListEntry{})
 		}
-
-		return json.Marshal(entries)
+		return json.Marshal(result)
 	}
 }

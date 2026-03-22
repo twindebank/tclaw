@@ -345,13 +345,13 @@ func setupHarnessWithCallback(t *testing.T, env config.Env, onChange func()) tes
 	handler := mcp.NewHandler()
 	secrets := newMemorySecretStore()
 
-	staticChannels := []channel.Info{
-		{ID: "/tmp/test/desktop.sock", Type: channel.TypeSocket, Name: "desktop", Description: "Desktop workstation", Source: channel.SourceStatic},
+	staticEntries := []channel.RegistryEntry{
+		{Info: channel.Info{ID: "/tmp/test/desktop.sock", Type: channel.TypeSocket, Name: "desktop", Description: "Desktop workstation", Source: channel.SourceStatic}},
 	}
+	registry := channel.NewRegistry(staticEntries, dynamicStore)
 
 	channeltools.RegisterTools(handler, channeltools.Deps{
-		DynamicStore:    dynamicStore,
-		StaticChannels:  staticChannels,
+		Registry:        registry,
 		Env:             env,
 		SecretStore:     secrets,
 		OnChannelChange: onChange,
