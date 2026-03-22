@@ -216,23 +216,27 @@ func (s *CallbackServer) Stop(ctx context.Context) error {
 	return s.srv.Shutdown(ctx)
 }
 
-// CallbackURL returns the full callback URL for OAuth redirect_uri.
+// BaseURL returns the externally-reachable base URL without any path suffix.
 // Uses publicURL when configured (prod), otherwise derives from the listen address.
-func (s *CallbackServer) CallbackURL() string {
+func (s *CallbackServer) BaseURL() string {
 	if s.publicURL != "" {
-		return s.publicURL + "/oauth/callback"
+		return s.publicURL
 	}
 
-	// Replace wildcard addresses with localhost so the URL is routable
-	// and matches what's registered with OAuth providers.
 	host, port, err := net.SplitHostPort(s.addr)
 	if err != nil {
-		return fmt.Sprintf("http://%s/oauth/callback", s.addr)
+		return "http://" + s.addr
 	}
 	if host == "" || host == "::" || host == "0.0.0.0" {
 		host = "127.0.0.1"
 	}
-	return fmt.Sprintf("http://%s/oauth/callback", net.JoinHostPort(host, port))
+	return "http://" + net.JoinHostPort(host, port)
+}
+
+// CallbackURL returns the full callback URL for OAuth redirect_uri.
+// Uses publicURL when configured (prod), otherwise derives from the listen address.
+func (s *CallbackServer) CallbackURL() string {
+	return s.BaseURL() + "/oauth/callback"
 }
 
 // StartFlow registers a pending OAuth flow and returns the state token.

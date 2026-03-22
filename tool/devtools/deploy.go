@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"tclaw/libraries/credentialerror"
+
 	"tclaw/mcp"
 )
 
@@ -135,7 +137,11 @@ func deployHandler(deps Deps) mcp.ToolHandler {
 			}
 		}
 		if flyToken == "" {
-			return nil, fmt.Errorf("no Fly API token configured — provide fly_api_token parameter (create one with: fly tokens create deploy -x 999999h)")
+			return nil, credentialerror.New(
+				"Fly.io Configuration",
+				"A Fly.io API token is needed for deployment",
+				credentialerror.Field{Key: flyTokenKey, Label: "Fly.io API Token", Description: "Create with: fly tokens create deploy -x 999999h"},
+			)
 		}
 
 		// Create a temporary checkout from the bare repo so fly can find the Dockerfile.

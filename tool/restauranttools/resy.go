@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+
 	"strings"
+	"tclaw/libraries/credentialerror"
 	"time"
 
 	"tclaw/libraries/secret"
@@ -150,9 +152,12 @@ func (r *ResyProvider) readCredentials(ctx context.Context) (apiKey string, auth
 		slog.Debug("failed to read resy api key from store", "err", err)
 	}
 	if apiKey == "" {
-		return "", "", fmt.Errorf("%w: call restaurant_set_credentials with provider=resy first — "+
-			"get your api_key and auth_token from browser dev tools on resy.com "+
-			"(Network tab → any API request → Authorization and x-resy-auth-token headers)", ErrCredentialsRequired)
+		return "", "", credentialerror.New(
+			"Resy Configuration",
+			"Get your credentials from browser dev tools on resy.com — open Network tab, find any API request, copy the Authorization header value (after 'ResyAPI api_key=') and the x-resy-auth-token header value.",
+			credentialerror.Field{Key: ResyAPIKeyStoreKey, Label: "Resy API Key", Description: "Authorization header value (after 'ResyAPI api_key=')"},
+			credentialerror.Field{Key: ResyAuthTokenStoreKey, Label: "Resy Auth Token", Description: "x-resy-auth-token header value"},
+		)
 	}
 
 	authToken, err = r.secretStore.Get(ctx, ResyAuthTokenStoreKey)
@@ -160,7 +165,11 @@ func (r *ResyProvider) readCredentials(ctx context.Context) (apiKey string, auth
 		slog.Debug("failed to read resy auth token from store", "err", err)
 	}
 	if authToken == "" {
-		return "", "", fmt.Errorf("%w: resy auth_token missing — call restaurant_set_credentials with provider=resy", ErrCredentialsRequired)
+		return "", "", credentialerror.New(
+			"Resy Configuration",
+			"Your Resy auth token is missing.",
+			credentialerror.Field{Key: ResyAuthTokenStoreKey, Label: "Resy Auth Token", Description: "x-resy-auth-token header value from resy.com"},
+		)
 	}
 
 	return apiKey, authToken, nil
@@ -227,7 +236,12 @@ func (r *ResyProvider) doRequest(req *http.Request, path string) (json.RawMessag
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return nil, fmt.Errorf("resy credentials invalid or expired (HTTP %d) — call restaurant_set_credentials with fresh values from resy.com", resp.StatusCode)
+		return nil, credentialerror.New(
+			"Resy Credentials Expired",
+			fmt.Sprintf("Resy returned HTTP %d — your credentials are invalid or expired. Get fresh values from browser dev tools on resy.com.", resp.StatusCode),
+			credentialerror.Field{Key: ResyAPIKeyStoreKey, Label: "Resy API Key", Description: "Authorization header value (after 'ResyAPI api_key=')"},
+			credentialerror.Field{Key: ResyAuthTokenStoreKey, Label: "Resy Auth Token", Description: "x-resy-auth-token header value"},
+		)
 	}
 
 	if resp.StatusCode == http.StatusTooManyRequests {

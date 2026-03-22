@@ -42,6 +42,7 @@ import (
 	"tclaw/tool/repotools"
 	"tclaw/tool/restauranttools"
 	"tclaw/tool/scheduletools"
+	"tclaw/tool/secretform"
 	tfltools "tclaw/tool/tfl"
 	"tclaw/user"
 	"tclaw/version"
@@ -491,6 +492,17 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			return ""
 		},
 	})
+
+	// Register secret form tools for collecting sensitive user input via web forms.
+	var secretFormDeps secretform.Deps
+	secretFormDeps.SecretStore = secretStore
+	if r.callback != nil {
+		secretFormDeps.BaseURL = r.callback.BaseURL()
+		secretFormDeps.RegisterHandler = func(pattern string, handler http.Handler) {
+			r.callback.Handle(pattern, handler)
+		}
+	}
+	secretform.RegisterTools(mcpHandler, secretFormDeps)
 
 	// Register tool_list last so it can see all MCP tools from every package.
 	channeltools.RegisterToolListTool(mcpHandler)

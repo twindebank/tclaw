@@ -445,6 +445,40 @@ Reuses the same `github_token` from the encrypted secret store as the dev workfl
 
 The `<userDir>/repos/` parent directory is pre-mounted in the bwrap sandbox, so new repo checkouts created via `repo_sync` are immediately accessible on the next turn without an agent restart.
 
+## Secure Information Collection
+
+The agent can request sensitive information from users via a web form. Values go directly to the encrypted secret store — the agent never sees them and they never appear in chat history.
+
+### Flow
+
+1. Agent calls `secret_form_request` specifying a title and fields (each with a label and a secret store key)
+2. Tool returns a URL with a 32-byte random hex state token
+3. Agent sends the URL to the user (e.g. in Telegram)
+4. User opens the URL, fills in the form, and submits
+5. HTTP POST handler stores each value in the user's encrypted secret store
+6. Agent calls `secret_form_wait` which blocks until submission (polling every 2s, 10-minute timeout)
+7. Wait tool returns the list of stored key names (not values)
+
+### MCP Tools
+
+| Tool | Purpose |
+|------|---------|
+| `secret_form_request` | Create a form and get a URL. Specify title, description, and fields with secret store key mappings. |
+| `secret_form_wait` | Wait for the user to submit. Returns key names on success, timeout status on expiry. |
+
+### Security
+
+- **State tokens**: 32-byte random hex, unguessable
+- **Single-use**: the form URL returns 404 after submission
+- **TTL**: 10-minute expiry on pending requests
+- **HTTPS in production**: form URLs use the public URL which is HTTPS on Fly.io
+- **Rate limiting**: inherited from the callback server's mux-level rate limiter
+- **Agent isolation**: submitted values are never returned to the agent or logged
+
+### Implementation
+
+The `tool/secretform/` package registers two MCP tools and one HTTP endpoint (`/secret-form/{state}`) on the shared callback server. Pending requests are tracked in an in-process `sync.Map` (no disk persistence needed — these are short-lived interactive flows). The HTTP handler serves a self-contained HTML form with inline CSS, mobile-friendly for Telegram users.
+
 ## Secret Management
 
 ### Config-level secrets

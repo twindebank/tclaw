@@ -85,7 +85,7 @@ func TestSearch(t *testing.T) {
 		err := callToolExpectError(t, h, "restaurant_search", map[string]any{
 			"day": "2026-04-15",
 		})
-		require.Contains(t, err.Error(), "credentials not configured")
+		require.Contains(t, err.Error(), "CREDENTIALS_NEEDED")
 	})
 
 	t.Run("requires day parameter", func(t *testing.T) {
@@ -106,7 +106,7 @@ func TestAvailability(t *testing.T) {
 			"venue_id": "12345",
 			"day":      "2026-04-15",
 		})
-		require.Contains(t, err.Error(), "credentials not configured")
+		require.Contains(t, err.Error(), "CREDENTIALS_NEEDED")
 	})
 
 	t.Run("requires venue_id", func(t *testing.T) {
@@ -138,7 +138,7 @@ func TestBook(t *testing.T) {
 			"party_size":        2,
 			"payment_method_id": 1,
 		})
-		require.Contains(t, err.Error(), "credentials not configured")
+		require.Contains(t, err.Error(), "CREDENTIALS_NEEDED")
 	})
 
 	t.Run("requires config_id", func(t *testing.T) {

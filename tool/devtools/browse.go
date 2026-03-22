@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"tclaw/libraries/credentialerror"
+
 	"tclaw/mcp"
 )
 
@@ -40,7 +42,11 @@ func devBrowseHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("read github token: %w", err)
 		}
 		if token == "" {
-			return nil, fmt.Errorf("no GitHub token configured — run dev_start once to set it up")
+			return nil, credentialerror.New(
+				"GitHub Configuration",
+				"A Personal Access Token with repo scope is needed to browse the repo",
+				credentialerror.Field{Key: githubTokenKey, Label: "GitHub Personal Access Token", Description: "Create at github.com/settings/tokens with 'repo' scope"},
+			)
 		}
 
 		repoDir := filepath.Join(deps.UserDir, "repo")
