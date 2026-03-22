@@ -153,11 +153,16 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			}
 		}
 
-		// Check uniqueness against static channels.
-		for _, info := range deps.StaticChannels {
-			if info.Name == a.Name {
+		// Check uniqueness against all existing channels (static + dynamic).
+		exists, existsErr := deps.Registry.NameExists(ctx, a.Name)
+		if existsErr != nil {
+			return nil, fmt.Errorf("check channel name: %w", existsErr)
+		}
+		if exists {
+			if deps.Registry.IsStatic(a.Name) {
 				return nil, fmt.Errorf("channel name %q is already used by a static channel (from config file)", a.Name)
 			}
+			return nil, fmt.Errorf("dynamic channel %q already exists", a.Name)
 		}
 
 		// Validate links.
@@ -191,7 +196,7 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			AllowedUsers:    allowedUsers,
 			Links:           a.Links,
 		}
-		if err := deps.DynamicStore.Add(ctx, cfg); err != nil {
+		if err := deps.Registry.DynamicStore().Add(ctx, cfg); err != nil {
 			return nil, fmt.Errorf("create channel: %w", err)
 		}
 
@@ -199,7 +204,7 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 		if a.TelegramConfig != nil {
 			if err := deps.SecretStore.Set(ctx, channel.ChannelSecretKey(a.Name), a.TelegramConfig.Token); err != nil {
 				// Roll back the channel config if we can't store the secret.
-				if rollbackErr := deps.DynamicStore.Remove(ctx, a.Name); rollbackErr != nil {
+				if rollbackErr := deps.Registry.DynamicStore().Remove(ctx, a.Name); rollbackErr != nil {
 					slog.Warn("failed to roll back channel config after secret store error", "channel", a.Name, "err", rollbackErr)
 				}
 				return nil, fmt.Errorf("store channel secret: %w", err)

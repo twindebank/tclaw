@@ -80,9 +80,9 @@ type managedUser struct {
 	// per-channel tool permissions can be resolved at agent start time.
 	configChannels []config.Channel
 
-	// dynamicStore is set in waitAndStart so StopAll can check dynamic
-	// channel configs for lifecycle notifications.
-	dynamicStore *channel.DynamicStore
+	// registry is set in waitAndStart so StopAll can look up lifecycle
+	// channels. Provides unified access to static + dynamic metadata.
+	registry *channel.Registry
 
 	// Set once the agent is running.
 	cancel context.CancelFunc
@@ -371,34 +371,37 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		}
 	}
 
-	// Create dynamic channel store and register channel management tools.
+	// Create dynamic channel store — the registry wraps it below.
 	dynamicStore := channel.NewDynamicStore(s)
-	mu.dynamicStore = dynamicStore
 
 	// channelChangeCh signals the main loop to restart the agent when
 	// a channel is created, edited, or deleted via MCP tools.
 	channelChangeCh := make(chan struct{}, 1)
 
-	// Collect static channel infos for the channel tools (immutable reference).
-	// Enrich with per-channel tool permissions from config.
-	staticInfos := channel.InfoAll(staticChMap)
+	// Build the channel registry — unified view of static + dynamic metadata.
 	configByName := make(map[string]config.Channel, len(mu.configChannels))
 	for _, cc := range mu.configChannels {
 		configByName[cc.Name] = cc
 	}
-	for i, info := range staticInfos {
+	var staticEntries []channel.RegistryEntry
+	for _, info := range channel.InfoAll(staticChMap) {
+		entry := channel.RegistryEntry{Info: info}
 		if cc, ok := configByName[info.Name]; ok {
-			staticInfos[i].Role = cc.Role
-			staticInfos[i].AllowedTools = cc.AllowedTools
-			staticInfos[i].DisallowedTools = cc.DisallowedTools
-			staticInfos[i].NotifyLifecycle = cc.NotifyLifecycle
+			entry.Info.Role = cc.Role
+			entry.Info.AllowedTools = cc.AllowedTools
+			entry.Info.DisallowedTools = cc.DisallowedTools
+			entry.Info.NotifyLifecycle = cc.NotifyLifecycle
+			entry.Links = cc.Links
 		}
+		staticEntries = append(staticEntries, entry)
 	}
+	registry := channel.NewRegistry(staticEntries, dynamicStore)
+	mu.registry = registry
+
 	channeltools.RegisterTools(mcpHandler, channeltools.Deps{
-		DynamicStore:   dynamicStore,
-		StaticChannels: staticInfos,
-		Env:            r.env,
-		SecretStore:    secretStore,
+		Registry:    registry,
+		Env:         r.env,
+		SecretStore: secretStore,
 		OnChannelChange: func() {
 			select {
 			case channelChangeCh <- struct{}{}:
@@ -474,16 +477,15 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// is set by the agent's OnTurnStart callback before each handle() so
 	// the tool can validate from_channel server-side.
 	crossChannelMsgs := make(chan channel.TaggedMessage, 8)
-	staticLinks := buildLinksMap(mu.configChannels)
 	var activeChannelName atomic.Pointer[string]
 	channeltools.RegisterSendTool(mcpHandler, channeltools.SendDeps{
 		Links: func() map[string][]channel.Link {
-			dynamics, listErr := dynamicStore.List(ctx)
-			if listErr != nil {
-				slog.Error("failed to list dynamic channels for links", "err", listErr)
-				return staticLinks
+			links, linksErr := registry.Links(ctx)
+			if linksErr != nil {
+				slog.Error("failed to get links for channel_send", "err", linksErr)
+				return nil
 			}
-			return mergeLinks(staticLinks, dynamics)
+			return links
 		},
 		Output: crossChannelMsgs,
 		Channels: func() map[channel.ChannelID]channel.Channel {
@@ -556,7 +558,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				allChannels = append(allChannels, ch)
 			}
 			startupMsg := fmt.Sprintf("✅ Started (v%s)", version.Commit)
-			sendLifecycleNotification(ctx, allChannels, mu.configChannels, dynamicStore, startupMsg)
+			sendLifecycleNotification(ctx, allChannels, registry, startupMsg)
 		}
 
 		// Update the channel map so the scheduler can resolve channel names.
@@ -579,10 +581,8 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			})
 		}
 
-		// Populate outbound links from config + dynamic channels and compute
-		// inbound links by inverting the outbound graph.
-		dynamics, _ := dynamicStore.List(dynamicCtx)
-		allLinks := mergeLinks(staticLinks, dynamics)
+		// Populate outbound links and compute inbound links by inverting the graph.
+		allLinks, _ := registry.Links(dynamicCtx)
 		for i, chInfo := range chInfos {
 			if links, ok := allLinks[chInfo.Name]; ok {
 				for _, link := range links {
@@ -741,7 +741,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 		// Build per-channel tool overrides from config (static), store (dynamic),
 		// and roles. Roles are resolved with channel context (connections, remote MCPs).
-		channelToolOverrides := buildChannelToolOverrides(allChMap, configByName, dynamicStore, dynamicCtx, mu.cfg, connMgr)
+		channelToolOverrides := buildChannelToolOverrides(allChMap, registry, dynamicCtx, mu.cfg, connMgr)
 
 		// Generate per-channel MCP config files for channels with scoped remote MCPs.
 		mcpConfigPaths := buildMCPConfigPaths(dynamicCtx, allChMap, connMgr, mcpConfigDir, mcpAddr, mcpToken)
@@ -913,7 +913,9 @@ func (r *Router) StopAll() {
 	defer cancel()
 	msg := fmt.Sprintf("🔄 Shutting down (v%s)...", version.Commit)
 	for _, u := range users {
-		sendLifecycleNotification(shutdownCtx, u.channels, u.configChannels, u.dynamicStore, msg)
+		if u.registry != nil {
+			sendLifecycleNotification(shutdownCtx, u.channels, u.registry, msg)
+		}
 	}
 
 	for id, u := range users {
@@ -925,35 +927,21 @@ func (r *Router) StopAll() {
 	}
 }
 
-// sendLifecycleNotification sends a message to all channels that have NotifyLifecycle
-// enabled. It checks both static (configChannels) and dynamic channel configs.
-func sendLifecycleNotification(ctx context.Context, channels []channel.Channel, configChannels []config.Channel, dynamicStore *channel.DynamicStore, message string) {
-	// Build lookup of which channels want notifications.
-	notify := make(map[string]bool)
-	for _, cc := range configChannels {
-		if cc.NotifyLifecycle {
-			notify[cc.Name] = true
-		}
-	}
-	if dynamicStore != nil {
-		configs, err := dynamicStore.List(ctx)
-		if err != nil {
-			slog.Error("failed to list dynamic channels for lifecycle notification", "err", err)
-		} else {
-			for _, dc := range configs {
-				if dc.NotifyLifecycle {
-					notify[dc.Name] = true
-				}
-			}
-		}
+// sendLifecycleNotification sends a message to all channels that have
+// NotifyLifecycle enabled.
+func sendLifecycleNotification(ctx context.Context, channels []channel.Channel, registry *channel.Registry, message string) {
+	notify, err := registry.LifecycleChannelNames(ctx)
+	if err != nil {
+		slog.Error("failed to get lifecycle channels", "err", err)
+		return
 	}
 
 	for _, ch := range channels {
 		if !notify[ch.Info().Name] {
 			continue
 		}
-		if _, err := ch.Send(ctx, message); err != nil {
-			slog.Warn("failed to send lifecycle notification", "channel", ch.Info().Name, "err", err)
+		if _, sendErr := ch.Send(ctx, message); sendErr != nil {
+			slog.Warn("failed to send lifecycle notification", "channel", ch.Info().Name, "err", sendErr)
 		}
 	}
 }
@@ -1005,30 +993,4 @@ func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel, 
 		}
 	}
 	return channels, nil
-}
-
-// buildLinksMap converts static config channel link declarations into a
-// lookup map of source channel name → allowed outbound targets.
-func buildLinksMap(channels []config.Channel) map[string][]channel.Link {
-	m := make(map[string][]channel.Link)
-	for _, ch := range channels {
-		if len(ch.Links) > 0 {
-			m[ch.Name] = ch.Links
-		}
-	}
-	return m
-}
-
-// mergeLinks combines static and dynamic channel links into a single map.
-func mergeLinks(static map[string][]channel.Link, dynamics []channel.DynamicChannelConfig) map[string][]channel.Link {
-	merged := make(map[string][]channel.Link, len(static)+len(dynamics))
-	for name, links := range static {
-		merged[name] = links
-	}
-	for _, dc := range dynamics {
-		if len(dc.Links) > 0 {
-			merged[dc.Name] = dc.Links
-		}
-	}
-	return merged
 }
