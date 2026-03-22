@@ -16,8 +16,9 @@ import (
 
 func repoAddDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "repo_add",
-		Description: "Register a remote git repo for read-only monitoring. Does not clone — use repo_sync after adding to fetch the code.",
+		Name: "repo_add",
+		Description: "Register a remote git repo for read-only monitoring. Does not clone — use repo_sync after adding to fetch the code. " +
+			"Repos are read-only — don't commit, push, or modify files. Use the dev workflow (dev_start) for making code changes.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
