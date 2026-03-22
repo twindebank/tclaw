@@ -199,6 +199,14 @@ Active dev sessions are shown in the system prompt for awareness, not as a call 
 
 Use `dev_logs` to inspect tclaw's own logs. Logs are persisted to the volume across deployments, so history is available even after restarts. Supports filtering by level, keyword, line count, and time range (`since`: e.g. `"4d"`, `"2h"`, `"1w"`). Logs are scoped to your user — you won't see other users' logs.
 
+## Browsing the codebase (read-only)
+
+Use `dev_browse` to fetch latest main and get a read-only path for exploring source code **without starting a dev session**. Use this to answer questions about the codebase, understand how something works, or check current state. ⚠️ Never write, edit, or commit in the path returned by `dev_browse` — use `dev_start` for any changes.
+
+## CI checks
+
+Use `dev_pr_checks` to see pass/fail status for a PR's CI checks. Call this after opening a PR (or when iterating on one) to verify checks pass before merging. If checks fail, use `dev_start` with the same branch name to check out the PR and fix the issue.
+
 ## Reviewing PRs
 
 When asked about PRs — whether to review, merge, or comment on them — **always read the PR first** using `gh pr view <number>` or the GitHub API before making assertions. Don't assume a PR's status (open, merged, closed) or content without checking. PRs may have already been merged by the time you look at them.
