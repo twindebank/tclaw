@@ -66,6 +66,7 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 | `tool/google/` | Google Workspace tools registered when a Google connection exists. Delegates to `gws` binary. |
 | `tool/monzo/` | Monzo banking tools registered when a Monzo connection exists. Direct HTTP calls to the Monzo API. |
 | `tool/tfl/` | Transport for London tools (line status, journey planning, arrivals, disruptions). Always registered — API key stored per-user in secret store. |
+| `tool/restauranttools/` | Restaurant search and booking tools via provider interface (currently Resy). Always registered — credentials stored per-user in secret store. |
 | `tool/devtools/` | MCP tools for dev workflow (dev_start, dev_status, dev_end, dev_cancel, deploy, dev_logs). Git worktree management, PR creation via `gh`, Fly.io deployment, application log inspection. |
 | `tool/repotools/` | MCP tools for read-only monitoring of external git repos (add, sync, log, list, remove). Shallow clones with last-seen commit tracking. |
 | `tool/onboardingtools/` | MCP tools for new user onboarding (status, set_info, advance, tip_shown, skip). Tracks onboarding progress and manages the daily tips schedule. |
@@ -293,6 +294,8 @@ OnChannelChange callback signals router → agent restarts automatically
 │    github_token           (dev tools)    │
 │    fly_api_token          (deploy tool)  │
 │    tfl_api_key            (tfl tools)    │
+│    resy_api_key           (restaurant)   │
+│    resy_auth_token        (restaurant)   │
 │    conn/<provider>/<id>   (connections)  │
 │    channel/<name>/token   (channels)     │
 └──────────────────────────────────────────┘
@@ -336,6 +339,8 @@ MCP tools read credentials from the per-user encrypted secret store. In producti
 | `GITHUB_TOKEN_<USER>` | `github_token` | `dev_start`, `dev_end`, `deploy` (git fetch) |
 | `FLY_TOKEN_<USER>` | `fly_api_token` | `deploy` (fly deploy) |
 | `TFL_API_KEY_<USER>` | `tfl_api_key` | `tfl_*` tools (Transport for London) |
+| `RESY_API_KEY_<USER>` | `resy_api_key` | `restaurant_*` tools (Resy search/booking) |
+| `RESY_AUTH_TOKEN_<USER>` | `resy_auth_token` | `restaurant_*` tools (Resy search/booking) |
 | `CLAUDE_SETUP_TOKEN_<USER>` | `claude_setup_token` | Claude CLI auth |
 
 **When to use seeding vs runtime prompting:**
@@ -491,6 +496,8 @@ Secret store keys follow a hierarchical naming convention:
 - `github_token` — GitHub PAT for dev workflow (push, PR creation)
 - `fly_api_token` — Fly.io API token for deploys
 - `tfl_api_key` — TfL API key for Transport for London tools
+- `resy_api_key` — Resy API key for restaurant tools
+- `resy_auth_token` — Resy auth token for restaurant tools
 - `conn/<provider>/<id>` — OAuth connection credentials
 - `channel/<name>/token` — dynamic channel secrets (e.g. Telegram bot tokens)
 
