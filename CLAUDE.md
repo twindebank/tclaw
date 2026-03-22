@@ -13,6 +13,9 @@
 - Proper versioning for deployments (semver tags, changelog generation, release notes)
 - Periodic job to audit repo dependencies and open upgrade PRs (needs `repo_*` + `dev_*` tools working together)
 - Voice message transcription — Telegram sends voice notes as .ogg files which the agent can't read. Claude API has no native audio input (as of Mar 2026); use Groq Whisper API (generous free tier). Transcribe at ingest in the Telegram handler, inject as `[Voice message: "<transcript>"]` so the agent sees plain text with no changes needed downstream.
+- Telegram Bot API integration — native tools for managing bot channels: get chat info, list members, pin messages, manage channel settings. Currently all Telegram management is done via BotFather manually; native tools would let the agent set up and configure channels programmatically.
+- Token exhausted state — when Claude API limit is hit, record reset time in channel state. Scheduled jobs should be deferred until reset time (not silently dropped). On reset, prompt user whether to run deferred schedules or skip them. Normal inbound messages should be queued and replayed (or flagged as unactioned) when the limit resets so nothing is silently lost.
+- Channel busy/free check — `channel_is_busy` tool: returns whether a channel has an active agent turn or recent conversation activity (with configurable timeout). Enables scheduled tasks to check before sending cross-channel messages, and to queue/defer if busy rather than interrupting.
 
 ### Maintenance
 - Periodic jobs to check Claude Code changelog and dynamically update agent/CLI behavior
