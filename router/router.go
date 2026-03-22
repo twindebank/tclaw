@@ -468,11 +468,36 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		Store: s,
 	})
 
+	// Set up cross-channel messaging — lets channels send messages to
+	// each other via declared config links. The activeChannelName atomic
+	// is set by the agent's OnTurnStart callback before each handle() so
+	// the tool can validate from_channel server-side.
+	crossChannelMsgs := make(chan channel.TaggedMessage, 8)
+	linksByChannel := buildLinksMap(mu.configChannels)
+	var activeChannelName atomic.Pointer[string]
+	channeltools.RegisterSendTool(mcpHandler, channeltools.SendDeps{
+		Links:  linksByChannel,
+		Output: crossChannelMsgs,
+		Channels: func() map[channel.ChannelID]channel.Channel {
+			if p := currentChannels.Load(); p != nil {
+				return *p
+			}
+			return nil
+		},
+		ActiveChannel: func() string {
+			if p := activeChannelName.Load(); p != nil {
+				return *p
+			}
+			return ""
+		},
+	})
+
 	// Register tool_list last so it can see all MCP tools from every package.
 	channeltools.RegisterToolListTool(mcpHandler)
 
-	// Merge schedule messages into the static stream so they outlive the agent.
-	allStaticMsgs := channel.MergeFanIns(ctx, staticMsgs, scheduleMsgs)
+	// Merge schedule and cross-channel messages into the static stream so
+	// they outlive the agent.
+	allStaticMsgs := channel.MergeFanIns(ctx, staticMsgs, scheduleMsgs, crossChannelMsgs)
 
 	firstBoot := true
 	for {
@@ -533,6 +558,31 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				Source:      string(info.Source),
 				Role:        string(info.Role),
 			})
+		}
+
+		// Populate outbound links from config and compute inbound links
+		// by inverting the outbound graph.
+		for i, chInfo := range chInfos {
+			if links, ok := linksByChannel[chInfo.Name]; ok {
+				for _, link := range links {
+					chInfos[i].OutboundLinks = append(chInfos[i].OutboundLinks, agent.ChannelLinkInfo{
+						ChannelName: link.Target,
+						Description: link.Description,
+					})
+				}
+			}
+		}
+		for _, chInfo := range chInfos {
+			for _, out := range chInfo.OutboundLinks {
+				for j, target := range chInfos {
+					if target.Name == out.ChannelName {
+						chInfos[j].InboundLinks = append(chInfos[j].InboundLinks, agent.ChannelLinkInfo{
+							ChannelName: chInfo.Name,
+							Description: out.Description,
+						})
+					}
+				}
+			}
 		}
 
 		// Build dev session info for the system prompt and AddDirs for sandbox access.
@@ -713,6 +763,9 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				if saveErr := saveSession(ctx, sessionStore, chID, sessionID); saveErr != nil {
 					slog.Error("failed to save session", "err", saveErr)
 				}
+			},
+			OnTurnStart: func(channelName string) {
+				activeChannelName.Store(&channelName)
 			},
 			AllowedTools:         mu.cfg.AllowedTools,
 			DisallowedTools:      mu.cfg.DisallowedTools,
@@ -931,4 +984,16 @@ func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel, 
 		}
 	}
 	return channels, nil
+}
+
+// buildLinksMap converts config channel link declarations into a lookup
+// map of source channel name → allowed outbound targets.
+func buildLinksMap(channels []config.Channel) map[string][]config.ChannelLink {
+	m := make(map[string][]config.ChannelLink)
+	for _, ch := range channels {
+		if len(ch.Links) > 0 {
+			m[ch.Name] = ch.Links
+		}
+	}
+	return m
 }

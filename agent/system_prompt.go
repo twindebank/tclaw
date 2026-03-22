@@ -17,6 +17,7 @@ type systemPromptData struct {
 	Date        string
 	Time        string
 	Channels    []ChannelInfo
+	HasLinks    bool
 	DevSessions []DevSessionInfo
 	UserPrompt  string
 	Onboarding  *OnboardingInfo
@@ -43,6 +44,12 @@ type OnboardingFeatureArea struct {
 	Description string
 }
 
+// ChannelLinkInfo describes a messaging link to/from another channel.
+type ChannelLinkInfo struct {
+	ChannelName string
+	Description string
+}
+
 // ChannelInfo describes a channel for the system prompt template.
 // Plain struct with no transport dependencies — the caller converts
 // from channel.Info before calling BuildSystemPrompt.
@@ -52,6 +59,12 @@ type ChannelInfo struct {
 	Description string
 	Source      string // "static" or "dynamic"
 	Role        string // role name if set (e.g. "assistant", "developer")
+
+	// OutboundLinks lists channels this channel can send messages to.
+	OutboundLinks []ChannelLinkInfo
+
+	// InboundLinks lists channels that can send messages to this channel.
+	InboundLinks []ChannelLinkInfo
 }
 
 // DevSessionInfo describes an active dev session for the system prompt.
@@ -68,10 +81,19 @@ type DevSessionInfo struct {
 // BuildSystemPrompt executes the system_prompt.md template with runtime
 // state and user config. The result is passed to --append-system-prompt.
 func BuildSystemPrompt(channels []ChannelInfo, devSessions []DevSessionInfo, userPrompt string, onboarding *OnboardingInfo) string {
+	hasLinks := false
+	for _, ch := range channels {
+		if len(ch.OutboundLinks) > 0 || len(ch.InboundLinks) > 0 {
+			hasLinks = true
+			break
+		}
+	}
+
 	data := systemPromptData{
 		Date:        time.Now().Format("Monday, January 2, 2006"),
 		Time:        time.Now().Format("15:04 MST"),
 		Channels:    channels,
+		HasLinks:    hasLinks,
 		DevSessions: devSessions,
 		UserPrompt:  userPrompt,
 		Onboarding:  onboarding,

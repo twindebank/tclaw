@@ -27,7 +27,11 @@ func FanIn(ctx context.Context, channels map[ChannelID]Channel) <-chan TaggedMes
 			defer wg.Done()
 			for msg := range ch.Messages(ctx) {
 				select {
-				case out <- TaggedMessage{ChannelID: id, Text: msg}:
+				case out <- TaggedMessage{
+					ChannelID:  id,
+					Text:       msg,
+					SourceInfo: &MessageSourceInfo{Source: SourceUser},
+				}:
 				case <-ctx.Done():
 					return
 				}
