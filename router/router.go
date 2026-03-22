@@ -31,6 +31,7 @@ import (
 	"tclaw/provider"
 	"tclaw/repo"
 	"tclaw/schedule"
+	"tclaw/tool/bankingtools"
 	"tclaw/tool/channeltools"
 	"tclaw/tool/connectiontools"
 	"tclaw/tool/devtools"
@@ -371,6 +372,28 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		}
 	}
 
+	// Seed Enable Banking app ID from Fly secret (e.g. ENABLEBANKING_APP_ID_THEO).
+	ebAppIDEnvVar := agent.EnableBankingAppIDEnvVarName(string(mu.cfg.ID))
+	if ebAppID := os.Getenv(ebAppIDEnvVar); ebAppID != "" {
+		if seedErr := secretStore.Set(ctx, bankingtools.ApplicationIDStoreKey, ebAppID); seedErr != nil {
+			slog.Error("failed to seed enable banking app id from env", "user", mu.cfg.ID, "err", seedErr)
+		} else {
+			os.Unsetenv(ebAppIDEnvVar)
+			slog.Info("seeded and scrubbed enable banking app id from env", "user", mu.cfg.ID, "env_var", ebAppIDEnvVar)
+		}
+	}
+
+	// Seed Enable Banking private key from Fly secret (e.g. ENABLEBANKING_PRIVATE_KEY_THEO).
+	ebPrivKeyEnvVar := agent.EnableBankingPrivateKeyEnvVarName(string(mu.cfg.ID))
+	if ebPrivKey := os.Getenv(ebPrivKeyEnvVar); ebPrivKey != "" {
+		if seedErr := secretStore.Set(ctx, bankingtools.PrivateKeyStoreKey, ebPrivKey); seedErr != nil {
+			slog.Error("failed to seed enable banking private key from env", "user", mu.cfg.ID, "err", seedErr)
+		} else {
+			os.Unsetenv(ebPrivKeyEnvVar)
+			slog.Info("seeded and scrubbed enable banking private key from env", "user", mu.cfg.ID, "env_var", ebPrivKeyEnvVar)
+		}
+	}
+
 	// Create dynamic channel store — the registry wraps it below.
 	dynamicStore := channel.NewDynamicStore(s)
 
@@ -458,6 +481,14 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// credentials at call time and return a helpful error if missing.
 	restauranttools.RegisterTools(mcpHandler, restauranttools.Deps{
 		SecretStore: secretStore,
+	})
+
+	// Register banking tools unconditionally — they check for
+	// credentials at call time and return a helpful error if missing.
+	bankingtools.RegisterTools(mcpHandler, bankingtools.Deps{
+		SecretStore: secretStore,
+		StateStore:  s,
+		Callback:    r.callback,
 	})
 
 	// Set up onboarding state tracking and tools.
