@@ -344,21 +344,23 @@ The agent can create and manage cron schedules that fire autonomously. When a sc
 
 Channels can send messages to each other via config-driven links and the `channel_send` MCP tool. Messages arrive on the target channel's session, waking the agent if idle. The agent sees which channel sent the message in the per-turn Message Context section.
 
-Links are declared per-channel in config. Only declared links are valid — the tool rejects arbitrary sends:
+Links are declared per-channel. Only declared links are valid — the tool rejects arbitrary sends.
+
+**Always try `channel_edit` first.** If the channel is dynamic (user-managed) it will succeed immediately. If it's a static channel, `channel_edit` returns a helpful error with the exact file path and YAML to add.
+
+Static channels are defined in `tclaw.yaml`, which is **gitignored** — it lives only on the running instance, not in source control. To edit a static channel's links:
+1. Use Read/Edit tools to modify the live `tclaw.yaml` directly (the error tells you the path)
+2. Run `deploy` to apply the change
 
 ```yaml
 channels:
-  - name: assistant
-    role: assistant
-    links:
-      - target: dev
-        description: "Report bugs, errors, or issues that require code changes"
-  - name: dev
-    role: developer
+  - name: admin
     links:
       - target: assistant
-        description: "Notify when a fix is ready or a deploy completes"
+        description: "Notify when a fix is ready"
 ```
+
+The `link.description` is the primary guidance for when to use the link — it appears in the channel list in the system prompt. Make it specific and actionable.
 
 The system prompt shows each channel's outbound and inbound links. Agent runtime behavior (when to send, how to handle received messages) is documented in `agent/system_prompt.md`.
 
