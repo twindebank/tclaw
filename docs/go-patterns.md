@@ -23,16 +23,52 @@
 - **Comment line width ~120 characters**
 
 ## Error Handling
+
+> **The golden rule: every error must be visible. No exceptions.**
+
 - **Never use `_` to discard errors** — every function call that returns an error must be handled
-- **Never swallow errors silently** — if you can't return an error, you MUST log it. Never use bare `continue` or empty error handling without logging.
+- **Never swallow errors silently** — if you can't return an error, you MUST log it at `ERROR` or `WARN` level. Never use bare `continue`, bare `return`, or empty `if err != nil {}` blocks without logging.
 - **Never let unexpected cases pass silently** — every unexpected/impossible case must either return an error or log an error. Never return zero values for unexpected states without signaling the problem. This applies to:
   - Switch `default` cases — don't silently return nil
   - Functions that find "no results" when results were expected — return an error
   - Any branch that "shouldn't happen" — make it visible via error or log
+- **Caller must be informed** — if an operation fails partway through, the caller must receive either an error return or an explicit signal in the data. Silent partial failure is the worst kind of bug: the caller proceeds as if nothing happened.
 - **Use simple `if err != nil` for single error checks** — don't use switch statements when there's only one condition
 - **Use switch for multiple error types** — `switch { case errors.Is(err, X): ... case err != nil: ... }`
 - **Wrap errors with context** — `fmt.Errorf("context: %w", err)` to build a traceable error chain
 - **Never return data alongside an error** — on error paths, return zero values for all non-error returns
+
+```go
+// WRONG — silent swallow, caller has no idea the operation failed
+if err != nil {
+    return // ❌ caller proceeds as if nothing happened
+}
+
+// WRONG — logged but caller still proceeds as if media was absent, not failed
+path, err := downloadMedia(msg)
+if err != nil {
+    slog.Warn("failed", "err", err) // ❌ media silently dropped, user never knows
+}
+
+// CORRECT — return error up the stack wherever possible
+if err != nil {
+    return fmt.Errorf("download media: %w", err) // ✅ caller decides what to do
+}
+
+// CORRECT — when returning an error isn't possible, signal failure explicitly in output
+path, err := downloadMedia(msg)
+if err != nil {
+    slog.Error("failed to download media", "err", err)
+    text = formatMediaError(text, err) // ✅ agent sees the failure, can tell the user
+}
+
+// CORRECT — best-effort cleanup functions may swallow, but must still log
+entries, err := os.ReadDir(dir)
+if err != nil {
+    slog.Warn("failed to read dir for cleanup", "dir", dir, "err", err) // ✅ at least visible
+    return
+}
+```
 
 ## Testing
 
