@@ -36,7 +36,9 @@ func runServe() {
 		return
 	}
 
-	logBuf := logbuffer.New(5000)
+	// 50000 lines covers ~1 week of typical log volume and is loaded from
+	// the persisted log file on startup so history survives deployments.
+	logBuf := logbuffer.New(50000)
 	logWriter := io.MultiWriter(os.Stderr, logBuf)
 	slog.SetDefault(slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
@@ -48,6 +50,30 @@ func runServe() {
 	if err != nil {
 		slog.Error("failed to load config", "path", *configPath, "err", err)
 		os.Exit(1)
+	}
+
+	// Persist logs to the volume so they survive deployments. Rotate the file
+	// at 20MB, then load the tail into the buffer before opening for writing.
+	logPath := filepath.Join(cfg.BaseDir, "logs", "tclaw.log")
+	if err := logbuffer.RotateIfNeeded(logPath); err != nil {
+		slog.Warn("log file rotation failed, continuing without rotation", "err", err)
+	}
+	if historical, err := logbuffer.ReadTailLines(logPath, 50000); err != nil {
+		slog.Warn("failed to load historical logs", "err", err)
+	} else if len(historical) > 0 {
+		logBuf.Load(historical)
+		slog.Info("loaded historical log lines", "count", len(historical))
+	}
+	logFile, err := logbuffer.OpenLogFile(logPath)
+	if err != nil {
+		slog.Warn("failed to open log file, logs will not be persisted", "path", logPath, "err", err)
+	} else {
+		defer logFile.Close()
+		slog.SetDefault(slog.New(slog.NewTextHandler(
+			io.MultiWriter(os.Stderr, logBuf, logFile),
+			&slog.HandlerOptions{Level: slog.LevelDebug},
+		)))
+		slog.Info("log file opened", "path", logPath)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
