@@ -377,15 +377,15 @@ The agent can monitor arbitrary remote git repositories for changes via `repo_*`
 
 ### Storage
 
-- **Clone** at `<userDir>/repos/<name>/` — shallow single-branch clone. The agent browses files and runs git commands (log, diff, blame) directly in this directory.
+- **Clone** at `<userDir>/repos/<name>/` — shallow clone (configurable depth, default 50). The agent browses files and runs git commands (log, diff, blame) directly in this directory.
 - **Tracking state** in the user's state store under `"tracked_repos"` — name, URL, branch, last-seen commit SHA, timestamps
 
 ### Lifecycle
 
 1. `repo_add` registers metadata and creates the directory (no network I/O)
-2. `repo_sync` does the actual clone/fetch and advances the last-seen commit cursor
+2. `repo_sync` clones (or fetches if already cloned), updates the working tree, and advances the last-seen commit cursor
 3. The agent explores files using Read/Grep/Glob and inspects git history using Bash (`git log`, `git diff`, etc.) — all in the same directory
-4. `repo_remove` deletes the clone and store entry
+4. `repo_remove` deletes the clone directory and store entry
 
 No automatic cleanup or TTL — the agent manages lifecycle explicitly. Combine with `schedule_create` for periodic monitoring (e.g. daily sync + summarize).
 
