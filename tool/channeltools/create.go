@@ -70,6 +70,18 @@ func channelCreateDef() mcp.ToolDef {
 					"type": "array",
 					"items": {"type": "string"},
 					"description": "Tools explicitly denied on this channel. Works alongside both role and allowed_tools for surgical removal."
+				},
+				"links": {
+					"type": "array",
+					"description": "Cross-channel messaging links. Each declares a target channel this channel can send messages to via channel_send.",
+					"items": {
+						"type": "object",
+						"properties": {
+							"target": {"type": "string", "description": "Name of the target channel."},
+							"description": {"type": "string", "description": "When this link should be used (shown in system prompt)."}
+						},
+						"required": ["target", "description"]
+					}
 				}
 			},
 			"required": ["name", "description", "type"]
@@ -90,6 +102,7 @@ type channelCreateArgs struct {
 	Role            string                `json:"role"`
 	AllowedTools    []string              `json:"allowed_tools"`
 	DisallowedTools []string              `json:"disallowed_tools"`
+	Links           []channel.Link        `json:"links"`
 }
 
 func channelCreateHandler(deps Deps) mcp.ToolHandler {
@@ -147,6 +160,21 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			}
 		}
 
+		// Validate links.
+		linkTargets := make(map[string]bool, len(a.Links))
+		for i, link := range a.Links {
+			if link.Target == "" || link.Description == "" {
+				return nil, fmt.Errorf("links[%d]: target and description are required", i)
+			}
+			if link.Target == a.Name {
+				return nil, fmt.Errorf("links[%d]: self-links are not allowed", i)
+			}
+			if linkTargets[link.Target] {
+				return nil, fmt.Errorf("links[%d]: duplicate target %q", i, link.Target)
+			}
+			linkTargets[link.Target] = true
+		}
+
 		var allowedUsers []int64
 		if a.TelegramConfig != nil {
 			allowedUsers = a.TelegramConfig.AllowedUsers
@@ -161,6 +189,7 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			AllowedTools:    a.AllowedTools,
 			DisallowedTools: a.DisallowedTools,
 			AllowedUsers:    allowedUsers,
+			Links:           a.Links,
 		}
 		if err := deps.DynamicStore.Add(ctx, cfg); err != nil {
 			return nil, fmt.Errorf("create channel: %w", err)

@@ -9,14 +9,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"tclaw/channel"
-	"tclaw/config"
 	"tclaw/mcp"
 	"tclaw/tool/channeltools"
 )
 
 func TestChannelSend(t *testing.T) {
 	t.Run("sends message to linked channel", func(t *testing.T) {
-		h, output := setupSend(t, "assistant", map[string][]config.ChannelLink{
+		h, output := setupSend(t, "assistant", map[string][]channel.Link{
 			"assistant": {{Target: "dev", Description: "report bugs"}},
 		})
 
@@ -47,7 +46,7 @@ func TestChannelSend(t *testing.T) {
 
 	t.Run("rejects spoofed from_channel", func(t *testing.T) {
 		// Active channel is "dev" but agent claims to be on "assistant".
-		h, _ := setupSend(t, "dev", map[string][]config.ChannelLink{
+		h, _ := setupSend(t, "dev", map[string][]channel.Link{
 			"assistant": {{Target: "dev", Description: "report bugs"}},
 		})
 
@@ -60,7 +59,7 @@ func TestChannelSend(t *testing.T) {
 	})
 
 	t.Run("rejects unlisted source channel", func(t *testing.T) {
-		h, _ := setupSend(t, "unknown", map[string][]config.ChannelLink{
+		h, _ := setupSend(t, "unknown", map[string][]channel.Link{
 			"assistant": {{Target: "dev", Description: "report bugs"}},
 		})
 
@@ -73,7 +72,7 @@ func TestChannelSend(t *testing.T) {
 	})
 
 	t.Run("rejects unlisted target channel", func(t *testing.T) {
-		h, _ := setupSend(t, "assistant", map[string][]config.ChannelLink{
+		h, _ := setupSend(t, "assistant", map[string][]channel.Link{
 			"assistant": {{Target: "dev", Description: "report bugs"}},
 		})
 
@@ -86,7 +85,7 @@ func TestChannelSend(t *testing.T) {
 	})
 
 	t.Run("rejects missing from_channel", func(t *testing.T) {
-		h, _ := setupSend(t, "assistant", map[string][]config.ChannelLink{})
+		h, _ := setupSend(t, "assistant", map[string][]channel.Link{})
 
 		err := callToolExpectError(t, h, "channel_send", map[string]any{
 			"to_channel": "dev",
@@ -96,7 +95,7 @@ func TestChannelSend(t *testing.T) {
 	})
 
 	t.Run("rejects empty message", func(t *testing.T) {
-		h, _ := setupSend(t, "assistant", map[string][]config.ChannelLink{
+		h, _ := setupSend(t, "assistant", map[string][]channel.Link{
 			"assistant": {{Target: "dev", Description: "report bugs"}},
 		})
 
@@ -114,8 +113,10 @@ func TestChannelSend(t *testing.T) {
 
 		// Link exists but points to a channel not in the live map.
 		channeltools.RegisterSendTool(handler, channeltools.SendDeps{
-			Links: map[string][]config.ChannelLink{
-				"assistant": {{Target: "missing", Description: "does not exist"}},
+			Links: func() map[string][]channel.Link {
+				return map[string][]channel.Link{
+					"assistant": {{Target: "missing", Description: "does not exist"}},
+				}
 			},
 			Output: output,
 			Channels: func() map[channel.ChannelID]channel.Channel {
@@ -137,7 +138,7 @@ func TestChannelSend(t *testing.T) {
 
 // --- helpers ---
 
-func setupSend(t *testing.T, activeChannel string, links map[string][]config.ChannelLink) (*mcp.Handler, chan channel.TaggedMessage) {
+func setupSend(t *testing.T, activeChannel string, links map[string][]channel.Link) (*mcp.Handler, chan channel.TaggedMessage) {
 	t.Helper()
 	output := make(chan channel.TaggedMessage, 8)
 	handler := mcp.NewHandler()
@@ -148,7 +149,7 @@ func setupSend(t *testing.T, activeChannel string, links map[string][]config.Cha
 	}
 
 	channeltools.RegisterSendTool(handler, channeltools.SendDeps{
-		Links:  links,
+		Links:  func() map[string][]channel.Link { return links },
 		Output: output,
 		Channels: func() map[channel.ChannelID]channel.Channel {
 			return channelMap
