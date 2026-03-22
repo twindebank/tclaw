@@ -304,6 +304,17 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			}
 		}
 
+		// Notify the user when a message arrives from another channel, so
+		// it's clear what triggered the agent turn before the response appears.
+		if msg.SourceInfo != nil && msg.SourceInfo.Source == channel.SourceChannel {
+			if ch, ok := opts.Channels[msg.ChannelID]; ok {
+				notification := fmt.Sprintf("↩️ Message from %s channel", msg.SourceInfo.FromChannel)
+				if _, err := ch.Send(ctx, notification); err != nil {
+					slog.Error("failed to send cross-channel notification", "channel", msg.ChannelID, "err", err)
+				}
+			}
+		}
+
 		if strings.EqualFold(msg.Text, CmdStop) {
 			if !isBuiltinAllowed(opts, msg.ChannelID, claudecli.BuiltinStop) {
 				sendDenied(ctx, opts, msg.ChannelID)
