@@ -123,6 +123,21 @@ type Channel struct {
 
 	// NotifyLifecycle sends a message to this channel on instance startup and shutdown.
 	NotifyLifecycle bool `yaml:"notify_lifecycle,omitempty"`
+
+	// Links declares which channels this channel can send messages to via
+	// the channel_send MCP tool. Only declared links are valid — the agent
+	// cannot send to arbitrary channels.
+	Links []ChannelLink `yaml:"links,omitempty"`
+}
+
+// ChannelLink declares a one-way messaging link from this channel to a target.
+type ChannelLink struct {
+	// Target is the name of the destination channel.
+	Target string `yaml:"target"`
+
+	// Description explains when this link should be used. Shown in the
+	// system prompt to guide the agent's decision.
+	Description string `yaml:"description"`
 }
 
 // TelegramChannelConfig holds Telegram-specific channel configuration.
@@ -303,6 +318,31 @@ func validate(cfg *Config) error {
 				return fmt.Errorf("user %q channel %q: missing type", u.ID, ch.Name)
 			default:
 				return fmt.Errorf("user %q channel %q: unknown type %q (known: socket, stdio, telegram)", u.ID, ch.Name, ch.Type)
+			}
+
+		}
+
+		// Validate channel links in a second pass so forward references work
+		// (a link can target a channel defined later in the list).
+		for _, ch := range u.Channels {
+			linkTargets := make(map[string]bool)
+			for k, link := range ch.Links {
+				if link.Target == "" {
+					return fmt.Errorf("user %q channel %q links[%d]: missing target", u.ID, ch.Name, k)
+				}
+				if link.Description == "" {
+					return fmt.Errorf("user %q channel %q links[%d]: missing description", u.ID, ch.Name, k)
+				}
+				if link.Target == ch.Name {
+					return fmt.Errorf("user %q channel %q links[%d]: self-links are not allowed", u.ID, ch.Name, k)
+				}
+				if linkTargets[link.Target] {
+					return fmt.Errorf("user %q channel %q links[%d]: duplicate target %q", u.ID, ch.Name, k, link.Target)
+				}
+				linkTargets[link.Target] = true
+				if !chNames[link.Target] {
+					return fmt.Errorf("user %q channel %q links[%d]: target %q does not match any channel name", u.ID, ch.Name, k, link.Target)
+				}
 			}
 		}
 	}
