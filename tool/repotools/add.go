@@ -80,23 +80,18 @@ func repoAddHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("repo %q already tracked — use repo_remove first to re-add", a.Name)
 		}
 
-		repoDir := filepath.Join(deps.UserDir, "repos", a.Name, "bare")
-		checkoutDir := filepath.Join(deps.UserDir, "repos", a.Name, "checkout")
+		repoDir := filepath.Join(deps.UserDir, "repos", a.Name)
 
 		if err := os.MkdirAll(repoDir, 0o755); err != nil {
 			return nil, fmt.Errorf("create repo dir: %w", err)
 		}
-		if err := os.MkdirAll(checkoutDir, 0o755); err != nil {
-			return nil, fmt.Errorf("create checkout dir: %w", err)
-		}
 
 		tracked := repo.TrackedRepo{
-			Name:        a.Name,
-			URL:         a.URL,
-			Branch:      branch,
-			RepoDir:     repoDir,
-			WorktreeDir: checkoutDir,
-			AddedAt:     time.Now(),
+			Name:    a.Name,
+			URL:     a.URL,
+			Branch:  branch,
+			RepoDir: repoDir,
+			AddedAt: time.Now(),
 		}
 		if err := deps.Store.Put(ctx, tracked); err != nil {
 			return nil, fmt.Errorf("save repo: %w", err)

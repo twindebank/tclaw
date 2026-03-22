@@ -21,7 +21,7 @@ const (
 func repoSyncDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name:        "repo_sync",
-		Description: "Fetch the latest from a tracked repo and report what's new since the last sync. Updates the read-only checkout for file exploration via Read/Grep/Glob.",
+		Description: "Fetch the latest from a tracked repo and report what's new since the last sync. The repo directory is a full git clone — browse files with Read/Grep/Glob and inspect history with git commands, all in the same directory.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -60,7 +60,7 @@ func repoSyncHandler(deps Deps) mcp.ToolHandler {
 			depth = defaultSyncDepth
 		}
 
-		// Ensure directories exist — they may be gone if the volume was
+		// Ensure the directory exists — it may be gone if the volume was
 		// wiped while the store entries survived.
 		if err := os.MkdirAll(tracked.RepoDir, 0o755); err != nil {
 			return nil, fmt.Errorf("create repo dir: %w", err)
@@ -69,7 +69,7 @@ func repoSyncHandler(deps Deps) mcp.ToolHandler {
 		// Read GitHub token for private repos. Public repos work without one.
 		token, _ := deps.SecretStore.Get(ctx, githubTokenKey)
 
-		if err := shallowCloneOrFetch(tracked.RepoDir, tracked.URL, tracked.Branch, token, depth); err != nil {
+		if err := cloneOrFetch(tracked.RepoDir, tracked.URL, tracked.Branch, token, depth); err != nil {
 			return nil, fmt.Errorf("fetch: %w", err)
 		}
 
@@ -103,11 +103,7 @@ func repoSyncHandler(deps Deps) mcp.ToolHandler {
 			}
 		}
 
-		// Update the read-only checkout.
-		checkout, err := readOnlyCheckout(tracked.RepoDir, tracked.WorktreeDir, tracked.Branch)
-		if err != nil {
-			return nil, fmt.Errorf("checkout: %w", err)
-		}
+		fileCount := countFiles(tracked.RepoDir)
 
 		// Persist updated cursor.
 		tracked.LastSeenCommit = newHead
@@ -116,22 +112,23 @@ func repoSyncHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("save repo: %w", err)
 		}
 
-		message := fmt.Sprintf("Repo %q synced. %d new commit(s). Checkout %s (%d files, %s). Explore files at %s",
-			tracked.Name, newCommitCount, checkout.Action, checkout.FileCount, tracked.WorktreeDir, tracked.WorktreeDir)
+		message := fmt.Sprintf("Repo %q synced. %d new commit(s) (%d files). "+
+			"Browse files and run git commands at %s",
+			tracked.Name, newCommitCount, fileCount, tracked.RepoDir)
 		if newCommitCount == 0 {
-			message = fmt.Sprintf("Repo %q synced — no new commits since last check. Checkout %s (%d files). Explore files at %s",
-				tracked.Name, checkout.Action, checkout.FileCount, tracked.WorktreeDir)
+			message = fmt.Sprintf("Repo %q synced — no new commits since last check (%d files). "+
+				"Browse files and run git commands at %s",
+				tracked.Name, fileCount, tracked.RepoDir)
 		}
 
 		result := map[string]any{
-			"name":                tracked.Name,
-			"new_commit_count":    newCommitCount,
-			"new_commits":         newCommitLog,
-			"head_commit":         newHead,
-			"worktree_dir":        tracked.WorktreeDir,
-			"checkout_action":     checkout.Action,
-			"checkout_file_count": checkout.FileCount,
-			"message":             message,
+			"name":             tracked.Name,
+			"new_commit_count": newCommitCount,
+			"new_commits":      newCommitLog,
+			"head_commit":      newHead,
+			"repo_dir":         tracked.RepoDir,
+			"file_count":       fileCount,
+			"message":          message,
 		}
 		return json.Marshal(result)
 	}
