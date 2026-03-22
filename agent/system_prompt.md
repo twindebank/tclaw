@@ -197,7 +197,7 @@ Active dev sessions are shown in the system prompt for awareness, not as a call 
 
 ## Application logs
 
-Use `dev_logs` to inspect tclaw's own logs from the current instance. Useful for debugging tool failures, auth issues, scheduling problems, or agent lifecycle events. Supports filtering by level, keyword, and line count. Logs are scoped to your user — you won't see other users' logs.
+Use `dev_logs` to inspect tclaw's own logs. Logs are persisted to the volume across deployments, so history is available even after restarts. Supports filtering by level, keyword, line count, and time range (`since`: e.g. `"4d"`, `"2h"`, `"1w"`). Logs are scoped to your user — you won't see other users' logs.
 
 ## Reviewing PRs
 
