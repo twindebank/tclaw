@@ -195,6 +195,12 @@ type Options struct {
 	// May be nil.
 	OnTurnStart func(channelName string)
 
+	// OnTurnEnd is called after each message turn completes (whether
+	// successful, failed, or stopped), with the name of the channel.
+	// The router uses this to update channel activity state.
+	// May be nil.
+	OnTurnEnd func(channelName string)
+
 	// Env identifies the runtime environment (e.g. "local", "prod").
 	// OAuth login is only available in local environments.
 	Env config.Env
@@ -859,6 +865,11 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		cancelTurn()
 		if restoreOverride != nil {
 			restoreOverride()
+		}
+		if opts.OnTurnEnd != nil {
+			if ch, ok := opts.Channels[msg.ChannelID]; ok {
+				opts.OnTurnEnd(ch.Info().Name)
+			}
 		}
 		idle.Reset()
 		ch, ok := opts.Channels[msg.ChannelID]
