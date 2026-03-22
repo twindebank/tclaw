@@ -357,8 +357,8 @@ func (t *Telegram) StatusWrap() StatusWrap {
 }
 
 // downloadMedia downloads the media attachment from a Telegram message to the
-// configured MediaDir. Returns the path relative to the memory dir (parent of
-// MediaDir) so the agent can reference it with the Read tool.
+// configured MediaDir. Returns the absolute path so the agent can pass it
+// directly to the Read tool without needing to resolve against a base dir.
 func (t *Telegram) downloadMedia(ctx context.Context, b *bot.Bot, msg *models.Message) (string, error) {
 	// Clean up old media files before downloading new ones.
 	cleanupOldMedia(t.opts.MediaDir)
@@ -408,8 +408,9 @@ func (t *Telegram) downloadMedia(ctx context.Context, b *bot.Bot, msg *models.Me
 		return "", fmt.Errorf("write file: %w", err)
 	}
 
-	// Return path relative to the memory dir (parent of MediaDir).
-	return filepath.Join("media", filename), nil
+	// Return the absolute path so the agent can pass it directly to the Read
+	// tool without needing to resolve it relative to any base directory.
+	return fullPath, nil
 }
 
 // mediaFileInfo extracts the Telegram file ID and a file extension from the
