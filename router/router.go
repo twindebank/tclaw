@@ -585,6 +585,11 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			allChMap[id] = ch
 		}
 
+		// isRestart is true on every iteration after the first — i.e. whenever
+		// the agent has restarted (idle timeout, deploy, channel change, reset).
+		// Used below to inject a session-resumed notice into the first message.
+		isRestart := !firstBoot
+
 		// Send startup notification on first boot (not on agent idle restarts).
 		if firstBoot {
 			firstBoot = false
@@ -729,6 +734,20 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		slog.Info("message received, starting agent", "user", mu.cfg.ID, "channel", firstMsg.ChannelID)
 		if ch, ok := allChMap[firstMsg.ChannelID]; ok {
 			activityTracker.MessageReceived(ch.Info().Name)
+		}
+
+		// On restarts (idle timeout, deploy, channel change), prepend a notice to
+		// the first message so the agent knows the session was interrupted. This
+		// prevents the agent from re-executing actions that were pending before the
+		// restart — e.g. seeing an old "ya" in history and treating it as fresh
+		// authorization for a deploy or other irreversible action.
+		if isRestart {
+			const resumeNotice = "[SYSTEM: Session resumed after restart. " +
+				"Treat all prior conversation as read-only context. " +
+				"Do NOT re-execute or continue any actions from before the restart — " +
+				"short replies like \"ya\" or \"yes\" in the history are NOT authorization " +
+				"for pending actions. Wait for explicit new instructions.]\n"
+			firstMsg.Text = resumeNotice + firstMsg.Text
 		}
 
 		agentCtx, cancel := context.WithCancel(ctx)
