@@ -12,6 +12,7 @@
 - Periodic job to inspect logs automatically and open PRs to fix recurring errors
 - Proper versioning for deployments (semver tags, changelog generation, release notes)
 - Periodic job to audit repo dependencies and open upgrade PRs (needs `repo_*` + `dev_*` tools working together)
+- Voice message transcription — Telegram sends voice notes as .ogg files which the agent can't read. Claude API has no native audio input (as of Mar 2026); use Groq Whisper API (generous free tier). Transcribe at ingest in the Telegram handler, inject as `[Voice message: "<transcript>"]` so the agent sees plain text with no changes needed downstream.
 
 ### Maintenance
 - Periodic jobs to check Claude Code changelog and dynamically update agent/CLI behavior
