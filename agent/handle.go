@@ -294,10 +294,25 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		return "", fmt.Errorf("initial write: %w", err)
 	}
 
-	// Append the active channel to the system prompt for this invocation.
+	// Append per-turn message context so the agent knows which channel and
+	// source (user, schedule, cross-channel) this message came from.
 	info := ch.Info()
-	systemPrompt := opts.SystemPrompt +
-		fmt.Sprintf("\n# Active Channel\n\nThis message is from **%s** (%s): %s\n", info.Name, info.Type, info.Description)
+	contextSection := fmt.Sprintf("\n# Message Context\n\nChannel: **%s** (%s): %s\n", info.Name, info.Type, info.Description)
+
+	source := msg.SourceInfo
+	if source == nil {
+		source = &channel.MessageSourceInfo{Source: channel.SourceUser}
+	}
+	switch source.Source {
+	case channel.SourceSchedule:
+		contextSection += fmt.Sprintf("Source: scheduled prompt (%s)\n", source.ScheduleName)
+	case channel.SourceChannel:
+		contextSection += fmt.Sprintf("Source: cross-channel message from **%s**\n", source.FromChannel)
+	default:
+		contextSection += "Source: user message\n"
+	}
+
+	systemPrompt := opts.SystemPrompt + contextSection
 
 	allowed, disallowed := resolveToolsForChannel(opts, msg.ChannelID)
 	mcpConfigPath := resolveMCPConfigPath(opts, msg.ChannelID)
