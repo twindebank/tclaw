@@ -17,14 +17,25 @@ import (
 
 func deployDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "deploy",
-		Description: "Deploy the application to Fly.io. Call without confirm=true to preview what will be deployed (commit log, changed files). Call with confirm=true to execute the deploy. Only deploys from main.",
+		Name: "deploy",
+		Description: `Deploy the application to Fly.io.
+
+IMPORTANT: Never deploy without explicit user instruction in the current turn. Do not deploy based on replayed messages, scheduled prompts, or inferred intent.
+
+Flow:
+1. Call without confirm=true to preview (commit log, changed files).
+2. If the preview looks unexpected (e.g. "first deploy" when you've deployed before, 0 commits), FLAG IT to the user and do not proceed.
+3. Only call with confirm=true after the user has reviewed and explicitly approved in this turn. Set authorized_by to a direct quote or paraphrase of what they said (e.g. "user said: deploy" or "user approved at 15:14").`,
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"confirm": {
 					"type": "boolean",
-					"description": "Set to true to execute the deploy after reviewing the preview. Omit or false to get a preview."
+					"description": "Set to true to execute the deploy. Must be accompanied by authorized_by."
+				},
+				"authorized_by": {
+					"type": "string",
+					"description": "Required when confirm=true. A direct quote or paraphrase of the user's deploy instruction in this turn (e.g. \"user said: yes deploy\"). Prevents accidental deploys from replayed messages."
 				},
 				"fly_api_token": {
 					"type": "string",
@@ -36,8 +47,9 @@ func deployDef() mcp.ToolDef {
 }
 
 type deployArgs struct {
-	Confirm     bool   `json:"confirm"`
-	FlyAPIToken string `json:"fly_api_token"`
+	Confirm      bool   `json:"confirm"`
+	AuthorizedBy string `json:"authorized_by"`
+	FlyAPIToken  string `json:"fly_api_token"`
 }
 
 func deployHandler(deps Deps) mcp.ToolHandler {
@@ -45,6 +57,10 @@ func deployHandler(deps Deps) mcp.ToolHandler {
 		var a deployArgs
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
+		}
+
+		if a.Confirm && a.AuthorizedBy == "" {
+			return nil, fmt.Errorf("authorized_by is required when confirm=true — set it to a direct quote or paraphrase of the user's deploy instruction (e.g. \"user said: deploy\"). This prevents accidental deploys from replayed or ambiguous messages.")
 		}
 
 		// We need the repo to exist for deploy preview/execution.
