@@ -70,6 +70,7 @@ func (r *Router) buildDynamicChannels(dynamicCtx context.Context, userID user.ID
 			}
 			opts.ChatID = loadChatID(dynamicCtx, stateStore, cfg.Name)
 			opts.OnChatID = saveChatIDFunc(stateStore, cfg.Name)
+			opts.MediaDir = filepath.Join(r.baseDir, string(userID), "memory", "media")
 			tg := channel.NewDynamicTelegram(token, cfg.Name, cfg.Description, cfg.AllowedUsers, opts)
 			channels[tg.Info().ID] = tg
 		default:

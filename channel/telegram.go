@@ -5,16 +5,28 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 )
+
+// maxMediaDownloadBytes is the maximum file size we'll download from Telegram.
+// Conservative limit for the 512MB Fly VM.
+const maxMediaDownloadBytes = 10 * 1024 * 1024
+
+// mediaRetention is how long downloaded media files are kept before cleanup.
+// Files older than this are deleted when new media is downloaded.
+const mediaRetention = 24 * time.Hour
 
 // TelegramOptions configures optional webhook mode for a Telegram channel.
 type TelegramOptions struct {
@@ -37,6 +49,11 @@ type TelegramOptions struct {
 
 	// OnChatID is called when the chat ID is first set or changes.
 	OnChatID func(chatID int64)
+
+	// MediaDir is the directory where downloaded media files are saved.
+	// Must be inside the agent's sandbox (e.g. memory/media/).
+	// When empty, media messages are processed as text-only (caption only).
+	MediaDir string
 }
 
 // Telegram connects to the Telegram Bot API using either long polling or webhooks.
@@ -121,16 +138,28 @@ func (t *Telegram) Messages(ctx context.Context) <-chan string {
 		defer close(out)
 
 		opts := []bot.Option{
-			bot.WithDefaultHandler(func(_ context.Context, _ *bot.Bot, update *models.Update) {
-				if update.Message == nil || update.Message.Text == "" {
+			bot.WithDefaultHandler(func(handlerCtx context.Context, b *bot.Bot, update *models.Update) {
+				if update.Message == nil {
+					return
+				}
+				msg := update.Message
+
+				// Extract text — media messages use Caption, text messages use Text.
+				text := msg.Text
+				if text == "" {
+					text = msg.Caption
+				}
+
+				hasMedia := len(msg.Photo) > 0 || msg.Voice != nil || msg.Audio != nil
+				if text == "" && !hasMedia {
 					return
 				}
 
 				// Reject messages from users not in the allowlist.
 				if len(t.allowedUsers) > 0 {
 					fromID := int64(0)
-					if update.Message.From != nil {
-						fromID = update.Message.From.ID
+					if msg.From != nil {
+						fromID = msg.From.ID
 					}
 					if _, ok := t.allowedUsers[fromID]; !ok {
 						slog.Warn("telegram message from unauthorized user",
@@ -141,12 +170,21 @@ func (t *Telegram) Messages(ctx context.Context) <-chan string {
 					}
 				}
 
-				chatID := update.Message.Chat.ID
-				text := update.Message.Text
+				chatID := msg.Chat.ID
+
+				// Download media if present.
+				if hasMedia && t.opts.MediaDir != "" {
+					mediaPath, err := t.downloadMedia(handlerCtx, b, msg)
+					if err != nil {
+						slog.Warn("failed to download media", "err", err, "channel", t.name)
+					} else {
+						text = formatMediaMessage(text, mediaPath)
+					}
+				}
 
 				// Prepend a short snippet of the replied-to message so the
 				// agent knows what the user is referring to.
-				if reply := update.Message.ReplyToMessage; reply != nil && reply.Text != "" {
+				if reply := msg.ReplyToMessage; reply != nil && reply.Text != "" {
 					snippet := truncateReplySnippet(reply.Text, 100)
 					text = "[replying to: \"" + snippet + "\"]\n" + text
 				}
@@ -154,6 +192,7 @@ func (t *Telegram) Messages(ctx context.Context) <-chan string {
 				slog.Info("telegram message received",
 					"chat_id", chatID,
 					"length", len(text),
+					"has_media", hasMedia,
 					"channel", t.name,
 				)
 
@@ -315,6 +354,145 @@ func (t *Telegram) Markup() Markup {
 
 func (t *Telegram) StatusWrap() StatusWrap {
 	return StatusWrap{Open: "<blockquote expandable>", Close: "</blockquote>"}
+}
+
+// downloadMedia downloads the media attachment from a Telegram message to the
+// configured MediaDir. Returns the path relative to the memory dir (parent of
+// MediaDir) so the agent can reference it with the Read tool.
+func (t *Telegram) downloadMedia(ctx context.Context, b *bot.Bot, msg *models.Message) (string, error) {
+	// Clean up old media files before downloading new ones.
+	cleanupOldMedia(t.opts.MediaDir)
+
+	fileID, ext := mediaFileInfo(msg)
+	if fileID == "" {
+		return "", fmt.Errorf("no supported media in message")
+	}
+
+	file, err := b.GetFile(ctx, &bot.GetFileParams{FileID: fileID})
+	if err != nil {
+		return "", fmt.Errorf("get file: %w", err)
+	}
+	if file.FileSize > maxMediaDownloadBytes {
+		return "", fmt.Errorf("file too large (%d bytes, max %d)", file.FileSize, maxMediaDownloadBytes)
+	}
+
+	downloadURL := b.FileDownloadLink(file)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("download: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("download status %d", resp.StatusCode)
+	}
+
+	// Limit the reader to prevent unexpectedly large downloads.
+	body := io.LimitReader(resp.Body, maxMediaDownloadBytes+1)
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return "", fmt.Errorf("read body: %w", err)
+	}
+	if len(data) > maxMediaDownloadBytes {
+		return "", fmt.Errorf("file too large (downloaded %d bytes, max %d)", len(data), maxMediaDownloadBytes)
+	}
+
+	filename := mediaFilename(msg, ext)
+	fullPath := filepath.Join(t.opts.MediaDir, filename)
+	if err := os.WriteFile(fullPath, data, 0o644); err != nil {
+		return "", fmt.Errorf("write file: %w", err)
+	}
+
+	// Return path relative to the memory dir (parent of MediaDir).
+	return filepath.Join("media", filename), nil
+}
+
+// mediaFileInfo extracts the Telegram file ID and a file extension from the
+// message's media attachment. Returns empty strings if no supported media.
+func mediaFileInfo(msg *models.Message) (fileID string, ext string) {
+	switch {
+	case len(msg.Photo) > 0:
+		// Telegram sends photos as an array of sizes — last is largest.
+		largest := msg.Photo[len(msg.Photo)-1]
+		return largest.FileID, ".jpg"
+	case msg.Voice != nil:
+		return msg.Voice.FileID, ".ogg"
+	case msg.Audio != nil:
+		ext := ".mp3"
+		if msg.Audio.FileName != "" {
+			if e := filepath.Ext(msg.Audio.FileName); e != "" {
+				ext = e
+			}
+		}
+		return msg.Audio.FileID, ext
+	default:
+		return "", ""
+	}
+}
+
+// mediaFilename builds a unique filename for a downloaded media file.
+func mediaFilename(msg *models.Message, ext string) string {
+	ts := time.Now().Unix()
+	prefix := "file"
+	switch {
+	case len(msg.Photo) > 0:
+		prefix = "photo"
+	case msg.Voice != nil:
+		prefix = "voice"
+	case msg.Audio != nil:
+		prefix = "audio"
+	}
+	// Use the message ID as a simple collision-resistant suffix.
+	return fmt.Sprintf("%s_%d_%d%s", prefix, ts, msg.ID, ext)
+}
+
+// formatMediaMessage builds the prompt text that tells the agent about an
+// attached media file so it knows to Read it.
+func formatMediaMessage(text string, mediaPath string) string {
+	mediaType := "file"
+	ext := filepath.Ext(mediaPath)
+	switch {
+	case ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp":
+		mediaType = "image"
+	case ext == ".ogg" || ext == ".mp3" || ext == ".m4a" || ext == ".wav" || ext == ".flac":
+		mediaType = "audio"
+	}
+
+	attachment := fmt.Sprintf("[Attached %s: %s — view it with the Read tool]", mediaType, mediaPath)
+	if text == "" {
+		return attachment
+	}
+	return attachment + "\n" + text
+}
+
+// cleanupOldMedia removes files in the media directory that are older than
+// mediaRetention. Best-effort — errors are logged and swallowed.
+func cleanupOldMedia(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-mediaRetention)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().Before(cutoff) {
+			path := filepath.Join(dir, entry.Name())
+			if err := os.Remove(path); err != nil {
+				slog.Warn("failed to clean up old media file", "path", path, "err", err)
+			}
+		}
+	}
 }
 
 // markdownBold matches **text** that the model emits despite being told to use HTML.
