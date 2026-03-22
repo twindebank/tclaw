@@ -146,6 +146,10 @@ func (s *Scheduler) fireReadySchedules(ctx context.Context) {
 		msg := channel.TaggedMessage{
 			ChannelID: channelID,
 			Text:      sched.Prompt,
+			SourceInfo: &channel.MessageSourceInfo{
+				Source:       channel.SourceSchedule,
+				ScheduleName: string(sched.ID),
+			},
 		}
 		select {
 		case s.output <- msg:

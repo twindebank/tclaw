@@ -189,6 +189,12 @@ type Options struct {
 	// cleanup. May be nil if reset is not supported.
 	OnReset func(level ResetLevel) error
 
+	// OnTurnStart is called before each message is handled, with the name
+	// of the channel being processed. The router uses this to track the
+	// active channel for server-side validation of cross-channel sends.
+	// May be nil.
+	OnTurnStart func(channelName string)
+
 	// Env identifies the runtime environment (e.g. "local", "prod").
 	// OAuth login is only available in local environments.
 	Env config.Env
@@ -694,6 +700,12 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 
 		sessionID := sessions[msg.ChannelID]
 		turnCtx, cancelTurn := context.WithCancel(ctx)
+
+		if opts.OnTurnStart != nil {
+			if ch, ok := opts.Channels[msg.ChannelID]; ok {
+				opts.OnTurnStart(ch.Info().Name)
+			}
+		}
 
 		handleDone := make(chan handleResult, 1)
 		go func() {

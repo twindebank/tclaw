@@ -67,11 +67,35 @@ type Info struct {
 	NotifyLifecycle bool
 }
 
+// MessageSource identifies where a message originated.
+type MessageSource string
+
+const (
+	SourceUser     MessageSource = "user"     // typed by a human on the channel
+	SourceSchedule MessageSource = "schedule" // fired by a cron schedule
+	SourceChannel  MessageSource = "channel"  // sent from another channel via channel_send
+)
+
+// MessageSourceInfo carries attribution details for a message.
+type MessageSourceInfo struct {
+	Source MessageSource
+
+	// FromChannel is the name of the source channel (set when Source == SourceChannel).
+	FromChannel string
+
+	// ScheduleName is the schedule's human-readable name (set when Source == SourceSchedule).
+	ScheduleName string
+}
+
 // TaggedMessage pairs an incoming message with the channel it arrived on
 // so the agent can route responses back to the correct transport.
 type TaggedMessage struct {
 	ChannelID ChannelID
 	Text      string
+
+	// SourceInfo describes where this message came from. Nil is treated as
+	// SourceUser for backwards compatibility.
+	SourceInfo *MessageSourceInfo
 }
 
 // StatusWrap holds the open and close tags for wrapping status content
