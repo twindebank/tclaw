@@ -421,11 +421,14 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	registry := channel.NewRegistry(staticEntries, dynamicStore)
 	mu.registry = registry
 
+	activityTracker := channel.NewActivityTracker()
+
 	channeltools.RegisterTools(mcpHandler, channeltools.Deps{
-		Registry:    registry,
-		Env:         r.env,
-		SecretStore: secretStore,
-		ConfigPath:  r.configPath,
+		Registry:        registry,
+		Env:             r.env,
+		SecretStore:     secretStore,
+		ConfigPath:      r.configPath,
+		ActivityTracker: activityTracker,
 		OnChannelChange: func() {
 			select {
 			case channelChangeCh <- struct{}{}:
@@ -724,6 +727,9 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		}
 
 		slog.Info("message received, starting agent", "user", mu.cfg.ID, "channel", firstMsg.ChannelID)
+		if ch, ok := allChMap[firstMsg.ChannelID]; ok {
+			activityTracker.MessageReceived(ch.Info().Name)
+		}
 
 		agentCtx, cancel := context.WithCancel(ctx)
 		done := make(chan struct{})
@@ -759,6 +765,12 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				case msg, ok := <-mergedMsgs:
 					if !ok {
 						return
+					}
+					// Record message arrival for activity tracking before
+					// forwarding to the agent, so IsBusy returns true
+					// as soon as the message enters the pipeline.
+					if ch, ok := allChMap[msg.ChannelID]; ok {
+						activityTracker.MessageReceived(ch.Info().Name)
 					}
 					select {
 					case bridgeCh <- msg:
@@ -819,6 +831,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			},
 			OnTurnStart: func(channelName string) {
 				activeChannelName.Store(&channelName)
+				activityTracker.TurnStarted(channelName)
+			},
+			OnTurnEnd: func(channelName string) {
+				activityTracker.TurnEnded(channelName)
 			},
 			AllowedTools:         mu.cfg.AllowedTools,
 			DisallowedTools:      mu.cfg.DisallowedTools,

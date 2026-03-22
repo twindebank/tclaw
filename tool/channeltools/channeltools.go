@@ -23,6 +23,9 @@ type Deps struct {
 	// The router uses this to trigger an automatic agent restart so the new
 	// channel configuration takes effect immediately.
 	OnChannelChange func()
+
+	// ActivityTracker tracks per-channel processing state for channel_is_busy.
+	ActivityTracker *channel.ActivityTracker
 }
 
 // RegisterTools adds channel management tools to the MCP handler.
@@ -31,4 +34,5 @@ func RegisterTools(handler *mcp.Handler, deps Deps) {
 	handler.Register(channelCreateDef(), channelCreateHandler(deps))
 	handler.Register(channelEditDef(), channelEditHandler(deps))
 	handler.Register(channelDeleteDef(), channelDeleteHandler(deps))
+	handler.Register(channelIsBusyDef(), channelIsBusyHandler(deps))
 }
