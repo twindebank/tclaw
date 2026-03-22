@@ -477,12 +477,14 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			ch, ok := opts.Channels[msg.ChannelID]
 			if ok {
 				if _, err := ch.Send(ctx, authPrompt(ch.Markup())); err != nil {
+					// Channel is dead — don't register the flow.
 					slog.Error("failed to send auth prompt", "err", err)
+				} else {
+					authFlows[msg.ChannelID] = &pendingAuth{state: authChoosing}
 				}
 				if err := ch.Done(ctx); err != nil {
 					slog.Error("failed to close turn after login prompt", "err", err)
 				}
-				authFlows[msg.ChannelID] = &pendingAuth{state: authChoosing}
 			}
 			continue
 		}
@@ -773,16 +775,20 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				// retry once the user has authenticated.
 				if errors.Is(result.err, ErrAuthRequired) {
 					slog.Info("auth required, starting auth flow", "channel", msg.ChannelID)
-					authFlows[msg.ChannelID] = &pendingAuth{
+					flow := &pendingAuth{
 						state:       authChoosing,
 						originalMsg: msg,
 					}
 					ch, chOK := opts.Channels[msg.ChannelID]
 					if chOK {
 						if _, sendErr := ch.Send(ctx, authPrompt(ch.Markup())); sendErr != nil {
-							slog.Error("failed to send auth prompt", "err", sendErr)
+							// Channel is dead (e.g. socket disconnected) — don't
+							// leave a stale flow that blocks future messages.
+							slog.Error("failed to send auth prompt, discarding flow", "err", sendErr)
+							goto done
 						}
 					}
+					authFlows[msg.ChannelID] = flow
 					goto done
 				}
 
