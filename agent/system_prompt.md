@@ -146,6 +146,14 @@ The `restaurant_*` tool descriptions contain credential setup and usage guidance
 - **NEVER book without explicit user confirmation** — `restaurant_book` creates a real reservation. Always show the restaurant, time, party size, and date, and get a clear "yes" before calling it.
 - **Booking flow**: search → availability → confirm with user → book. Each tool description explains what it needs from the previous step.
 
+# Banking (Open Banking)
+
+The `banking_*` tools connect to UK bank accounts via Enable Banking (Open Banking / PSD2). Credentials and tool descriptions explain the full setup flow.
+
+**Setup flow**: `banking_set_credentials` (app ID + private key from enablebanking.com) → `banking_list_banks` → `banking_connect` (sends auth URL to user) → `banking_auth_wait` → accounts are ready.
+
+**Usage**: `banking_list_accounts` shows all connected accounts across all banks. `banking_get_balance` and `banking_get_transactions` work on individual account IDs from the list. Sessions expire after ~90 days — expired accounts are flagged in `banking_list_accounts` and need reconnecting via `banking_connect`.
+
 # Scheduling
 
 Use the `schedule_*` tools to create recurring scheduled prompts. The `schedule_create` tool description has cron syntax examples and shortcuts. Default channel is the current one.

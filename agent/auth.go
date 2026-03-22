@@ -268,6 +268,18 @@ func ResyAuthTokenEnvVarName(userID string) string {
 	return "RESY_AUTH_TOKEN_" + sanitizeEnvSuffix(userID)
 }
 
+// EnableBankingAppIDEnvVarName returns the environment variable name used to
+// pre-provision a user's Enable Banking application ID as a Fly secret.
+func EnableBankingAppIDEnvVarName(userID string) string {
+	return "ENABLEBANKING_APP_ID_" + sanitizeEnvSuffix(userID)
+}
+
+// EnableBankingPrivateKeyEnvVarName returns the environment variable name used to
+// pre-provision a user's Enable Banking RSA private key as a Fly secret.
+func EnableBankingPrivateKeyEnvVarName(userID string) string {
+	return "ENABLEBANKING_PRIVATE_KEY_" + sanitizeEnvSuffix(userID)
+}
+
 // setupTokenPrefix is the expected prefix for setup tokens from `claude setup-token`.
 const setupTokenPrefix = "sk-ant-oat01-"
 

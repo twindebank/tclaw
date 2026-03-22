@@ -308,6 +308,20 @@ The package uses a provider interface (`tool/restauranttools/provider.go`) so ad
 
 Credential storage: `resy_api_key` and `resy_auth_token` in the encrypted secret store. Fly secret seeding: `RESY_API_KEY_<USER>`, `RESY_AUTH_TOKEN_<USER>`.
 
+### Banking (Enable Banking)
+
+Open Banking integration via Enable Banking's API (PSD2). Aggregates transactions and balances across all connected UK bank accounts. Free for personal use.
+
+Tools: `banking_set_credentials`, `banking_list_banks`, `banking_connect`, `banking_auth_wait`, `banking_list_accounts`, `banking_get_balance`, `banking_get_transactions`.
+
+**Setup:** Register at [enablebanking.com](https://enablebanking.com/), create an application, generate a self-signed certificate, upload the public cert. Provide the application ID and PEM private key via `banking_set_credentials`.
+
+**Bank connection flow:** `banking_connect` calls Enable Banking's `POST /auth` to start authorization, returns a URL the user visits to log into their bank. The bank redirects back to tclaw's OAuth callback with an authorization code. `POST /sessions` exchanges the code for a session granting access to the user's accounts. Sessions last ~90 days (PSD2 maximum) before re-authorization is needed.
+
+**Authentication:** JWT Bearer tokens signed with RSA-256 using the user's private key. JWTs are generated per-request with 10-minute expiry. No external JWT library — uses Go stdlib `crypto/rsa`.
+
+Credential storage: `enablebanking_app_id` and `enablebanking_private_key` in the encrypted secret store. Fly secret seeding: `ENABLEBANKING_APP_ID_<USER>`, `ENABLEBANKING_PRIVATE_KEY_<USER>`.
+
 ## Remote MCP Servers
 
 Users can connect to external MCP servers (like the Anthropic MCP directory) via MCP tools. Every remote MCP is scoped to a specific channel — its tools are only included in that channel's MCP configuration.
