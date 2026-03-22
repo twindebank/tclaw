@@ -103,6 +103,11 @@ type QueryParams struct {
 	// Contains filters to lines matching this substring (case-insensitive).
 	Contains string
 
+	// Since filters to lines whose slog time= field is at or after this time.
+	// Zero value means no filter. Parsed from the log line text so it works
+	// for both live entries and lines loaded from the persisted log file.
+	Since time.Time
+
 	// MaxLines caps the number of returned lines (most recent). 0 = no cap.
 	MaxLines int
 }
@@ -152,7 +157,36 @@ func matchesEntry(line string, p QueryParams, containsLower string) bool {
 		return false
 	}
 
+	if !p.Since.IsZero() {
+		// Parse the timestamp from the log line text rather than relying on
+		// entry.time, so that lines loaded from the persisted file are also
+		// filtered correctly (they have zero entry.time).
+		if t, ok := extractTime(line); !ok || t.Before(p.Since) {
+			return false
+		}
+	}
+
 	return true
+}
+
+// extractTime parses the time= field from a slog TextHandler log line.
+func extractTime(line string) (time.Time, bool) {
+	const prefix = "time="
+	idx := strings.Index(line, prefix)
+	if idx < 0 {
+		return time.Time{}, false
+	}
+	rest := line[idx+len(prefix):]
+	// Value may be unquoted (no spaces in RFC3339) so read until the next space.
+	end := strings.IndexByte(rest, ' ')
+	if end < 0 {
+		end = len(rest)
+	}
+	t, err := time.Parse(time.RFC3339Nano, rest[:end])
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 // matchesUser checks for user=<id> in the slog text output. The value is
