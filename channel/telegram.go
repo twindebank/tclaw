@@ -176,7 +176,8 @@ func (t *Telegram) Messages(ctx context.Context) <-chan string {
 				if hasMedia && t.opts.MediaDir != "" {
 					mediaPath, err := t.downloadMedia(handlerCtx, b, msg)
 					if err != nil {
-						slog.Warn("failed to download media", "err", err, "channel", t.name)
+						slog.Error("failed to download media", "err", err, "channel", t.name)
+						text = formatMediaError(text, err)
 					} else {
 						text = formatMediaMessage(text, mediaPath)
 					}
@@ -452,6 +453,16 @@ func mediaFilename(msg *models.Message, ext string) string {
 	return fmt.Sprintf("%s_%d_%d%s", prefix, ts, msg.ID, ext)
 }
 
+// formatMediaError builds the prompt text that tells the agent a media
+// attachment failed to download so it can inform the user.
+func formatMediaError(text string, err error) string {
+	notice := fmt.Sprintf("[Attached media could not be downloaded: %v]", err)
+	if text == "" {
+		return notice
+	}
+	return notice + "\n" + text
+}
+
 // formatMediaMessage builds the prompt text that tells the agent about an
 // attached media file so it knows to Read it.
 func formatMediaMessage(text string, mediaPath string) string {
@@ -472,10 +483,11 @@ func formatMediaMessage(text string, mediaPath string) string {
 }
 
 // cleanupOldMedia removes files in the media directory that are older than
-// mediaRetention. Best-effort — errors are logged and swallowed.
+// mediaRetention. Best-effort — errors are logged.
 func cleanupOldMedia(dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		slog.Warn("failed to read media dir for cleanup", "dir", dir, "err", err)
 		return
 	}
 	cutoff := time.Now().Add(-mediaRetention)
