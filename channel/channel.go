@@ -67,6 +67,13 @@ type Info struct {
 	NotifyLifecycle bool
 }
 
+// Link declares a one-way messaging link from one channel to another.
+// Used by both static config (YAML) and dynamic channels (JSON).
+type Link struct {
+	Target      string `json:"target" yaml:"target"`
+	Description string `json:"description" yaml:"description"`
+}
+
 // MessageSource identifies where a message originated.
 type MessageSource string
 

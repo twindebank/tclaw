@@ -474,10 +474,17 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// is set by the agent's OnTurnStart callback before each handle() so
 	// the tool can validate from_channel server-side.
 	crossChannelMsgs := make(chan channel.TaggedMessage, 8)
-	linksByChannel := buildLinksMap(mu.configChannels)
+	staticLinks := buildLinksMap(mu.configChannels)
 	var activeChannelName atomic.Pointer[string]
 	channeltools.RegisterSendTool(mcpHandler, channeltools.SendDeps{
-		Links:  linksByChannel,
+		Links: func() map[string][]channel.Link {
+			dynamics, listErr := dynamicStore.List(ctx)
+			if listErr != nil {
+				slog.Error("failed to list dynamic channels for links", "err", listErr)
+				return staticLinks
+			}
+			return mergeLinks(staticLinks, dynamics)
+		},
 		Output: crossChannelMsgs,
 		Channels: func() map[channel.ChannelID]channel.Channel {
 			if p := currentChannels.Load(); p != nil {
@@ -572,10 +579,12 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			})
 		}
 
-		// Populate outbound links from config and compute inbound links
-		// by inverting the outbound graph.
+		// Populate outbound links from config + dynamic channels and compute
+		// inbound links by inverting the outbound graph.
+		dynamics, _ := dynamicStore.List(dynamicCtx)
+		allLinks := mergeLinks(staticLinks, dynamics)
 		for i, chInfo := range chInfos {
-			if links, ok := linksByChannel[chInfo.Name]; ok {
+			if links, ok := allLinks[chInfo.Name]; ok {
 				for _, link := range links {
 					chInfos[i].OutboundLinks = append(chInfos[i].OutboundLinks, agent.ChannelLinkInfo{
 						ChannelName: link.Target,
@@ -998,14 +1007,28 @@ func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel, 
 	return channels, nil
 }
 
-// buildLinksMap converts config channel link declarations into a lookup
-// map of source channel name → allowed outbound targets.
-func buildLinksMap(channels []config.Channel) map[string][]config.ChannelLink {
-	m := make(map[string][]config.ChannelLink)
+// buildLinksMap converts static config channel link declarations into a
+// lookup map of source channel name → allowed outbound targets.
+func buildLinksMap(channels []config.Channel) map[string][]channel.Link {
+	m := make(map[string][]channel.Link)
 	for _, ch := range channels {
 		if len(ch.Links) > 0 {
 			m[ch.Name] = ch.Links
 		}
 	}
 	return m
+}
+
+// mergeLinks combines static and dynamic channel links into a single map.
+func mergeLinks(static map[string][]channel.Link, dynamics []channel.DynamicChannelConfig) map[string][]channel.Link {
+	merged := make(map[string][]channel.Link, len(static)+len(dynamics))
+	for name, links := range static {
+		merged[name] = links
+	}
+	for _, dc := range dynamics {
+		if len(dc.Links) > 0 {
+			merged[dc.Name] = dc.Links
+		}
+	}
+	return merged
 }

@@ -54,6 +54,18 @@ func channelEditDef() mcp.ToolDef {
 					"type": "array",
 					"items": {"type": "string"},
 					"description": "Tools explicitly denied on this channel. Replaces any existing disallowed_tools."
+				},
+				"links": {
+					"type": "array",
+					"description": "Cross-channel messaging links. Replaces all existing links. Pass empty array to remove all links.",
+					"items": {
+						"type": "object",
+						"properties": {
+							"target": {"type": "string", "description": "Name of the target channel."},
+							"description": {"type": "string", "description": "When this link should be used."}
+						},
+						"required": ["target", "description"]
+					}
 				}
 			},
 			"required": ["name"]
@@ -73,6 +85,7 @@ type channelEditArgs struct {
 	Role            *string             `json:"role"`
 	AllowedTools    []string            `json:"allowed_tools"`
 	DisallowedTools []string            `json:"disallowed_tools"`
+	Links           *[]channel.Link     `json:"links"`
 }
 
 func channelEditHandler(deps Deps) mcp.ToolHandler {
@@ -82,8 +95,8 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
-		if a.Description == "" && a.TelegramConfig == nil && a.Role == nil && a.AllowedTools == nil && a.DisallowedTools == nil {
-			return nil, fmt.Errorf("at least one of 'description', 'telegram_config', 'role', 'allowed_tools', or 'disallowed_tools' must be provided")
+		if a.Description == "" && a.TelegramConfig == nil && a.Role == nil && a.AllowedTools == nil && a.DisallowedTools == nil && a.Links == nil {
+			return nil, fmt.Errorf("at least one of 'description', 'telegram_config', 'role', 'allowed_tools', 'disallowed_tools', or 'links' must be provided")
 		}
 
 		// Validate role if provided.
@@ -179,6 +192,29 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 				}); err != nil {
 					return nil, fmt.Errorf("edit channel allowed_users: %w", err)
 				}
+			}
+		}
+
+		// Update links if provided.
+		if a.Links != nil {
+			// Validate links.
+			linkTargets := make(map[string]bool, len(*a.Links))
+			for i, link := range *a.Links {
+				if link.Target == "" || link.Description == "" {
+					return nil, fmt.Errorf("links[%d]: target and description are required", i)
+				}
+				if link.Target == a.Name {
+					return nil, fmt.Errorf("links[%d]: self-links are not allowed", i)
+				}
+				if linkTargets[link.Target] {
+					return nil, fmt.Errorf("links[%d]: duplicate target %q", i, link.Target)
+				}
+				linkTargets[link.Target] = true
+			}
+			if err := deps.DynamicStore.Update(ctx, a.Name, func(c *channel.DynamicChannelConfig) {
+				c.Links = *a.Links
+			}); err != nil {
+				return nil, fmt.Errorf("edit channel links: %w", err)
 			}
 		}
 

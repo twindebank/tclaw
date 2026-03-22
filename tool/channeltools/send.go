@@ -6,14 +6,15 @@ import (
 	"fmt"
 
 	"tclaw/channel"
-	"tclaw/config"
 	"tclaw/mcp"
 )
 
 // SendDeps holds dependencies for the channel_send tool.
 type SendDeps struct {
-	// Links maps source channel name → allowed outbound targets.
-	Links map[string][]config.ChannelLink
+	// Links returns the current outbound link map (source channel name →
+	// allowed targets). Called on each send so it picks up links from
+	// both static config and dynamic channels.
+	Links func() map[string][]channel.Link
 
 	// Output receives cross-channel messages for injection into the
 	// target channel's message stream (same pattern as schedule injection).
@@ -94,7 +95,8 @@ func channelSendHandler(deps SendDeps) mcp.ToolHandler {
 		}
 
 		// Validate the outbound link exists.
-		links, ok := deps.Links[p.FromChannel]
+		allLinks := deps.Links()
+		links, ok := allLinks[p.FromChannel]
 		if !ok {
 			return nil, fmt.Errorf("channel %q has no outbound links configured", p.FromChannel)
 		}
