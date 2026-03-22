@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"tclaw/connection"
+	"tclaw/gws"
 	"tclaw/mcp"
 )
 
@@ -139,12 +140,7 @@ func calendarListHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandl
 			params["q"] = a.Query
 		}
 
-		paramsJSON, err := json.Marshal(params)
-		if err != nil {
-			return nil, fmt.Errorf("marshal params: %w", err)
-		}
-
-		output, err := runGWS(ctx, deps, "calendar", "events", "list", "--params", string(paramsJSON))
+		output, err := runGWS(ctx, deps, gws.Calendar.ListEvents(params))
 		if err != nil {
 			return nil, fmt.Errorf("list events: %w", err)
 		}
@@ -305,21 +301,12 @@ func calendarCreateHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHan
 			}
 		}
 
-		bodyJSON, err := json.Marshal(eventBody)
-		if err != nil {
-			return nil, fmt.Errorf("marshal event body: %w", err)
-		}
-
 		calendarParams := map[string]any{"calendarId": calendarID}
 		if a.AddMeet {
 			calendarParams["conferenceDataVersion"] = 1
 		}
-		paramsJSON, err := json.Marshal(calendarParams)
-		if err != nil {
-			return nil, fmt.Errorf("marshal params: %w", err)
-		}
 
-		output, err := runGWS(ctx, deps, "calendar", "events", "insert", "--params", string(paramsJSON), "--json", string(bodyJSON))
+		output, err := runGWS(ctx, deps, gws.Calendar.InsertEvent(calendarParams, eventBody))
 		if err != nil {
 			return nil, fmt.Errorf("create event: %w", err)
 		}
@@ -352,12 +339,7 @@ func findDuplicate(ctx context.Context, deps Deps, calendarID, title string, dat
 		"q":            title,
 	}
 
-	paramsJSON, err := json.Marshal(params)
-	if err != nil {
-		return nil, fmt.Errorf("marshal params: %w", err)
-	}
-
-	output, err := runGWS(ctx, deps, "calendar", "events", "list", "--params", string(paramsJSON))
+	output, err := runGWS(ctx, deps, gws.Calendar.ListEvents(params))
 	if err != nil {
 		return nil, fmt.Errorf("search events: %w", err)
 	}

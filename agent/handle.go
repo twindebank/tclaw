@@ -669,11 +669,12 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				slog.Warn("failed to parse rate_limit_event", "err", err)
 				continue
 			}
-			slog.Info("rate limit event received", "retry_after_ms", rl.RetryAfterMs)
-			notice := "⏳ Rate limited — retrying..."
-			if rl.RetryAfterMs > 0 {
-				notice = fmt.Sprintf("⏳ Rate limited — retrying in %ds...", rl.RetryAfterMs/1000)
+			if rl.RetryAfterMs <= 0 {
+				// Zero retry_after is informational — the CLI retries internally.
+				continue
 			}
+			slog.Info("rate limit event received", "retry_after_ms", rl.RetryAfterMs)
+			notice := fmt.Sprintf("⏳ Rate limited — retrying in %ds...", rl.RetryAfterMs/1000)
 			if err := tw.write(phaseStatus, notice+"\n"); err != nil {
 				return "", err
 			}

@@ -43,6 +43,7 @@ import (
 	"tclaw/tool/scheduletools"
 	tfltools "tclaw/tool/tfl"
 	"tclaw/user"
+	"tclaw/version"
 )
 
 // Router manages per-user agent goroutines, each with their own
@@ -76,6 +77,10 @@ type managedUser struct {
 	// configChannels preserves the raw config.Channel entries so that
 	// per-channel tool permissions can be resolved at agent start time.
 	configChannels []config.Channel
+
+	// dynamicStore is set in waitAndStart so StopAll can check dynamic
+	// channel configs for lifecycle notifications.
+	dynamicStore *channel.DynamicStore
 
 	// Set once the agent is running.
 	cancel context.CancelFunc
@@ -338,6 +343,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 	// Create dynamic channel store and register channel management tools.
 	dynamicStore := channel.NewDynamicStore(s)
+	mu.dynamicStore = dynamicStore
 
 	// channelChangeCh signals the main loop to restart the agent when
 	// a channel is created, edited, or deleted via MCP tools.
@@ -355,6 +361,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			staticInfos[i].Role = cc.Role
 			staticInfos[i].AllowedTools = cc.AllowedTools
 			staticInfos[i].DisallowedTools = cc.DisallowedTools
+			staticInfos[i].NotifyLifecycle = cc.NotifyLifecycle
 		}
 	}
 	channeltools.RegisterTools(mcpHandler, channeltools.Deps{
@@ -432,6 +439,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Merge schedule messages into the static stream so they outlive the agent.
 	allStaticMsgs := channel.MergeFanIns(ctx, staticMsgs, scheduleMsgs)
 
+	firstBoot := true
 	for {
 		// Seed memory/CLAUDE.md and the home/.claude/ symlink on each iteration.
 		// This is idempotent — only writes if the file/link doesn't exist — and
@@ -459,6 +467,17 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		}
 		for id, ch := range dynamicChMap {
 			allChMap[id] = ch
+		}
+
+		// Send startup notification on first boot (not on agent idle restarts).
+		if firstBoot {
+			firstBoot = false
+			allChannels := make([]channel.Channel, 0, len(allChMap))
+			for _, ch := range allChMap {
+				allChannels = append(allChannels, ch)
+			}
+			startupMsg := fmt.Sprintf("✅ Started (v%s)", version.Commit)
+			sendLifecycleNotification(ctx, allChannels, mu.configChannels, dynamicStore, startupMsg)
 		}
 
 		// Update the channel map so the scheduler can resolve channel names.
@@ -772,6 +791,7 @@ func (r *Router) StopUser(userID user.ID) {
 }
 
 // StopAll cancels all users and waits for them to finish.
+// Sends shutdown notifications to channels with NotifyLifecycle before stopping.
 func (r *Router) StopAll() {
 	r.mu.Lock()
 	users := make(map[user.ID]*managedUser, len(r.users))
@@ -779,12 +799,53 @@ func (r *Router) StopAll() {
 	r.users = make(map[user.ID]*managedUser)
 	r.mu.Unlock()
 
+	// Send shutdown notifications before cancelling agents.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	msg := fmt.Sprintf("🔄 Shutting down (v%s)...", version.Commit)
+	for _, u := range users {
+		sendLifecycleNotification(shutdownCtx, u.channels, u.configChannels, u.dynamicStore, msg)
+	}
+
 	for id, u := range users {
 		if u.cancel != nil {
 			u.cancel()
 			<-u.done
 		}
 		slog.Info("user stopped", "user", id)
+	}
+}
+
+// sendLifecycleNotification sends a message to all channels that have NotifyLifecycle
+// enabled. It checks both static (configChannels) and dynamic channel configs.
+func sendLifecycleNotification(ctx context.Context, channels []channel.Channel, configChannels []config.Channel, dynamicStore *channel.DynamicStore, message string) {
+	// Build lookup of which channels want notifications.
+	notify := make(map[string]bool)
+	for _, cc := range configChannels {
+		if cc.NotifyLifecycle {
+			notify[cc.Name] = true
+		}
+	}
+	if dynamicStore != nil {
+		configs, err := dynamicStore.List(ctx)
+		if err != nil {
+			slog.Error("failed to list dynamic channels for lifecycle notification", "err", err)
+		} else {
+			for _, dc := range configs {
+				if dc.NotifyLifecycle {
+					notify[dc.Name] = true
+				}
+			}
+		}
+	}
+
+	for _, ch := range channels {
+		if !notify[ch.Info().Name] {
+			continue
+		}
+		if _, err := ch.Send(ctx, message); err != nil {
+			slog.Warn("failed to send lifecycle notification", "channel", ch.Info().Name, "err", err)
+		}
 	}
 }
 

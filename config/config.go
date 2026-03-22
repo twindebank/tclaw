@@ -120,6 +120,9 @@ type Channel struct {
 	// DisallowedTools overrides user-level disallowed_tools for this channel.
 	// Works alongside both Role and AllowedTools for surgical removal.
 	DisallowedTools []string `yaml:"disallowed_tools,omitempty"`
+
+	// NotifyLifecycle sends a message to this channel on instance startup and shutdown.
+	NotifyLifecycle bool `yaml:"notify_lifecycle,omitempty"`
 }
 
 // TelegramChannelConfig holds Telegram-specific channel configuration.

@@ -62,6 +62,9 @@ type Info struct {
 
 	// DisallowedTools overrides user-level tool permissions for this channel.
 	DisallowedTools []string
+
+	// NotifyLifecycle sends a message to this channel on instance startup and shutdown.
+	NotifyLifecycle bool
 }
 
 // TaggedMessage pairs an incoming message with the channel it arrived on
