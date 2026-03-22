@@ -3,6 +3,7 @@ package logbuffer
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -144,4 +145,56 @@ func TestBuffer_NoUserFilter_ShowsAll(t *testing.T) {
 	// No user filter: show everything.
 	lines := buf.Query(QueryParams{})
 	require.Len(t, lines, 2)
+}
+
+func TestBuffer_SinceFilter(t *testing.T) {
+	buf := New(100)
+	fmt.Fprintln(buf, `time=2024-01-01T00:00:00Z level=INFO msg="old line"`)
+	fmt.Fprintln(buf, `time=2024-01-02T00:00:00Z level=INFO msg="new line"`)
+
+	cutoff := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	lines := buf.Query(QueryParams{Since: cutoff})
+	require.Len(t, lines, 1)
+	require.Contains(t, lines[0], "new line")
+}
+
+func TestBuffer_SinceFilter_IncludesExactBoundary(t *testing.T) {
+	buf := New(100)
+	ts := "2024-06-15T10:00:00Z"
+	fmt.Fprintf(buf, "time=%s level=INFO msg=\"boundary line\"\n", ts)
+
+	cutoff := time.Date(2024, 6, 15, 10, 0, 0, 0, time.UTC)
+	lines := buf.Query(QueryParams{Since: cutoff})
+	require.Len(t, lines, 1)
+}
+
+func TestBuffer_SinceFilter_WorksForLoadedLines(t *testing.T) {
+	// Lines loaded from file have zero entry.time — since filter must parse
+	// the timestamp from the log text itself.
+	buf := New(100)
+	buf.Load([]string{
+		`time=2024-01-01T00:00:00Z level=INFO msg="old loaded"`,
+		`time=2024-01-02T00:00:00Z level=INFO msg="new loaded"`,
+	})
+
+	cutoff := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	lines := buf.Query(QueryParams{Since: cutoff})
+	require.Len(t, lines, 1)
+	require.Contains(t, lines[0], "new loaded")
+}
+
+func TestExtractTime(t *testing.T) {
+	t.Run("valid RFC3339", func(t *testing.T) {
+		line := `time=2024-06-15T10:30:00.123Z level=INFO msg="hello"`
+		got, ok := extractTime(line)
+		require.True(t, ok)
+		require.Equal(t, 2024, got.Year())
+		require.Equal(t, time.June, got.Month())
+		require.Equal(t, 15, got.Day())
+	})
+
+	t.Run("no time field", func(t *testing.T) {
+		_, ok := extractTime(`level=INFO msg="no time"`)
+		require.False(t, ok)
+	})
 }
