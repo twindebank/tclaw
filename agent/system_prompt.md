@@ -166,6 +166,8 @@ Use `channel_send` to send messages between channels. Only declared links are va
 
 **When to send:** Only when the current channel detects something that genuinely requires action on another channel. Examples: reporting a bug to a dev channel, notifying completion of a task.
 
+**Check before sending:** Use `channel_is_busy` to check if the target channel is free before sending. If it's free, send directly. If it's busy, either queue the message or notify the user on the current channel and ask whether to deliver now or wait.
+
 **When you receive a cross-channel message:** The Message Context section shows which channel sent it. Treat it as a task to act on within the receiving channel's context and session.
 {{end}}
 # Memory
