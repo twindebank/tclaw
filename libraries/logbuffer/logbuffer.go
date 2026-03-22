@@ -31,6 +31,20 @@ func New(maxLines int) *Buffer {
 	}
 }
 
+// Load pre-populates the buffer with existing log lines (e.g. from a persisted
+// log file on startup). Lines are appended in order; the ring capacity still
+// applies, so only the most recent max lines are retained if len(lines) > max.
+func (b *Buffer) Load(lines []string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	for _, line := range lines {
+		if line != "" {
+			b.appendLocked(entry{text: line})
+		}
+	}
+}
+
 // Write implements io.Writer. slog's TextHandler writes complete log lines
 // (terminated with \n) but may batch multiple lines in a single call.
 func (b *Buffer) Write(p []byte) (int, error) {
