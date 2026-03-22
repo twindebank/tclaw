@@ -193,6 +193,9 @@ channels:
       token: ${secret:TELEGRAM_ADMIN_TOKEN}
       allowed_users: [123456789]
     role: superuser
+    links:
+      - target: assistant
+        description: "Notify when a deploy completes or a fix is ready"
   - name: assistant
     type: telegram
     description: Mobile assistant — concise responses, no channel management
@@ -200,6 +203,9 @@ channels:
       token: ${secret:TELEGRAM_ASSISTANT_TOKEN}
       allowed_users: [123456789]
     role: assistant
+    links:
+      - target: admin
+        description: "Report bugs, errors, or issues that need dev attention"
 ```
 
 | Consideration | Dynamic (Approach 1) | Static (Approach 2) |
@@ -319,6 +325,40 @@ The MCP discovery client (`mcp/discovery/safeclient.go`) validates that remote M
 ## Scheduling
 
 The agent can create and manage cron schedules that fire autonomously. When a schedule fires, it injects a message into the specified channel, waking the agent if idle. Schedules persist across agent restarts and are managed by a background goroutine that runs at user lifetime (not agent lifetime).
+
+## Cross-Channel Messaging
+
+Channels can send messages to each other via config-driven links and the `channel_send` MCP tool. Messages arrive on the target channel's session, waking the agent if idle. The agent sees which channel sent the message in the per-turn Message Context section.
+
+Links are declared per-channel in config. Only declared links are valid — the tool rejects arbitrary sends:
+
+```yaml
+channels:
+  - name: assistant
+    role: assistant
+    links:
+      - target: dev
+        description: "Report bugs, errors, or issues that require code changes"
+  - name: dev
+    role: developer
+    links:
+      - target: assistant
+        description: "Notify when a fix is ready or a deploy completes"
+```
+
+The system prompt shows each channel's outbound and inbound links. Agent runtime behavior (when to send, how to handle received messages) is documented in `agent/system_prompt.md`.
+
+### Message Source Attribution
+
+All messages carry a `MessageSourceInfo` that identifies their origin: user input, scheduled prompt, or cross-channel send. The agent sees this in the `# Message Context` section appended to the system prompt each turn, replacing the old `# Active Channel` section.
+
+### Security
+
+The `channel_send` tool validates `from_channel` against the actual active channel server-side via an `OnTurnStart` callback. This prevents prompt injection from spoofing the source channel to use another channel's outbound links.
+
+### Implementation
+
+Same injection pattern as scheduled messages: `crossChannelMsgs` channel merged into the message stream via `MergeFanIns`. See `tool/channeltools/send.go` for the tool and `channel/channel.go` for the `MessageSourceInfo` types.
 
 ## Model Management
 

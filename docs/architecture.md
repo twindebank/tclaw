@@ -59,7 +59,7 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 |---------|----------------|
 | `mcp/` | JSON-RPC tool registry (`Handler`), HTTP server (`Server`), config file generation (`GenerateConfigFile`). |
 | `mcp/discovery/` | OAuth discovery for remote MCP servers (RFC 7591 dynamic registration). Safe HTTP client that blocks private IPs and requires HTTPS. |
-| `tool/channeltools/` | MCP tools for dynamic channel management (create, list, edit, delete). Stores/rotates/deletes channel secrets (e.g. Telegram bot tokens) in the secret store alongside channel config CRUD. |
+| `tool/channeltools/` | MCP tools for dynamic channel management (create, list, edit, delete) and cross-channel messaging (`channel_send`). Channel CRUD stores/rotates/deletes secrets alongside config. Cross-channel send validates config links and active channel server-side, then injects into the target channel's message stream. |
 | `tool/connectiontools/` | MCP tools for OAuth connection management (add, remove, list, auth_wait). |
 | `tool/remotemcp/` | MCP tools for remote MCP server management (add, remove, list, auth_wait). |
 | `tool/scheduletools/` | MCP tools for cron schedule management (create, list, edit, delete, pause, resume). |
@@ -115,20 +115,28 @@ Layer 11: Orchestration (router, main)
 
 ### Message Lifecycle
 
-1. User sends a message via a channel (socket, Telegram, etc.)
-2. `channel.FanIn()` multiplexes all channels into a single `<-chan TaggedMessage`
-3. Router's `waitAndStart()` receives the first message and starts the agent
-4. `agent.RunWithMessages()` processes messages in a loop:
+Messages arrive from three sources, all as `TaggedMessage{ChannelID, Text, SourceInfo}`:
+
+- **User input** — channel transports (socket, Telegram) via `FanIn()`, tagged `SourceUser`
+- **Scheduled prompts** — scheduler goroutine via `scheduleMsgs`, tagged `SourceSchedule`
+- **Cross-channel sends** — `channel_send` MCP tool via `crossChannelMsgs`, tagged `SourceChannel`
+
+All sources are merged via `MergeFanIns(ctx, staticMsgs, scheduleMsgs, crossChannelMsgs)` into a single stream.
+
+1. Message arrives on the merged stream
+2. Router's `waitAndStart()` receives the first message and starts the agent
+3. `agent.RunWithMessages()` processes messages in a loop:
+   - `OnTurnStart` callback fires with the channel name (used for cross-channel send validation)
    - Builtin commands (`stop`, `compact`, `reset`, `login`, `auth`) are gated by `isBuiltinAllowed()` — if the channel's tool permissions don't include the corresponding `builtin__*` entry, the command is denied with a message
    - `stop` cancels the active turn and clears any pending reset/auth flows
    - `reset`/`new`/`clear`/`delete` starts a per-channel reset state machine. `allowedResetLevels()` computes which reset levels to show in the menu based on channel permissions. Session resets are immediate; memories/project/everything resets call `OnReset` and project/everything return `ErrResetRequested` to restart the agent.
    - `compact` rewrites the message to a compaction prompt and falls through to `handle()`
    - `login`/`auth` are handled inline or routed to the per-channel auth state machine
    - Regular messages spawn a CLI subprocess via `handle()`
-5. `handle()` calls `resolveToolsForChannel()` to pick channel-level or user-level tool permissions, filters out `builtin__*` entries, then builds CLI args and starts `claude` with stream-json output
-6. `streamResponse()` parses JSON events and writes to the channel via `turnWriter`
-7. The channel's `Send()`/`Edit()` methods deliver output to the user
-8. `Done()` signals end of turn
+4. `handle()` appends `# Message Context` (channel + source attribution) to the system prompt, calls `resolveToolsForChannel()` for permissions, then starts `claude` with stream-json output
+5. `streamResponse()` parses JSON events and writes to the channel via `turnWriter`
+6. The channel's `Send()`/`Edit()` methods deliver output to the user
+7. `Done()` signals end of turn
 
 ### Auth Flow
 
