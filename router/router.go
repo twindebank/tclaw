@@ -425,6 +425,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		Registry:    registry,
 		Env:         r.env,
 		SecretStore: secretStore,
+		ConfigPath:  r.configPath,
 		OnChannelChange: func() {
 			select {
 			case channelChangeCh <- struct{}{}:
