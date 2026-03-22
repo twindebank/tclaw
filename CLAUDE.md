@@ -5,10 +5,29 @@
 
 
 ## TODO
+
+### Features
+- System message posted to admin channel on every redeployment (with commit hash / changelog)
+- Tools for restaurant/venue bookings (OpenTable, Resy, or scraping-based)
+- Google Maps / location tools — place search, directions, travel time; location history integration
+- Periodic job to inspect logs automatically and open PRs to fix recurring errors
+- Proper versioning for deployments (semver tags, changelog generation, release notes)
+- Periodic job to audit repo dependencies and open upgrade PRs (needs `repo_*` + `dev_*` tools working together)
+
+### Maintenance
 - Periodic jobs to check Claude Code changelog and dynamically update agent/CLI behavior
 - Check CVEs and dynamically update dependencies
 - Generally update dependencies (go mod tidy, bump versions)
 - Other periodic maintenance tasks (e.g. rotate secrets, audit configs)
+
+### Dev Experience
+- GitHub Actions CI: run `go build ./...` + `go test ./...` on every PR (currently no CI)
+- `dev_logs` time range filter — `since` param (e.g. "last 4 days") so historical logs are easily queryable
+- Local dev parity — `make dev` that spins up the full stack with a test Telegram bot token and hot reload
+- PR preview deployments — deploy PRs to a separate Fly.io app (`tclaw-preview`) for manual testing before merge
+- `dev_status` should show CI check results alongside uncommitted changes
+- Structured log viewer — `dev_logs` currently returns raw text; a mode that groups by session/tool-call would help debug agent turns
+- Replay harness — record + replay Telegram message sequences to test agent behavior without live bots
 
 ## Code Style
 - Comment code that isn't obvious, prefer readability over clever code
