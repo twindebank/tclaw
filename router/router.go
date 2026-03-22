@@ -168,6 +168,11 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	secretsDir := filepath.Join(userDir, "secrets")      // encrypted credentials
 	mcpConfigDir := filepath.Join(userDir, "mcp-config") // MCP config files (mounted read-only in sandbox)
 
+	// Create media dir for Telegram file downloads (inside the sandbox).
+	if err := os.MkdirAll(filepath.Join(memoryDir, "media"), 0o755); err != nil {
+		slog.Error("failed to create media dir", "user", mu.cfg.ID, "err", err)
+	}
+
 	// State store for tclaw's own data (connections, remote MCPs, dynamic channels).
 	s, err := store.NewFS(stateDir)
 	if err != nil {
@@ -889,6 +894,7 @@ func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel, 
 			}
 			opts.ChatID = loadChatID(context.Background(), stateStore, chCfg.Name)
 			opts.OnChatID = saveChatIDFunc(stateStore, chCfg.Name)
+			opts.MediaDir = filepath.Join(r.baseDir, string(userID), "memory", "media")
 			channels = append(channels, channel.NewTelegram(chCfg.TelegramConfig.Token, chCfg.Name, chCfg.Description, chCfg.TelegramConfig.AllowedUsers, opts))
 		default:
 			return nil, fmt.Errorf("channel %d: unsupported type %q", i, chCfg.Type)

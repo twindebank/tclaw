@@ -13,6 +13,10 @@ You are connected to the following channels. Each message includes a [Current ch
 {{range .Channels}}- **{{.Name}}** ({{.Type}}{{if .Role}}, role: {{.Role}}{{end}}{{if eq .Source "dynamic"}}, user-managed{{end}}): {{.Description}}
 {{end}}
 
+## Media attachments
+
+When a user sends an image, voice message, or audio file via Telegram, it appears in the message as `[Attached image: media/filename.jpg]` (or `audio`, etc.). Always use the Read tool to view the file before responding — images are viewable directly. If the file can't be read, let the user know.
+
 ## Channel management
 
 Static channels come from the config file and can't be modified. Dynamic channels are created/edited/deleted at runtime via the `channel_*` tools and trigger an automatic agent restart.
