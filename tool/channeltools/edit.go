@@ -116,14 +116,12 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 		}
 
 		// Reject editing static channels.
-		for _, info := range deps.StaticChannels {
-			if info.Name == a.Name {
-				return nil, fmt.Errorf("channel %q is a static channel (from config file) and cannot be edited. Only dynamic channels can be modified.", a.Name)
-			}
+		if deps.Registry.IsStatic(a.Name) {
+			return nil, fmt.Errorf("channel %q is a static channel (from config file) and cannot be edited. Only dynamic channels can be modified.", a.Name)
 		}
 
 		// Look up the channel to validate telegram_config is only used on telegram channels.
-		cfg, err := deps.DynamicStore.Get(ctx, a.Name)
+		cfg, err := deps.Registry.DynamicStore().Get(ctx, a.Name)
 		if err != nil {
 			return nil, fmt.Errorf("look up channel: %w", err)
 		}
@@ -137,7 +135,7 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 
 		// Update the description if provided.
 		if a.Description != "" {
-			if err := deps.DynamicStore.Update(ctx, a.Name, func(c *channel.DynamicChannelConfig) {
+			if err := deps.Registry.DynamicStore().Update(ctx, a.Name, func(c *channel.DynamicChannelConfig) {
 				c.Description = a.Description
 			}); err != nil {
 				return nil, fmt.Errorf("edit channel: %w", err)
@@ -146,7 +144,7 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 
 		// Update role if provided.
 		if a.Role != nil {
-			if err := deps.DynamicStore.Update(ctx, a.Name, func(c *channel.DynamicChannelConfig) {
+			if err := deps.Registry.DynamicStore().Update(ctx, a.Name, func(c *channel.DynamicChannelConfig) {
 				c.Role = role.Role(*a.Role)
 				if *a.Role != "" {
 					// Switching to a role clears explicit tool lists.
@@ -159,7 +157,7 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 
 		// Update tool permissions if provided.
 		if a.AllowedTools != nil || a.DisallowedTools != nil {
-			if err := deps.DynamicStore.Update(ctx, a.Name, func(c *channel.DynamicChannelConfig) {
+			if err := deps.Registry.DynamicStore().Update(ctx, a.Name, func(c *channel.DynamicChannelConfig) {
 				if a.AllowedTools != nil {
 					c.AllowedTools = a.AllowedTools
 					// Switching to explicit tools clears the role.
@@ -187,7 +185,7 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 				if len(*a.TelegramConfig.AllowedUsers) == 0 {
 					return nil, fmt.Errorf("allowed_users cannot be empty — at least one Telegram user ID is required")
 				}
-				if err := deps.DynamicStore.Update(ctx, a.Name, func(c *channel.DynamicChannelConfig) {
+				if err := deps.Registry.DynamicStore().Update(ctx, a.Name, func(c *channel.DynamicChannelConfig) {
 					c.AllowedUsers = *a.TelegramConfig.AllowedUsers
 				}); err != nil {
 					return nil, fmt.Errorf("edit channel allowed_users: %w", err)
@@ -211,7 +209,7 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 				}
 				linkTargets[link.Target] = true
 			}
-			if err := deps.DynamicStore.Update(ctx, a.Name, func(c *channel.DynamicChannelConfig) {
+			if err := deps.Registry.DynamicStore().Update(ctx, a.Name, func(c *channel.DynamicChannelConfig) {
 				c.Links = *a.Links
 			}); err != nil {
 				return nil, fmt.Errorf("edit channel links: %w", err)
