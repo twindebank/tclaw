@@ -20,8 +20,12 @@ const (
 
 func repoSyncDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "repo_sync",
-		Description: "Fetch the latest from a tracked repo and report what's new since the last sync. The repo directory is a full git clone — browse files with Read/Grep/Glob and inspect history with git commands, all in the same directory.",
+		Name: "repo_sync",
+		Description: "Fetch the latest from a tracked repo and report what's new since the last sync. " +
+			"Returns repo_dir — a full git clone where you can browse files with Read/Grep/Glob and run git commands (log, diff, blame, show) directly. " +
+			"Tracks the last-seen commit automatically — each sync reports only new commits since the previous check. " +
+			"Combine with schedule_create for periodic monitoring (e.g. daily sync + summarize). " +
+			"Public repos work without a token. Private repos need the GitHub token (same one used by dev workflow).",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {

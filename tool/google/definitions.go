@@ -28,6 +28,9 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 				"Without a query, returns the most recent messages. " +
 				"Defaults: max_results=10 (max 25), query=empty (all mail). " +
 				"Returns fetched_count, total_estimate, and next_page_token for pagination awareness. " +
+				"PAGINATION: returns at most 25 results per call. If a call returns exactly 25 results, paginate using next_page_token until done — otherwise you'll silently miss messages. " +
+				"Don't filter by category/label when doing a comprehensive scan — Gmail categorisation (Promotions, Updates) can hide important emails. " +
+				"Results are authoritative — don't re-list to double-check. " +
 				"IMPORTANT: Messages sharing the same thread_id are part of one email conversation — they are NOT duplicates. " +
 				"The snippet field is a short preview only — do NOT extrapolate or assume email content beyond what the snippet says. " +
 				"Use google_gmail_read to get the actual full body text before summarizing any email's content.",
@@ -168,7 +171,10 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 			Description: "Execute a Google Workspace command. " +
 				"Supports Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks, and more. " +
 				"The 'command' is the gws CLI arguments (e.g. 'gmail users messages list', 'drive files list'). " +
-				"Use google_workspace_schema to discover available methods and their parameters.",
+				"Use google_workspace_schema to discover available methods and their parameters. " +
+				"IMPORTANT: Never use with Gmail format=full — it returns huge HTML blobs that waste context. Use google_gmail_read instead. " +
+				"Calendar updates: use 'calendar events update' (full PUT), NOT 'calendar events patch' — patching date to dateTime causes a 400. " +
+				"For timezone in dateTime, use UTC offset in the ISO string (e.g. 2026-03-13T17:26:00+00:00), NOT a separate timeZone field.",
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
