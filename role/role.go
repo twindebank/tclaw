@@ -100,6 +100,7 @@ const (
 	MCPToolRepoAll       claudecli.Tool = "mcp__tclaw__repo_*"
 	MCPToolRestaurantAll claudecli.Tool = "mcp__tclaw__restaurant_*"
 	MCPToolChannelSend   claudecli.Tool = "mcp__tclaw__channel_send"
+	MCPToolSecretFormAll claudecli.Tool = "mcp__tclaw__secret_form_*"
 )
 
 // basic builtins for assistant.
@@ -184,6 +185,7 @@ func resolveAssistant(ctx ChannelContext) []claudecli.Tool {
 		MCPToolRestaurantAll,
 		MCPToolOnboardingAll,
 		MCPToolChannelSend,
+		MCPToolSecretFormAll,
 	)
 	// Provider tools for connections on this channel.
 	tools = append(tools, providerToolPatterns(ctx)...)

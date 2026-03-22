@@ -8,7 +8,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+
 	"strings"
+	"tclaw/libraries/credentialerror"
 	"time"
 	"unicode"
 
@@ -89,7 +91,11 @@ func devStartHandler(deps Deps) mcp.ToolHandler {
 			}
 		}
 		if token == "" {
-			return nil, fmt.Errorf("no GitHub token configured — provide github_token parameter (a Personal Access Token with repo scope)")
+			return nil, credentialerror.New(
+				"GitHub Configuration",
+				"A Personal Access Token with repo scope is needed for push and PR access",
+				credentialerror.Field{Key: githubTokenKey, Label: "GitHub Personal Access Token", Description: "Create at github.com/settings/tokens with 'repo' scope"},
+			)
 		}
 
 		// Determine branch name.
