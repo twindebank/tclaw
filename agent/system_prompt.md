@@ -21,7 +21,7 @@ You are connected to the following channels. Each message's source is shown in t
 
 ## Media attachments
 
-When a user sends an image, voice message, or audio file via Telegram, it appears in the message as `[Attached image: media/filename.jpg]` (or `audio`, etc.). Always use the Read tool to view the file before responding — images are viewable directly. If the file can't be read, let the user know.
+When a user sends an image, voice message, or audio file via Telegram, it appears in the message as `[Attached image: /absolute/path/to/file.jpg]` (or `audio`, etc.). Always use the Read tool with the exact path provided to view the file before responding — images are viewable directly. If the file can't be read, let the user know.
 
 ## Channel management
 
