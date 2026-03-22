@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"tclaw/libraries/logbuffer"
 	"tclaw/mcp"
@@ -17,6 +19,10 @@ func devLogsDef() mcp.ToolDef {
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
+				"since": {
+					"type": "string",
+					"description": "Return only logs from this far back. Accepts '4d', '2h', '30m', '1w', or a Go duration string. Defaults to no limit (all buffered logs)."
+				},
 				"level": {
 					"type": "string",
 					"description": "Minimum log level to show. One of: DEBUG, INFO, WARN, ERROR. Defaults to DEBUG (show all).",
@@ -40,6 +46,7 @@ func devLogsDef() mcp.ToolDef {
 }
 
 type devLogsArgs struct {
+	Since         string `json:"since"`
 	Level         string `json:"level"`
 	Contains      string `json:"contains"`
 	IncludeSystem bool   `json:"include_system"`
@@ -62,11 +69,21 @@ func devLogsHandler(deps Deps) mcp.ToolHandler {
 			maxLines = 100
 		}
 
+		var since time.Time
+		if a.Since != "" {
+			d, err := parseDuration(a.Since)
+			if err != nil {
+				return nil, fmt.Errorf("invalid since %q: %w", a.Since, err)
+			}
+			since = time.Now().Add(-d)
+		}
+
 		lines := deps.LogBuffer.Query(logbuffer.QueryParams{
 			UserID:        string(deps.UserID),
 			IncludeSystem: a.IncludeSystem,
 			Level:         a.Level,
 			Contains:      a.Contains,
+			Since:         since,
 			MaxLines:      maxLines,
 		})
 
@@ -79,5 +96,36 @@ func devLogsHandler(deps Deps) mcp.ToolHandler {
 		}
 
 		return json.Marshal(result)
+	}
+}
+
+// parseDuration parses a human-friendly duration string. Supports shorthand
+// units not covered by time.ParseDuration: d (days) and w (weeks). Falls back
+// to time.ParseDuration for standard Go formats like "24h" or "90m".
+func parseDuration(s string) (time.Duration, error) {
+	// Try standard Go duration first (handles "24h", "90m", "30s", etc.).
+	if d, err := time.ParseDuration(s); err == nil {
+		return d, nil
+	}
+
+	// Parse shorthand: optional integer prefix + single-char unit.
+	// Supported: Nd (days), Nw (weeks). N defaults to 1 if omitted.
+	unit := s[len(s)-1:]
+	numStr := s[:len(s)-1]
+	if numStr == "" {
+		numStr = "1"
+	}
+	n, err := strconv.Atoi(numStr)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("expected a positive integer before unit, got %q", numStr)
+	}
+
+	switch unit {
+	case "d":
+		return time.Duration(n) * 24 * time.Hour, nil
+	case "w":
+		return time.Duration(n) * 7 * 24 * time.Hour, nil
+	default:
+		return 0, fmt.Errorf("unknown unit %q (use d, w, or a Go duration like 24h)", unit)
 	}
 }
