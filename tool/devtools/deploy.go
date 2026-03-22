@@ -25,7 +25,9 @@ IMPORTANT: Never deploy without explicit user instruction in the current turn. D
 Flow:
 1. Call without confirm=true to preview (commit log, changed files).
 2. If the preview looks unexpected (e.g. "first deploy" when you've deployed before, 0 commits), FLAG IT to the user and do not proceed.
-3. Only call with confirm=true after the user has reviewed and explicitly approved in this turn. Set authorized_by to a direct quote or paraphrase of what they said (e.g. "user said: deploy" or "user approved at 15:14").`,
+3. Only call with confirm=true after the user has reviewed and explicitly approved in this turn. Set authorized_by to a direct quote or paraphrase of what they said (e.g. "user said: deploy" or "user approved at 15:14").
+
+WARNING — ambiguous responses: Short replies like "ya", "yes", "ok", "sure" are NOT sufficient authorization unless the most recent question you asked was specifically "shall I deploy?" or similar. If you asked multiple questions or the conversation moved on, do NOT treat a short affirmative as deploy authorization. When in doubt, ask explicitly: "Just to confirm — deploy now?"`,
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
