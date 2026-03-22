@@ -82,10 +82,15 @@ func deployHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("fetch: %w", err)
 		}
 
-		// Get current deployed commit.
+		// Get current deployed commit — prefer the live /version endpoint
+		// over the stored value, since the store entry can be missing after
+		// a volume wipe or if a deploy happened outside this tool.
 		deployedCommit, err := deps.Store.GetDeployedCommit(ctx)
 		if err != nil {
 			return nil, err
+		}
+		if liveCommit := fetchLiveVersion(ctx, deps.Store); liveCommit != "" {
+			deployedCommit = liveCommit
 		}
 
 		// Get origin/main HEAD.
