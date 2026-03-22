@@ -294,6 +294,14 @@ Tools: `tfl_line_status`, `tfl_journey`, `tfl_arrivals`, `tfl_stop_search`, `tfl
 2. **Via Telegram** — the agent prompts for the key if rate-limited.
 3. **Pre-provisioned via Fly secret** — `fly secrets set TFL_API_KEY_<USER>=<key> -a tclaw`. Seeded into the encrypted store on boot.
 
+### Restaurant Reservations (Resy)
+
+Restaurant booking via the Resy platform's reverse-engineered API. Tools: `restaurant_search`, `restaurant_availability`, `restaurant_book`, `restaurant_set_credentials`, `restaurant_cancel`, `restaurant_list_bookings`. Tool descriptions contain full credential setup and usage guidance.
+
+The package uses a provider interface (`tool/restauranttools/provider.go`) so additional platforms (OpenTable, Google Places, etc.) can be added by implementing `Provider` — no handler or wiring changes needed. Cancel and list bookings return `ErrNotSupported` until the Resy API endpoints are discovered.
+
+Credential storage: `resy_api_key` and `resy_auth_token` in the encrypted secret store. Fly secret seeding: `RESY_API_KEY_<USER>`, `RESY_AUTH_TOKEN_<USER>`.
+
 ## Remote MCP Servers
 
 Users can connect to external MCP servers (like the Anthropic MCP directory) via MCP tools. Every remote MCP is scoped to a specific channel — its tools are only included in that channel's MCP configuration.

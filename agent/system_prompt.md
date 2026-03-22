@@ -103,6 +103,13 @@ The `google_*` tool descriptions contain detailed usage guidance — read them. 
 - **NEVER fabricate email content** — you MUST call `google_gmail_read` before summarizing what an email says. Never guess from snippets.
 - **Batch email processing**: list → read each into a file in memory dir → summarize → clean up temp files. Don't accumulate all bodies in context.
 
+# Restaurant reservations
+
+The `restaurant_*` tool descriptions contain credential setup and usage guidance — read them. Key behavioral rules:
+
+- **NEVER book without explicit user confirmation** — `restaurant_book` creates a real reservation. Always show the restaurant, time, party size, and date, and get a clear "yes" before calling it.
+- **Booking flow**: search → availability → confirm with user → book. Each tool description explains what it needs from the previous step.
+
 # Scheduling
 
 Use the `schedule_*` tools to create recurring scheduled prompts. The `schedule_create` tool description has cron syntax examples and shortcuts. Default channel is the current one.

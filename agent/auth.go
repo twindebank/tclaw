@@ -255,6 +255,19 @@ func TfLAPIKeyEnvVarName(userID string) string {
 	return "TFL_API_KEY_" + sanitizeEnvSuffix(userID)
 }
 
+// ResyAPIKeyEnvVarName returns the environment variable name used to
+// pre-provision a user's Resy API key as a Fly secret. At boot, the router
+// seeds this into the encrypted secret store so restaurant tools find it without prompting.
+func ResyAPIKeyEnvVarName(userID string) string {
+	return "RESY_API_KEY_" + sanitizeEnvSuffix(userID)
+}
+
+// ResyAuthTokenEnvVarName returns the environment variable name used to
+// pre-provision a user's Resy auth token as a Fly secret.
+func ResyAuthTokenEnvVarName(userID string) string {
+	return "RESY_AUTH_TOKEN_" + sanitizeEnvSuffix(userID)
+}
+
 // setupTokenPrefix is the expected prefix for setup tokens from `claude setup-token`.
 const setupTokenPrefix = "sk-ant-oat01-"
 

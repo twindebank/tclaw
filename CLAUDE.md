@@ -8,7 +8,6 @@
 
 ### Features
 - System message posted to admin channel on every redeployment (with commit hash / changelog)
-- Tools for restaurant/venue bookings (OpenTable, Resy, or scraping-based)
 - Google Maps / location tools — place search, directions, travel time; location history integration
 - Periodic job to inspect logs automatically and open PRs to fix recurring errors
 - Proper versioning for deployments (semver tags, changelog generation, release notes)

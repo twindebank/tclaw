@@ -40,6 +40,7 @@ import (
 	"tclaw/tool/onboardingtools"
 	"tclaw/tool/remotemcp"
 	"tclaw/tool/repotools"
+	"tclaw/tool/restauranttools"
 	"tclaw/tool/scheduletools"
 	tfltools "tclaw/tool/tfl"
 	"tclaw/user"
@@ -346,6 +347,29 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		}
 	}
 
+	// Seed Resy API key from Fly secret (e.g. RESY_API_KEY_THEO) into the
+	// encrypted secret store, same pattern as the TfL key above.
+	resyAPIKeyEnvVar := agent.ResyAPIKeyEnvVarName(string(mu.cfg.ID))
+	if resyAPIKey := os.Getenv(resyAPIKeyEnvVar); resyAPIKey != "" {
+		if seedErr := secretStore.Set(ctx, restauranttools.ResyAPIKeyStoreKey, resyAPIKey); seedErr != nil {
+			slog.Error("failed to seed resy api key from env", "user", mu.cfg.ID, "err", seedErr)
+		} else {
+			os.Unsetenv(resyAPIKeyEnvVar)
+			slog.Info("seeded and scrubbed resy api key from env", "user", mu.cfg.ID, "env_var", resyAPIKeyEnvVar)
+		}
+	}
+
+	// Seed Resy auth token from Fly secret (e.g. RESY_AUTH_TOKEN_THEO).
+	resyAuthTokenEnvVar := agent.ResyAuthTokenEnvVarName(string(mu.cfg.ID))
+	if resyAuthToken := os.Getenv(resyAuthTokenEnvVar); resyAuthToken != "" {
+		if seedErr := secretStore.Set(ctx, restauranttools.ResyAuthTokenStoreKey, resyAuthToken); seedErr != nil {
+			slog.Error("failed to seed resy auth token from env", "user", mu.cfg.ID, "err", seedErr)
+		} else {
+			os.Unsetenv(resyAuthTokenEnvVar)
+			slog.Info("seeded and scrubbed resy auth token from env", "user", mu.cfg.ID, "env_var", resyAuthTokenEnvVar)
+		}
+	}
+
 	// Create dynamic channel store and register channel management tools.
 	dynamicStore := channel.NewDynamicStore(s)
 	mu.dynamicStore = dynamicStore
@@ -423,6 +447,12 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Register TfL tools unconditionally — they work without an API key
 	// (rate-limited to ~50 req/min) and prompt for one if not stored.
 	tfltools.RegisterTools(mcpHandler, tfltools.Deps{
+		SecretStore: secretStore,
+	})
+
+	// Register restaurant tools unconditionally — they check for
+	// credentials at call time and return a helpful error if missing.
+	restauranttools.RegisterTools(mcpHandler, restauranttools.Deps{
 		SecretStore: secretStore,
 	})
 
