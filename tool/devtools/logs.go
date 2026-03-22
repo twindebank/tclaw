@@ -103,6 +103,10 @@ func devLogsHandler(deps Deps) mcp.ToolHandler {
 // units not covered by time.ParseDuration: d (days) and w (weeks). Falls back
 // to time.ParseDuration for standard Go formats like "24h" or "90m".
 func parseDuration(s string) (time.Duration, error) {
+	if s == "" {
+		return 0, fmt.Errorf("empty duration string")
+	}
+
 	// Try standard Go duration first (handles "24h", "90m", "30s", etc.).
 	if d, err := time.ParseDuration(s); err == nil {
 		return d, nil
@@ -113,7 +117,7 @@ func parseDuration(s string) (time.Duration, error) {
 	unit := s[len(s)-1:]
 	numStr := s[:len(s)-1]
 	if numStr == "" {
-		numStr = "1"
+		return 0, fmt.Errorf("missing number before unit %q", unit)
 	}
 	n, err := strconv.Atoi(numStr)
 	if err != nil || n <= 0 {

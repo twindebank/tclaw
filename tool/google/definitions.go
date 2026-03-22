@@ -78,6 +78,57 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 			}`, connDescription, enumJSON)),
 		},
 		{
+			Name: "google_gmail_send",
+			Description: "Send an email via Gmail. Handles RFC 2822 message construction and base64url encoding internally — " +
+				"no Bash or external encoding needed. " +
+				"For replies: use google_gmail_read first to get the message_id (use as in_reply_to), references, and thread_id, " +
+				"then pass them here to thread the reply correctly. " +
+				"Sends plain text emails. The From address is set automatically from the authenticated Google account.",
+			InputSchema: json.RawMessage(fmt.Sprintf(`{
+				"type": "object",
+				"properties": {
+					"connection": {
+						"type": "string",
+						"description": %q,
+						"enum": %s
+					},
+					"to": {
+						"type": "string",
+						"description": "Recipient email address(es), comma-separated for multiple."
+					},
+					"subject": {
+						"type": "string",
+						"description": "Email subject line."
+					},
+					"body": {
+						"type": "string",
+						"description": "Plain text email body."
+					},
+					"cc": {
+						"type": "string",
+						"description": "CC recipient(s), comma-separated."
+					},
+					"bcc": {
+						"type": "string",
+						"description": "BCC recipient(s), comma-separated."
+					},
+					"in_reply_to": {
+						"type": "string",
+						"description": "Message-ID header from the email being replied to (from google_gmail_read response). Required for proper reply threading."
+					},
+					"references": {
+						"type": "string",
+						"description": "References header chain from the original email (from google_gmail_read response). Helps mail clients thread the conversation."
+					},
+					"thread_id": {
+						"type": "string",
+						"description": "Gmail thread ID to place the reply in the same conversation thread (from google_gmail_read or google_gmail_list)."
+					}
+				},
+				"required": ["connection", "to", "subject", "body"]
+			}`, connDescription, enumJSON)),
+		},
+		{
 			Name: "google_calendar_list",
 			Description: "List upcoming calendar events with full details (title, time, attendees, location, meeting links). " +
 				"Returns a clean summary for each event — no need to parse raw API responses. " +
