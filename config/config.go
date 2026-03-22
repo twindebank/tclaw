@@ -130,15 +130,10 @@ type Channel struct {
 	Links []ChannelLink `yaml:"links,omitempty"`
 }
 
-// ChannelLink declares a one-way messaging link from this channel to a target.
-type ChannelLink struct {
-	// Target is the name of the destination channel.
-	Target string `yaml:"target"`
-
-	// Description explains when this link should be used. Shown in the
-	// system prompt to guide the agent's decision.
-	Description string `yaml:"description"`
-}
+// ChannelLink is a config alias for channel.Link with YAML tags.
+// The underlying type lives in the channel package so both static config
+// and dynamic channels can use the same type.
+type ChannelLink = channel.Link
 
 // TelegramChannelConfig holds Telegram-specific channel configuration.
 type TelegramChannelConfig struct {

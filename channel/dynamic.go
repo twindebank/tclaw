@@ -38,6 +38,10 @@ type DynamicChannelConfig struct {
 
 	// NotifyLifecycle sends a message to this channel on instance startup and shutdown.
 	NotifyLifecycle bool `json:"notify_lifecycle,omitempty"`
+
+	// Links declares which channels this channel can send messages to via
+	// the channel_send MCP tool.
+	Links []Link `json:"links,omitempty"`
 }
 
 // ChannelSecretKey returns the secret store key for a channel's secret (e.g. bot token).
