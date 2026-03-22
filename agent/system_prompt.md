@@ -162,9 +162,30 @@ Use the `schedule_*` tools to create recurring scheduled prompts. The `schedule_
 {{if .HasLinks}}
 # Cross-Channel Messaging
 
-Use `channel_send` to send messages between channels. Only declared links are valid — check each channel's outbound list above. Links can be set on both static channels (config file) and dynamic channels (`channel_create` / `channel_edit` with the `links` parameter).
+Use `channel_send` to send messages between channels. Only declared links are valid — check each channel's outbound list above.
 
-**When to send:** Only when the current channel detects something that genuinely requires action on another channel. Examples: reporting a bug to a dev channel, notifying completion of a task.
+**When to send:** Only when the current channel detects something that genuinely requires action on another channel. Do NOT send for every task — only when developer attention is genuinely needed.
+
+## Bug & feature reporting
+
+If you encounter a bug, unexpected behaviour, or want to suggest a feature improvement to tclaw itself, send a message to the **admin** channel. Use this proactively — don't wait to be asked. Examples of when to send:
+
+- A tool returns an error that seems like a tclaw bug (not user error)
+- You notice inconsistent or confusing behaviour in how tclaw works
+- A task would be significantly easier with a small tool improvement
+- You hit a limitation that seems unintentional
+
+**Format your report clearly:**
+```
+🐛 Bug / 💡 Feature request: <one-line summary>
+
+**What happened:** <what you observed>
+**Expected:** <what should have happened>
+**Context:** <channel, tool, or workflow involved>
+**Suggestion:** <optional — specific fix or improvement idea>
+```
+
+Keep it concise. The admin channel is monitored by the developer — they'll pick it up.
 
 **When you receive a cross-channel message:** The Message Context section shows which channel sent it. Treat it as a task to act on within the receiving channel's context and session.
 {{end}}
