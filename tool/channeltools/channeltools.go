@@ -9,10 +9,10 @@ import (
 
 // Deps holds dependencies for channel management tools.
 type Deps struct {
-	DynamicStore   *channel.DynamicStore
-	StaticChannels []channel.Info
-	Env            config.Env
-	SecretStore    secret.Store
+	Registry *channel.Registry
+	Env      config.Env
+
+	SecretStore secret.Store
 
 	// OnChannelChange is called after a channel is created, edited, or deleted.
 	// The router uses this to trigger an automatic agent restart so the new

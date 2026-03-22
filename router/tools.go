@@ -7,7 +7,6 @@ import (
 	"tclaw/agent"
 	"tclaw/channel"
 	"tclaw/claudecli"
-	"tclaw/config"
 	"tclaw/connection"
 	"tclaw/mcp"
 	"tclaw/role"
@@ -32,46 +31,27 @@ type channelToolSource struct {
 // that includes which providers and remote MCPs are available on that channel.
 func buildChannelToolOverrides(
 	allChMap map[channel.ChannelID]channel.Channel,
-	configByName map[string]config.Channel,
-	dynamicStore *channel.DynamicStore,
+	registry *channel.Registry,
 	ctx context.Context,
 	userCfg user.Config,
 	connMgr *connection.Manager,
 ) map[channel.ChannelID]agent.ChannelToolPermissions {
 	overrides := make(map[channel.ChannelID]agent.ChannelToolPermissions)
 
-	// Load dynamic channel configs if available.
-	var dynamicByName map[string]channel.DynamicChannelConfig
-	if dynamicStore != nil {
-		configs, err := dynamicStore.List(ctx)
-		if err != nil {
-			slog.Error("failed to list dynamic channels for tool overrides", "err", err)
-		} else {
-			dynamicByName = make(map[string]channel.DynamicChannelConfig, len(configs))
-			for _, dc := range configs {
-				dynamicByName[dc.Name] = dc
-			}
-		}
-	}
-
 	for chID, ch := range allChMap {
 		name := ch.Info().Name
 
-		// Determine the tool source for this channel.
+		// Determine the tool source for this channel via the registry.
 		var src channelToolSource
-
-		// Check channel-level config first (static or dynamic).
-		if cc, ok := configByName[name]; ok {
+		entry, err := registry.ByName(ctx, name)
+		if err != nil {
+			slog.Error("failed to look up channel in registry", "channel", name, "err", err)
+		}
+		if entry != nil {
 			src = channelToolSource{
-				Role:            cc.Role,
-				AllowedTools:    cc.AllowedTools,
-				DisallowedTools: cc.DisallowedTools,
-			}
-		} else if dc, ok := dynamicByName[name]; ok {
-			src = channelToolSource{
-				Role:            dc.Role,
-				AllowedTools:    dc.AllowedTools,
-				DisallowedTools: dc.DisallowedTools,
+				Role:            entry.Role,
+				AllowedTools:    entry.AllowedTools,
+				DisallowedTools: entry.DisallowedTools,
 			}
 		}
 
