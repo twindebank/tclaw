@@ -31,10 +31,8 @@ func TestRepoAdd_Basic(t *testing.T) {
 	require.Equal(t, "https://github.com/user/repo", got["url"])
 	require.Equal(t, "main", got["branch"], "should default to main")
 
-	// Directories should be created.
-	_, err := os.Stat(filepath.Join(userDir, "repos", "myrepo", "bare"))
-	require.NoError(t, err)
-	_, err = os.Stat(filepath.Join(userDir, "repos", "myrepo", "checkout"))
+	// Directory should be created.
+	_, err := os.Stat(filepath.Join(userDir, "repos", "myrepo"))
 	require.NoError(t, err)
 }
 
@@ -201,9 +199,9 @@ func TestRepoSync_FullLifecycle(t *testing.T) {
 	require.NotEmpty(t, syncResult["head_commit"])
 	require.NotEmpty(t, syncResult["new_commits"], "first sync should show initial commits")
 
-	// Checkout should contain the file from the initial commit.
-	checkoutDir := filepath.Join(userDir, "repos", "lifecycle", "checkout")
-	_, err := os.Stat(filepath.Join(checkoutDir, "init.txt"))
+	// Clone should contain the file from the initial commit.
+	repoDir := filepath.Join(userDir, "repos", "lifecycle")
+	_, err := os.Stat(filepath.Join(repoDir, "init.txt"))
 	require.NoError(t, err)
 
 	// Store should have LastSeenCommit set.
@@ -226,8 +224,8 @@ func TestRepoSync_FullLifecycle(t *testing.T) {
 	require.Contains(t, syncResult["new_commits"], "add feature")
 	require.NotEqual(t, firstHead, syncResult["head_commit"])
 
-	// New file should appear in checkout.
-	_, err = os.Stat(filepath.Join(checkoutDir, "feature.txt"))
+	// New file should appear in the clone.
+	_, err = os.Stat(filepath.Join(repoDir, "feature.txt"))
 	require.NoError(t, err)
 }
 
@@ -405,21 +403,15 @@ func gitRun(t *testing.T, dir string, args ...string) {
 // bypassing repo_add's HTTPS validation. Used for integration tests.
 func addLocalRepo(t *testing.T, repoStore *repo.Store, userDir string, name string, localRemote string, branch string) {
 	t.Helper()
-	repoDir := filepath.Join(userDir, "repos", name, "bare")
-	checkoutDir := filepath.Join(userDir, "repos", name, "checkout")
-
-	// Only create the bare dir — readOnlyCheckout creates the checkout dir via
-	// git worktree add. Pre-creating it would make readOnlyCheckout think the
-	// worktree already exists and try git checkout instead.
+	repoDir := filepath.Join(userDir, "repos", name)
 	require.NoError(t, os.MkdirAll(repoDir, 0o755))
 
 	require.NoError(t, repoStore.Put(context.Background(), repo.TrackedRepo{
-		Name:        name,
-		URL:         localRemote,
-		Branch:      branch,
-		RepoDir:     repoDir,
-		WorktreeDir: checkoutDir,
-		AddedAt:     time.Now(),
+		Name:    name,
+		URL:     localRemote,
+		Branch:  branch,
+		RepoDir: repoDir,
+		AddedAt: time.Now(),
 	}))
 }
 
