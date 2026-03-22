@@ -16,7 +16,7 @@ import (
 func devPRChecksDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name:        "dev_pr_checks",
-		Description: "Show CI check results for a pull request. Returns pass/fail status for each check and a direct link to failing runs. Use this to verify CI passes before merging, or to diagnose failures to fix.",
+		Description: "Show CI check results and current state (open/merged/closed) for a pull request. Always check this before suggesting a merge — if state is \"merged\" the PR is already done.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -59,8 +59,19 @@ func devPRChecksHandler(deps Deps) mcp.ToolHandler {
 		// Run gh pr checks in the bare repo directory so gh can infer the repo.
 		// Falls back to the first available worktree if the bare repo doesn't exist yet.
 		repoDir := filepath.Join(deps.UserDir, "repo")
+		prStr := fmt.Sprintf("%d", a.PR)
 
-		cmd := exec.Command("gh", "pr", "checks", fmt.Sprintf("%d", a.PR), "--watch=false")
+		// Fetch PR state (open/merged/closed) separately — gh pr checks doesn't include it.
+		stateCmd := exec.Command("gh", "pr", "view", prStr, "--json", "state", "--jq", ".state")
+		stateCmd.Dir = repoDir
+		stateCmd.Env = ghEnv(token)
+		stateOut, stateErr := stateCmd.CombinedOutput()
+		state := strings.ToLower(strings.TrimSpace(string(stateOut)))
+		if stateErr != nil || state == "" {
+			state = "unknown"
+		}
+
+		cmd := exec.Command("gh", "pr", "checks", prStr, "--watch=false")
 		cmd.Dir = repoDir
 		cmd.Env = ghEnv(token)
 		out, err := cmd.CombinedOutput()
@@ -78,6 +89,7 @@ func devPRChecksHandler(deps Deps) mcp.ToolHandler {
 
 		result := map[string]any{
 			"pr":      a.PR,
+			"state":   state, // "open", "merged", or "closed"
 			"passing": passing,
 			"output":  raw,
 		}
