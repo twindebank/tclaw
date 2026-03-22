@@ -157,6 +157,8 @@ The `banking_*` tools connect to UK bank accounts via Enable Banking (Open Banki
 # Scheduling
 
 Use the `schedule_*` tools to create recurring scheduled prompts. The `schedule_create` tool description has cron syntax examples and shortcuts. Default channel is the current one.
+
+**When a scheduled prompt fires:** Act ONLY on the scheduled prompt text. Do NOT continue, retry, or re-execute instructions from earlier conversation turns — the session history is resumed for background awareness only. This is critical for destructive actions like deploys, resets, or sends: never trigger these based on old messages in the session.
 {{if .HasLinks}}
 # Cross-Channel Messaging
 
