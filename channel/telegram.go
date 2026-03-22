@@ -240,8 +240,17 @@ func (t *Telegram) Send(ctx context.Context, text string) (MessageID, error) {
 	b := t.bot
 	t.mu.Unlock()
 
-	if b == nil || chatID == 0 {
+	if chatID == 0 {
 		return "", nil
+	}
+
+	// Create a send-only bot if Messages() hasn't been called yet (e.g. lifecycle notifications).
+	if b == nil {
+		var err error
+		b, err = bot.New(t.token)
+		if err != nil {
+			return "", fmt.Errorf("telegram send (create bot): %w", err)
+		}
 	}
 
 	msg, err := b.SendMessage(ctx, &bot.SendMessageParams{
@@ -262,8 +271,16 @@ func (t *Telegram) Edit(ctx context.Context, msgID MessageID, text string) error
 	b := t.bot
 	t.mu.Unlock()
 
-	if b == nil || chatID == 0 {
+	if chatID == 0 {
 		return nil
+	}
+
+	if b == nil {
+		var err error
+		b, err = bot.New(t.token)
+		if err != nil {
+			return fmt.Errorf("telegram edit (create bot): %w", err)
+		}
 	}
 
 	telegramMsgID, err := strconv.Atoi(string(msgID))
