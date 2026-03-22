@@ -166,6 +166,7 @@ func resolveDeveloper() []claudecli.Tool {
 
 func resolveAssistant(ctx ChannelContext) []claudecli.Tool {
 	tools := make([]claudecli.Tool, 0, 32)
+	tools = append(tools, claudecli.ToolBash)
 	tools = append(tools, fileTools...)
 	tools = append(tools, webTools...)
 	tools = append(tools, basicBuiltins...)

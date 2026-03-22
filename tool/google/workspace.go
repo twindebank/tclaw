@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"tclaw/connection"
+	"tclaw/gws"
 	"tclaw/mcp"
 )
 
@@ -33,16 +33,6 @@ func workspaceHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler 
 			return nil, fmt.Errorf("command is required (e.g. 'gmail users messages list')")
 		}
 
-		// Split command string into args for exec.
-		args := strings.Fields(a.Command)
-
-		if a.Params != "" {
-			args = append(args, "--params", a.Params)
-		}
-		if a.Body != "" {
-			args = append(args, "--json", a.Body)
-		}
-
-		return runGWS(ctx, deps, args...)
+		return runGWS(ctx, deps, gws.Raw(a.Command, a.Params, a.Body))
 	}
 }

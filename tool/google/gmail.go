@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"tclaw/connection"
+	"tclaw/gws"
 	"tclaw/mcp"
 )
 
@@ -120,12 +121,7 @@ func gmailListHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler 
 			listParams["q"] = a.Query
 		}
 
-		paramsJSON, err := json.Marshal(listParams)
-		if err != nil {
-			return nil, fmt.Errorf("marshal list params: %w", err)
-		}
-
-		listOutput, err := runGWS(ctx, deps, "gmail", "users", "messages", "list", "--params", string(paramsJSON))
+		listOutput, err := runGWS(ctx, deps, gws.Gmail.ListMessages(listParams))
 		if err != nil {
 			slog.Error("gmail list failed", "connection", a.Connection, "error", err)
 			return nil, fmt.Errorf("list messages: %w", err)
@@ -165,18 +161,12 @@ func gmailListHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler 
 				semaphore <- struct{}{}
 				defer func() { <-semaphore }()
 
-				getParams, marshalErr := json.Marshal(map[string]any{
+				output, err := runGWS(ctx, deps, gws.Gmail.GetMessage(map[string]any{
 					"userId":          "me",
 					"id":              msgID,
 					"format":          "metadata",
 					"metadataHeaders": "Subject,From,To,Cc,Date",
-				})
-				if marshalErr != nil {
-					results[idx] = indexedResult{index: idx, err: marshalErr}
-					return
-				}
-
-				output, err := runGWS(ctx, deps, "gmail", "users", "messages", "get", "--params", string(getParams))
+				}))
 				if err != nil {
 					slog.Warn("gmail message metadata fetch failed", "message_id", msgID, "error", err)
 					results[idx] = indexedResult{index: idx, err: err}

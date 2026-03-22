@@ -11,6 +11,7 @@ import (
 	"github.com/k3a/html2text"
 
 	"tclaw/connection"
+	"tclaw/gws"
 	"tclaw/mcp"
 )
 
@@ -47,6 +48,15 @@ type gmailReadResponse struct {
 	Subject string `json:"subject"`
 	Date    string `json:"date"`
 	Body    string `json:"body"`
+
+	// ThreadID is Gmail's internal thread identifier for reply threading.
+	ThreadID string `json:"thread_id"`
+
+	// MessageID is the RFC 2822 Message-ID header — pass as in_reply_to when replying.
+	MessageID string `json:"message_id_header"`
+
+	// References is the RFC 2822 References header chain — pass to google_gmail_send for threading.
+	References string `json:"references"`
 }
 
 // gmailReadHandler returns an MCP handler that fetches a single email's full body
@@ -71,16 +81,11 @@ func gmailReadHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler 
 
 		slog.Info("gmail read starting", "connection", a.Connection, "message_id", a.MessageID)
 
-		getParams, err := json.Marshal(map[string]any{
+		output, err := runGWS(ctx, deps, gws.Gmail.GetMessage(map[string]any{
 			"userId": "me",
 			"id":     a.MessageID,
 			"format": "full",
-		})
-		if err != nil {
-			return nil, fmt.Errorf("marshal params: %w", err)
-		}
-
-		output, err := runGWS(ctx, deps, "gmail", "users", "messages", "get", "--params", string(getParams))
+		}))
 		if err != nil {
 			return nil, fmt.Errorf("get message: %w", err)
 		}
@@ -90,7 +95,10 @@ func gmailReadHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler 
 			return nil, fmt.Errorf("parse message: %w", err)
 		}
 
-		rsp := gmailReadResponse{ID: msg.ID}
+		rsp := gmailReadResponse{
+			ID:       msg.ID,
+			ThreadID: msg.ThreadID,
+		}
 
 		if msg.Payload != nil {
 			for _, h := range msg.Payload.Headers {
@@ -103,6 +111,10 @@ func gmailReadHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler 
 					rsp.Subject = h.Value
 				case "Date":
 					rsp.Date = h.Value
+				case "Message-ID", "Message-Id":
+					rsp.MessageID = h.Value
+				case "References":
+					rsp.References = h.Value
 				}
 			}
 		}

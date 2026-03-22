@@ -35,6 +35,9 @@ type DynamicChannelConfig struct {
 	// At least one user ID is required for Telegram channels — messages from users
 	// not in this list are silently ignored.
 	AllowedUsers []int64 `json:"allowed_users,omitempty"`
+
+	// NotifyLifecycle sends a message to this channel on instance startup and shutdown.
+	NotifyLifecycle bool `json:"notify_lifecycle,omitempty"`
 }
 
 // ChannelSecretKey returns the secret store key for a channel's secret (e.g. bot token).
