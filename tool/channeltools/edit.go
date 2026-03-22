@@ -115,9 +115,21 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("telegram_config must include 'token' and/or 'allowed_users'")
 		}
 
-		// Reject editing static channels.
+		// Reject editing static channels — they are defined in tclaw.yaml and
+		// must be changed there. Return a helpful message with the exact YAML
+		// to add so the agent knows what to do.
 		if deps.Registry.IsStatic(a.Name) {
-			return nil, fmt.Errorf("channel %q is a static channel (from config file) and cannot be edited. Only dynamic channels can be modified.", a.Name)
+			return nil, fmt.Errorf(
+				"channel %q is a static channel defined in %s — it cannot be edited via this tool.\n\n"+
+					"To add or change links, edit the channel's entry in %s:\n\n"+
+					"    channels:\n"+
+					"      - name: %s\n"+
+					"        links:\n"+
+					"          - target: <target-channel>\n"+
+					"            description: \"When to use this link\"\n\n"+
+					"Then redeploy for the change to take effect.",
+				a.Name, deps.ConfigPath, deps.ConfigPath, a.Name,
+			)
 		}
 
 		// Look up the channel to validate telegram_config is only used on telegram channels.

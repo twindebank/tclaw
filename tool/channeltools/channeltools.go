@@ -14,6 +14,11 @@ type Deps struct {
 
 	SecretStore secret.Store
 
+	// ConfigPath is the path to the active tclaw.yaml. Included in error
+	// messages when the agent tries to edit a static channel, so it knows
+	// exactly which file to modify.
+	ConfigPath string
+
 	// OnChannelChange is called after a channel is created, edited, or deleted.
 	// The router uses this to trigger an automatic agent restart so the new
 	// channel configuration takes effect immediately.
