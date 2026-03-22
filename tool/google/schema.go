@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"tclaw/connection"
+	"tclaw/gws"
 	"tclaw/mcp"
 )
 
@@ -30,7 +31,7 @@ func schemaHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("method is required (e.g. 'gmail.users.messages.list')")
 		}
 
-		output, err := runGWSRaw(ctx, deps, "schema", a.Method)
+		output, err := runGWSRaw(ctx, deps, gws.Schema(a.Method))
 		if err != nil {
 			return nil, err
 		}
