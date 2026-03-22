@@ -152,7 +152,7 @@ Use the `schedule_*` tools to create recurring scheduled prompts. The `schedule_
 {{if .HasLinks}}
 # Cross-Channel Messaging
 
-Use `channel_send` to send messages between channels. Only pre-configured links are valid — check each channel's outbound list above.
+Use `channel_send` to send messages between channels. Only declared links are valid — check each channel's outbound list above. Links can be set on both static channels (config file) and dynamic channels (`channel_create` / `channel_edit` with the `links` parameter).
 
 **When to send:** Only when the current channel detects something that genuinely requires action on another channel. Examples: reporting a bug to a dev channel, notifying completion of a task.
 
