@@ -199,9 +199,7 @@ func deploySetupToken(ctx context.Context, userID string, setupToken string) err
 
 	envName := SetupTokenEnvVarName(userID)
 
-	// Pass the secret via stdin instead of CLI args to avoid exposure in `ps aux`.
-	cmd := exec.CommandContext(deployCtx, "fly", "secrets", "set", "-a", flyAppName)
-	cmd.Stdin = strings.NewReader(envName + "=" + setupToken)
+	cmd := exec.CommandContext(deployCtx, "fly", "secrets", "set", envName+"="+setupToken, "-a", flyAppName)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		if deployCtx.Err() != nil {
