@@ -13,7 +13,6 @@
 - Proper versioning for deployments (semver tags, changelog generation, release notes)
 - Periodic job to audit repo dependencies and open upgrade PRs (needs `repo_*` + `dev_*` tools working together)
 - Voice message transcription — Telegram sends voice notes as .ogg files which the agent can't read. Claude API has no native audio input (as of Mar 2026); use Groq Whisper API (generous free tier). Transcribe at ingest in the Telegram handler, inject as `[Voice message: "<transcript>"]` so the agent sees plain text with no changes needed downstream.
-- Telegram Bot API integration — native tools for managing bot channels: get chat info, list members, pin messages, manage channel settings. Currently all Telegram management is done via BotFather manually; native tools would let the agent set up and configure channels programmatically.
 - Token exhausted state — when Claude API limit is hit, record reset time in channel state. Scheduled jobs should be deferred until reset time (not silently dropped). On reset, prompt user whether to run deferred schedules or skip them. Normal inbound messages should be queued and replayed (or flagged as unactioned) when the limit resets so nothing is silently lost.
 - Channel busy/free check — `channel_is_busy` tool: returns whether a channel has an active agent turn or recent conversation activity (with configurable timeout). Enables scheduled tasks to check before sending cross-channel messages, and to queue/defer if busy rather than interrupting.
 
@@ -84,6 +83,15 @@ This project has several documentation files serving different audiences. Unders
 
 `agent/system_prompt.md` defines agent behavior. `docs/features.md` describes how tclaw works for developers. These serve different audiences and should NOT contain the same content. If you're documenting how the agent should use a tool → system prompt. If you're documenting how a feature is implemented or configured → features.md.
 
+### Key rule: tool descriptions are the primary reference
+
+MCP tool descriptions (`definitions.go`) are the **single source of truth** for tool parameters, usage, and behavior. The agent reads these directly at runtime. The system prompt should only cover:
+- **High-level concepts** — what a tool category does and when to use it
+- **Cross-cutting rules** — behavioral constraints that span multiple tools (e.g. "collect credentials via secret_form_request, never in chat")
+- **Flows that compose multiple tools** — auth sequences, provisioning workflows
+
+Do NOT duplicate parameter details, usage examples, or tool-specific guidance from `definitions.go` into the system prompt. The agent can look up tool descriptions itself.
+
 ## Reference Docs
 - @docs/go-patterns.md — comments, error handling, testing, function design, naming
 - @docs/deployment.md — Fly.io deployment, secrets, commands, first-time setup, CI
@@ -94,7 +102,7 @@ This project has several documentation files serving different audiences. Unders
 - **When adding or changing agent-facing behavior** (tool usage, formatting, memory rules) — update `agent/system_prompt.md`
 - **When adding or changing a feature** (implementation, config, wiring) — update @docs/features.md
 - **When changing architecture** (new packages, data flows, auth, directory layout) — update @docs/architecture.md
-- **When adding new MCP tools** — update `agent/system_prompt.md` (how the agent uses them) AND @docs/features.md (how they're implemented/configured)
+- **When adding new MCP tools** — write detailed tool descriptions in `definitions.go` (primary reference for the agent). Add a high-level section to `agent/system_prompt.md` only if the tools need cross-cutting behavioral rules or multi-tool flow guidance. Update @docs/features.md with implementation/config details for developers. Update @docs/architecture.md package map and secret store keys.
 - **When changing deployment/config** — update @docs/architecture.md and @docs/deployment.md
 - **When adding a new channel type** — update @docs/features.md, @docs/architecture.md, and `agent/system_prompt.md`
 - **When changing Go conventions** — update @docs/go-patterns.md

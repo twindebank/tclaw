@@ -71,6 +71,7 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 | `tool/devtools/` | MCP tools for dev workflow (dev_start, dev_status, dev_end, dev_cancel, deploy, dev_logs). Git worktree management, PR creation via `gh`, Fly.io deployment, application log inspection. |
 | `tool/repotools/` | MCP tools for read-only monitoring of external git repos (add, sync, log, list, remove). Shallow clones with last-seen commit tracking. |
 | `tool/onboardingtools/` | MCP tools for new user onboarding (status, set_info, advance, tip_shown, skip). Tracks onboarding progress and manages the daily tips schedule. |
+| `tool/telegramclient/` | MCP tools for Telegram Client API (MTProto) — auth, bot management via BotFather, chat creation, message history, search. Uses `gotd/td` library with session persistence via encrypted secret store. |
 
 ### Infrastructure
 
@@ -355,6 +356,8 @@ MCP tools read credentials from the per-user encrypted secret store. In producti
 | `ENABLEBANKING_APP_ID_<USER>` | `enablebanking_app_id` | `banking_*` tools (Enable Banking) |
 | `ENABLEBANKING_PRIVATE_KEY_<USER>` | `enablebanking_private_key` | `banking_*` tools (Enable Banking) |
 | `CLAUDE_SETUP_TOKEN_<USER>` | `claude_setup_token` | Claude CLI auth |
+| `TELEGRAM_CLIENT_API_ID_<USER>` | `telegram_client_api_id` | `telegram_client_*` tools (MTProto) |
+| `TELEGRAM_CLIENT_API_HASH_<USER>` | `telegram_client_api_hash` | `telegram_client_*` tools (MTProto) |
 
 **When to use seeding vs runtime prompting:**
 
@@ -513,6 +516,10 @@ Secret store keys follow a hierarchical naming convention:
 - `resy_auth_token` — Resy auth token for restaurant tools
 - `enablebanking_app_id` — Enable Banking application ID for open banking tools
 - `enablebanking_private_key` — Enable Banking RSA private key PEM for open banking tools
+- `telegram_client_api_id` — Telegram API ID for MTProto Client API tools
+- `telegram_client_api_hash` — Telegram API hash for MTProto Client API tools
+- `telegram_client_phone` — authenticated phone number for MTProto
+- `telegram_client_session` — MTProto session bytes (base64-encoded, extremely sensitive)
 - `conn/<provider>/<id>` — OAuth connection credentials
 - `channel/<name>/token` — dynamic channel secrets (e.g. Telegram bot tokens)
 
