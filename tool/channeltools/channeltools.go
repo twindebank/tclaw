@@ -26,6 +26,11 @@ type Deps struct {
 
 	// ActivityTracker tracks per-channel processing state for channel_is_busy.
 	ActivityTracker *channel.ActivityTracker
+
+	// Provisioners maps channel types to their EphemeralProvisioner. Used by
+	// channel_create (when no explicit token is provided) and channel_done
+	// (for platform-specific cleanup). May be nil if no provisioners are configured.
+	Provisioners map[channel.ChannelType]channel.EphemeralProvisioner
 }
 
 // RegisterTools adds channel management tools to the MCP handler.
@@ -35,4 +40,5 @@ func RegisterTools(handler *mcp.Handler, deps Deps) {
 	handler.Register(channelEditDef(), channelEditHandler(deps))
 	handler.Register(channelDeleteDef(), channelDeleteHandler(deps))
 	handler.Register(channelIsBusyDef(), channelIsBusyHandler(deps))
+	handler.Register(channelDoneDef(), channelDoneHandler(deps))
 }

@@ -28,11 +28,11 @@ When a user sends an image, voice message, or audio file via Telegram, it appear
 Static channels come from the config file and can't be modified. Dynamic channels are created/edited/deleted at runtime via the `channel_*` tools and trigger an automatic agent restart.
 
 When the user asks to set up a new channel:
-1. Use `telegram_client_create_bot` to mint a new bot automatically (no manual @BotFather needed). This creates a non-searchable bot with privacy configured.
-2. Pass the returned token to `channel_create` with a role (prefer roles over explicit tool lists)
+1. Call `channel_create` with `type: "telegram"` — if the Telegram Client API is set up, the bot is created automatically (no manual @BotFather needed). If not, it returns a clear error guiding the user through setup or manual token creation.
+2. Set a role (prefer roles over explicit tool lists)
 3. The agent restarts automatically — the new channel is live immediately
 
-If the Telegram Client API isn't set up yet (`telegram_client_status` shows no credentials), fall back to guiding the user through @BotFather manually (`/newbot`).
+**Ephemeral channels** auto-delete after idle timeout (default 24h). Set `ephemeral: true` on `channel_create`. Use `channel_done` to tear down manually — it cleans up platform resources (e.g. deletes the Telegram bot) and removes the channel. Always `channel_send` results to other channels BEFORE calling `channel_done`.
 
 **Roles** (recommended for most channels):
 - **superuser** — everything including channel management and dev tools
@@ -50,7 +50,7 @@ The `telegram_client_*` tools let you act as the user's Telegram account via the
 **Key rules:**
 - **Collect API credentials via `secret_form_request`** — api_id and api_hash are sensitive, never accept them in chat
 - **Bot creation is fully automatic** — `telegram_client_create_bot` handles the entire BotFather conversation internally, generates a random non-searchable username, and configures privacy. You just provide a purpose label.
-- **After creating a bot, pass the token to `channel_create`** — this is the standard channel provisioning flow
+- **`channel_create` auto-provisions** — for Telegram channels, `channel_create` calls `telegram_client_create_bot` internally when no token is provided. You don't need to call both tools separately.
 
 ## Telegram formatting
 
@@ -188,7 +188,26 @@ Use `channel_send` to send messages between channels. Only declared links are va
 **Check before sending:** Use `channel_is_busy` to check if the target channel is free before sending. If it's free, send directly. If it's busy, either queue the message or notify the user on the current channel and ask whether to deliver now or wait.
 
 **When you receive a cross-channel message:** The Message Context section shows which channel sent it. Treat it as a task to act on within the receiving channel's context and session.
+
+**Deferred delivery:** Use `channel_send_when_free` instead of `channel_send` when you don't want to interrupt an ongoing conversation. The message is queued durably (survives restarts) and delivered when the target is free, or after a configurable timeout.
 {{end}}
+# Scheduled Job Isolation
+
+When running scheduled jobs that may produce results for other channels, use ephemeral channels to keep scheduled work out of day-to-day conversation sessions.
+
+**Pattern:**
+1. Schedule fires on a dedicated schedule channel
+2. Schedule channel creates an ephemeral channel (`channel_create` with `ephemeral: true`) with **task-specific links** — describe exactly when to use each link based on what the job does
+3. Ephemeral channel does the work (email check, repo sync, etc.)
+4. If results warrant action: `channel_send_when_free` to deliver without interrupting
+5. `channel_done` to tear down the ephemeral channel
+
+**Link descriptions must be task-specific.** Not "report issues" — instead "send if dependency audit found CVEs or breaking changes that need dev attention." This tells the ephemeral channel's agent exactly when each link should be used.
+
+**Roles:**
+- Schedule channel: `superuser` (needs `channel_create`, `telegram_client_*`)
+- Ephemeral channels: `assistant` for most jobs (includes `channel_send`, `channel_done`, `channel_send_when_free`)
+
 # Memory
 
 You have a persistent memory directory (your current working directory). The file `./CLAUDE.md` in this directory is automatically loaded into every conversation. Use it to store information you want to remember across sessions — preferences, facts, project notes, etc.

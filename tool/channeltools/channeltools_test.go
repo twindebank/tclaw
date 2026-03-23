@@ -3,6 +3,7 @@ package channeltools_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -324,6 +325,126 @@ func TestChannelDelete(t *testing.T) {
 	})
 }
 
+func TestChannelDone(t *testing.T) {
+	t.Run("tears down dynamic channel", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		// Create a dynamic channel first.
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name":        "temp",
+			"description": "Temporary channel",
+			"type":        "socket",
+		})
+
+		// Verify it exists.
+		cfg, err := th.dynamicStore.Get(context.Background(), "temp")
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+
+		// Tear it down.
+		result := callTool(t, th.handler, "channel_done", map[string]any{
+			"channel_name": "temp",
+		})
+
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(result, &got))
+		require.Equal(t, "deleted", got["status"])
+
+		// Verify it's gone.
+		cfg, err = th.dynamicStore.Get(context.Background(), "temp")
+		require.NoError(t, err)
+		require.Nil(t, cfg)
+	})
+
+	t.Run("rejects static channel", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		err := callToolExpectError(t, th.handler, "channel_done", map[string]any{
+			"channel_name": "desktop",
+		})
+		require.Contains(t, err.Error(), "static channel")
+	})
+
+	t.Run("rejects nonexistent channel", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		err := callToolExpectError(t, th.handler, "channel_done", map[string]any{
+			"channel_name": "nonexistent",
+		})
+		require.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("rejects empty channel name", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		err := callToolExpectError(t, th.handler, "channel_done", map[string]any{})
+		require.Contains(t, err.Error(), "channel_name is required")
+	})
+
+	t.Run("calls provisioner teardown", func(t *testing.T) {
+		th := setupHarnessWithProvisioner(t, config.EnvLocal)
+
+		// Manually add a channel with teardown state.
+		err := th.dynamicStore.Add(context.Background(), channel.DynamicChannelConfig{
+			Name:      "ephemeral-test",
+			Type:      channel.TypeTelegram,
+			Ephemeral: true,
+			TeardownState: channel.TelegramTeardownState{
+				BotUsername: "tclaw_test_bot",
+			},
+		})
+		require.NoError(t, err)
+		th.secretStore.data[channel.ChannelSecretKey("ephemeral-test")] = "fake-token"
+
+		result := callTool(t, th.handler, "channel_done", map[string]any{
+			"channel_name": "ephemeral-test",
+		})
+
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(result, &got))
+		require.Equal(t, "deleted", got["status"])
+
+		// Verify provisioner was called.
+		require.True(t, th.provisioner.teardownCalled)
+		require.Equal(t, "tclaw_test_bot", th.provisioner.teardownUsername)
+
+		// Verify channel is gone.
+		cfg, err := th.dynamicStore.Get(context.Background(), "ephemeral-test")
+		require.NoError(t, err)
+		require.Nil(t, cfg)
+
+		// Verify secret is gone.
+		token, _ := th.secretStore.Get(context.Background(), channel.ChannelSecretKey("ephemeral-test"))
+		require.Empty(t, token)
+	})
+
+	t.Run("does not delete channel if teardown fails", func(t *testing.T) {
+		th := setupHarnessWithProvisioner(t, config.EnvLocal)
+		th.provisioner.teardownErr = fmt.Errorf("BotFather unreachable")
+
+		err := th.dynamicStore.Add(context.Background(), channel.DynamicChannelConfig{
+			Name:      "failing-ephemeral",
+			Type:      channel.TypeTelegram,
+			Ephemeral: true,
+			TeardownState: channel.TelegramTeardownState{
+				BotUsername: "tclaw_fail_bot",
+			},
+		})
+		require.NoError(t, err)
+
+		toolErr := callToolExpectError(t, th.handler, "channel_done", map[string]any{
+			"channel_name": "failing-ephemeral",
+		})
+		require.Contains(t, toolErr.Error(), "platform teardown failed")
+		require.Contains(t, toolErr.Error(), "BotFather unreachable")
+
+		// Channel should still exist (not deleted on teardown failure).
+		cfg, err := th.dynamicStore.Get(context.Background(), "failing-ephemeral")
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+	})
+}
+
 // --- helpers ---
 
 type testHarness struct {
@@ -399,4 +520,73 @@ func (m *memorySecretStore) Set(_ context.Context, key, value string) error {
 func (m *memorySecretStore) Delete(_ context.Context, key string) error {
 	delete(m.data, key)
 	return nil
+}
+
+type testHarnessWithProvisioner struct {
+	testHarness
+	provisioner *mockProvisioner
+}
+
+func setupHarnessWithProvisioner(t *testing.T, env config.Env) testHarnessWithProvisioner {
+	t.Helper()
+	s, err := store.NewFS(t.TempDir())
+	require.NoError(t, err)
+
+	dynamicStore := channel.NewDynamicStore(s)
+	handler := mcp.NewHandler()
+	secrets := newMemorySecretStore()
+	prov := &mockProvisioner{}
+
+	staticEntries := []channel.RegistryEntry{
+		{Info: channel.Info{ID: "/tmp/test/desktop.sock", Type: channel.TypeSocket, Name: "desktop", Description: "Desktop workstation", Source: channel.SourceStatic}},
+	}
+	registry := channel.NewRegistry(staticEntries, dynamicStore)
+
+	channeltools.RegisterTools(handler, channeltools.Deps{
+		Registry:    registry,
+		Env:         env,
+		SecretStore: secrets,
+		Provisioners: map[channel.ChannelType]channel.EphemeralProvisioner{
+			channel.TypeTelegram: prov,
+		},
+	})
+
+	return testHarnessWithProvisioner{
+		testHarness: testHarness{handler: handler, dynamicStore: dynamicStore, secretStore: secrets},
+		provisioner: prov,
+	}
+}
+
+type mockProvisioner struct {
+	teardownCalled   bool
+	teardownUsername string
+	teardownErr      error
+	provisionCalled  bool
+	provisionResult  *channel.ProvisionResult
+	provisionErr     error
+}
+
+func (m *mockProvisioner) Provision(_ context.Context, name, purpose string) (*channel.ProvisionResult, error) {
+	m.provisionCalled = true
+	if m.provisionErr != nil {
+		return nil, m.provisionErr
+	}
+	if m.provisionResult != nil {
+		return m.provisionResult, nil
+	}
+	return &channel.ProvisionResult{
+		Token: "mock-bot-token",
+		TeardownState: channel.TelegramTeardownState{
+			BotUsername: "tclaw_mock_bot",
+		},
+		AllowedUsers: []int64{123456789},
+	}, nil
+}
+
+func (m *mockProvisioner) Teardown(_ context.Context, state channel.TeardownState) error {
+	m.teardownCalled = true
+	if tg, ok := state.(channel.TelegramTeardownState); ok {
+		m.teardownUsername = tg.BotUsername
+	}
+	return m.teardownErr
 }

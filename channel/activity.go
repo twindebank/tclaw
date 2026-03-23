@@ -5,10 +5,10 @@ import (
 	"time"
 )
 
-// idleTimeout is how long after a message is received a channel is still
+// DefaultIdleTimeout is how long after a message is received a channel is still
 // considered busy, even if the agent turn has completed. This accounts for
 // back-and-forth conversations where the user may reply again shortly.
-const idleTimeout = 3 * time.Minute
+const DefaultIdleTimeout = 3 * time.Minute
 
 // ActivityTracker tracks per-channel activity so other channels can check
 // whether a channel is busy before sending cross-channel messages.
@@ -60,8 +60,14 @@ func (t *ActivityTracker) TurnEnded(channelName string) {
 }
 
 // IsBusy returns true if channelName is actively processing a turn or
-// received a message within the idle timeout window.
+// received a message within the default idle timeout window.
 func (t *ActivityTracker) IsBusy(channelName string) bool {
+	return t.IsBusyWithTimeout(channelName, DefaultIdleTimeout)
+}
+
+// IsBusyWithTimeout returns true if channelName is actively processing a turn
+// or received a message within the given idle timeout window.
+func (t *ActivityTracker) IsBusyWithTimeout(channelName string, idleTimeout time.Duration) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	e, ok := t.entries[channelName]
