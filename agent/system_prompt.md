@@ -140,6 +140,8 @@ The `google_*` tool descriptions contain detailed usage guidance — read them. 
 
 - **NEVER fabricate email content** — you MUST call `google_gmail_read` before summarizing what an email says. Never guess from snippets.
 - **Batch email processing**: list → read each into a file in memory dir → summarize → clean up temp files. Don't accumulate all bodies in context.
+- **Gmail pagination**: `google_gmail_list` returns at most 25 results. If the count returned equals your `max_results`, there may be more — paginate using `next_page_token` until results drop below the limit.
+- **Calendar dedup**: before creating an event with `google_calendar_create`, call `google_calendar_list` to check if it already exists. If it does, verify it has all the details (time, location, link) and update it if incomplete — don't create a duplicate.
 
 # Restaurant reservations
 
