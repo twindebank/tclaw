@@ -11,20 +11,22 @@ var toolDefs = []mcp.ToolDef{
 		Name: "telegram_client_setup",
 		Description: "Store Telegram Client API credentials (API ID and API hash). " +
 			"Register at my.telegram.org → API Development Tools to get these. " +
-			"These are stored encrypted and never leave this device.",
+			"Preferred flow: collect credentials via secret_form_request using keys " +
+			"\"telegram_client_api_id\" (integer) and \"telegram_client_api_hash\" (string), " +
+			"then call this tool with no arguments — it reads from the secret store automatically. " +
+			"Alternatively, pass api_id and api_hash directly (stored encrypted).",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"api_id": {
 					"type": "integer",
-					"description": "Telegram API ID (numeric) from my.telegram.org."
+					"description": "Telegram API ID (numeric). Omit if already stored via secret_form_request."
 				},
 				"api_hash": {
 					"type": "string",
-					"description": "Telegram API hash (hexadecimal string) from my.telegram.org."
+					"description": "Telegram API hash (hex string). Omit if already stored via secret_form_request."
 				}
-			},
-			"required": ["api_id", "api_hash"]
+			}
 		}`),
 	},
 	{
