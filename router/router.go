@@ -432,8 +432,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		entry := channel.RegistryEntry{Info: info}
 		if cc, ok := configByName[info.Name]; ok {
 			entry.Info.Role = cc.Role
+			entry.Info.ToolGroups = cc.ToolGroups
 			entry.Info.AllowedTools = cc.AllowedTools
 			entry.Info.DisallowedTools = cc.DisallowedTools
+			entry.Info.CreatableGroups = cc.CreatableGroups
 			entry.Info.NotifyLifecycle = cc.NotifyLifecycle
 			entry.Links = cc.Links
 		}

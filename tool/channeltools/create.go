@@ -70,18 +70,28 @@ func channelCreateDef() mcp.ToolDef {
 				},
 				"role": {
 					"type": "string",
-					"enum": ["superuser", "developer", "assistant"],
-					"description": "Named preset of tool permissions. Mutually exclusive with allowed_tools."
+					"enum": ["superuser", "developer", "assistant", "monitor"],
+					"description": "Named preset of tool groups. Mutually exclusive with tool_groups and allowed_tools."
+				},
+				"tool_groups": {
+					"type": "array",
+					"items": {"type": "string"},
+					"description": "Tool groups to enable on this channel (e.g. ['base', 'gsuite_read', 'channel_send']). Additive — start with nothing, add what you need. Mutually exclusive with role and allowed_tools. Available groups: base, builtins, builtins_basic, channel_send, channel_ops, scheduling, dev, repo, gsuite_read, gsuite_write, services, connections, telegram_client, onboarding, secret_form."
 				},
 				"allowed_tools": {
 					"type": "array",
 					"items": {"type": "string"},
-					"description": "Tools this channel is allowed to use. Mutually exclusive with role."
+					"description": "Explicit tool list. Mutually exclusive with role and tool_groups."
 				},
 				"disallowed_tools": {
 					"type": "array",
 					"items": {"type": "string"},
-					"description": "Tools explicitly denied on this channel."
+					"description": "Tools explicitly denied on this channel. Works alongside role, tool_groups, or allowed_tools."
+				},
+				"creatable_groups": {
+					"type": "array",
+					"items": {"type": "string"},
+					"description": "Tool groups this channel is allowed to delegate when creating new channels. If empty or omitted, channel_create is blocked. Prevents privilege escalation — a channel can only give created channels groups from this list."
 				},
 				"links": {
 					"type": "array",
@@ -114,8 +124,10 @@ type channelCreateArgs struct {
 	Ephemeral                 bool                  `json:"ephemeral"`
 	EphemeralIdleTimeoutHours int                   `json:"ephemeral_idle_timeout_hours"`
 	Role                      string                `json:"role"`
+	ToolGroups                []string              `json:"tool_groups"`
 	AllowedTools              []string              `json:"allowed_tools"`
 	DisallowedTools           []string              `json:"disallowed_tools"`
+	CreatableGroups           []string              `json:"creatable_groups"`
 	Links                     []channel.Link        `json:"links"`
 }
 
@@ -176,16 +188,100 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("unsupported channel type %q (must be 'socket' or 'telegram')", a.Type)
 		}
 
-		// Validate role / allowed_tools mutual exclusion.
+		// Validate role / tool_groups / allowed_tools mutual exclusion.
 		var channelRole role.Role
+		var toolGroups []role.ToolGroup
+
+		setCount := 0
+		if a.Role != "" {
+			setCount++
+		}
+		if len(a.ToolGroups) > 0 {
+			setCount++
+		}
+		if len(a.AllowedTools) > 0 {
+			setCount++
+		}
+		if setCount > 1 {
+			return nil, fmt.Errorf("role, tool_groups, and allowed_tools are mutually exclusive — set exactly one")
+		}
+
 		if a.Role != "" {
 			channelRole = role.Role(a.Role)
 			if !channelRole.Valid() {
 				return nil, fmt.Errorf("unknown role %q (known: %v)", a.Role, role.ValidRoles())
 			}
-			if len(a.AllowedTools) > 0 {
-				return nil, fmt.Errorf("role and allowed_tools are mutually exclusive — set one or the other")
+		}
+		if len(a.ToolGroups) > 0 {
+			for _, g := range a.ToolGroups {
+				tg := role.ToolGroup(g)
+				if !role.ValidGroup(tg) {
+					return nil, fmt.Errorf("unknown tool group %q", g)
+				}
+				toolGroups = append(toolGroups, tg)
 			}
+		}
+
+		// Enforce creatable_groups — the creating channel can only assign groups
+		// it's been authorized to delegate. Uses the registry which covers both
+		// static and dynamic channels.
+		if deps.ActiveChannel != nil {
+			activeChannelName := deps.ActiveChannel()
+			if activeChannelName != "" {
+				activeEntry, entryErr := deps.Registry.ByName(ctx, activeChannelName)
+				if entryErr != nil {
+					slog.Error("failed to look up creating channel for creatable_groups check", "channel", activeChannelName, "err", entryErr)
+				}
+
+				// Determine the effective groups being assigned to the new channel.
+				var requestedGroups []role.ToolGroup
+				if channelRole == role.Superuser {
+					// Superuser requires all groups — effectively only channels with
+					// all groups in creatable_groups can create superuser channels.
+					requestedGroups = role.ValidGroups()
+				} else if channelRole != "" {
+					requestedGroups = role.RoleGroups(channelRole)
+				} else if len(toolGroups) > 0 {
+					requestedGroups = toolGroups
+				}
+
+				// Enforce if the new channel has groups/role.
+				if len(requestedGroups) > 0 && activeEntry != nil {
+					// Use explicit creatable_groups if set, otherwise fall back
+					// to role defaults. This preserves backwards compatibility —
+					// existing superuser channels without creatable_groups can
+					// still create channels.
+					creatableList := activeEntry.CreatableGroups
+					if len(creatableList) == 0 {
+						creatableList = role.DefaultCreatableGroups(activeEntry.Role)
+					}
+
+					allowed := make(map[role.ToolGroup]bool, len(creatableList))
+					for _, g := range creatableList {
+						allowed[g] = true
+					}
+
+					if len(allowed) == 0 {
+						return nil, fmt.Errorf("this channel is not authorized to create other channels (creatable_groups is empty)")
+					}
+
+					for _, g := range requestedGroups {
+						if !allowed[g] {
+							return nil, fmt.Errorf("this channel is not authorized to delegate tool group %q (not in creatable_groups)", g)
+						}
+					}
+				}
+			}
+		}
+
+		// Convert creatable_groups strings to typed values.
+		var creatableGroups []role.ToolGroup
+		for _, g := range a.CreatableGroups {
+			tg := role.ToolGroup(g)
+			if !role.ValidGroup(tg) {
+				return nil, fmt.Errorf("unknown creatable group %q", g)
+			}
+			creatableGroups = append(creatableGroups, tg)
 		}
 
 		// Check uniqueness against all existing channels (static + dynamic).
@@ -231,8 +327,10 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			Description:          a.Description,
 			CreatedAt:            time.Now(),
 			Role:                 channelRole,
+			ToolGroups:           toolGroups,
 			AllowedTools:         a.AllowedTools,
 			DisallowedTools:      a.DisallowedTools,
+			CreatableGroups:      creatableGroups,
 			AllowedUsers:         allowedUsers,
 			Links:                a.Links,
 			Ephemeral:            a.Ephemeral,
