@@ -350,6 +350,30 @@ Chat tools use the raw `tg.Client` API: `MessagesCreateChat` for groups, `Contac
 - **Secret store keys**: `telegram_client_api_id`, `telegram_client_api_hash`, `telegram_client_phone`, `telegram_client_session`
 - **Fly secret seeding**: `TELEGRAM_CLIENT_API_ID_<USER>`, `TELEGRAM_CLIENT_API_HASH_<USER>`
 
+## Ephemeral Channels
+
+Channels with `ephemeral: true` auto-delete after a configurable idle timeout (default 24 hours). Each ephemeral channel gets its own platform resources (e.g. a dedicated Telegram bot with its own chat) and cleans them up on teardown.
+
+### Provisioner Interface
+
+Platform-specific resource creation and teardown is handled by the `EphemeralProvisioner` interface (`channel/provisioner.go`). Each channel type can have a provisioner — currently only Telegram (wraps `telegram_client_create_bot` / `telegram_client_delete_bot`). The provisioner is called by `channel_create` (when no explicit token is provided) and `channel_done` / auto-cleanup.
+
+### Teardown State
+
+Platform-specific cleanup state is stored as typed data on `DynamicChannelConfig.TeardownState` (sealed `TeardownState` interface in `channel/teardown.go`). JSON serialization uses a discriminated envelope (`{"type": "telegram", "data": {...}}`). Currently only `TelegramTeardownState` (stores `BotUsername`). Adding a new platform means adding a new concrete type + case in the unmarshal switch.
+
+### Auto-Cleanup
+
+A background goroutine (`router/ephemeral.go`) runs at user lifetime and checks ephemeral channels every 60 seconds. Channels idle past their `EphemeralIdleTimeout` are torn down (provisioner teardown → delete config → delete secret → trigger restart). If teardown fails, the channel is skipped and retried next tick — never deleted without successful platform cleanup.
+
+### `channel_done` Tool
+
+Manually tears down any dynamic channel (not just ephemeral). Calls the provisioner's `Teardown()` if the channel has `TeardownState`, then deletes config and secret. Returns an error if platform teardown fails — does NOT delete the channel config, avoiding orphaned platform resources.
+
+## Deferred Message Delivery
+
+`channel_send_when_free` queues a cross-channel message for delivery when the target is free. If the target is busy, the message is persisted durably in the state store (`channel/pending.go`) and delivered by a background drain goroutine (`router/pending.go`) running at user lifetime. Messages survive restarts. After a configurable timeout (default 30 min, max 2h), the message is delivered anyway with a `[delayed]` prefix.
+
 ## Remote MCP Servers
 
 Users can connect to external MCP servers (like the Anthropic MCP directory) via MCP tools. Every remote MCP is scoped to a specific channel — its tools are only included in that channel's MCP configuration.

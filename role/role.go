@@ -102,6 +102,8 @@ const (
 	MCPToolChannelSend       claudecli.Tool = "mcp__tclaw__channel_send"
 	MCPToolSecretFormAll     claudecli.Tool = "mcp__tclaw__secret_form_*"
 	MCPToolTelegramClientAll claudecli.Tool = "mcp__tclaw__telegram_client_*"
+	MCPToolChannelDone       claudecli.Tool = "mcp__tclaw__channel_done"
+	MCPToolSendWhenFree      claudecli.Tool = "mcp__tclaw__channel_send_when_free"
 )
 
 // basic builtins for assistant.
@@ -188,6 +190,8 @@ func resolveAssistant(ctx ChannelContext) []claudecli.Tool {
 		MCPToolChannelSend,
 		MCPToolSecretFormAll,
 		MCPToolTelegramClientAll,
+		MCPToolChannelDone,
+		MCPToolSendWhenFree,
 	)
 	// Provider tools for connections on this channel.
 	tools = append(tools, providerToolPatterns(ctx)...)
