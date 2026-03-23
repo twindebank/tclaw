@@ -52,9 +52,13 @@ type Info struct {
 	Description string // explains the channel's purpose (e.g. "Desktop workstation", "Phone")
 	Source      Source // where this channel's config came from
 
-	// Role is a named preset of tool permissions. Mutually exclusive with
-	// AllowedTools — set one or the other.
+	// Role is a named preset of tool groups. Mutually exclusive with
+	// ToolGroups and AllowedTools.
 	Role role.Role
+
+	// ToolGroups is a list of named tool groups, combined additively.
+	// Mutually exclusive with Role and AllowedTools.
+	ToolGroups []role.ToolGroup
 
 	// AllowedTools overrides user-level tool permissions for this channel.
 	// Uses []string (not []claudecli.Tool) to avoid circular dependency.
@@ -62,6 +66,10 @@ type Info struct {
 
 	// DisallowedTools overrides user-level tool permissions for this channel.
 	DisallowedTools []string
+
+	// CreatableGroups is the set of tool groups this channel can delegate when
+	// creating new channels. If empty, channel_create is blocked.
+	CreatableGroups []role.ToolGroup
 
 	// NotifyLifecycle sends a message to this channel on instance startup and shutdown.
 	NotifyLifecycle bool

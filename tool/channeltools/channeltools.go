@@ -31,6 +31,10 @@ type Deps struct {
 	// channel_create (when no explicit token is provided) and channel_done
 	// (for platform-specific cleanup). May be nil if no provisioners are configured.
 	Provisioners map[channel.ChannelType]channel.EphemeralProvisioner
+
+	// ActiveChannel returns the name of the channel currently being processed.
+	// Used by channel_create to look up the creating channel's creatable_roles.
+	ActiveChannel func() string
 }
 
 // RegisterTools adds channel management tools to the MCP handler.

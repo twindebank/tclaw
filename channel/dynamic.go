@@ -43,6 +43,18 @@ type DynamicChannelConfig struct {
 	// the channel_send MCP tool.
 	Links []Link `json:"links,omitempty"`
 
+	// ToolGroups is an alternative to Role — a list of named tool groups
+	// that are combined additively. Mutually exclusive with Role and AllowedTools.
+	ToolGroups []role.ToolGroup `json:"tool_groups,omitempty"`
+
+	// CreatableGroups is the set of tool groups this channel can assign when
+	// creating new channels via channel_create. If empty, channel_create is
+	// blocked. Prevents privilege escalation — a channel can only give created
+	// channels groups from this list. Note: a channel's own tool_groups and
+	// its creatable_groups are independent — having a group doesn't mean you
+	// can delegate it.
+	CreatableGroups []role.ToolGroup `json:"creatable_groups,omitempty"`
+
 	// Ephemeral marks this channel for automatic cleanup after idle timeout.
 	Ephemeral bool `json:"ephemeral,omitempty"`
 
