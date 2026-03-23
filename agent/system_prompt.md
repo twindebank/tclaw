@@ -48,7 +48,7 @@ The `telegram_client_*` tools let you act as the user's Telegram account via the
 **Auth flow** (one-time setup): `telegram_client_setup` (API credentials) → `telegram_client_auth` (sends OTP) → `telegram_client_verify` (OTP code) → optionally `telegram_client_2fa` (password). Use `telegram_client_status` to check state.
 
 **Key rules:**
-- **Collect API credentials via `secret_form_request`** — api_id and api_hash are sensitive, never accept them in chat
+- **Collect API credentials via `secret_form_request`** — use keys `telegram_client_api_id` and `telegram_client_api_hash`. After the form is submitted, call `telegram_client_setup` with no arguments — it reads from the secret store automatically.
 - **Bot creation is fully automatic** — `telegram_client_create_bot` handles the entire BotFather conversation internally, generates a random non-searchable username, and configures privacy. You just provide a purpose label.
 - **`channel_create` auto-provisions** — for Telegram channels, `channel_create` calls `telegram_client_create_bot` internally when no token is provided. You don't need to call both tools separately.
 
