@@ -7,13 +7,12 @@ import (
 
 	"tclaw/channel"
 	"tclaw/mcp"
-	"tclaw/role"
 )
 
 func channelEditDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name:        "channel_edit",
-		Description: "Update a dynamic channel's description, role, tool permissions, or rotate its bot token. Cannot modify static channels (from config file). The agent restarts automatically to apply changes.",
+		Description: "Update a dynamic channel's description, tool permissions, or rotate its bot token. Cannot modify static channels (from config file). The agent restarts automatically to apply changes.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -40,15 +39,10 @@ func channelEditDef() mcp.ToolDef {
 						}
 					}
 				},
-				"role": {
-					"type": "string",
-					"enum": ["superuser", "developer", "assistant"],
-					"description": "Named preset of tool permissions. Mutually exclusive with allowed_tools — set one or the other. Pass empty string to clear the role."
-				},
 				"allowed_tools": {
 					"type": "array",
 					"items": {"type": "string"},
-					"description": "Tools this channel is allowed to use. Replaces any existing allowed_tools for this channel. Mutually exclusive with role."
+					"description": "Tools this channel is allowed to use. Replaces any existing allowed_tools for this channel."
 				},
 				"disallowed_tools": {
 					"type": "array",
@@ -82,7 +76,6 @@ type channelEditArgs struct {
 	Name            string              `json:"name"`
 	Description     string              `json:"description"`
 	TelegramConfig  *telegramEditConfig `json:"telegram_config"`
-	Role            *string             `json:"role"`
 	AllowedTools    []string            `json:"allowed_tools"`
 	DisallowedTools []string            `json:"disallowed_tools"`
 	Links           *[]channel.Link     `json:"links"`
@@ -95,19 +88,8 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
-		if a.Description == "" && a.TelegramConfig == nil && a.Role == nil && a.AllowedTools == nil && a.DisallowedTools == nil && a.Links == nil {
-			return nil, fmt.Errorf("at least one of 'description', 'telegram_config', 'role', 'allowed_tools', 'disallowed_tools', or 'links' must be provided")
-		}
-
-		// Validate role if provided.
-		if a.Role != nil && *a.Role != "" {
-			channelRole := role.Role(*a.Role)
-			if !channelRole.Valid() {
-				return nil, fmt.Errorf("unknown role %q (known: %v)", *a.Role, role.ValidRoles())
-			}
-			if len(a.AllowedTools) > 0 {
-				return nil, fmt.Errorf("role and allowed_tools are mutually exclusive — set one or the other")
-			}
+		if a.Description == "" && a.TelegramConfig == nil && a.AllowedTools == nil && a.DisallowedTools == nil && a.Links == nil {
+			return nil, fmt.Errorf("at least one of 'description', 'telegram_config', 'allowed_tools', 'disallowed_tools', or 'links' must be provided")
 		}
 
 		// telegram_config with only allowed_users (no token) is valid for updating the allowlist.
@@ -156,26 +138,11 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 			}
 		}
 
-		// Update role if provided.
-		if a.Role != nil {
-			if err := deps.Registry.DynamicStore().Update(ctx, a.Name, func(c *channel.DynamicChannelConfig) {
-				c.Role = role.Role(*a.Role)
-				if *a.Role != "" {
-					// Switching to a role clears explicit tool lists.
-					c.AllowedTools = nil
-				}
-			}); err != nil {
-				return nil, fmt.Errorf("edit channel role: %w", err)
-			}
-		}
-
 		// Update tool permissions if provided.
 		if a.AllowedTools != nil || a.DisallowedTools != nil {
 			if err := deps.Registry.DynamicStore().Update(ctx, a.Name, func(c *channel.DynamicChannelConfig) {
 				if a.AllowedTools != nil {
 					c.AllowedTools = a.AllowedTools
-					// Switching to explicit tools clears the role.
-					c.Role = ""
 				}
 				if a.DisallowedTools != nil {
 					c.DisallowedTools = a.DisallowedTools

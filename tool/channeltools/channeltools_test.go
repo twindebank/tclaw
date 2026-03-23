@@ -12,7 +12,6 @@ import (
 	"tclaw/config"
 	"tclaw/libraries/store"
 	"tclaw/mcp"
-	"tclaw/role"
 	"tclaw/tool/channeltools"
 )
 
@@ -463,7 +462,7 @@ func TestCreatableGroups(t *testing.T) {
 			"name":        "child",
 			"description": "Child channel",
 			"type":        "socket",
-			"tool_groups": []string{"base"},
+			"tool_groups": []string{"core_tools"},
 		})
 		require.Contains(t, toolErr.Error(), "not authorized to create")
 	})
@@ -475,7 +474,7 @@ func TestCreatableGroups(t *testing.T) {
 			Name:            "monitor-chan",
 			Type:            channel.TypeSocket,
 			Description:     "Monitor with base+channel_send delegation",
-			CreatableGroups: []role.ToolGroup{role.GroupBase, role.GroupChannelSend},
+			CreatableGroups: []string{"core_tools", "channel_messaging"},
 		})
 		require.NoError(t, err)
 
@@ -483,7 +482,7 @@ func TestCreatableGroups(t *testing.T) {
 			"name":        "child-ok",
 			"description": "Authorized child",
 			"type":        "socket",
-			"tool_groups": []string{"base", "channel_send"},
+			"tool_groups": []string{"core_tools", "channel_messaging"},
 		})
 
 		var got map[string]any
@@ -498,7 +497,7 @@ func TestCreatableGroups(t *testing.T) {
 			Name:            "monitor-chan",
 			Type:            channel.TypeSocket,
 			Description:     "Monitor with base only",
-			CreatableGroups: []role.ToolGroup{role.GroupBase},
+			CreatableGroups: []string{"core_tools"},
 		})
 		require.NoError(t, err)
 
@@ -506,33 +505,12 @@ func TestCreatableGroups(t *testing.T) {
 			"name":        "child-bad",
 			"description": "Unauthorized child",
 			"type":        "socket",
-			"tool_groups": []string{"base", "dev"},
+			"tool_groups": []string{"core_tools", "dev_workflow"},
 		})
 		require.Contains(t, toolErr.Error(), "not authorized to delegate tool group")
-		require.Contains(t, toolErr.Error(), "dev")
+		require.Contains(t, toolErr.Error(), "dev_workflow")
 	})
 
-	t.Run("privilege escalation via role is blocked", func(t *testing.T) {
-		th := setupHarnessWithActiveChannel(t, config.EnvLocal, "monitor-chan")
-
-		// Monitor can only delegate base + channel_send.
-		err := th.dynamicStore.Add(context.Background(), channel.DynamicChannelConfig{
-			Name:            "monitor-chan",
-			Type:            channel.TypeSocket,
-			Description:     "Restricted monitor",
-			CreatableGroups: []role.ToolGroup{role.GroupBase, role.GroupChannelSend},
-		})
-		require.NoError(t, err)
-
-		// Superuser role requires ALL groups — should be blocked.
-		toolErr := callToolExpectError(t, th.handler, "channel_create", map[string]any{
-			"name":        "escalated",
-			"description": "Attempted superuser escalation",
-			"type":        "socket",
-			"role":        "superuser",
-		})
-		require.Contains(t, toolErr.Error(), "not authorized")
-	})
 }
 
 // --- helpers ---

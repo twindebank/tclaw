@@ -11,7 +11,7 @@ import (
 	"tclaw/channel"
 	"tclaw/claudecli"
 	"tclaw/libraries/secret"
-	"tclaw/role"
+	"tclaw/toolgroup"
 	"tclaw/user"
 
 	"gopkg.in/yaml.v3"
@@ -79,12 +79,6 @@ type User struct {
 	MaxTurns       int                      `yaml:"max_turns"`
 	Debug          bool                     `yaml:"debug"`
 
-	// Role is a named preset of tool permissions. Mutually exclusive with
-	// AllowedTools — set one or the other. When set on the user, it applies
-	// as the default for all channels that don't specify their own role or
-	// allowed_tools.
-	Role role.Role `yaml:"role,omitempty"`
-
 	AllowedTools    []claudecli.Tool `yaml:"allowed_tools"`
 	DisallowedTools []claudecli.Tool `yaml:"disallowed_tools"`
 	SystemPrompt    string           `yaml:"system_prompt"`
@@ -107,14 +101,9 @@ type Channel struct {
 	// Empty means the channel is active in all environments.
 	Envs []Env `yaml:"envs,omitempty"`
 
-	// Role is a named preset of tool permissions for this channel.
-	// Mutually exclusive with AllowedTools — set one or the other.
-	// When set, this replaces any user-level role or allowed_tools.
-	Role role.Role `yaml:"role,omitempty"`
-
 	// ToolGroups is a list of named tool groups, combined additively.
 	// Mutually exclusive with Role and AllowedTools.
-	ToolGroups []role.ToolGroup `yaml:"tool_groups,omitempty"`
+	ToolGroups []toolgroup.ToolGroup `yaml:"tool_groups,omitempty"`
 
 	// AllowedTools overrides the user-level allowed_tools for this channel.
 	// Mutually exclusive with Role and ToolGroups. When set, this replaces
@@ -128,7 +117,7 @@ type Channel struct {
 	// CreatableGroups is the set of tool groups this channel can delegate when
 	// creating new channels via channel_create. If empty, channel_create is
 	// blocked on this channel.
-	CreatableGroups []role.ToolGroup `yaml:"creatable_groups,omitempty"`
+	CreatableGroups []toolgroup.ToolGroup `yaml:"creatable_groups,omitempty"`
 
 	// NotifyLifecycle sends a message to this channel on instance startup and shutdown.
 	NotifyLifecycle bool `yaml:"notify_lifecycle,omitempty"`
@@ -256,13 +245,6 @@ func validate(cfg *Config) error {
 
 		if u.PermissionMode != "" && !claudecli.ValidPermissionMode(u.PermissionMode) {
 			return fmt.Errorf("user %q: unknown permission_mode %q (known: %v)", u.ID, u.PermissionMode, claudecli.ValidPermissionModes())
-		}
-
-		if u.Role != "" && !u.Role.Valid() {
-			return fmt.Errorf("user %q: unknown role %q (known: %v)", u.ID, u.Role, role.ValidRoles())
-		}
-		if u.Role != "" && len(u.AllowedTools) > 0 {
-			return fmt.Errorf("user %q: role and allowed_tools are mutually exclusive", u.ID)
 		}
 
 		for j, t := range u.AllowedTools {
@@ -484,7 +466,6 @@ func (u *User) ToUserConfig() user.Config {
 		APIKey:          u.APIKey,
 		Model:           u.Model,
 		PermissionMode:  u.PermissionMode,
-		Role:            u.Role,
 		AllowedTools:    u.AllowedTools,
 		DisallowedTools: u.DisallowedTools,
 		MaxTurns:        u.MaxTurns,

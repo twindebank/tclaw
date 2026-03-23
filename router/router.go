@@ -431,11 +431,9 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	for _, info := range channel.InfoAll(staticChMap) {
 		entry := channel.RegistryEntry{Info: info}
 		if cc, ok := configByName[info.Name]; ok {
-			entry.Info.Role = cc.Role
-			entry.Info.ToolGroups = cc.ToolGroups
-			entry.Info.AllowedTools = cc.AllowedTools
+			entry.Info.AllowedTools = resolveConfigChannelTools(cc)
 			entry.Info.DisallowedTools = cc.DisallowedTools
-			entry.Info.CreatableGroups = cc.CreatableGroups
+			entry.Info.CreatableGroups = toolGroupsToStrings(cc.CreatableGroups)
 			entry.Info.NotifyLifecycle = cc.NotifyLifecycle
 			entry.Links = cc.Links
 		}
@@ -675,7 +673,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				Type:        string(info.Type),
 				Description: info.Description,
 				Source:      string(info.Source),
-				Role:        string(info.Role),
 			})
 		}
 
@@ -861,7 +858,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		}()
 
 		// Build per-channel tool overrides from config (static), store (dynamic),
-		// and roles. Roles are resolved with channel context (connections, remote MCPs).
+		// and tool groups. Groups are resolved with channel context (connections, remote MCPs).
 		channelToolOverrides := buildChannelToolOverrides(allChMap, registry, dynamicCtx, mu.cfg, connMgr)
 
 		// Generate per-channel MCP config files for channels with scoped remote MCPs.
