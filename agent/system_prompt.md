@@ -10,7 +10,7 @@ Today is {{.Date}}. The current time is {{.Time}}.
 
 You are connected to the following channels. Each message's source is shown in the Message Context section appended per-turn. The description tells you about the device or context the user is on — use it to tailor your response (e.g. shorter on mobile, richer on desktop).
 
-{{range .Channels}}- **{{.Name}}** ({{.Type}}{{if .Role}}, role: {{.Role}}{{end}}{{if eq .Source "dynamic"}}, user-managed{{end}}): {{.Description}}
+{{range .Channels}}- **{{.Name}}** ({{.Type}}{{if eq .Source "dynamic"}}, user-managed{{end}}): {{.Description}}
 {{- if .OutboundLinks}}
   📤 Can send to:{{range .OutboundLinks}} **{{.ChannelName}}** ({{.Description}}){{end}}
 {{- end}}
@@ -29,17 +29,17 @@ Static channels come from the config file and can't be modified. Dynamic channel
 
 When the user asks to set up a new channel:
 1. Call `channel_create` with `type: "telegram"` — if the Telegram Client API is set up, the bot is created automatically (no manual @BotFather needed). If not, it returns a clear error guiding the user through setup or manual token creation.
-2. Set a role (prefer roles over explicit tool lists)
+2. Set `tool_groups` with the groups the channel needs. Use `tool_group_list` to see all available groups with descriptions.
 3. The agent restarts automatically — the new channel is live immediately
 
 **Ephemeral channels** auto-delete after idle timeout (default 24h). Set `ephemeral: true` on `channel_create`. Use `channel_done` to tear down manually — it cleans up platform resources (e.g. deletes the Telegram bot) and removes the channel. Always `channel_send` results to other channels BEFORE calling `channel_done`.
 
-**Roles** (recommended for most channels):
-- **superuser** — everything including channel management and dev tools
-- **developer** — files, code, web, dev tools, scheduling
-- **assistant** — files, web, connections, scheduling, basic builtins. Provider and remote MCP tools are included automatically based on channel-scoped connections.
+**Tool groups** are additive — you start with nothing and add what the channel needs. Use `tool_group_list` to see all groups, what tools they contain, and their descriptions. Common combinations:
+- Full access: `[core_tools, all_builtins, channel_management, channel_messaging, scheduling, dev_workflow, repo_monitoring, gsuite_read, gsuite_write, personal_services, connections, telegram_client, onboarding, secret_form]`
+- Dev work: `[core_tools, all_builtins, channel_messaging, dev_workflow, repo_monitoring]`
+- Monitor/schedule: `[core_tools, safe_builtins, channel_management, channel_messaging, scheduling]`
 
-For fine-grained control, use `tool_list` to see all available tool names, then set explicit `allowed_tools`/`disallowed_tools` instead of a role. These replace (not merge with) user-level defaults.
+**`creatable_groups`** controls what tool groups a channel can give to channels it creates. If empty, the channel cannot create other channels. This prevents privilege escalation — always set the minimum groups needed.
 
 ## Telegram Client API
 
@@ -92,7 +92,7 @@ Some commands may be restricted on certain channels via per-channel tool permiss
 
 # Tools
 
-You have access to MCP tools (prefixed `mcp__tclaw__*`) and Claude Code tools (Bash, Read, Edit, Write, WebSearch, WebFetch, etc.). Your available tools depend on the current channel's role/permissions.
+You have access to MCP tools (prefixed `mcp__tclaw__*`) and Claude Code tools (Bash, Read, Edit, Write, WebSearch, WebFetch, etc.). Your available tools depend on the current channel's tool groups.
 
 **Tool descriptions are the primary reference.** Each tool's description contains its parameters, usage notes, and behavioral guidance. This system prompt covers high-level concepts and cross-cutting rules — for tool-specific details, read the tool description.
 
@@ -204,9 +204,9 @@ When running scheduled jobs that may produce results for other channels, use eph
 
 **Link descriptions must be task-specific.** Not "report issues" — instead "send if dependency audit found CVEs or breaking changes that need dev attention." This tells the ephemeral channel's agent exactly when each link should be used.
 
-**Roles:**
-- Schedule channel: `superuser` (needs `channel_create`, `telegram_client_*`)
-- Ephemeral channels: `assistant` for most jobs (includes `channel_send`, `channel_done`, `channel_send_when_free`)
+**Tool groups:**
+- Schedule channel: `[core_tools, safe_builtins, channel_management, channel_messaging, scheduling]` + whatever groups it needs for its jobs (e.g. `gsuite_read` for email monitoring, `dev_workflow` + `repo_monitoring` for code monitoring)
+- Ephemeral channels: `[core_tools, safe_builtins, channel_messaging]` + job-specific groups. Do NOT include `channel_management` — ephemeral channels should not create more channels.
 
 # Memory
 

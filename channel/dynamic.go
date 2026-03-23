@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"tclaw/libraries/store"
-	"tclaw/role"
 )
 
 const dynamicChannelsStoreKey = "dynamic_channels"
@@ -21,14 +20,11 @@ type DynamicChannelConfig struct {
 	Description string      `json:"description"`
 	CreatedAt   time.Time   `json:"created_at"`
 
-	// Role is a named preset of tool permissions for this channel.
-	// Mutually exclusive with AllowedTools.
-	Role role.Role `json:"role,omitempty"`
-
-	// AllowedTools overrides user-level tool permissions for this channel.
+	// AllowedTools is the resolved set of tools this channel can use.
+	// Populated at creation time from tool_groups or explicit lists.
 	AllowedTools []string `json:"allowed_tools,omitempty"`
 
-	// DisallowedTools overrides user-level tool permissions for this channel.
+	// DisallowedTools are tools explicitly denied on this channel.
 	DisallowedTools []string `json:"disallowed_tools,omitempty"`
 
 	// AllowedUsers restricts which Telegram user IDs can interact with this channel.
@@ -43,17 +39,10 @@ type DynamicChannelConfig struct {
 	// the channel_send MCP tool.
 	Links []Link `json:"links,omitempty"`
 
-	// ToolGroups is an alternative to Role — a list of named tool groups
-	// that are combined additively. Mutually exclusive with Role and AllowedTools.
-	ToolGroups []role.ToolGroup `json:"tool_groups,omitempty"`
-
-	// CreatableGroups is the set of tool groups this channel can assign when
-	// creating new channels via channel_create. If empty, channel_create is
-	// blocked. Prevents privilege escalation — a channel can only give created
-	// channels groups from this list. Note: a channel's own tool_groups and
-	// its creatable_groups are independent — having a group doesn't mean you
-	// can delegate it.
-	CreatableGroups []role.ToolGroup `json:"creatable_groups,omitempty"`
+	// CreatableGroups is the set of tool group names this channel can delegate
+	// when creating new channels via channel_create. If empty, channel_create
+	// is blocked. Prevents privilege escalation.
+	CreatableGroups []string `json:"creatable_groups,omitempty"`
 
 	// Ephemeral marks this channel for automatic cleanup after idle timeout.
 	Ephemeral bool `json:"ephemeral,omitempty"`

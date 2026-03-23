@@ -58,7 +58,6 @@ type ChannelInfo struct {
 	Type        string
 	Description string
 	Source      string // "static" or "dynamic"
-	Role        string // role name if set (e.g. "assistant", "developer")
 
 	// OutboundLinks lists channels this channel can send messages to.
 	OutboundLinks []ChannelLinkInfo

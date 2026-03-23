@@ -1,10 +1,6 @@
 package channel
 
-import (
-	"context"
-
-	"tclaw/role"
-)
+import "context"
 
 // MessageID identifies a sent message so it can be edited later.
 // The concrete value is transport-specific (e.g. telegram message ID,
@@ -52,24 +48,17 @@ type Info struct {
 	Description string // explains the channel's purpose (e.g. "Desktop workstation", "Phone")
 	Source      Source // where this channel's config came from
 
-	// Role is a named preset of tool groups. Mutually exclusive with
-	// ToolGroups and AllowedTools.
-	Role role.Role
-
-	// ToolGroups is a list of named tool groups, combined additively.
-	// Mutually exclusive with Role and AllowedTools.
-	ToolGroups []role.ToolGroup
-
-	// AllowedTools overrides user-level tool permissions for this channel.
+	// AllowedTools is the resolved set of tools this channel can use.
+	// Populated at creation time from tool_groups, role presets, or explicit lists.
 	// Uses []string (not []claudecli.Tool) to avoid circular dependency.
 	AllowedTools []string
 
-	// DisallowedTools overrides user-level tool permissions for this channel.
+	// DisallowedTools are tools explicitly denied on this channel.
 	DisallowedTools []string
 
-	// CreatableGroups is the set of tool groups this channel can delegate when
-	// creating new channels. If empty, channel_create is blocked.
-	CreatableGroups []role.ToolGroup
+	// CreatableGroups is the set of tool group names this channel can delegate
+	// when creating new channels. If empty, channel_create is blocked.
+	CreatableGroups []string
 
 	// NotifyLifecycle sends a message to this channel on instance startup and shutdown.
 	NotifyLifecycle bool

@@ -45,4 +45,5 @@ func RegisterTools(handler *mcp.Handler, deps Deps) {
 	handler.Register(channelDeleteDef(), channelDeleteHandler(deps))
 	handler.Register(channelIsBusyDef(), channelIsBusyHandler(deps))
 	handler.Register(channelDoneDef(), channelDoneHandler(deps))
+	handler.Register(toolGroupListDef(), toolGroupListHandler())
 }

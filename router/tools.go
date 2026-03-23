@@ -7,17 +7,15 @@ import (
 	"tclaw/agent"
 	"tclaw/channel"
 	"tclaw/claudecli"
+	"tclaw/config"
 	"tclaw/connection"
 	"tclaw/mcp"
-	"tclaw/role"
+	"tclaw/toolgroup"
 	"tclaw/user"
 )
 
-// channelToolSource holds the role, tool groups, or explicit tool lists for a channel.
-// Exactly one of Role, ToolGroups, or AllowedTools should be set.
+// channelToolSource holds the resolved tool lists for a channel.
 type channelToolSource struct {
-	Role            role.Role
-	ToolGroups      []role.ToolGroup
 	AllowedTools    []string
 	DisallowedTools []string
 }
@@ -28,8 +26,8 @@ type channelToolSource struct {
 //  1. Channel-level role or allowed_tools (from config or dynamic store)
 //  2. User-level role or allowed_tools (fallback)
 //
-// When a role is used, it's resolved via role.Resolve() with a ChannelContext
-// that includes which providers and remote MCPs are available on that channel.
+// Provider and remote MCP tool patterns are added dynamically based on which
+// connections and remote MCPs are available on that channel.
 func buildChannelToolOverrides(
 	allChMap map[channel.ChannelID]channel.Channel,
 	registry *channel.Registry,
@@ -50,37 +48,26 @@ func buildChannelToolOverrides(
 		}
 		if entry != nil {
 			src = channelToolSource{
-				Role:            entry.Role,
-				ToolGroups:      entry.ToolGroups,
 				AllowedTools:    entry.AllowedTools,
 				DisallowedTools: entry.DisallowedTools,
 			}
 		}
 
 		// Fall back to user-level if channel has no permissions set.
-		if src.Role == "" && len(src.ToolGroups) == 0 && len(src.AllowedTools) == 0 {
-			src.Role = userCfg.Role
-			if src.Role == "" {
-				src.AllowedTools = toolsToStrings(userCfg.AllowedTools)
-				src.DisallowedTools = toolsToStrings(userCfg.DisallowedTools)
-			}
+		if len(src.AllowedTools) == 0 {
+			src.AllowedTools = toolsToStrings(userCfg.AllowedTools)
+			src.DisallowedTools = toolsToStrings(userCfg.DisallowedTools)
 		}
 
-		// Resolve the final tool lists.
-		var allowed, disallowed []claudecli.Tool
+		// Add dynamic provider and remote MCP tool patterns.
 		channelCtx := buildChannelContext(ctx, connMgr, name)
+		var extraTools []claudecli.Tool
+		extraTools = append(extraTools, toolgroup.ProviderToolPatterns(channelCtx)...)
+		extraTools = append(extraTools, toolgroup.RemoteMCPToolPatterns(channelCtx)...)
 
-		if src.Role != "" {
-			allowed, disallowed = role.Resolve(src.Role, channelCtx)
-			disallowed = append(disallowed, toTools(src.DisallowedTools)...)
-		} else if len(src.ToolGroups) > 0 {
-			// Resolve tool groups additively.
-			allowed = role.ResolveToolGroups(src.ToolGroups, channelCtx)
-			disallowed = toTools(src.DisallowedTools)
-		} else {
-			allowed = toTools(src.AllowedTools)
-			disallowed = toTools(src.DisallowedTools)
-		}
+		allowed := toTools(src.AllowedTools)
+		allowed = append(allowed, extraTools...)
+		disallowed := toTools(src.DisallowedTools)
 
 		if len(allowed) == 0 && len(disallowed) == 0 {
 			continue
@@ -97,8 +84,8 @@ func buildChannelToolOverrides(
 // buildChannelContext constructs the ChannelContext for role resolution by
 // looking up which provider connections and remote MCPs are scoped to this
 // channel.
-func buildChannelContext(ctx context.Context, connMgr *connection.Manager, channelName string) role.ChannelContext {
-	var channelCtx role.ChannelContext
+func buildChannelContext(ctx context.Context, connMgr *connection.Manager, channelName string) toolgroup.ChannelContext {
+	var channelCtx toolgroup.ChannelContext
 
 	conns, err := connMgr.ListByChannel(ctx, channelName)
 	if err != nil {
@@ -206,4 +193,31 @@ func toTools(ss []string) []claudecli.Tool {
 		tools[i] = claudecli.Tool(s)
 	}
 	return tools
+}
+
+// resolveConfigChannelTools resolves a config.Channel's tool permissions
+// to a flat []string list. ToolGroups are resolved via toolgroup.ResolveGroups;
+// explicit AllowedTools are passed through as-is.
+func resolveConfigChannelTools(cc config.Channel) []string {
+	if len(cc.ToolGroups) > 0 {
+		tools := toolgroup.ResolveGroups(cc.ToolGroups)
+		ss := make([]string, len(tools))
+		for i, t := range tools {
+			ss[i] = string(t)
+		}
+		return ss
+	}
+	return cc.AllowedTools
+}
+
+// toolGroupsToStrings converts a []toolgroup.ToolGroup to []string.
+func toolGroupsToStrings(groups []toolgroup.ToolGroup) []string {
+	if len(groups) == 0 {
+		return nil
+	}
+	ss := make([]string, len(groups))
+	for i, g := range groups {
+		ss[i] = string(g)
+	}
+	return ss
 }
