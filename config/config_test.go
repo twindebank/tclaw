@@ -4,8 +4,6 @@ import (
 	"testing"
 
 	"tclaw/channel"
-	"tclaw/claudecli"
-	"tclaw/role"
 
 	"github.com/stretchr/testify/require"
 )
@@ -54,15 +52,6 @@ func TestValidate_DuplicateUserID(t *testing.T) {
 	err := validate(cfg)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "duplicate id")
-}
-
-func TestValidate_RoleAndAllowedToolsMutuallyExclusive(t *testing.T) {
-	cfg := validConfig()
-	cfg.Users[0].Role = role.Superuser
-	cfg.Users[0].AllowedTools = []claudecli.Tool{"Bash"}
-	err := validate(cfg)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "role and allowed_tools are mutually exclusive")
 }
 
 func TestValidate_NoChannels(t *testing.T) {

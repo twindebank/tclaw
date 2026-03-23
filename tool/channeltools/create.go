@@ -10,7 +10,7 @@ import (
 
 	"tclaw/channel"
 	"tclaw/mcp"
-	"tclaw/role"
+	"tclaw/toolgroup"
 )
 
 const (
@@ -68,25 +68,20 @@ func channelCreateDef() mcp.ToolDef {
 					"type": "integer",
 					"description": "How many hours an ephemeral channel can sit idle before auto-cleanup. Defaults to 24. Only meaningful when ephemeral is true."
 				},
-				"role": {
-					"type": "string",
-					"enum": ["superuser", "developer", "assistant", "monitor"],
-					"description": "Named preset of tool groups. Mutually exclusive with tool_groups and allowed_tools."
-				},
 				"tool_groups": {
 					"type": "array",
 					"items": {"type": "string"},
-					"description": "Tool groups to enable on this channel (e.g. ['base', 'gsuite_read', 'channel_send']). Additive — start with nothing, add what you need. Mutually exclusive with role and allowed_tools. Available groups: base, builtins, builtins_basic, channel_send, channel_ops, scheduling, dev, repo, gsuite_read, gsuite_write, services, connections, telegram_client, onboarding, secret_form."
+					"description": "Tool groups to enable on this channel (e.g. ['core_tools', 'gsuite_read', 'channel_messaging']). Additive — start with nothing, add what you need. Mutually exclusive with allowed_tools. Use tool_group_list to see all available groups with descriptions."
 				},
 				"allowed_tools": {
 					"type": "array",
 					"items": {"type": "string"},
-					"description": "Explicit tool list. Mutually exclusive with role and tool_groups."
+					"description": "Explicit tool list. Mutually exclusive with tool_groups."
 				},
 				"disallowed_tools": {
 					"type": "array",
 					"items": {"type": "string"},
-					"description": "Tools explicitly denied on this channel. Works alongside role, tool_groups, or allowed_tools."
+					"description": "Tools explicitly denied on this channel. Works alongside tool_groups or allowed_tools for surgical removal."
 				},
 				"creatable_groups": {
 					"type": "array",
@@ -123,7 +118,6 @@ type channelCreateArgs struct {
 	TelegramConfig            *telegramCreateConfig `json:"telegram_config"`
 	Ephemeral                 bool                  `json:"ephemeral"`
 	EphemeralIdleTimeoutHours int                   `json:"ephemeral_idle_timeout_hours"`
-	Role                      string                `json:"role"`
 	ToolGroups                []string              `json:"tool_groups"`
 	AllowedTools              []string              `json:"allowed_tools"`
 	DisallowedTools           []string              `json:"disallowed_tools"`
@@ -188,34 +182,17 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("unsupported channel type %q (must be 'socket' or 'telegram')", a.Type)
 		}
 
-		// Validate role / tool_groups / allowed_tools mutual exclusion.
-		var channelRole role.Role
-		var toolGroups []role.ToolGroup
+		// Validate tool_groups / allowed_tools mutual exclusion.
+		var toolGroups []toolgroup.ToolGroup
 
-		setCount := 0
-		if a.Role != "" {
-			setCount++
-		}
-		if len(a.ToolGroups) > 0 {
-			setCount++
-		}
-		if len(a.AllowedTools) > 0 {
-			setCount++
-		}
-		if setCount > 1 {
-			return nil, fmt.Errorf("role, tool_groups, and allowed_tools are mutually exclusive — set exactly one")
+		if len(a.ToolGroups) > 0 && len(a.AllowedTools) > 0 {
+			return nil, fmt.Errorf("tool_groups and allowed_tools are mutually exclusive — set exactly one")
 		}
 
-		if a.Role != "" {
-			channelRole = role.Role(a.Role)
-			if !channelRole.Valid() {
-				return nil, fmt.Errorf("unknown role %q (known: %v)", a.Role, role.ValidRoles())
-			}
-		}
 		if len(a.ToolGroups) > 0 {
 			for _, g := range a.ToolGroups {
-				tg := role.ToolGroup(g)
-				if !role.ValidGroup(tg) {
+				tg := toolgroup.ToolGroup(g)
+				if !toolgroup.ValidGroup(tg) {
 					return nil, fmt.Errorf("unknown tool group %q", g)
 				}
 				toolGroups = append(toolGroups, tg)
@@ -225,7 +202,7 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 		// Enforce creatable_groups — the creating channel can only assign groups
 		// it's been authorized to delegate. Uses the registry which covers both
 		// static and dynamic channels.
-		if deps.ActiveChannel != nil {
+		if deps.ActiveChannel != nil && len(toolGroups) > 0 {
 			activeChannelName := deps.ActiveChannel()
 			if activeChannelName != "" {
 				activeEntry, entryErr := deps.Registry.ByName(ctx, activeChannelName)
@@ -233,40 +210,18 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 					slog.Error("failed to look up creating channel for creatable_groups check", "channel", activeChannelName, "err", entryErr)
 				}
 
-				// Determine the effective groups being assigned to the new channel.
-				var requestedGroups []role.ToolGroup
-				if channelRole == role.Superuser {
-					// Superuser requires all groups — effectively only channels with
-					// all groups in creatable_groups can create superuser channels.
-					requestedGroups = role.ValidGroups()
-				} else if channelRole != "" {
-					requestedGroups = role.RoleGroups(channelRole)
-				} else if len(toolGroups) > 0 {
-					requestedGroups = toolGroups
-				}
-
-				// Enforce if the new channel has groups/role.
-				if len(requestedGroups) > 0 && activeEntry != nil {
-					// Use explicit creatable_groups if set, otherwise fall back
-					// to role defaults. This preserves backwards compatibility —
-					// existing superuser channels without creatable_groups can
-					// still create channels.
-					creatableList := activeEntry.CreatableGroups
-					if len(creatableList) == 0 {
-						creatableList = role.DefaultCreatableGroups(activeEntry.Role)
+				if activeEntry != nil {
+					creatableSet := make(map[string]bool, len(activeEntry.CreatableGroups))
+					for _, g := range activeEntry.CreatableGroups {
+						creatableSet[g] = true
 					}
 
-					allowed := make(map[role.ToolGroup]bool, len(creatableList))
-					for _, g := range creatableList {
-						allowed[g] = true
-					}
-
-					if len(allowed) == 0 {
+					if len(creatableSet) == 0 {
 						return nil, fmt.Errorf("this channel is not authorized to create other channels (creatable_groups is empty)")
 					}
 
-					for _, g := range requestedGroups {
-						if !allowed[g] {
+					for _, g := range toolGroups {
+						if !creatableSet[string(g)] {
 							return nil, fmt.Errorf("this channel is not authorized to delegate tool group %q (not in creatable_groups)", g)
 						}
 					}
@@ -274,14 +229,11 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			}
 		}
 
-		// Convert creatable_groups strings to typed values.
-		var creatableGroups []role.ToolGroup
+		// Validate creatable_groups values.
 		for _, g := range a.CreatableGroups {
-			tg := role.ToolGroup(g)
-			if !role.ValidGroup(tg) {
+			if !toolgroup.ValidGroup(toolgroup.ToolGroup(g)) {
 				return nil, fmt.Errorf("unknown creatable group %q", g)
 			}
-			creatableGroups = append(creatableGroups, tg)
 		}
 
 		// Check uniqueness against all existing channels (static + dynamic).
@@ -321,16 +273,24 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			idleTimeout = time.Duration(a.EphemeralIdleTimeoutHours) * time.Hour
 		}
 
+		// Resolve tool_groups to AllowedTools for the dynamic config.
+		var resolvedAllowed []string
+		if len(toolGroups) > 0 {
+			for _, t := range toolgroup.ResolveGroups(toolGroups) {
+				resolvedAllowed = append(resolvedAllowed, string(t))
+			}
+		} else {
+			resolvedAllowed = a.AllowedTools
+		}
+
 		cfg := channel.DynamicChannelConfig{
 			Name:                 a.Name,
 			Type:                 channelType,
 			Description:          a.Description,
 			CreatedAt:            time.Now(),
-			Role:                 channelRole,
-			ToolGroups:           toolGroups,
-			AllowedTools:         a.AllowedTools,
+			AllowedTools:         resolvedAllowed,
 			DisallowedTools:      a.DisallowedTools,
-			CreatableGroups:      creatableGroups,
+			CreatableGroups:      a.CreatableGroups,
 			AllowedUsers:         allowedUsers,
 			Links:                a.Links,
 			Ephemeral:            a.Ephemeral,

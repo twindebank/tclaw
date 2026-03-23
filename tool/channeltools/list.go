@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"tclaw/mcp"
-	"tclaw/role"
 )
 
 func channelListDef() mcp.ToolDef {
@@ -18,13 +17,12 @@ func channelListDef() mcp.ToolDef {
 }
 
 type channelListEntry struct {
-	Name            string    `json:"name"`
-	Type            string    `json:"type"`
-	Description     string    `json:"description"`
-	Source          string    `json:"source"`
-	Role            role.Role `json:"role,omitempty"`
-	AllowedTools    []string  `json:"allowed_tools,omitempty"`
-	DisallowedTools []string  `json:"disallowed_tools,omitempty"`
+	Name            string   `json:"name"`
+	Type            string   `json:"type"`
+	Description     string   `json:"description"`
+	Source          string   `json:"source"`
+	AllowedTools    []string `json:"allowed_tools,omitempty"`
+	DisallowedTools []string `json:"disallowed_tools,omitempty"`
 }
 
 func channelListHandler(deps Deps) mcp.ToolHandler {
@@ -41,7 +39,6 @@ func channelListHandler(deps Deps) mcp.ToolHandler {
 				Type:            string(e.Type),
 				Description:     e.Description,
 				Source:          string(e.Source),
-				Role:            e.Role,
 				AllowedTools:    e.AllowedTools,
 				DisallowedTools: e.DisallowedTools,
 			})
