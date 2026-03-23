@@ -69,28 +69,26 @@ This project has several documentation files serving different audiences. Unders
 
 ### What goes where
 
-| File | Owner | Purpose | Who reads it |
-|------|-------|---------|-------------|
-| `agent/system_prompt.md` | **Agent runtime behavior** — the single source of truth for how the agent operates. Tool usage, formatting rules, memory management, channel setup guidance, connection/schedule/dev workflow instructions. | Agent (all channels) |
+| File | Purpose | Who reads it |
+|------|---------|-------------|
+| Tool descriptions (`definitions.go`, inline defs) | **Tool-specific reference** — parameters, usage, credential keys, setup flows. The single source of truth for individual tools. | Agent (at runtime) |
+| `agent/system_prompt.md` | **Agent runtime behavior** — identity, formatting, cross-cutting rules, multi-tool flows. No tool-specific parameter details. | Agent (all channels) |
 | `CLAUDE.md` (this file) | **Developer instructions** — code style, architecture overview, build/deploy commands, doc guide. | Developer (us), agent in dev worktree |
-| `docs/features.md` | **Developer feature reference** — what tclaw does and how it's configured. Implementation details, config examples, security model. Does NOT duplicate agent behavior docs. | Developer (us), agent in dev worktree |
-| `docs/architecture.md` | **Technical internals** — package map, dependency layers, data flows, security boundaries, directory layout. | Developer (us), agent in dev worktree |
+| `docs/features.md` | **Developer feature summary** — concise overview of what tclaw does. Points to tool descriptions and architecture.md for details. | Developer (us), agent in dev worktree |
+| `docs/architecture.md` | **Technical internals** — package map, dependency layers, data flows, security boundaries, directory layout, secret management, config. | Developer (us), agent in dev worktree |
 | `docs/deployment.md` | **Operations** — Fly.io deployment, secrets, commands, first-time setup, CI. | Developer/operator |
 | `docs/go-patterns.md` | **Code conventions** — comments, error handling, testing, function design, naming. | Developer (us), agent in dev worktree |
 | `agent.DefaultMemoryTemplate` | **User memory seed** — minimal scaffolding for the agent's per-user CLAUDE.md. NOT project docs. | Agent (loaded automatically each session) |
 
-### Key rule: no duplication between system prompt and docs/
+### Key rule: tool descriptions are the single source of truth
 
-`agent/system_prompt.md` defines agent behavior. `docs/features.md` describes how tclaw works for developers. These serve different audiences and should NOT contain the same content. If you're documenting how the agent should use a tool → system prompt. If you're documenting how a feature is implemented or configured → features.md.
+MCP tool descriptions (`definitions.go` and inline tool defs) are the **single source of truth** for tool parameters, usage, and behavior. The agent reads these directly at runtime. Three documentation layers, strictly separated:
 
-### Key rule: tool descriptions are the primary reference
+1. **Tool descriptions** — parameters, usage, credential keys, setup flows. The agent reads these. This is where tool-specific details go — NOT the system prompt, NOT features.md.
+2. **System prompt** (`agent/system_prompt.md`) — agent identity, behavioral rules, cross-cutting constraints that span multiple tools (e.g. "never ask for secrets in chat"), and multi-tool flow guidance. No tool-specific parameter details.
+3. **Developer docs** (`docs/features.md`, `docs/architecture.md`) — developer-facing summaries, config examples, security model, package structure. Not read by the agent at runtime.
 
-MCP tool descriptions (`definitions.go`) are the **single source of truth** for tool parameters, usage, and behavior. The agent reads these directly at runtime. The system prompt should only cover:
-- **High-level concepts** — what a tool category does and when to use it
-- **Cross-cutting rules** — behavioral constraints that span multiple tools (e.g. "collect credentials via secret_form_request, never in chat")
-- **Flows that compose multiple tools** — auth sequences, provisioning workflows
-
-Do NOT duplicate parameter details, usage examples, or tool-specific guidance from `definitions.go` into the system prompt. The agent can look up tool descriptions itself.
+Do NOT duplicate information across these layers. If you're documenting how a specific tool works → tool description. If you're documenting cross-cutting agent behavior → system prompt. If you're documenting implementation/config for developers → features.md or architecture.md.
 
 ## Reference Docs
 - @docs/go-patterns.md — comments, error handling, testing, function design, naming
@@ -99,10 +97,10 @@ Do NOT duplicate parameter details, usage examples, or tool-specific guidance fr
 - @docs/architecture.md — package map, dependency layers, data flows, auth flows, directory layout, secret management, environments
 
 ### Keeping Docs Up to Date
-- **When adding or changing agent-facing behavior** (tool usage, formatting, memory rules) — update `agent/system_prompt.md`
+- **When adding new MCP tools** — write detailed tool descriptions in `definitions.go` or inline tool defs. Include: parameters, usage, credential/secret store key names, setup flows. Only add to `agent/system_prompt.md` if the tools need cross-cutting behavioral rules or multi-tool flow guidance. Update @docs/architecture.md package map and secret store keys.
+- **When adding or changing agent-facing behavior** (formatting, memory rules, cross-tool constraints) — update `agent/system_prompt.md`
 - **When adding or changing a feature** (implementation, config, wiring) — update @docs/features.md
 - **When changing architecture** (new packages, data flows, auth, directory layout) — update @docs/architecture.md
-- **When adding new MCP tools** — write detailed tool descriptions in `definitions.go` (primary reference for the agent). Add a high-level section to `agent/system_prompt.md` only if the tools need cross-cutting behavioral rules or multi-tool flow guidance. Update @docs/features.md with implementation/config details for developers. Update @docs/architecture.md package map and secret store keys.
 - **When changing deployment/config** — update @docs/architecture.md and @docs/deployment.md
 - **When adding a new channel type** — update @docs/features.md, @docs/architecture.md, and `agent/system_prompt.md`
 - **When changing Go conventions** — update @docs/go-patterns.md
