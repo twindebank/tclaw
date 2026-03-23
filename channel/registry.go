@@ -137,8 +137,6 @@ func DynamicToEntry(dc DynamicChannelConfig) RegistryEntry {
 			Name:            dc.Name,
 			Description:     dc.Description,
 			Source:          SourceDynamic,
-			Role:            dc.Role,
-			ToolGroups:      dc.ToolGroups,
 			AllowedTools:    dc.AllowedTools,
 			DisallowedTools: dc.DisallowedTools,
 			CreatableGroups: dc.CreatableGroups,
