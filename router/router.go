@@ -444,18 +444,19 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 	activityTracker := channel.NewActivityTracker()
 
+	onChannelChange := func() {
+		select {
+		case channelChangeCh <- struct{}{}:
+		default:
+		}
+	}
 	channeltools.RegisterTools(mcpHandler, channeltools.Deps{
 		Registry:        registry,
 		Env:             r.env,
 		SecretStore:     secretStore,
 		ConfigPath:      r.configPath,
 		ActivityTracker: activityTracker,
-		OnChannelChange: func() {
-			select {
-			case channelChangeCh <- struct{}{}:
-			default:
-			}
-		},
+		OnChannelChange: onChannelChange,
 	})
 
 	// Set up the scheduler — runs at user lifetime, outlives the agent.
@@ -541,29 +542,56 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// the tool can validate from_channel server-side.
 	crossChannelMsgs := make(chan channel.TaggedMessage, 8)
 	var activeChannelName atomic.Pointer[string]
-	channeltools.RegisterSendTool(mcpHandler, channeltools.SendDeps{
-		Links: func() map[string][]channel.Link {
-			links, linksErr := registry.Links(ctx)
-			if linksErr != nil {
-				slog.Error("failed to get links for channel_send", "err", linksErr)
-				return nil
-			}
-			return links
-		},
-		Output: crossChannelMsgs,
-		Channels: func() map[channel.ChannelID]channel.Channel {
-			if p := currentChannels.Load(); p != nil {
-				return *p
-			}
+
+	// Shared closures for both channel_send and channel_send_when_free.
+	linksFunc := func() map[string][]channel.Link {
+		links, linksErr := registry.Links(ctx)
+		if linksErr != nil {
+			slog.Error("failed to get links for cross-channel send", "err", linksErr)
 			return nil
-		},
-		ActiveChannel: func() string {
-			if p := activeChannelName.Load(); p != nil {
-				return *p
-			}
-			return ""
-		},
+		}
+		return links
+	}
+	channelsFunc := func() map[channel.ChannelID]channel.Channel {
+		if p := currentChannels.Load(); p != nil {
+			return *p
+		}
+		return nil
+	}
+	activeChannelFunc := func() string {
+		if p := activeChannelName.Load(); p != nil {
+			return *p
+		}
+		return ""
+	}
+
+	channeltools.RegisterSendTool(mcpHandler, channeltools.SendDeps{
+		Links:         linksFunc,
+		Output:        crossChannelMsgs,
+		Channels:      channelsFunc,
+		ActiveChannel: activeChannelFunc,
 	})
+
+	// Deferred cross-channel delivery — waits until the target is free.
+	// Uses a durable queue in the state store so pending messages survive restarts.
+	pendingStore := channel.NewPendingStore(s)
+	channeltools.RegisterSendWhenFreeTool(mcpHandler, channeltools.SendWhenFreeDeps{
+		Links:           linksFunc,
+		Output:          crossChannelMsgs,
+		Channels:        channelsFunc,
+		ActiveChannel:   activeChannelFunc,
+		ActivityTracker: activityTracker,
+		PendingStore:    pendingStore,
+	})
+
+	// Drain goroutine for pending messages. Runs at user lifetime (not agent
+	// lifetime) so pending messages are delivered even across agent restarts.
+	go drainPendingMessages(ctx, pendingStore, activityTracker, crossChannelMsgs, channelsFunc)
+
+	// Ephemeral channel cleanup goroutine. Runs at user lifetime and
+	// periodically tears down ephemeral channels that have been idle past
+	// their timeout. Reads from the persistent DynamicStore each tick.
+	go cleanupEphemeralChannels(ctx, dynamicStore, activityTracker, secretStore, nil, onChannelChange)
 
 	// Register secret form tools for collecting sensitive user input via web forms.
 	var secretFormDeps secretform.Deps

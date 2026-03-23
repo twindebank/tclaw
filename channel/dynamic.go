@@ -42,6 +42,55 @@ type DynamicChannelConfig struct {
 	// Links declares which channels this channel can send messages to via
 	// the channel_send MCP tool.
 	Links []Link `json:"links,omitempty"`
+
+	// Ephemeral marks this channel for automatic cleanup after idle timeout.
+	Ephemeral bool `json:"ephemeral,omitempty"`
+
+	// EphemeralIdleTimeout is how long an ephemeral channel can sit idle
+	// before auto-cleanup. Defaults to 24 hours. Only meaningful when
+	// Ephemeral is true.
+	EphemeralIdleTimeout time.Duration `json:"ephemeral_idle_timeout,omitempty"`
+
+	// TeardownState holds platform-specific state needed to clean up
+	// resources when the channel is deleted (e.g. Telegram bot username).
+	// Nil for channels with no platform resources to clean up.
+	// Serialized via MarshalTeardownState/UnmarshalTeardownState.
+	TeardownState TeardownState `json:"-"`
+
+	// TeardownStateRaw is the JSON-serialized form of TeardownState, used
+	// for transparent JSON round-tripping via the store. Callers should use
+	// TeardownState (the typed field) instead of this.
+	TeardownStateRaw json.RawMessage `json:"teardown_state,omitempty"`
+}
+
+// MarshalJSON implements json.Marshaler to serialize TeardownState via the
+// typed envelope format.
+func (c DynamicChannelConfig) MarshalJSON() ([]byte, error) {
+	// Marshal TeardownState into the raw field before encoding.
+	type Alias DynamicChannelConfig
+	raw, err := MarshalTeardownState(c.TeardownState)
+	if err != nil {
+		return nil, fmt.Errorf("marshal teardown state: %w", err)
+	}
+	c.TeardownStateRaw = raw
+	return json.Marshal((*Alias)(&c))
+}
+
+// UnmarshalJSON implements json.Unmarshaler to deserialize TeardownState
+// from the typed envelope format.
+func (c *DynamicChannelConfig) UnmarshalJSON(data []byte) error {
+	type Alias DynamicChannelConfig
+	if err := json.Unmarshal(data, (*Alias)(c)); err != nil {
+		return err
+	}
+	if len(c.TeardownStateRaw) > 0 {
+		ts, err := UnmarshalTeardownState(c.TeardownStateRaw)
+		if err != nil {
+			return fmt.Errorf("unmarshal teardown state: %w", err)
+		}
+		c.TeardownState = ts
+	}
+	return nil
 }
 
 // ChannelSecretKey returns the secret store key for a channel's secret (e.g. bot token).

@@ -22,63 +22,75 @@ var channelNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
 func channelCreateDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "channel_create",
-		Description: "Create a new dynamic channel. Supported types: 'socket' (local only) and 'telegram' (requires a bot token). The agent restarts automatically to activate the new channel.",
+		Name: "channel_create",
+		Description: "Create a new dynamic channel. Supported types: 'socket' (local only) and 'telegram'. " +
+			"For Telegram: if telegram_client_setup has been completed, the bot is created automatically " +
+			"(no manual @BotFather needed). Otherwise, provide a token in telegram_config. " +
+			"Set ephemeral: true for channels that should auto-delete after idle timeout (default 24h). " +
+			"The agent restarts automatically to activate the new channel.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"name": {
 					"type": "string",
-					"description": "Short name for the channel (e.g. 'phone', 'tablet'). Used in routing and must be unique across all channels."
+					"description": "Short name for the channel (e.g. 'phone', 'email-check-20260323'). Used in routing and must be unique."
 				},
 				"description": {
 					"type": "string",
-					"description": "Describes the device or context (e.g. 'Mobile phone', 'Work tablet'). Helps the agent tailor responses."
+					"description": "Describes the device or context. Helps the agent tailor responses."
 				},
 				"type": {
 					"type": "string",
 					"enum": ["socket", "telegram"],
-					"description": "Channel transport type. 'socket' creates a unix domain socket (local environments only). 'telegram' creates a Telegram bot channel (requires telegram_config)."
+					"description": "Channel transport type."
 				},
 				"telegram_config": {
 					"type": "object",
-					"description": "Configuration for Telegram channels. Required when type is 'telegram'.",
+					"description": "Manual Telegram config. Only needed if Telegram Client API is not set up. Omit to auto-create a bot.",
 					"properties": {
 						"token": {
 							"type": "string",
-							"description": "Bot token from @BotFather. Stored encrypted in the secret store."
+							"description": "Bot token from @BotFather."
 						},
 						"allowed_users": {
 							"type": "array",
 							"items": {"type": "integer"},
-							"description": "Telegram user IDs allowed to interact with this bot. When set, messages from other users are silently ignored. Get your user ID from @userinfobot on Telegram."
+							"description": "Telegram user IDs allowed to interact with this bot."
 						}
 					},
 					"required": ["token", "allowed_users"]
 				},
+				"ephemeral": {
+					"type": "boolean",
+					"description": "If true, the channel auto-deletes after idle timeout. Platform resources (e.g. Telegram bot) are cleaned up automatically. Use channel_done to tear down manually."
+				},
+				"ephemeral_idle_timeout_hours": {
+					"type": "integer",
+					"description": "How many hours an ephemeral channel can sit idle before auto-cleanup. Defaults to 24. Only meaningful when ephemeral is true."
+				},
 				"role": {
 					"type": "string",
 					"enum": ["superuser", "developer", "assistant"],
-					"description": "Named preset of tool permissions. Mutually exclusive with allowed_tools — set one or the other. Roles resolve dynamically based on connections and remote MCPs on this channel."
+					"description": "Named preset of tool permissions. Mutually exclusive with allowed_tools."
 				},
 				"allowed_tools": {
 					"type": "array",
 					"items": {"type": "string"},
-					"description": "Tools this channel is allowed to use. Mutually exclusive with role. Supports glob patterns (e.g. 'mcp__tclaw__google_*') and builtin commands (e.g. 'builtin__reset_session', 'builtin__stop')."
+					"description": "Tools this channel is allowed to use. Mutually exclusive with role."
 				},
 				"disallowed_tools": {
 					"type": "array",
 					"items": {"type": "string"},
-					"description": "Tools explicitly denied on this channel. Works alongside both role and allowed_tools for surgical removal."
+					"description": "Tools explicitly denied on this channel."
 				},
 				"links": {
 					"type": "array",
-					"description": "Cross-channel messaging links. Each declares a target channel this channel can send messages to via channel_send.",
+					"description": "Cross-channel messaging links. For ephemeral channels, make these task-specific — describe exactly when to use each link based on what the job does.",
 					"items": {
 						"type": "object",
 						"properties": {
 							"target": {"type": "string", "description": "Name of the target channel."},
-							"description": {"type": "string", "description": "When this link should be used (shown in system prompt)."}
+							"description": {"type": "string", "description": "When this link should be used. Be specific to the task, not generic."}
 						},
 						"required": ["target", "description"]
 					}
@@ -95,15 +107,19 @@ type telegramCreateConfig struct {
 }
 
 type channelCreateArgs struct {
-	Name            string                `json:"name"`
-	Description     string                `json:"description"`
-	Type            string                `json:"type"`
-	TelegramConfig  *telegramCreateConfig `json:"telegram_config"`
-	Role            string                `json:"role"`
-	AllowedTools    []string              `json:"allowed_tools"`
-	DisallowedTools []string              `json:"disallowed_tools"`
-	Links           []channel.Link        `json:"links"`
+	Name                      string                `json:"name"`
+	Description               string                `json:"description"`
+	Type                      string                `json:"type"`
+	TelegramConfig            *telegramCreateConfig `json:"telegram_config"`
+	Ephemeral                 bool                  `json:"ephemeral"`
+	EphemeralIdleTimeoutHours int                   `json:"ephemeral_idle_timeout_hours"`
+	Role                      string                `json:"role"`
+	AllowedTools              []string              `json:"allowed_tools"`
+	DisallowedTools           []string              `json:"disallowed_tools"`
+	Links                     []channel.Link        `json:"links"`
 }
+
+const defaultEphemeralIdleTimeout = 24 * time.Hour
 
 func channelCreateHandler(deps Deps) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
@@ -123,6 +139,7 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 		}
 
 		var channelType channel.ChannelType
+		var teardownState channel.TeardownState
 		switch a.Type {
 		case "socket":
 			if !deps.Env.IsLocal() {
@@ -130,9 +147,27 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			}
 			channelType = channel.TypeSocket
 		case "telegram":
+			// If no token provided, try auto-provisioning via the Telegram provisioner.
 			if a.TelegramConfig == nil || a.TelegramConfig.Token == "" {
-				return nil, fmt.Errorf("telegram_config with a bot token is required for telegram channels (get a token from @BotFather)")
+				provisioner, hasProvisioner := deps.Provisioners[channel.TypeTelegram]
+				if !hasProvisioner {
+					return nil, fmt.Errorf("Telegram Client API not configured — run telegram_client_setup first to enable automatic bot creation. Alternatively, create a bot manually via @BotFather and pass the token in telegram_config.")
+				}
+
+				result, provErr := provisioner.Provision(ctx, a.Name, a.Description)
+				if provErr != nil {
+					return nil, fmt.Errorf("auto-create Telegram bot: %w", provErr)
+				}
+
+				// Fill in the config from the provisioner result.
+				a.TelegramConfig = &telegramCreateConfig{
+					Token:        result.Token,
+					AllowedUsers: result.AllowedUsers,
+				}
+				// Store teardown state for later cleanup.
+				teardownState = result.TeardownState
 			}
+
 			if len(a.TelegramConfig.AllowedUsers) == 0 {
 				return nil, fmt.Errorf("telegram_config.allowed_users is required — at least one Telegram user ID must be specified (get your user ID from @userinfobot on Telegram)")
 			}
@@ -185,16 +220,24 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			allowedUsers = a.TelegramConfig.AllowedUsers
 		}
 
+		idleTimeout := defaultEphemeralIdleTimeout
+		if a.EphemeralIdleTimeoutHours > 0 {
+			idleTimeout = time.Duration(a.EphemeralIdleTimeoutHours) * time.Hour
+		}
+
 		cfg := channel.DynamicChannelConfig{
-			Name:            a.Name,
-			Type:            channelType,
-			Description:     a.Description,
-			CreatedAt:       time.Now(),
-			Role:            channelRole,
-			AllowedTools:    a.AllowedTools,
-			DisallowedTools: a.DisallowedTools,
-			AllowedUsers:    allowedUsers,
-			Links:           a.Links,
+			Name:                 a.Name,
+			Type:                 channelType,
+			Description:          a.Description,
+			CreatedAt:            time.Now(),
+			Role:                 channelRole,
+			AllowedTools:         a.AllowedTools,
+			DisallowedTools:      a.DisallowedTools,
+			AllowedUsers:         allowedUsers,
+			Links:                a.Links,
+			Ephemeral:            a.Ephemeral,
+			EphemeralIdleTimeout: idleTimeout,
+			TeardownState:        teardownState,
 		}
 		if err := deps.Registry.DynamicStore().Add(ctx, cfg); err != nil {
 			return nil, fmt.Errorf("create channel: %w", err)
