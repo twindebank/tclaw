@@ -3,6 +3,7 @@ package channeltools_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,6 +106,21 @@ func TestChannelSend(t *testing.T) {
 			"message":      "",
 		})
 		require.Contains(t, err.Error(), "message")
+	})
+
+	t.Run("rejects message exceeding max length", func(t *testing.T) {
+		h, _ := setupSend(t, "assistant", map[string][]channel.Link{
+			"assistant": {{Target: "dev", Description: "report bugs"}},
+		})
+
+		longMessage := strings.Repeat("a", 8001)
+
+		err := callToolExpectError(t, h, "channel_send", map[string]any{
+			"from_channel": "assistant",
+			"to_channel":   "dev",
+			"message":      longMessage,
+		})
+		require.Contains(t, err.Error(), "too long")
 	})
 
 	t.Run("rejects target not in active channels", func(t *testing.T) {

@@ -9,6 +9,11 @@ import (
 	"tclaw/mcp"
 )
 
+// Cross-channel messages should be concise summaries. This cap prevents
+// abuse (e.g. prompt injection payloads) while leaving plenty of room
+// for legitimate multi-paragraph messages.
+const maxSendMessageLength = 8000
+
 // SendDeps holds dependencies for the channel_send tool.
 type SendDeps struct {
 	// Links returns the current outbound link map (source channel name →
@@ -86,6 +91,9 @@ func channelSendHandler(deps SendDeps) mcp.ToolHandler {
 		}
 		if p.Message == "" {
 			return nil, fmt.Errorf("message is required")
+		}
+		if len(p.Message) > maxSendMessageLength {
+			return nil, fmt.Errorf("message is too long (%d characters, max %d)", len(p.Message), maxSendMessageLength)
 		}
 
 		// Verify from_channel matches the actual active channel to prevent

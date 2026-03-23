@@ -278,6 +278,18 @@ func EnableBankingPrivateKeyEnvVarName(userID string) string {
 	return "ENABLEBANKING_PRIVATE_KEY_" + sanitizeEnvSuffix(userID)
 }
 
+// TelegramClientAPIIDEnvVarName returns the environment variable name used to
+// pre-provision a user's Telegram Client API ID as a Fly secret.
+func TelegramClientAPIIDEnvVarName(userID string) string {
+	return "TELEGRAM_CLIENT_API_ID_" + sanitizeEnvSuffix(userID)
+}
+
+// TelegramClientAPIHashEnvVarName returns the environment variable name used to
+// pre-provision a user's Telegram Client API hash as a Fly secret.
+func TelegramClientAPIHashEnvVarName(userID string) string {
+	return "TELEGRAM_CLIENT_API_HASH_" + sanitizeEnvSuffix(userID)
+}
+
 // setupTokenPrefix is the expected prefix for setup tokens from `claude setup-token`.
 const setupTokenPrefix = "sk-ant-oat01-"
 
