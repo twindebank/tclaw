@@ -112,14 +112,23 @@ type Channel struct {
 	// When set, this replaces any user-level role or allowed_tools.
 	Role role.Role `yaml:"role,omitempty"`
 
+	// ToolGroups is a list of named tool groups, combined additively.
+	// Mutually exclusive with Role and AllowedTools.
+	ToolGroups []role.ToolGroup `yaml:"tool_groups,omitempty"`
+
 	// AllowedTools overrides the user-level allowed_tools for this channel.
-	// Mutually exclusive with Role. When set, this replaces (not merges
-	// with) the user-level list.
+	// Mutually exclusive with Role and ToolGroups. When set, this replaces
+	// (not merges with) the user-level list.
 	AllowedTools []string `yaml:"allowed_tools,omitempty"`
 
 	// DisallowedTools overrides user-level disallowed_tools for this channel.
-	// Works alongside both Role and AllowedTools for surgical removal.
+	// Works alongside Role, ToolGroups, and AllowedTools for surgical removal.
 	DisallowedTools []string `yaml:"disallowed_tools,omitempty"`
+
+	// CreatableGroups is the set of tool groups this channel can delegate when
+	// creating new channels via channel_create. If empty, channel_create is
+	// blocked on this channel.
+	CreatableGroups []role.ToolGroup `yaml:"creatable_groups,omitempty"`
 
 	// NotifyLifecycle sends a message to this channel on instance startup and shutdown.
 	NotifyLifecycle bool `yaml:"notify_lifecycle,omitempty"`
