@@ -322,6 +322,34 @@ Tools: `banking_set_credentials`, `banking_list_banks`, `banking_connect`, `bank
 
 Credential storage: `enablebanking_app_id` and `enablebanking_private_key` in the encrypted secret store. Fly secret seeding: `ENABLEBANKING_APP_ID_<USER>`, `ENABLEBANKING_PRIVATE_KEY_<USER>`.
 
+## Telegram Client API (MTProto)
+
+The `telegram_client_*` tools provide access to Telegram's Client API (MTProto protocol) via the `gotd/td` library. This enables the agent to act as the user's Telegram account — creating bots, managing chats, and reading message history.
+
+### Authentication
+
+MTProto requires API credentials from [my.telegram.org](https://my.telegram.org) plus phone-based OTP verification. The multi-step auth flow is handled by five tools: `setup`, `auth`, `verify`, `2fa`, and `status`.
+
+Session data is persisted in the encrypted secret store as base64-encoded bytes (the `secretSessionStorage` adapter bridges gotd's `session.Storage` interface with tclaw's `secret.Store`). The MTProto client connects lazily on first tool call and stays alive for the user's lifetime.
+
+### Bot Management (BotFather)
+
+`telegram_client_create_bot` drives the entire @BotFather conversation programmatically inside a single tool call — no agent involvement in the multi-step BotFather flow. Bots get randomized, non-searchable usernames (`tclaw_<8hex>_bot`) and are auto-configured with privacy mode ON and join groups OFF.
+
+The send-and-poll pattern: send a message to BotFather, sleep 2s, read the latest response from chat history, parse and proceed. Each step has a 30s timeout, 2min total per flow. Username collisions are retried automatically (up to 3 attempts).
+
+### Chat Management
+
+Chat tools use the raw `tg.Client` API: `MessagesCreateChat` for groups, `ContactsResolveUsername` for user/bot resolution, `MessagesGetDialogs` for listing, `MessagesGetHistory` for history, `MessagesSearch` for search.
+
+### Implementation
+
+- **Package**: `tool/telegramclient/`
+- **Library**: `github.com/gotd/td` (pure Go MTProto)
+- **Pattern**: follows `bankingtools` (multi-step auth, `handlerState`, credential storage)
+- **Secret store keys**: `telegram_client_api_id`, `telegram_client_api_hash`, `telegram_client_phone`, `telegram_client_session`
+- **Fly secret seeding**: `TELEGRAM_CLIENT_API_ID_<USER>`, `TELEGRAM_CLIENT_API_HASH_<USER>`
+
 ## Remote MCP Servers
 
 Users can connect to external MCP servers (like the Anthropic MCP directory) via MCP tools. Every remote MCP is scoped to a specific channel — its tools are only included in that channel's MCP configuration.

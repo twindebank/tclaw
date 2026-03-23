@@ -44,6 +44,7 @@ import (
 	"tclaw/tool/restauranttools"
 	"tclaw/tool/scheduletools"
 	"tclaw/tool/secretform"
+	"tclaw/tool/telegramclient"
 	tfltools "tclaw/tool/tfl"
 	"tclaw/user"
 	"tclaw/version"
@@ -394,6 +395,26 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		}
 	}
 
+	// Seed Telegram Client API credentials from Fly secrets.
+	tgAPIIDEnvVar := agent.TelegramClientAPIIDEnvVarName(string(mu.cfg.ID))
+	if tgAPIID := os.Getenv(tgAPIIDEnvVar); tgAPIID != "" {
+		if seedErr := secretStore.Set(ctx, telegramclient.APIIDStoreKey, tgAPIID); seedErr != nil {
+			slog.Error("failed to seed telegram client api id from env", "user", mu.cfg.ID, "err", seedErr)
+		} else {
+			os.Unsetenv(tgAPIIDEnvVar)
+			slog.Info("seeded and scrubbed telegram client api id from env", "user", mu.cfg.ID, "env_var", tgAPIIDEnvVar)
+		}
+	}
+	tgAPIHashEnvVar := agent.TelegramClientAPIHashEnvVarName(string(mu.cfg.ID))
+	if tgAPIHash := os.Getenv(tgAPIHashEnvVar); tgAPIHash != "" {
+		if seedErr := secretStore.Set(ctx, telegramclient.APIHashStoreKey, tgAPIHash); seedErr != nil {
+			slog.Error("failed to seed telegram client api hash from env", "user", mu.cfg.ID, "err", seedErr)
+		} else {
+			os.Unsetenv(tgAPIHashEnvVar)
+			slog.Info("seeded and scrubbed telegram client api hash from env", "user", mu.cfg.ID, "env_var", tgAPIHashEnvVar)
+		}
+	}
+
 	// Create dynamic channel store — the registry wraps it below.
 	dynamicStore := channel.NewDynamicStore(s)
 
@@ -493,6 +514,13 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		SecretStore: secretStore,
 		StateStore:  s,
 		Callback:    r.callback,
+	})
+
+	// Register Telegram Client API tools — MTProto-based tools for managing
+	// bots via BotFather, creating chats, and reading message history.
+	telegramclient.RegisterTools(mcpHandler, telegramclient.Deps{
+		SecretStore: secretStore,
+		StateStore:  s,
 	})
 
 	// Set up onboarding state tracking and tools.

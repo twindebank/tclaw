@@ -86,21 +86,22 @@ var allBuiltins = []claudecli.Tool{
 
 // MCP tool patterns for tclaw tools.
 const (
-	MCPToolAll           claudecli.Tool = "mcp__tclaw__*"
-	MCPToolDevAll        claudecli.Tool = "mcp__tclaw__dev_*"
-	MCPToolDeploy        claudecli.Tool = "mcp__tclaw__deploy"
-	MCPToolScheduleAll   claudecli.Tool = "mcp__tclaw__schedule_*"
-	MCPToolConnectionAll claudecli.Tool = "mcp__tclaw__connection_*"
-	MCPToolRemoteMCPAll  claudecli.Tool = "mcp__tclaw__remote_mcp_*"
-	MCPToolGoogleAll     claudecli.Tool = "mcp__tclaw__google_*"
-	MCPToolMonzoAll      claudecli.Tool = "mcp__tclaw__monzo_*"
-	MCPToolTflAll        claudecli.Tool = "mcp__tclaw__tfl_*"
-	MCPToolModelAll      claudecli.Tool = "mcp__tclaw__model_*"
-	MCPToolOnboardingAll claudecli.Tool = "mcp__tclaw__onboarding_*"
-	MCPToolRepoAll       claudecli.Tool = "mcp__tclaw__repo_*"
-	MCPToolRestaurantAll claudecli.Tool = "mcp__tclaw__restaurant_*"
-	MCPToolChannelSend   claudecli.Tool = "mcp__tclaw__channel_send"
-	MCPToolSecretFormAll claudecli.Tool = "mcp__tclaw__secret_form_*"
+	MCPToolAll               claudecli.Tool = "mcp__tclaw__*"
+	MCPToolDevAll            claudecli.Tool = "mcp__tclaw__dev_*"
+	MCPToolDeploy            claudecli.Tool = "mcp__tclaw__deploy"
+	MCPToolScheduleAll       claudecli.Tool = "mcp__tclaw__schedule_*"
+	MCPToolConnectionAll     claudecli.Tool = "mcp__tclaw__connection_*"
+	MCPToolRemoteMCPAll      claudecli.Tool = "mcp__tclaw__remote_mcp_*"
+	MCPToolGoogleAll         claudecli.Tool = "mcp__tclaw__google_*"
+	MCPToolMonzoAll          claudecli.Tool = "mcp__tclaw__monzo_*"
+	MCPToolTflAll            claudecli.Tool = "mcp__tclaw__tfl_*"
+	MCPToolModelAll          claudecli.Tool = "mcp__tclaw__model_*"
+	MCPToolOnboardingAll     claudecli.Tool = "mcp__tclaw__onboarding_*"
+	MCPToolRepoAll           claudecli.Tool = "mcp__tclaw__repo_*"
+	MCPToolRestaurantAll     claudecli.Tool = "mcp__tclaw__restaurant_*"
+	MCPToolChannelSend       claudecli.Tool = "mcp__tclaw__channel_send"
+	MCPToolSecretFormAll     claudecli.Tool = "mcp__tclaw__secret_form_*"
+	MCPToolTelegramClientAll claudecli.Tool = "mcp__tclaw__telegram_client_*"
 )
 
 // basic builtins for assistant.
@@ -186,6 +187,7 @@ func resolveAssistant(ctx ChannelContext) []claudecli.Tool {
 		MCPToolOnboardingAll,
 		MCPToolChannelSend,
 		MCPToolSecretFormAll,
+		MCPToolTelegramClientAll,
 	)
 	// Provider tools for connections on this channel.
 	tools = append(tools, providerToolPatterns(ctx)...)
