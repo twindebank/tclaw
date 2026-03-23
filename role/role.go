@@ -5,21 +5,39 @@ import (
 	"tclaw/provider"
 )
 
-// Role is a named preset of tool permissions. Channels and users can specify a
-// role instead of listing individual tools. Roles and allowed_tools are mutually
-// exclusive — use one or the other.
+// Role is a named preset of tool permissions. Each role is a predefined
+// combination of tool groups. Channels and users can specify a role, a list
+// of tool groups, or explicit tool lists — these are mutually exclusive.
 type Role string
 
 const (
 	Superuser Role = "superuser"
 	Developer Role = "developer"
 	Assistant Role = "assistant"
+	Monitor   Role = "monitor"
 )
+
+// RoleInfo describes a role for display in the system prompt and tool descriptions.
+type RoleInfo struct {
+	Role        Role
+	Description string
+	Groups      []ToolGroup
+}
+
+// AllRoleInfo returns info about all available roles.
+func AllRoleInfo() []RoleInfo {
+	return []RoleInfo{
+		{Superuser, "Full system access — all tools, all builtins", nil},
+		{Assistant, "Personal assistant — web, services, scheduling, cross-channel messaging", roleGroups[Assistant]},
+		{Developer, "Code and dev workflow — bash, dev tools, deployment, repo monitoring", roleGroups[Developer]},
+		{Monitor, "Watch, report, and orchestrate — observation, channel creation, schedule management", roleGroups[Monitor]},
+	}
+}
 
 // Valid reports whether r is a known role.
 func (r Role) Valid() bool {
 	switch r {
-	case Superuser, Developer, Assistant:
+	case Superuser, Developer, Assistant, Monitor:
 		return true
 	}
 	return false
@@ -27,7 +45,67 @@ func (r Role) Valid() bool {
 
 // ValidRoles returns all known role names.
 func ValidRoles() []Role {
-	return []Role{Superuser, Developer, Assistant}
+	return []Role{Superuser, Developer, Assistant, Monitor}
+}
+
+// DefaultCreatableRoles returns the default set of roles a channel with the
+// given role is allowed to create. Returns nil (empty) for roles that should
+// not create channels by default.
+func DefaultCreatableRoles(r Role) []Role {
+	switch r {
+	case Superuser:
+		return ValidRoles()
+	case Monitor:
+		return []Role{Developer, Assistant}
+	default:
+		return nil
+	}
+}
+
+// DefaultCreatableGroups returns the default set of tool groups a channel with
+// the given role is allowed to delegate when creating channels. Returns all
+// groups for superuser, a safe subset for monitor, and nil for others.
+func DefaultCreatableGroups(r Role) []ToolGroup {
+	switch r {
+	case Superuser:
+		return ValidGroups()
+	case Monitor:
+		// Monitor can delegate groups that developer and assistant channels need,
+		// but NOT channel_ops (prevents chain spawning).
+		return []ToolGroup{
+			GroupBase, GroupBuiltinsBasic, GroupChannelSend,
+			GroupDev, GroupRepo, GroupScheduling,
+			GroupGSuiteRead, GroupGSuiteWrite,
+			GroupServices, GroupConnections,
+			GroupTelegramClient, GroupOnboarding, GroupSecretForm,
+		}
+	default:
+		return nil
+	}
+}
+
+// RoleGroups returns the tool groups for a role. Returns nil for superuser
+// (which uses a different resolution path) and unknown roles.
+func RoleGroups(r Role) []ToolGroup {
+	return roleGroups[r]
+}
+
+// roleGroups maps each role to its constituent tool groups.
+var roleGroups = map[Role][]ToolGroup{
+	Assistant: {
+		GroupBase, GroupBuiltinsBasic, GroupChannelSend,
+		GroupScheduling, GroupGSuiteRead, GroupGSuiteWrite,
+		GroupServices, GroupConnections, GroupTelegramClient,
+		GroupOnboarding, GroupSecretForm,
+	},
+	Developer: {
+		GroupBase, GroupBuiltins, GroupChannelSend,
+		GroupDev, GroupRepo,
+	},
+	Monitor: {
+		GroupBase, GroupBuiltinsBasic, GroupChannelOps,
+		GroupChannelSend, GroupScheduling,
+	},
 }
 
 // ChannelContext provides information about what connections and remote MCPs
@@ -48,40 +126,28 @@ type ChannelContext struct {
 // Resolve returns the allowed and disallowed tool lists for the given role,
 // taking into account which connections and remote MCPs exist on the channel.
 func Resolve(r Role, channelContext ChannelContext) (allowed []claudecli.Tool, disallowed []claudecli.Tool) {
-	switch r {
-	case Superuser:
+	if r == Superuser {
 		return resolveSuperuser(channelContext), nil
-	case Developer:
-		return resolveDeveloper(), nil
-	case Assistant:
-		return resolveAssistant(channelContext), nil
-	default:
+	}
+
+	groups, ok := roleGroups[r]
+	if !ok {
 		return nil, nil
 	}
+
+	tools := ResolveGroups(groups)
+	tools = append(tools, providerToolPatterns(channelContext)...)
+	tools = append(tools, remoteMCPToolPatterns(channelContext)...)
+	return tools, nil
 }
 
-// file tools shared across developer and assistant roles.
-var fileTools = []claudecli.Tool{
-	claudecli.ToolRead,
-	claudecli.ToolEdit,
-	claudecli.ToolWrite,
-	claudecli.ToolGlob,
-	claudecli.ToolGrep,
-}
-
-// web tools shared across roles.
-var webTools = []claudecli.Tool{
-	claudecli.ToolWebFetch,
-	claudecli.ToolWebSearch,
-}
-
-// all builtins.
-var allBuiltins = []claudecli.Tool{
-	claudecli.BuiltinStop,
-	claudecli.BuiltinCompact,
-	claudecli.BuiltinLogin,
-	claudecli.BuiltinAuth,
-	claudecli.BuiltinReset,
+// ResolveToolGroups returns the tool list for a set of tool groups, including
+// dynamic provider and remote MCP patterns from the channel context.
+func ResolveToolGroups(groups []ToolGroup, channelContext ChannelContext) []claudecli.Tool {
+	tools := ResolveGroups(groups)
+	tools = append(tools, providerToolPatterns(channelContext)...)
+	tools = append(tools, remoteMCPToolPatterns(channelContext)...)
+	return tools
 }
 
 // MCP tool patterns for tclaw tools.
@@ -106,96 +172,13 @@ const (
 	MCPToolSendWhenFree      claudecli.Tool = "mcp__tclaw__channel_send_when_free"
 )
 
-// basic builtins for assistant.
-var basicBuiltins = []claudecli.Tool{
-	claudecli.BuiltinStop,
-	claudecli.BuiltinCompact,
-	claudecli.BuiltinResetSession,
-	claudecli.BuiltinResetMemories,
-}
-
 func resolveSuperuser(ctx ChannelContext) []claudecli.Tool {
-	// Superuser gets everything — use a wildcard pattern that matches all
-	// MCP tools, plus all base tools and all builtins.
-	tools := []claudecli.Tool{
-		// All base Claude Code tools.
-		claudecli.ToolBash, claudecli.ToolRead, claudecli.ToolEdit, claudecli.ToolWrite,
-		claudecli.ToolGlob, claudecli.ToolGrep, claudecli.ToolLS, claudecli.ToolLSP,
-		claudecli.ToolWebFetch, claudecli.ToolWebSearch, claudecli.ToolNotebookEdit,
-		claudecli.ToolAgent, claudecli.ToolTask, claudecli.ToolTaskOutput, claudecli.ToolTaskStop,
-		claudecli.ToolTodoWrite, claudecli.ToolToolSearch, claudecli.ToolSkill,
-		claudecli.ToolAskUserQuestion, claudecli.ToolEnterPlanMode, claudecli.ToolExitPlanMode,
-		claudecli.ToolEnterWorktree, claudecli.ToolListMcpResources, claudecli.ToolReadMcpResource,
-		// All tclaw MCP tools.
-		MCPToolAll,
-	}
-	tools = append(tools, allBuiltins...)
+	// Superuser gets everything — all CLI tools + MCP wildcard + all builtins.
+	tools := make([]claudecli.Tool, len(cliToolsAll))
+	copy(tools, cliToolsAll)
+	tools = append(tools, MCPToolAll)
+	tools = append(tools, GroupTools(GroupBuiltins)...)
 	tools = append(tools, providerToolPatterns(ctx)...)
-	tools = append(tools, remoteMCPToolPatterns(ctx)...)
-	return tools
-}
-
-func resolveDeveloper() []claudecli.Tool {
-	tools := []claudecli.Tool{
-		claudecli.ToolBash,
-		claudecli.ToolAgent,
-		claudecli.ToolLS,
-		claudecli.ToolLSP,
-		claudecli.ToolNotebookEdit,
-		claudecli.ToolTask,
-		claudecli.ToolTaskOutput,
-		claudecli.ToolTaskStop,
-		claudecli.ToolTodoWrite,
-		claudecli.ToolToolSearch,
-		claudecli.ToolSkill,
-		claudecli.ToolAskUserQuestion,
-		claudecli.ToolEnterPlanMode,
-		claudecli.ToolExitPlanMode,
-		claudecli.ToolEnterWorktree,
-		claudecli.ToolListMcpResources,
-		claudecli.ToolReadMcpResource,
-	}
-	tools = append(tools, fileTools...)
-	tools = append(tools, webTools...)
-	tools = append(tools, allBuiltins...)
-	// Dev workflow, schedule, repo monitoring, model, onboarding, and cross-channel tools.
-	tools = append(tools,
-		MCPToolDevAll,
-		MCPToolDeploy,
-		MCPToolScheduleAll,
-		MCPToolRepoAll,
-		MCPToolModelAll,
-		MCPToolOnboardingAll,
-		MCPToolChannelSend,
-	)
-	return tools
-}
-
-func resolveAssistant(ctx ChannelContext) []claudecli.Tool {
-	tools := make([]claudecli.Tool, 0, 32)
-	tools = append(tools, claudecli.ToolBash)
-	tools = append(tools, fileTools...)
-	tools = append(tools, webTools...)
-	tools = append(tools, basicBuiltins...)
-	// Connection/remote MCP management, scheduling, repo monitoring, model, TfL, onboarding, and cross-channel.
-	tools = append(tools,
-		MCPToolConnectionAll,
-		MCPToolRemoteMCPAll,
-		MCPToolScheduleAll,
-		MCPToolRepoAll,
-		MCPToolModelAll,
-		MCPToolTflAll,
-		MCPToolRestaurantAll,
-		MCPToolOnboardingAll,
-		MCPToolChannelSend,
-		MCPToolSecretFormAll,
-		MCPToolTelegramClientAll,
-		MCPToolChannelDone,
-		MCPToolSendWhenFree,
-	)
-	// Provider tools for connections on this channel.
-	tools = append(tools, providerToolPatterns(ctx)...)
-	// Remote MCP tool patterns for remote MCPs on this channel.
 	tools = append(tools, remoteMCPToolPatterns(ctx)...)
 	return tools
 }

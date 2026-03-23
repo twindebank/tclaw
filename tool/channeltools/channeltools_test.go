@@ -12,6 +12,7 @@ import (
 	"tclaw/config"
 	"tclaw/libraries/store"
 	"tclaw/mcp"
+	"tclaw/role"
 	"tclaw/tool/channeltools"
 )
 
@@ -445,7 +446,122 @@ func TestChannelDone(t *testing.T) {
 	})
 }
 
+func TestCreatableGroups(t *testing.T) {
+	t.Run("channel with empty creatable_groups cannot create", func(t *testing.T) {
+		th := setupHarnessWithActiveChannel(t, config.EnvLocal, "monitor-chan")
+
+		// Create a monitor channel with empty creatable_groups.
+		err := th.dynamicStore.Add(context.Background(), channel.DynamicChannelConfig{
+			Name:            "monitor-chan",
+			Type:            channel.TypeSocket,
+			Description:     "Monitor",
+			CreatableGroups: nil, // empty — cannot create
+		})
+		require.NoError(t, err)
+
+		toolErr := callToolExpectError(t, th.handler, "channel_create", map[string]any{
+			"name":        "child",
+			"description": "Child channel",
+			"type":        "socket",
+			"tool_groups": []string{"base"},
+		})
+		require.Contains(t, toolErr.Error(), "not authorized to create")
+	})
+
+	t.Run("channel can delegate authorized groups", func(t *testing.T) {
+		th := setupHarnessWithActiveChannel(t, config.EnvLocal, "monitor-chan")
+
+		err := th.dynamicStore.Add(context.Background(), channel.DynamicChannelConfig{
+			Name:            "monitor-chan",
+			Type:            channel.TypeSocket,
+			Description:     "Monitor with base+channel_send delegation",
+			CreatableGroups: []role.ToolGroup{role.GroupBase, role.GroupChannelSend},
+		})
+		require.NoError(t, err)
+
+		result := callTool(t, th.handler, "channel_create", map[string]any{
+			"name":        "child-ok",
+			"description": "Authorized child",
+			"type":        "socket",
+			"tool_groups": []string{"base", "channel_send"},
+		})
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(result, &got))
+		require.Equal(t, "child-ok", got["name"])
+	})
+
+	t.Run("channel cannot delegate unauthorized groups", func(t *testing.T) {
+		th := setupHarnessWithActiveChannel(t, config.EnvLocal, "monitor-chan")
+
+		err := th.dynamicStore.Add(context.Background(), channel.DynamicChannelConfig{
+			Name:            "monitor-chan",
+			Type:            channel.TypeSocket,
+			Description:     "Monitor with base only",
+			CreatableGroups: []role.ToolGroup{role.GroupBase},
+		})
+		require.NoError(t, err)
+
+		toolErr := callToolExpectError(t, th.handler, "channel_create", map[string]any{
+			"name":        "child-bad",
+			"description": "Unauthorized child",
+			"type":        "socket",
+			"tool_groups": []string{"base", "dev"},
+		})
+		require.Contains(t, toolErr.Error(), "not authorized to delegate tool group")
+		require.Contains(t, toolErr.Error(), "dev")
+	})
+
+	t.Run("privilege escalation via role is blocked", func(t *testing.T) {
+		th := setupHarnessWithActiveChannel(t, config.EnvLocal, "monitor-chan")
+
+		// Monitor can only delegate base + channel_send.
+		err := th.dynamicStore.Add(context.Background(), channel.DynamicChannelConfig{
+			Name:            "monitor-chan",
+			Type:            channel.TypeSocket,
+			Description:     "Restricted monitor",
+			CreatableGroups: []role.ToolGroup{role.GroupBase, role.GroupChannelSend},
+		})
+		require.NoError(t, err)
+
+		// Superuser role requires ALL groups — should be blocked.
+		toolErr := callToolExpectError(t, th.handler, "channel_create", map[string]any{
+			"name":        "escalated",
+			"description": "Attempted superuser escalation",
+			"type":        "socket",
+			"role":        "superuser",
+		})
+		require.Contains(t, toolErr.Error(), "not authorized")
+	})
+}
+
 // --- helpers ---
+
+func setupHarnessWithActiveChannel(t *testing.T, env config.Env, activeChannel string) testHarness {
+	t.Helper()
+	s, err := store.NewFS(t.TempDir())
+	require.NoError(t, err)
+
+	dynamicStore := channel.NewDynamicStore(s)
+	handler := mcp.NewHandler()
+	secrets := newMemorySecretStore()
+
+	staticEntries := []channel.RegistryEntry{
+		{Info: channel.Info{ID: "/tmp/test/desktop.sock", Type: channel.TypeSocket, Name: "desktop", Description: "Desktop workstation", Source: channel.SourceStatic}},
+	}
+	registry := channel.NewRegistry(staticEntries, dynamicStore)
+
+	channeltools.RegisterTools(handler, channeltools.Deps{
+		Registry:    registry,
+		Env:         env,
+		SecretStore: secrets,
+		ActiveChannel: func() string {
+			return activeChannel
+		},
+	})
+
+	return testHarness{handler: handler, dynamicStore: dynamicStore, secretStore: secrets}
+}
 
 type testHarness struct {
 	handler      *mcp.Handler

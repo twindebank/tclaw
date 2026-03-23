@@ -13,10 +13,11 @@ import (
 	"tclaw/user"
 )
 
-// channelToolSource holds the role or explicit tool lists for a channel.
-// Exactly one of Role or AllowedTools should be set (they're mutually exclusive).
+// channelToolSource holds the role, tool groups, or explicit tool lists for a channel.
+// Exactly one of Role, ToolGroups, or AllowedTools should be set.
 type channelToolSource struct {
 	Role            role.Role
+	ToolGroups      []role.ToolGroup
 	AllowedTools    []string
 	DisallowedTools []string
 }
@@ -50,16 +51,16 @@ func buildChannelToolOverrides(
 		if entry != nil {
 			src = channelToolSource{
 				Role:            entry.Role,
+				ToolGroups:      entry.ToolGroups,
 				AllowedTools:    entry.AllowedTools,
 				DisallowedTools: entry.DisallowedTools,
 			}
 		}
 
-		// Fall back to user-level if channel has neither role nor allowed_tools.
-		if src.Role == "" && len(src.AllowedTools) == 0 {
+		// Fall back to user-level if channel has no permissions set.
+		if src.Role == "" && len(src.ToolGroups) == 0 && len(src.AllowedTools) == 0 {
 			src.Role = userCfg.Role
 			if src.Role == "" {
-				// User-level explicit tools — convert to strings.
 				src.AllowedTools = toolsToStrings(userCfg.AllowedTools)
 				src.DisallowedTools = toolsToStrings(userCfg.DisallowedTools)
 			}
@@ -67,13 +68,15 @@ func buildChannelToolOverrides(
 
 		// Resolve the final tool lists.
 		var allowed, disallowed []claudecli.Tool
+		channelCtx := buildChannelContext(ctx, connMgr, name)
 
 		if src.Role != "" {
-			channelCtx := buildChannelContext(ctx, connMgr, name)
 			allowed, disallowed = role.Resolve(src.Role, channelCtx)
-			// Append channel-level disallowed_tools for surgical removal
-			// alongside a role.
 			disallowed = append(disallowed, toTools(src.DisallowedTools)...)
+		} else if len(src.ToolGroups) > 0 {
+			// Resolve tool groups additively.
+			allowed = role.ResolveToolGroups(src.ToolGroups, channelCtx)
+			disallowed = toTools(src.DisallowedTools)
 		} else {
 			allowed = toTools(src.AllowedTools)
 			disallowed = toTools(src.DisallowedTools)
