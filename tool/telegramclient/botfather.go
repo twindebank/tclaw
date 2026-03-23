@@ -36,6 +36,11 @@ var tokenRegex = regexp.MustCompile(`\d{8,12}:[A-Za-z0-9_-]{30,}`)
 type BotFather struct {
 	client *Client
 	peer   *tg.InputPeerUser
+
+	// lastSeenMsgID tracks the most recent message ID in the BotFather chat.
+	// waitForResponse only accepts messages with IDs strictly greater than this,
+	// preventing stale or concurrent messages from being picked up.
+	lastSeenMsgID int
 }
 
 // NewBotFather creates a BotFather session for the given client.
@@ -320,11 +325,23 @@ func (bf *BotFather) resolvePeer(ctx context.Context) error {
 		UserID:     u.ID,
 		AccessHash: u.AccessHash,
 	}
+
+	// Snapshot the latest message ID so waitForResponse ignores anything
+	// already in the chat before we start our conversation.
+	bf.lastSeenMsgID = bf.latestMessageID(ctx)
+
 	return nil
 }
 
-// sendMessage sends a text message to BotFather.
+// sendMessage sends a text message to BotFather and updates lastSeenMsgID
+// so that waitForResponse only picks up messages newer than what we sent.
 func (bf *BotFather) sendMessage(ctx context.Context, text string) error {
+	// Snapshot the latest ID before sending so we can detect BotFather's
+	// reply as anything with an ID higher than the current latest.
+	if id := bf.latestMessageID(ctx); id > bf.lastSeenMsgID {
+		bf.lastSeenMsgID = id
+	}
+
 	_, err := bf.client.API().MessagesSendMessage(ctx, &tg.MessagesSendMessageRequest{
 		Peer:     bf.peer,
 		Message:  text,
@@ -333,8 +350,9 @@ func (bf *BotFather) sendMessage(ctx context.Context, text string) error {
 	return err
 }
 
-// waitForResponse polls BotFather's chat for a new response containing the
-// given substring. If substring is empty, accepts any new response.
+// waitForResponse polls BotFather's chat for a new response with a message ID
+// strictly greater than lastSeenMsgID. This prevents picking up stale messages
+// or responses from concurrent BotFather conversations.
 func (bf *BotFather) waitForResponse(ctx context.Context, substring string) (string, error) {
 	deadline := time.Now().Add(stepTimeout)
 	substring = strings.ToLower(substring)
@@ -349,9 +367,11 @@ func (bf *BotFather) waitForResponse(ctx context.Context, substring string) (str
 		default:
 		}
 
+		// Fetch a small batch — BotFather might send multiple messages
+		// (e.g. a prompt + inline keyboard description).
 		history, err := bf.client.API().MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
 			Peer:  bf.peer,
-			Limit: 1,
+			Limit: 5,
 		})
 		if err != nil {
 			return "", fmt.Errorf("get BotFather history: %w", err)
@@ -365,15 +385,26 @@ func (bf *BotFather) waitForResponse(ctx context.Context, substring string) (str
 			messages = h.Messages
 		}
 
-		if len(messages) > 0 {
-			if msg, ok := messages[0].(*tg.Message); ok {
-				// Only accept messages FROM BotFather (not our own).
-				if from, ok := msg.FromID.(*tg.PeerUser); ok && from.UserID == bf.peer.UserID {
-					text := msg.Message
-					if substring == "" || strings.Contains(strings.ToLower(text), substring) {
-						return text, nil
-					}
-				}
+		for _, raw := range messages {
+			msg, ok := raw.(*tg.Message)
+			if !ok {
+				continue
+			}
+			// Only accept messages newer than what we've already seen.
+			if msg.ID <= bf.lastSeenMsgID {
+				continue
+			}
+			// Only accept messages FROM BotFather (not our own).
+			from, ok := msg.FromID.(*tg.PeerUser)
+			if !ok || from.UserID != bf.peer.UserID {
+				continue
+			}
+
+			text := msg.Message
+			if substring == "" || strings.Contains(strings.ToLower(text), substring) {
+				// Advance the cursor past this message.
+				bf.lastSeenMsgID = msg.ID
+				return text, nil
 			}
 		}
 
@@ -381,6 +412,33 @@ func (bf *BotFather) waitForResponse(ctx context.Context, substring string) (str
 	}
 
 	return "", fmt.Errorf("timeout waiting for BotFather response (expected %q)", substring)
+}
+
+// latestMessageID returns the ID of the most recent message in the BotFather
+// chat, or 0 if the chat is empty or unreadable.
+func (bf *BotFather) latestMessageID(ctx context.Context) int {
+	history, err := bf.client.API().MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
+		Peer:  bf.peer,
+		Limit: 1,
+	})
+	if err != nil {
+		return 0
+	}
+
+	var messages []tg.MessageClass
+	switch h := history.(type) {
+	case *tg.MessagesMessages:
+		messages = h.Messages
+	case *tg.MessagesMessagesSlice:
+		messages = h.Messages
+	}
+
+	if len(messages) > 0 {
+		if msg, ok := messages[0].(*tg.Message); ok {
+			return msg.ID
+		}
+	}
+	return 0
 }
 
 // --- helpers ---
