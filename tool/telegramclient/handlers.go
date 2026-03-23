@@ -120,18 +120,39 @@ func setupHandler(s *handlerState) mcp.ToolHandler {
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
-		if a.APIID == 0 {
-			return nil, fmt.Errorf("api_id is required")
-		}
-		if a.APIHash == "" {
-			return nil, fmt.Errorf("api_hash is required")
-		}
 
-		if err := s.deps.SecretStore.Set(ctx, APIIDStoreKey, strconv.Itoa(a.APIID)); err != nil {
-			return nil, fmt.Errorf("store API ID: %w", err)
-		}
-		if err := s.deps.SecretStore.Set(ctx, APIHashStoreKey, a.APIHash); err != nil {
-			return nil, fmt.Errorf("store API hash: %w", err)
+		if a.APIID != 0 || a.APIHash != "" {
+			// Credentials provided directly — store them.
+			if a.APIID == 0 {
+				return nil, fmt.Errorf("api_id is required when providing credentials directly")
+			}
+			if a.APIHash == "" {
+				return nil, fmt.Errorf("api_hash is required when providing credentials directly")
+			}
+			if err := s.deps.SecretStore.Set(ctx, APIIDStoreKey, strconv.Itoa(a.APIID)); err != nil {
+				return nil, fmt.Errorf("store API ID: %w", err)
+			}
+			if err := s.deps.SecretStore.Set(ctx, APIHashStoreKey, a.APIHash); err != nil {
+				return nil, fmt.Errorf("store API hash: %w", err)
+			}
+		} else {
+			// No params — verify credentials already exist in the secret store
+			// (put there via secret_form_request with keys telegram_client_api_id / telegram_client_api_hash).
+			apiIDStr, err := s.deps.SecretStore.Get(ctx, APIIDStoreKey)
+			if err != nil {
+				return nil, fmt.Errorf("read API ID from secret store: %w", err)
+			}
+			if apiIDStr == "" {
+				return nil, fmt.Errorf("no credentials found — collect them via secret_form_request " +
+					"using keys \"telegram_client_api_id\" and \"telegram_client_api_hash\", then retry")
+			}
+			apiHash, err := s.deps.SecretStore.Get(ctx, APIHashStoreKey)
+			if err != nil {
+				return nil, fmt.Errorf("read API hash from secret store: %w", err)
+			}
+			if apiHash == "" {
+				return nil, fmt.Errorf("API hash not found in secret store — re-run secret_form_request to collect credentials")
+			}
 		}
 
 		return json.Marshal(map[string]string{
