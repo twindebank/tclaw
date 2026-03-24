@@ -135,6 +135,7 @@ var groupTools = map[ToolGroup][]claudecli.Tool{
 		claudecli.Tool("mcp__tclaw__channel_delete"),
 		claudecli.Tool("mcp__tclaw__channel_edit"),
 		claudecli.Tool("mcp__tclaw__channel_list"),
+		claudecli.Tool("mcp__tclaw__channel_ping"),
 		MCPToolChannelDone,
 		claudecli.Tool("mcp__tclaw__channel_is_busy"),
 		MCPToolChannelSend,
