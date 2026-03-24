@@ -39,13 +39,16 @@ type Deps struct {
 
 // RegisterTools registers all Telegram Client API tools on the handler.
 // Each call creates a new handlerState, so per-user state is isolated.
-func RegisterTools(handler *mcp.Handler, deps Deps) {
+// Returns a Provisioner that can create/delete bots using the same client
+// state — pass it to channel tools for auto-provisioning.
+func RegisterTools(handler *mcp.Handler, deps Deps) *Provisioner {
 	state := &handlerState{
 		deps: deps,
 	}
 	for _, def := range toolDefs {
 		handler.Register(def, makeHandler(def.Name, state))
 	}
+	return &Provisioner{state: state}
 }
 
 // UnregisterTools removes all Telegram Client API tools from the handler.
