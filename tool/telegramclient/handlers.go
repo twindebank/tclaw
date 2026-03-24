@@ -209,7 +209,7 @@ func authHandler(s *handlerState) mcp.ToolHandler {
 
 		return json.Marshal(map[string]string{
 			"status":  "code_sent",
-			"message": "Verification code sent to " + a.Phone + ". IMPORTANT: use secret_form_request immediately with key \"telegram_otp_code\" to collect the code — do NOT ask for it in chat. Then call telegram_client_verify with the submitted code.",
+			"message": "Verification code sent to " + a.Phone + ". IMMEDIATELY call secret_form_request with key \"telegram_otp_code\", then secret_form_wait, then telegram_client_verify with NO arguments — it reads the code from the secret store automatically.",
 		})
 	}
 }
@@ -222,8 +222,18 @@ func verifyHandler(s *handlerState) mcp.ToolHandler {
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
+		// If no code was passed directly, read it from the secret store where
+		// secret_form_request deposited it. This keeps the OTP out of chat history.
 		if a.Code == "" {
-			return nil, fmt.Errorf("code is required")
+			otp, err := s.deps.SecretStore.Get(ctx, OTPStoreKey)
+			if err != nil {
+				return nil, fmt.Errorf("read OTP from secret store: %w", err)
+			}
+			if otp == "" {
+				return nil, fmt.Errorf("no code provided and no OTP found in secret store — " +
+					"collect the code via secret_form_request with key \"telegram_otp_code\" first")
+			}
+			a.Code = otp
 		}
 
 		// Reload pending state from the store if an agent restart wiped it from memory.

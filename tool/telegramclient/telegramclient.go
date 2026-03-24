@@ -19,6 +19,11 @@ const (
 	// SessionStoreKey is the secret store key for the persisted MTProto session (base64-encoded).
 	SessionStoreKey = "telegram_client_session"
 
+	// OTPStoreKey is the secret store key for the OTP code collected via
+	// secret_form_request. telegram_client_verify reads from here when no
+	// code is passed directly, so the agent never sees the code value.
+	OTPStoreKey = "telegram_otp_code"
+
 	// pendingPhoneStoreKey and pendingCodeHashStoreKey persist the in-progress
 	// auth flow across agent restarts. Without this, a restart between
 	// telegram_client_auth and telegram_client_verify loses the code hash and

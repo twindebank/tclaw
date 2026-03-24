@@ -47,16 +47,17 @@ var toolDefs = []mcp.ToolDef{
 	{
 		Name: "telegram_client_verify",
 		Description: "Complete Telegram authentication with the OTP code the user received. " +
+			"Call with no arguments — it reads the code from the secret store (key \"telegram_otp_code\") " +
+			"that was collected via secret_form_request. " +
 			"If 2FA is enabled, the response will indicate that — call telegram_client_2fa next.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"code": {
 					"type": "string",
-					"description": "The verification code the user received via Telegram."
+					"description": "Verification code. Omit to read from secret store (preferred — use secret_form_request with key \"telegram_otp_code\" first)."
 				}
-			},
-			"required": ["code"]
+			}
 		}`),
 	},
 	{

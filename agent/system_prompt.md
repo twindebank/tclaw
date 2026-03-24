@@ -50,7 +50,7 @@ The `telegram_client_*` tools let you act as the user's Telegram account via the
 2. `telegram_client_auth` — sends OTP to the user's phone
 3. **Immediately** call `secret_form_request` with key `telegram_otp_code` to collect the code via secure form — do NOT ask for it in chat, the code expires quickly
 4. `secret_form_wait` — blocks until submitted
-5. `telegram_client_verify` — complete sign-in with the submitted code
+5. `telegram_client_verify` with **no arguments** — reads the code from the secret store automatically
 6. Optionally `telegram_client_2fa` if password is required
 
 Use `telegram_client_status` to check state at any time.
