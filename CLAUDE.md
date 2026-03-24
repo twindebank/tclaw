@@ -105,10 +105,14 @@ Do NOT duplicate information across these layers. If you're documenting how a sp
 - **When adding a new channel type** — update @docs/features.md, @docs/architecture.md, and `agent/system_prompt.md`
 - **When changing Go conventions** — update @docs/go-patterns.md
 
-## Fly.io Operations
-- **Use `go run . deploy logs`** (or `go run . logs`) to view recent production logs — shows last 100 lines by default, use `-n N` to change, `-f` to stream.
-- `fly deploy --local-only --no-cache -a tclaw` to force a clean Docker rebuild (avoids stale cache issues).
-- Use `go run . deploy` for the standard deploy flow, but be aware it doesn't pass `--no-cache` by default.
+## Deployment
+- **Deploys happen automatically via GitHub Actions CI** on push to main (`.github/workflows/deploy.yml`)
+- CI builds locally on the GitHub runner (7GB RAM) and pushes to Fly — avoids the remote builder OOM from gotd/td
+- `tclaw.yaml` is stored as a GitHub secret (`TCLAW_YAML`) and written during CI builds
+- **Local deploys** still work: `go run . deploy` builds with Docker and deploys via `fly deploy --local-only`
+- **The `deploy` MCP tool is status-only** — it checks what's deployed vs main, does NOT deploy. Deploys are CI's job.
+- **Logs**: `go run . deploy logs` (or `go run . logs`) to view recent production logs
+- Never deploy (`go run . deploy` or any deploy command) without the user explicitly asking to deploy. Committing code does not imply permission to deploy.
 
 ## Related Projects
 - **nanoclaw** — similar project (TypeScript, Docker containers, Anthropic Agent SDK). Repo: `https://github.com/qwibitai/nanoclaw`. Clone to `/tmp/nanoclaw` when asked about it.
