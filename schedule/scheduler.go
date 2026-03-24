@@ -10,6 +10,17 @@ import (
 	"tclaw/channel"
 )
 
+// SchedulerParams holds configuration for creating a Scheduler.
+type SchedulerParams struct {
+	Store    *Store
+	Output   chan<- channel.TaggedMessage
+	Channels func() map[channel.ChannelID]channel.Channel
+
+	// Activity is used to check channel busy state for wait_for_free schedules.
+	// May be nil if busy-checking is not needed.
+	Activity *channel.ActivityTracker
+}
+
 // Scheduler runs a timer loop that fires scheduled prompts into a message channel.
 // It outlives the agent — it runs at user lifetime in the router, not per-session.
 type Scheduler struct {
@@ -17,16 +28,17 @@ type Scheduler struct {
 	output   chan<- channel.TaggedMessage
 	reload   chan struct{}
 	channels func() map[channel.ChannelID]channel.Channel
+	activity *channel.ActivityTracker
 }
 
-// NewScheduler creates a scheduler that writes fired prompts to output.
-// channels is called to resolve schedule channel names to channel IDs at fire time.
-func NewScheduler(store *Store, output chan<- channel.TaggedMessage, channels func() map[channel.ChannelID]channel.Channel) *Scheduler {
+// NewScheduler creates a scheduler from the given params.
+func NewScheduler(p SchedulerParams) *Scheduler {
 	return &Scheduler{
-		store:    store,
-		output:   output,
+		store:    p.Store,
+		output:   p.Output,
 		reload:   make(chan struct{}, 1),
-		channels: channels,
+		channels: p.Channels,
+		activity: p.Activity,
 	}
 }
 
@@ -128,6 +140,13 @@ func (s *Scheduler) fireReadySchedules(ctx context.Context) {
 		if !ok {
 			slog.Warn("scheduler: cannot resolve channel for schedule, skipping",
 				"schedule", sched.ID, "channel_name", sched.ChannelName)
+			continue
+		}
+
+		// If wait_for_free is set, defer firing until the channel is idle.
+		if sched.WaitForFree && s.activity != nil && s.activity.IsBusy(sched.ChannelName) {
+			slog.Info("scheduler: channel busy, deferring wait_for_free schedule",
+				"schedule", sched.ID, "channel", sched.ChannelName)
 			continue
 		}
 
