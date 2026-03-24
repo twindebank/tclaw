@@ -208,8 +208,12 @@ func authHandler(s *handlerState) mcp.ToolHandler {
 		}
 
 		return json.Marshal(map[string]string{
-			"status":  "code_sent",
-			"message": "Verification code sent to " + a.Phone + ". IMPORTANT: use secret_form_request immediately with key \"telegram_otp_code\" to collect the code — do NOT ask for it in chat. Then call telegram_client_verify with the submitted code.",
+			"status": "code_sent",
+			"message": "Verification code sent to " + a.Phone + ". " +
+				"IMPORTANT: IMMEDIATELY call secret_form_request with key \"telegram_otp_code\" to collect the code via secure form. " +
+				"WARNING: do NOT ask the user to type the code in chat — sharing it directly in Telegram chat triggers a security block. " +
+				"NOTE: there are TWO codes: (1) the tclaw form verification code shown in the form URL, and (2) the actual Telegram OTP the user receives in their Telegram app/another chat — they enter (2) into the form field. " +
+				"After secret_form_wait completes, call telegram_client_verify with NO arguments.",
 		})
 	}
 }
@@ -222,8 +226,17 @@ func verifyHandler(s *handlerState) mcp.ToolHandler {
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
+		// If no code provided, read from secret store (placed there by secret_form_request).
 		if a.Code == "" {
-			return nil, fmt.Errorf("code is required")
+			otp, err := s.deps.SecretStore.Get(ctx, OTPStoreKey)
+			if err != nil {
+				return nil, fmt.Errorf("read OTP from secret store: %w", err)
+			}
+			if otp == "" {
+				return nil, fmt.Errorf("no code provided and no OTP found in secret store — " +
+					"collect the code via secret_form_request with key \"telegram_otp_code\" first")
+			}
+			a.Code = otp
 		}
 
 		// Reload pending state from the store if an agent restart wiped it from memory.
