@@ -337,17 +337,19 @@ func (bf *BotFather) resolvePeer(ctx context.Context) error {
 // sendMessage sends a text message to BotFather and updates lastSeenMsgID
 // so that waitForResponse only picks up messages newer than what we sent.
 func (bf *BotFather) sendMessage(ctx context.Context, text string) error {
-	// Snapshot the latest ID before sending so we can detect BotFather's
-	// reply as anything with an ID higher than the current latest.
 	if id := bf.latestMessageID(ctx); id > bf.lastSeenMsgID {
 		bf.lastSeenMsgID = id
 	}
+	slog.Info("botfather: sending message", "text", truncate(text, 40), "last_seen_id", bf.lastSeenMsgID)
 
 	_, err := bf.client.API().MessagesSendMessage(ctx, &tg.MessagesSendMessageRequest{
 		Peer:     bf.peer,
 		Message:  text,
 		RandomID: generateRandomID(),
 	})
+	if err != nil {
+		slog.Error("botfather: send failed", "err", err)
+	}
 	return err
 }
 
@@ -391,6 +393,11 @@ func (bf *BotFather) waitForResponse(ctx context.Context, substring string) (str
 			if !ok {
 				continue
 			}
+			slog.Info("botfather: poll saw message",
+				"msg_id", msg.ID,
+				"last_seen_id", bf.lastSeenMsgID,
+				"from_id", msg.FromID,
+				"text_prefix", truncate(msg.Message, 60))
 			if msg.ID <= bf.lastSeenMsgID {
 				continue
 			}
