@@ -308,6 +308,18 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			"description": cfg.Description,
 			"message":     fmt.Sprintf("Channel %q created. The agent will restart automatically to activate it.", a.Name),
 		}
+
+		// For Telegram channels, include the bot username and a link so the
+		// agent can tell the user to open the bot to start the conversation.
+		if ts, ok := teardownState.(channel.TelegramTeardownState); ok && ts.BotUsername != "" {
+			result["bot_username"] = ts.BotUsername
+			result["bot_link"] = fmt.Sprintf("https://t.me/%s", ts.BotUsername)
+			result["message"] = fmt.Sprintf(
+				"Channel %q created with bot @%s. The agent will restart automatically. "+
+					"IMPORTANT: The user must open the bot link and tap Start before the channel can receive messages: https://t.me/%s",
+				a.Name, ts.BotUsername, ts.BotUsername)
+		}
+
 		return json.Marshal(result)
 	}
 }
