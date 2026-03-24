@@ -3,6 +3,9 @@ package telegramclient
 import (
 	"context"
 	"fmt"
+	"log/slog"
+
+	"github.com/gotd/td/tg"
 
 	"tclaw/channel"
 )
@@ -57,5 +60,48 @@ func (p *Provisioner) Teardown(ctx context.Context, state channel.TeardownState)
 		return fmt.Errorf("delete bot @%s via BotFather: %w", ts.BotUsername, err)
 	}
 
+	return nil
+}
+
+// StartBot sends /start to a bot as the authenticated user via MTProto.
+// This initiates the conversation so the bot can message the user back
+// (Telegram blocks bots from messaging users who haven't /started them).
+func (p *Provisioner) StartBot(ctx context.Context, botUsername string, userID int64) error {
+	if err := ensureConnected(ctx, p.state); err != nil {
+		return fmt.Errorf("connect to Telegram: %w", err)
+	}
+
+	// Resolve the bot's username to a peer.
+	resolved, err := p.state.client.API().ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{
+		Username: botUsername,
+	})
+	if err != nil {
+		return fmt.Errorf("resolve bot @%s: %w", botUsername, err)
+	}
+	if len(resolved.Users) == 0 {
+		return fmt.Errorf("bot @%s not found", botUsername)
+	}
+
+	u, ok := resolved.Users[0].(*tg.User)
+	if !ok {
+		return fmt.Errorf("unexpected user type for @%s", botUsername)
+	}
+
+	peer := &tg.InputPeerUser{
+		UserID:     u.ID,
+		AccessHash: u.AccessHash,
+	}
+
+	// Send /start to the bot as the user.
+	_, err = p.state.client.API().MessagesSendMessage(ctx, &tg.MessagesSendMessageRequest{
+		Peer:     peer,
+		Message:  "/start",
+		RandomID: generateRandomID(),
+	})
+	if err != nil {
+		return fmt.Errorf("send /start to @%s: %w", botUsername, err)
+	}
+
+	slog.Info("auto-started bot conversation", "bot", botUsername)
 	return nil
 }
