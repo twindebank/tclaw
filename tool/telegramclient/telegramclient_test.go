@@ -308,8 +308,8 @@ func TestBotNameGeneration(t *testing.T) {
 		require.True(t, strings.HasSuffix(username, "_bot"), "username should end with _bot: %s", username)
 		require.Len(t, username, len("tclaw_12345678_bot"))
 
-		// Display name: tclaw <purpose> <4hex>
-		require.True(t, strings.HasPrefix(displayName, "tclaw assistant "), "display name should start with 'tclaw assistant ': %s", displayName)
+		// Display name: tclaw · <purpose>
+		require.Equal(t, "tclaw · assistant", displayName)
 	})
 
 	t.Run("generates unique names", func(t *testing.T) {

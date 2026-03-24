@@ -455,7 +455,9 @@ func (bf *BotFather) latestMessageID(ctx context.Context) int {
 
 // --- helpers ---
 
-// generateBotNames creates a randomized username and display name for a new bot.
+// generateBotNames creates a randomized username and clean display name.
+// The username has a random suffix for non-discoverability; the display
+// name is clean and human-readable (no random parts).
 func generateBotNames(purpose string) (username, displayName string, err error) {
 	randomBytes := make([]byte, 4)
 	if _, err := rand.Read(randomBytes); err != nil {
@@ -464,7 +466,7 @@ func generateBotNames(purpose string) (username, displayName string, err error) 
 	randomHex := hex.EncodeToString(randomBytes)
 
 	username = fmt.Sprintf("tclaw_%s_bot", randomHex)
-	displayName = fmt.Sprintf("tclaw %s %s", purpose, randomHex[:4])
+	displayName = fmt.Sprintf("tclaw · %s", purpose)
 
 	return username, displayName, nil
 }
