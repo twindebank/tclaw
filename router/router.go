@@ -444,6 +444,24 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 	activityTracker := channel.NewActivityTracker()
 
+	// Register Telegram Client API tools early — the returned provisioner
+	// is needed by channeltools.RegisterTools for auto-provisioning.
+	tgProvisioner := telegramclient.RegisterTools(mcpHandler, telegramclient.Deps{
+		SecretStore: secretStore,
+		StateStore:  s,
+	})
+
+	// activeChannelName tracks which channel is currently processing a turn.
+	// Needed by channel_send, channel_send_when_free, and channel_create
+	// (for creatable_groups enforcement).
+	var activeChannelName atomic.Pointer[string]
+	activeChannelFunc := func() string {
+		if p := activeChannelName.Load(); p != nil {
+			return *p
+		}
+		return ""
+	}
+
 	onChannelChange := func() {
 		select {
 		case channelChangeCh <- struct{}{}:
@@ -457,6 +475,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		ConfigPath:      r.configPath,
 		ActivityTracker: activityTracker,
 		OnChannelChange: onChannelChange,
+		Provisioners: map[channel.ChannelType]channel.EphemeralProvisioner{
+			channel.TypeTelegram: tgProvisioner,
+		},
+		ActiveChannel: activeChannelFunc,
 	})
 
 	// Set up the scheduler — runs at user lifetime, outlives the agent.
@@ -517,12 +539,8 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		Callback:    r.callback,
 	})
 
-	// Register Telegram Client API tools — MTProto-based tools for managing
-	// bots via BotFather, creating chats, and reading message history.
-	telegramclient.RegisterTools(mcpHandler, telegramclient.Deps{
-		SecretStore: secretStore,
-		StateStore:  s,
-	})
+	// Telegram Client API tools were registered earlier (before channeltools)
+	// so the provisioner is available for channel_create auto-provisioning.
 
 	// Set up onboarding state tracking and tools.
 	onboardingStore := onboarding.NewStore(s)
@@ -541,9 +559,9 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// is set by the agent's OnTurnStart callback before each handle() so
 	// the tool can validate from_channel server-side.
 	crossChannelMsgs := make(chan channel.TaggedMessage, 8)
-	var activeChannelName atomic.Pointer[string]
 
-	// Shared closures for both channel_send and channel_send_when_free.
+	// Shared closures for channel_send and channel_send_when_free.
+	// activeChannelFunc was declared earlier (before channeltools registration).
 	linksFunc := func() map[string][]channel.Link {
 		links, linksErr := registry.Links(ctx)
 		if linksErr != nil {
@@ -557,12 +575,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			return *p
 		}
 		return nil
-	}
-	activeChannelFunc := func() string {
-		if p := activeChannelName.Load(); p != nil {
-			return *p
-		}
-		return ""
 	}
 
 	channeltools.RegisterSendTool(mcpHandler, channeltools.SendDeps{
