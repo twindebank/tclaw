@@ -50,7 +50,11 @@ func devDeployedHandler(deps Deps) mcp.ToolHandler {
 		if err != nil {
 			return nil, err
 		}
-		if liveCommit := fetchLiveVersion(ctx, deps.Store); liveCommit != "" {
+		liveCommit, liveErr := fetchLiveVersion(ctx, deps.Store)
+		if liveErr != nil {
+			slog.Warn("failed to fetch live version", "err", liveErr)
+		}
+		if liveCommit != "" {
 			deployedCommit = liveCommit
 		}
 
@@ -99,30 +103,39 @@ func devDeployedHandler(deps Deps) mcp.ToolHandler {
 // fetchLiveVersion hits the running app's /version endpoint and returns the
 // commit hash. Returns empty string if the app URL is not configured or the
 // request fails — callers should fall back to the stored deployed commit.
-func fetchLiveVersion(ctx context.Context, store *dev.Store) string {
+// defaultAppURL is the fallback when the store doesn't have an app URL
+// (e.g. when all deploys happened locally via `go run . deploy`).
+const defaultAppURL = "https://YOUR_APP.fly.dev"
+
+// fetchLiveVersion hits the running app's /version endpoint. Returns the
+// commit hash and nil on success. On failure, returns "" and the error —
+// callers should include the error in their response so failures are visible.
+func fetchLiveVersion(ctx context.Context, store *dev.Store) (string, error) {
 	appURL, err := store.GetAppURL(ctx)
-	if err != nil || appURL == "" {
-		return ""
-	}
-	client := &http.Client{Timeout: 5 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, appURL+"/version", nil)
 	if err != nil {
-		return ""
+		slog.Warn("failed to read app URL from store, using default", "err", err)
+	}
+	if appURL == "" {
+		appURL = defaultAppURL
+	}
+
+	versionURL := appURL + "/version"
+	client := &http.Client{Timeout: 5 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, versionURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("create version request for %s: %w", versionURL, err)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		slog.Debug("failed to fetch live version", "url", appURL, "err", err)
-		return ""
+		return "", fmt.Errorf("fetch %s: %w", versionURL, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		slog.Debug("live version endpoint returned non-200", "url", appURL, "status", resp.StatusCode)
-		return ""
+		return "", fmt.Errorf("version endpoint %s returned %d", versionURL, resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 64))
 	if err != nil {
-		slog.Debug("failed to read live version response", "url", appURL, "err", err)
-		return ""
+		return "", fmt.Errorf("read version response from %s: %w", versionURL, err)
 	}
-	return strings.TrimSpace(string(body))
+	return strings.TrimSpace(string(body)), nil
 }
