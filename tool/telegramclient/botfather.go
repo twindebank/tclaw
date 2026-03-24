@@ -393,7 +393,7 @@ func (bf *BotFather) waitForResponse(ctx context.Context, substring string) (str
 			if !ok {
 				continue
 			}
-			slog.Info("botfather: poll saw message",
+			slog.Debug("botfather: poll saw message",
 				"msg_id", msg.ID,
 				"last_seen_id", bf.lastSeenMsgID,
 				"from_id", msg.FromID,
