@@ -1,6 +1,6 @@
 .env
 tclaw.yaml
-bin/
+/bin/
 tmp/
 .idea/
 
