@@ -68,17 +68,14 @@ func TestChannelCreate(t *testing.T) {
 		require.Contains(t, err.Error(), "not allowed")
 	})
 
-	t.Run("telegram stores token in secret store", func(t *testing.T) {
-		th := setupHarness(t, config.EnvProd)
+	t.Run("telegram auto-provisions via provisioner", func(t *testing.T) {
+		th := setupHarnessWithProvisioner(t, config.EnvProd)
 
 		result := callTool(t, th.handler, "channel_create", map[string]any{
-			"name":        "mybot",
-			"description": "Personal Telegram bot",
-			"type":        "telegram",
-			"telegram_config": map[string]any{
-				"token":         "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
-				"allowed_users": []any{float64(123456789)},
-			},
+			"name":          "mybot",
+			"description":   "Personal Telegram bot",
+			"type":          "telegram",
+			"allowed_users": []any{float64(123456789)},
 		})
 
 		var created map[string]any
@@ -86,7 +83,7 @@ func TestChannelCreate(t *testing.T) {
 		require.Equal(t, "mybot", created["name"])
 		require.Equal(t, "telegram", created["type"])
 
-		// Token should be in the secret store, not in the dynamic config.
+		// Token should be in the secret store (from provisioner), not in the dynamic config.
 		cfg, err := th.dynamicStore.Get(context.Background(), "mybot")
 		require.NoError(t, err)
 		require.NotNil(t, cfg)
@@ -94,32 +91,32 @@ func TestChannelCreate(t *testing.T) {
 
 		token, err := th.secretStore.Get(context.Background(), channel.ChannelSecretKey("mybot"))
 		require.NoError(t, err)
-		require.Equal(t, "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", token)
+		require.Equal(t, "mock-bot-token", token)
+
+		require.True(t, th.provisioner.provisionCalled)
 	})
 
-	t.Run("telegram missing config", func(t *testing.T) {
+	t.Run("telegram requires provisioner", func(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 
 		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
-			"name":        "mybot",
-			"description": "Missing token",
-			"type":        "telegram",
+			"name":          "mybot",
+			"description":   "No provisioner",
+			"type":          "telegram",
+			"allowed_users": []any{float64(123456789)},
 		})
-		require.Contains(t, err.Error(), "telegram_config")
+		require.Contains(t, err.Error(), "Telegram Client API not configured")
 	})
 
-	t.Run("telegram empty token", func(t *testing.T) {
-		th := setupHarness(t, config.EnvLocal)
+	t.Run("telegram requires allowed_users", func(t *testing.T) {
+		th := setupHarnessWithProvisioner(t, config.EnvLocal)
 
 		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
 			"name":        "mybot",
-			"description": "Empty token",
+			"description": "No users",
 			"type":        "telegram",
-			"telegram_config": map[string]any{
-				"token": "",
-			},
 		})
-		require.Contains(t, err.Error(), "telegram_config")
+		require.Contains(t, err.Error(), "allowed_users")
 	})
 
 	t.Run("rejects static name collision", func(t *testing.T) {
@@ -166,40 +163,6 @@ func TestChannelEdit(t *testing.T) {
 		cfg, err := th.dynamicStore.Get(context.Background(), "phone")
 		require.NoError(t, err)
 		require.Equal(t, "New description", cfg.Description)
-	})
-
-	t.Run("rotates telegram token", func(t *testing.T) {
-		th := setupHarness(t, config.EnvLocal)
-		callTool(t, th.handler, "channel_create", map[string]any{
-			"name": "mybot", "description": "Telegram bot", "type": "telegram",
-			"telegram_config": map[string]any{"token": "old-token", "allowed_users": []any{float64(123456789)}},
-		})
-
-		result := callTool(t, th.handler, "channel_edit", map[string]any{
-			"name":            "mybot",
-			"telegram_config": map[string]any{"token": "new-token"},
-		})
-
-		var edited map[string]any
-		require.NoError(t, json.Unmarshal(result, &edited))
-		require.Equal(t, true, edited["token_rotated"])
-
-		token, err := th.secretStore.Get(context.Background(), channel.ChannelSecretKey("mybot"))
-		require.NoError(t, err)
-		require.Equal(t, "new-token", token)
-	})
-
-	t.Run("telegram config on socket channel errors", func(t *testing.T) {
-		th := setupHarness(t, config.EnvLocal)
-		callTool(t, th.handler, "channel_create", map[string]any{
-			"name": "phone", "description": "Socket", "type": "socket",
-		})
-
-		err := callToolExpectError(t, th.handler, "channel_edit", map[string]any{
-			"name":            "phone",
-			"telegram_config": map[string]any{"token": "wrong-type"},
-		})
-		require.Contains(t, err.Error(), "telegram channels")
 	})
 
 	t.Run("rejects static channel", func(t *testing.T) {
@@ -287,16 +250,16 @@ func TestChannelDelete(t *testing.T) {
 	})
 
 	t.Run("cleans up telegram secret", func(t *testing.T) {
-		th := setupHarness(t, config.EnvLocal)
+		th := setupHarnessWithProvisioner(t, config.EnvLocal)
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "mybot", "description": "Telegram bot", "type": "telegram",
-			"telegram_config": map[string]any{"token": "secret-token", "allowed_users": []any{float64(123456789)}},
+			"allowed_users": []any{float64(123456789)},
 		})
 
 		// Verify secret exists before delete.
 		token, err := th.secretStore.Get(context.Background(), channel.ChannelSecretKey("mybot"))
 		require.NoError(t, err)
-		require.Equal(t, "secret-token", token)
+		require.Equal(t, "mock-bot-token", token)
 
 		callTool(t, th.handler, "channel_delete", map[string]any{"name": "mybot"})
 

@@ -44,21 +44,10 @@ func channelCreateDef() mcp.ToolDef {
 					"enum": ["socket", "telegram"],
 					"description": "Channel transport type."
 				},
-				"telegram_config": {
-					"type": "object",
-					"description": "Manual Telegram config. Only needed if Telegram Client API is not set up. Omit to auto-create a bot.",
-					"properties": {
-						"token": {
-							"type": "string",
-							"description": "Bot token from @BotFather."
-						},
-						"allowed_users": {
-							"type": "array",
-							"items": {"type": "integer"},
-							"description": "Telegram user IDs allowed to interact with this bot."
-						}
-					},
-					"required": ["token", "allowed_users"]
+				"allowed_users": {
+					"type": "array",
+					"items": {"type": "integer"},
+					"description": "Telegram user IDs allowed to interact with this bot. Required for Telegram channels."
 				},
 				"ephemeral": {
 					"type": "boolean",
@@ -106,23 +95,18 @@ func channelCreateDef() mcp.ToolDef {
 	}
 }
 
-type telegramCreateConfig struct {
-	Token        string  `json:"token"`
-	AllowedUsers []int64 `json:"allowed_users"`
-}
-
 type channelCreateArgs struct {
-	Name                      string                `json:"name"`
-	Description               string                `json:"description"`
-	Type                      string                `json:"type"`
-	TelegramConfig            *telegramCreateConfig `json:"telegram_config"`
-	Ephemeral                 bool                  `json:"ephemeral"`
-	EphemeralIdleTimeoutHours int                   `json:"ephemeral_idle_timeout_hours"`
-	ToolGroups                []string              `json:"tool_groups"`
-	AllowedTools              []string              `json:"allowed_tools"`
-	DisallowedTools           []string              `json:"disallowed_tools"`
-	CreatableGroups           []string              `json:"creatable_groups"`
-	Links                     []channel.Link        `json:"links"`
+	Name                      string         `json:"name"`
+	Description               string         `json:"description"`
+	Type                      string         `json:"type"`
+	AllowedUsers              []int64        `json:"allowed_users"`
+	Ephemeral                 bool           `json:"ephemeral"`
+	EphemeralIdleTimeoutHours int            `json:"ephemeral_idle_timeout_hours"`
+	ToolGroups                []string       `json:"tool_groups"`
+	AllowedTools              []string       `json:"allowed_tools"`
+	DisallowedTools           []string       `json:"disallowed_tools"`
+	CreatableGroups           []string       `json:"creatable_groups"`
+	Links                     []channel.Link `json:"links"`
 }
 
 const defaultEphemeralIdleTimeout = 24 * time.Hour
@@ -146,6 +130,7 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 
 		var channelType channel.ChannelType
 		var teardownState channel.TeardownState
+		var botToken string
 		switch a.Type {
 		case "socket":
 			if !deps.Env.IsLocal() {
@@ -153,30 +138,25 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			}
 			channelType = channel.TypeSocket
 		case "telegram":
-			// If no token provided, try auto-provisioning via the Telegram provisioner.
-			if a.TelegramConfig == nil || a.TelegramConfig.Token == "" {
-				provisioner, hasProvisioner := deps.Provisioners[channel.TypeTelegram]
-				if !hasProvisioner {
-					return nil, fmt.Errorf("Telegram Client API not configured — run telegram_client_setup first to enable automatic bot creation. Alternatively, create a bot manually via @BotFather and pass the token in telegram_config.")
-				}
-
-				result, provErr := provisioner.Provision(ctx, a.Name, a.Description)
-				if provErr != nil {
-					return nil, fmt.Errorf("auto-create Telegram bot: %w", provErr)
-				}
-
-				// Fill in the config from the provisioner result.
-				a.TelegramConfig = &telegramCreateConfig{
-					Token:        result.Token,
-					AllowedUsers: result.AllowedUsers,
-				}
-				// Store teardown state for later cleanup.
-				teardownState = result.TeardownState
+			if len(a.AllowedUsers) == 0 {
+				return nil, fmt.Errorf("allowed_users is required for Telegram channels — at least one Telegram user ID must be specified (get your user ID from @userinfobot on Telegram)")
 			}
 
-			if len(a.TelegramConfig.AllowedUsers) == 0 {
-				return nil, fmt.Errorf("telegram_config.allowed_users is required — at least one Telegram user ID must be specified (get your user ID from @userinfobot on Telegram)")
+			// Always auto-provision via the Telegram provisioner. The bot token
+			// is stored server-side in the secret store — never exposed to the
+			// agent or chat history.
+			provisioner, hasProvisioner := deps.Provisioners[channel.TypeTelegram]
+			if !hasProvisioner {
+				return nil, fmt.Errorf("Telegram Client API not configured — run telegram_client_setup first to enable automatic bot creation")
 			}
+
+			result, provErr := provisioner.Provision(ctx, a.Name, a.Description)
+			if provErr != nil {
+				return nil, fmt.Errorf("auto-create Telegram bot: %w", provErr)
+			}
+
+			botToken = result.Token
+			teardownState = result.TeardownState
 			channelType = channel.TypeTelegram
 		default:
 			return nil, fmt.Errorf("unsupported channel type %q (must be 'socket' or 'telegram')", a.Type)
@@ -263,10 +243,7 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			linkTargets[link.Target] = true
 		}
 
-		var allowedUsers []int64
-		if a.TelegramConfig != nil {
-			allowedUsers = a.TelegramConfig.AllowedUsers
-		}
+		allowedUsers := a.AllowedUsers
 
 		idleTimeout := defaultEphemeralIdleTimeout
 		if a.EphemeralIdleTimeoutHours > 0 {
@@ -301,10 +278,10 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("create channel: %w", err)
 		}
 
-		// Store the bot token in the encrypted secret store, not in the channel config.
-		if a.TelegramConfig != nil {
-			if err := deps.SecretStore.Set(ctx, channel.ChannelSecretKey(a.Name), a.TelegramConfig.Token); err != nil {
-				// Roll back the channel config if we can't store the secret.
+		// Store the bot token in the encrypted secret store — never in the
+		// channel config or tool call parameters.
+		if botToken != "" {
+			if err := deps.SecretStore.Set(ctx, channel.ChannelSecretKey(a.Name), botToken); err != nil {
 				if rollbackErr := deps.Registry.DynamicStore().Remove(ctx, a.Name); rollbackErr != nil {
 					slog.Warn("failed to roll back channel config after secret store error", "channel", a.Name, "err", rollbackErr)
 				}
