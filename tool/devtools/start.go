@@ -21,7 +21,7 @@ import (
 func devStartDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name:        "dev_start",
-		Description: "Start a dev session: clones/fetches the repo, creates a git worktree on a new branch (or checks out an existing one for PR iteration). Returns the worktree path where you can make changes using Bash/Read/Edit/Write. Multiple sessions can be active concurrently.",
+		Description: "Start a dev session: clones/fetches the repo, creates a git worktree on a new branch (or checks out an existing one for PR iteration). Returns the worktree path where you can make changes using Bash/Read/Edit/Write. Multiple sessions can be active concurrently. To iterate on an open PR, pass branch=<branch-name> — the branch name is returned by dev_end and shown in PR URLs.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -31,7 +31,7 @@ func devStartDef() mcp.ToolDef {
 				},
 				"branch": {
 					"type": "string",
-					"description": "Existing branch name to resume (e.g. for PR feedback iteration). Omit to create a new branch from main."
+					"description": "Existing branch name to check out (e.g. to iterate on an open PR). When provided, the existing branch is checked out instead of creating a new one. Get the branch name from the dev_end output or the PR. Do NOT pass 'session' — this is the correct parameter for PR iteration."
 				},
 				"repo_url": {
 					"type": "string",
