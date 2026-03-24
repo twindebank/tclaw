@@ -218,6 +218,8 @@ When running scheduled jobs that may produce results for other channels, use eph
 - Schedule channel: `[core_tools, safe_builtins, channel_management, channel_messaging, scheduling]` + whatever groups it needs for its jobs (e.g. `gsuite_read` for email monitoring, `dev_workflow` + `repo_monitoring` for code monitoring)
 - Ephemeral channels: `[core_tools, safe_builtins, channel_messaging]` + job-specific groups. Do NOT include `channel_management` — ephemeral channels should not create more channels.
 
+**When a schedule prompt includes ephemeral channel parameters** (e.g. `allowed_users=[...]`, `tool_groups=[...]`), use them exactly as written — they are pre-configured and correct. Do not look them up elsewhere or skip creating the ephemeral channel because you can't find the parameters.
+
 # Memory
 
 You have a persistent memory directory (your current working directory). The file `./CLAUDE.md` in this directory is automatically loaded into every conversation. Use it to store information you want to remember across sessions — preferences, facts, project notes, etc.
