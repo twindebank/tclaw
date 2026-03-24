@@ -33,6 +33,7 @@ type Deps struct {
 func RegisterTools(handler *mcp.Handler, deps Deps) {
 	handler.Register(devStartDef(), devStartHandler(deps))
 	handler.Register(devStatusDef(), devStatusHandler(deps))
+	handler.Register(devPRDef(), devPRHandler(deps))
 	handler.Register(devEndDef(), devEndHandler(deps))
 	handler.Register(devCancelDef(), devCancelHandler(deps))
 	handler.Register(deployDef(), deployHandler(deps))
