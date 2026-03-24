@@ -12,6 +12,7 @@ import (
 
 	"tclaw/channel"
 	"tclaw/mcp"
+	"tclaw/tool/telegramclient"
 	"tclaw/toolgroup"
 )
 
@@ -39,7 +40,7 @@ func channelCreateDef() mcp.ToolDef {
 				},
 				"description": {
 					"type": "string",
-					"description": "Describes the device or context. Helps the agent tailor responses."
+					"description": "Describes the device or context. Helps the agent tailor responses. For Telegram channels, used as the bot display name — must be 56 characters or fewer."
 				},
 				"type": {
 					"type": "string",
@@ -142,6 +143,9 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 		case "telegram":
 			if len(a.AllowedUsers) == 0 {
 				return nil, fmt.Errorf("allowed_users is required for Telegram channels — at least one Telegram user ID must be specified (get your user ID from @userinfobot on Telegram)")
+			}
+			if len([]rune(a.Description)) > telegramclient.MaxBotPurposeRunes {
+				return nil, fmt.Errorf("description too long for Telegram channel: %d characters, max %d (used as bot display name)", len([]rune(a.Description)), telegramclient.MaxBotPurposeRunes)
 			}
 
 			// Always auto-provision via the Telegram provisioner. The bot token
