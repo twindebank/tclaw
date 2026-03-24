@@ -28,8 +28,12 @@ func TestScheduler_FiresOnCron(t *testing.T) {
 		testChannelID: &fakeChannel{name: "desktop"},
 	}
 
-	scheduler := schedule.NewScheduler(schedStore, output, func() map[channel.ChannelID]channel.Channel {
-		return channelMap
+	scheduler := schedule.NewScheduler(schedule.SchedulerParams{
+		Store:  schedStore,
+		Output: output,
+		Channels: func() map[channel.ChannelID]channel.Channel {
+			return channelMap
+		},
 	})
 
 	// Add a schedule that fires every second (cron doesn't go below minutes,
@@ -89,8 +93,12 @@ func TestScheduler_SkipsPausedSchedules(t *testing.T) {
 		testChannelID: &fakeChannel{name: "desktop"},
 	}
 
-	scheduler := schedule.NewScheduler(schedStore, output, func() map[channel.ChannelID]channel.Channel {
-		return channelMap
+	scheduler := schedule.NewScheduler(schedule.SchedulerParams{
+		Store:  schedStore,
+		Output: output,
+		Channels: func() map[channel.ChannelID]channel.Channel {
+			return channelMap
+		},
 	})
 
 	// Add a paused schedule that would otherwise be due.
@@ -135,8 +143,12 @@ func TestScheduler_ReloadPicksUpNewSchedules(t *testing.T) {
 		testChannelID: &fakeChannel{name: "desktop"},
 	}
 
-	scheduler := schedule.NewScheduler(schedStore, output, func() map[channel.ChannelID]channel.Channel {
-		return channelMap
+	scheduler := schedule.NewScheduler(schedule.SchedulerParams{
+		Store:  schedStore,
+		Output: output,
+		Channels: func() map[channel.ChannelID]channel.Channel {
+			return channelMap
+		},
 	})
 
 	go scheduler.Run(ctx)

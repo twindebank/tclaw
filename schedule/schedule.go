@@ -33,6 +33,12 @@ type Schedule struct {
 	CreatedAt   time.Time  `json:"created_at"`
 	LastRunAt   time.Time  `json:"last_run_at,omitempty"`
 	NextRunAt   time.Time  `json:"next_run_at,omitempty"`
+
+	// WaitForFree defers firing until the target channel is not busy.
+	// When true, the scheduler checks ActivityTracker.IsBusy() before
+	// injecting the prompt. If busy, the fire is skipped and retried
+	// on the next scheduler tick (typically within seconds/minutes).
+	WaitForFree bool `json:"wait_for_free,omitempty"`
 }
 
 // GenerateID creates a new unique schedule ID.

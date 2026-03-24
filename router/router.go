@@ -487,11 +487,16 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	scheduleMsgs := make(chan channel.TaggedMessage, 8)
 
 	var currentChannels atomic.Pointer[map[channel.ChannelID]channel.Channel]
-	scheduler := schedule.NewScheduler(scheduleStore, scheduleMsgs, func() map[channel.ChannelID]channel.Channel {
-		if p := currentChannels.Load(); p != nil {
-			return *p
-		}
-		return nil
+	scheduler := schedule.NewScheduler(schedule.SchedulerParams{
+		Store:  scheduleStore,
+		Output: scheduleMsgs,
+		Channels: func() map[channel.ChannelID]channel.Channel {
+			if p := currentChannels.Load(); p != nil {
+				return *p
+			}
+			return nil
+		},
+		Activity: activityTracker,
 	})
 	go scheduler.Run(ctx)
 

@@ -35,6 +35,10 @@ func scheduleEditDef() mcp.ToolDef {
 				"channel_name": {
 					"type": "string",
 					"description": "New target channel name (optional)."
+				},
+				"wait_for_free": {
+					"type": "boolean",
+					"description": "If true, defer firing until the channel is not busy (optional)."
 				}
 			},
 			"required": ["id"]
@@ -47,6 +51,7 @@ type scheduleEditArgs struct {
 	Prompt      string `json:"prompt"`
 	CronExpr    string `json:"cron_expr"`
 	ChannelName string `json:"channel_name"`
+	WaitForFree *bool  `json:"wait_for_free"`
 }
 
 func scheduleEditHandler(deps Deps) mcp.ToolHandler {
@@ -87,6 +92,9 @@ func scheduleEditHandler(deps Deps) mcp.ToolHandler {
 			}
 			if a.ChannelName != "" {
 				sched.ChannelName = a.ChannelName
+			}
+			if a.WaitForFree != nil {
+				sched.WaitForFree = *a.WaitForFree
 			}
 		})
 		if err != nil {
