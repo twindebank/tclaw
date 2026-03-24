@@ -207,7 +207,9 @@ func deployHandler(deps Deps) mcp.ToolHandler {
 		// fly deploy reads FLY_API_TOKEN from env (no stdin alternative). The token is
 		// only visible to this subprocess — the claude CLI runs in a separate PID namespace
 		// (--unshare-pid in sandbox.go) and cannot read /proc/<pid>/environ.
-		cmd = exec.Command("fly", "deploy", "--remote-only", "--build-arg", "GO_BUILD_PARALLEL=2", "-a", appName)
+		// Use GO_BUILD_PARALLEL=1 to reduce memory usage on the remote builder.
+		// The gotd/td dependency is large and OOMs the builder at higher parallelism.
+		cmd = exec.Command("fly", "deploy", "--remote-only", "--build-arg", "GO_BUILD_PARALLEL=1", "-a", appName)
 		cmd.Dir = checkoutDir
 		cmd.Env = append(cmd.Env, "FLY_API_TOKEN="+flyToken, "PATH="+os.Getenv("PATH"), "HOME="+os.Getenv("HOME"))
 		deployOut, err := cmd.CombinedOutput()
