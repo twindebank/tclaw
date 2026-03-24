@@ -21,6 +21,19 @@ func cloneOrFetch(repoDir string, repoURL string, branch string, token string, d
 	// so a missing .git means we haven't cloned yet.
 	dotGit := filepath.Join(repoDir, ".git")
 	if _, err := os.Stat(dotGit); os.IsNotExist(err) {
+		// If the directory is non-empty (e.g. a stale bare repo from a previous
+		// code version, or a partial clone that never completed), remove it so
+		// git clone can start fresh.
+		entries, err := os.ReadDir(repoDir)
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("read repo dir: %w", err)
+		}
+		if len(entries) > 0 {
+			slog.Info("removing stale repo dir before re-cloning", "repo_dir", repoDir)
+			if err := os.RemoveAll(repoDir); err != nil {
+				return fmt.Errorf("remove stale repo dir: %w", err)
+			}
+		}
 		slog.Info("cloning repo", "repo_dir", repoDir, "branch", branch)
 		cmd := exec.Command("git", "-c", "core.hooksPath=/dev/null",
 			"clone", depthArg, "--single-branch", "--branch", branch,
