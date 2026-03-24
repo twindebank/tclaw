@@ -455,10 +455,28 @@ func (bf *BotFather) latestMessageID(ctx context.Context) int {
 
 // --- helpers ---
 
-// generateBotNames creates a randomized username and clean display name.
-// The username has a random suffix for non-discoverability; the display
-// name is clean and human-readable (no random parts).
+const (
+	// maxBotDisplayNameLength is BotFather's hard limit on bot display name length in runes.
+	maxBotDisplayNameLength = 64
+
+	// botDisplayNamePrefix is prepended to the purpose to form the display name.
+	// Rune length: t,c,l,a,w,space,·,space = 8.
+	botDisplayNamePrefix = "tclaw · "
+
+	// MaxBotPurposeRunes is the maximum rune length allowed for the purpose string.
+	// = maxBotDisplayNameLength (64) - len([]rune(botDisplayNamePrefix)) (8).
+	// Exported so callers can validate before invoking BotFather.
+	MaxBotPurposeRunes = 56
+)
+
+// generateBotNames creates a randomized username and a human-readable display name.
+// The username has a random hex suffix for non-discoverability. Returns an error if
+// the purpose exceeds MaxBotPurposeRunes — callers should validate upfront.
 func generateBotNames(purpose string) (username, displayName string, err error) {
+	if len([]rune(purpose)) > MaxBotPurposeRunes {
+		return "", "", fmt.Errorf("purpose too long: %d runes, max %d (BotFather display name limit)", len([]rune(purpose)), MaxBotPurposeRunes)
+	}
+
 	randomBytes := make([]byte, 4)
 	if _, err := rand.Read(randomBytes); err != nil {
 		return "", "", fmt.Errorf("generate random bytes: %w", err)
@@ -466,7 +484,7 @@ func generateBotNames(purpose string) (username, displayName string, err error) 
 	randomHex := hex.EncodeToString(randomBytes)
 
 	username = fmt.Sprintf("tclaw_%s_bot", randomHex)
-	displayName = fmt.Sprintf("tclaw · %s", purpose)
+	displayName = botDisplayNamePrefix + purpose
 
 	return username, displayName, nil
 }

@@ -312,7 +312,20 @@ func TestBotNameGeneration(t *testing.T) {
 		require.Equal(t, "tclaw · assistant", displayName)
 	})
 
-	t.Run("generates unique names", func(t *testing.T) {
+	t.Run("rejects purpose exceeding max rune length", func(t *testing.T) {
+		longPurpose := strings.Repeat("x", telegramclient.MaxBotPurposeRunes+1)
+		_, _, err := telegramclient.GenerateBotNamesForTest(longPurpose)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "too long")
+	})
+
+	t.Run("accepts purpose at exactly max rune length", func(t *testing.T) {
+		exactPurpose := strings.Repeat("x", telegramclient.MaxBotPurposeRunes)
+		_, _, err := telegramclient.GenerateBotNamesForTest(exactPurpose)
+		require.NoError(t, err)
+	})
+
+	t.Run("generates unique usernames", func(t *testing.T) {
 		u1, _, err := telegramclient.GenerateBotNamesForTest("test")
 		require.NoError(t, err)
 		u2, _, err := telegramclient.GenerateBotNamesForTest("test")
