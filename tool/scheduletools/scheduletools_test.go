@@ -21,8 +21,12 @@ func setup(t *testing.T) (*mcp.Handler, *schedule.Store) {
 
 	schedStore := schedule.NewStore(s)
 	output := make(chan channel.TaggedMessage, 8)
-	scheduler := schedule.NewScheduler(schedStore, output, func() map[channel.ChannelID]channel.Channel {
-		return nil
+	scheduler := schedule.NewScheduler(schedule.SchedulerParams{
+		Store:  schedStore,
+		Output: output,
+		Channels: func() map[channel.ChannelID]channel.Channel {
+			return nil
+		},
 	})
 
 	handler := mcp.NewHandler()
