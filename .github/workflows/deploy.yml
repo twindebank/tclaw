@@ -1,16 +1,34 @@
 name: Deploy to Fly.io
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: deploy
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
 
+      # tclaw.yaml is gitignored — write it from the GitHub secret so the
+      # Dockerfile COPY finds it. The file contains ${secret:NAME} refs,
+      # not actual secrets.
+      - name: Write tclaw.yaml
+        run: echo "$TCLAW_YAML" > tclaw.yaml
+        env:
+          TCLAW_YAML: ${{ secrets.TCLAW_YAML }}
+
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
-      - run: flyctl deploy --remote-only
+      # Build locally on the GitHub runner (7GB RAM, plenty for gotd/td)
+      # then push to Fly's registry. --local-only avoids the remote builder
+      # which OOMs on the large gotd/td dependency.
+      - name: Deploy
+        run: flyctl deploy --local-only -a tclaw
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
