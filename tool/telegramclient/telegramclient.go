@@ -18,6 +18,13 @@ const (
 
 	// SessionStoreKey is the secret store key for the persisted MTProto session (base64-encoded).
 	SessionStoreKey = "telegram_client_session"
+
+	// pendingPhoneStoreKey and pendingCodeHashStoreKey persist the in-progress
+	// auth flow across agent restarts. Without this, a restart between
+	// telegram_client_auth and telegram_client_verify loses the code hash and
+	// requires re-requesting the OTP (which Telegram may block as suspicious).
+	pendingPhoneStoreKey    = "telegram_client_pending_phone"
+	pendingCodeHashStoreKey = "telegram_client_pending_code_hash"
 )
 
 // Deps holds dependencies for Telegram Client API tools.

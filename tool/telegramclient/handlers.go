@@ -197,9 +197,19 @@ func authHandler(s *handlerState) mcp.ToolHandler {
 			return nil, fmt.Errorf("store phone: %w", err)
 		}
 
+		// Persist pending auth state so it survives agent restarts — without this
+		// a restart between auth and verify loses the code hash and forces a new
+		// OTP request, which Telegram may block as a replay attack.
+		if err := s.deps.StateStore.Set(ctx, pendingPhoneStoreKey, []byte(a.Phone)); err != nil {
+			return nil, fmt.Errorf("persist pending phone: %w", err)
+		}
+		if err := s.deps.StateStore.Set(ctx, pendingCodeHashStoreKey, []byte(sc.PhoneCodeHash)); err != nil {
+			return nil, fmt.Errorf("persist pending code hash: %w", err)
+		}
+
 		return json.Marshal(map[string]string{
 			"status":  "code_sent",
-			"message": "Verification code sent to " + a.Phone + ". Ask the user for the code and call telegram_client_verify.",
+			"message": "Verification code sent to " + a.Phone + ". IMPORTANT: use secret_form_request immediately with key \"telegram_otp_code\" to collect the code — do NOT ask for it in chat. Then call telegram_client_verify with the submitted code.",
 		})
 	}
 }
@@ -215,6 +225,21 @@ func verifyHandler(s *handlerState) mcp.ToolHandler {
 		if a.Code == "" {
 			return nil, fmt.Errorf("code is required")
 		}
+
+		// Reload pending state from the store if an agent restart wiped it from memory.
+		if s.pendingPhone == "" || s.pendingCodeHash == "" {
+			phone, err := s.deps.StateStore.Get(ctx, pendingPhoneStoreKey)
+			if err != nil {
+				return nil, fmt.Errorf("read pending phone: %w", err)
+			}
+			hash, err := s.deps.StateStore.Get(ctx, pendingCodeHashStoreKey)
+			if err != nil {
+				return nil, fmt.Errorf("read pending code hash: %w", err)
+			}
+			s.pendingPhone = string(phone)
+			s.pendingCodeHash = string(hash)
+		}
+
 		if s.pendingPhone == "" || s.pendingCodeHash == "" {
 			return nil, fmt.Errorf("no pending auth flow — call telegram_client_auth first")
 		}
@@ -235,9 +260,15 @@ func verifyHandler(s *handlerState) mcp.ToolHandler {
 			return nil, fmt.Errorf("sign in: %w", err)
 		}
 
-		// Auth complete — clear pending state.
+		// Auth complete — clear in-memory and persisted pending state.
 		s.pendingPhone = ""
 		s.pendingCodeHash = ""
+		if err := s.deps.StateStore.Set(ctx, pendingPhoneStoreKey, nil); err != nil {
+			return nil, fmt.Errorf("clear pending phone: %w", err)
+		}
+		if err := s.deps.StateStore.Set(ctx, pendingCodeHashStoreKey, nil); err != nil {
+			return nil, fmt.Errorf("clear pending code hash: %w", err)
+		}
 
 		return json.Marshal(map[string]string{
 			"status":  "authenticated",
