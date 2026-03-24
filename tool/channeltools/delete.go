@@ -38,18 +38,17 @@ func channelDeleteHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
-		// Reject deleting static channels.
-		if deps.Registry.IsStatic(a.Name) {
-			return nil, fmt.Errorf("channel %q is a static channel (from config file) and cannot be deleted. Only dynamic channels can be removed.", a.Name)
-		}
-
-		// Look up the channel before deleting so we know its type.
+		// Look up the dynamic channel first — even if a static channel with the
+		// same name exists, we can still delete the dynamic one.
 		cfg, err := deps.Registry.DynamicStore().Get(ctx, a.Name)
 		if err != nil {
 			return nil, fmt.Errorf("look up channel: %w", err)
 		}
 		if cfg == nil {
-			return nil, fmt.Errorf("dynamic channel %q not found", a.Name)
+			if deps.Registry.IsStatic(a.Name) {
+				return nil, fmt.Errorf("channel %q is a static channel (from config file) and cannot be deleted", a.Name)
+			}
+			return nil, fmt.Errorf("channel %q not found", a.Name)
 		}
 
 		if err := deps.Registry.DynamicStore().Remove(ctx, a.Name); err != nil {
