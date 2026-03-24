@@ -312,6 +312,13 @@ func TestBotNameGeneration(t *testing.T) {
 		require.Equal(t, "tclaw · assistant", displayName)
 	})
 
+	t.Run("truncates long purpose to 64 characters", func(t *testing.T) {
+		longPurpose := strings.Repeat("x", 200)
+		_, displayName, err := telegramclient.GenerateBotNamesForTest(longPurpose)
+		require.NoError(t, err)
+		require.LessOrEqual(t, len([]rune(displayName)), 64)
+	})
+
 	t.Run("generates unique names", func(t *testing.T) {
 		u1, _, err := telegramclient.GenerateBotNamesForTest("test")
 		require.NoError(t, err)

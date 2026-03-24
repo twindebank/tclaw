@@ -455,9 +455,13 @@ func (bf *BotFather) latestMessageID(ctx context.Context) int {
 
 // --- helpers ---
 
+// maxBotDisplayNameLength is BotFather's hard limit on bot display name length.
+const maxBotDisplayNameLength = 64
+
 // generateBotNames creates a randomized username and clean display name.
 // The username has a random suffix for non-discoverability; the display
-// name is clean and human-readable (no random parts).
+// name is clean and human-readable (no random parts), truncated to fit
+// BotFather's 64-character limit.
 func generateBotNames(purpose string) (username, displayName string, err error) {
 	randomBytes := make([]byte, 4)
 	if _, err := rand.Read(randomBytes); err != nil {
@@ -467,6 +471,11 @@ func generateBotNames(purpose string) (username, displayName string, err error) 
 
 	username = fmt.Sprintf("tclaw_%s_bot", randomHex)
 	displayName = fmt.Sprintf("tclaw · %s", purpose)
+
+	// BotFather rejects display names longer than 64 characters.
+	if runes := []rune(displayName); len(runes) > maxBotDisplayNameLength {
+		displayName = string(runes[:maxBotDisplayNameLength])
+	}
 
 	return username, displayName, nil
 }
