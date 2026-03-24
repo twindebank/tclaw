@@ -89,7 +89,11 @@ func deployHandler(deps Deps) mcp.ToolHandler {
 		if err != nil {
 			return nil, err
 		}
-		if liveCommit := fetchLiveVersion(ctx, deps.Store); liveCommit != "" {
+		liveCommit, liveErr := fetchLiveVersion(ctx, deps.Store)
+		if liveErr != nil {
+			slog.Warn("failed to fetch live version for deploy preview", "err", liveErr)
+		}
+		if liveCommit != "" {
 			deployedCommit = liveCommit
 		}
 

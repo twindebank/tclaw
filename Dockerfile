@@ -1,20 +1,12 @@
 FROM golang:1.26-bookworm AS builder
 
 ARG COMMIT=""
-ARG GO_BUILD_PARALLEL=""
 
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod download
+COPY vendor/ vendor/
 COPY . .
-# GO_BUILD_PARALLEL limits build parallelism via -p flag. Set to "1" on
-# memory-constrained remote builders where gotd/td/tg OOM-kills the
-# compiler. Leave empty for local builds to use all cores.
-# --mount=type=cache persists the Go build cache across builds, so
-# unchanged packages (especially gotd/td) aren't recompiled every time.
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build ${GO_BUILD_PARALLEL:+-p $GO_BUILD_PARALLEL} -ldflags "-X tclaw/version.Commit=${COMMIT}" -o /bin/tclaw .
+RUN CGO_ENABLED=0 go build -ldflags "-X tclaw/version.Commit=${COMMIT}" -o /bin/tclaw .
 
 # ---
 
@@ -31,22 +23,21 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o 
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*
 
-# Fly.io CLI — needed by deploy tool for `fly deploy --remote-only`.
+# Fly.io CLI — needed by deploy tool for `fly deploy`.
 RUN curl -fsSL https://fly.io/install.sh | sh
 ENV PATH="/root/.fly/bin:${PATH}"
 
 # Install claude CLI and Google Workspace CLI globally.
 RUN npm install -g @anthropic-ai/claude-code @googleworkspace/cli
 
-# Copy the Go binaries.
+# Copy the Go binary.
 COPY --from=builder /bin/tclaw /usr/local/bin/tclaw
 
-# tclaw.yaml is gitignored — the deploy tool copies it into the build context.
-# Fail the build if it's missing rather than falling back to the example config,
-# which lacks the prod environment and causes a crash loop.
+# tclaw.yaml is gitignored — written from GitHub secret in CI, or copied
+# by the local deploy tool. Build fails if missing.
 COPY tclaw.yaml /etc/tclaw/tclaw.yaml
 
-# Persistent volume at /data holds all per-user state (store, home dirs, etc.).
+# Persistent volume at /data holds all per-user state.
 VOLUME ["/data"]
 
 ENV CLAUDECODE=""
