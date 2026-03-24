@@ -308,11 +308,29 @@ func TestBotNameGeneration(t *testing.T) {
 		require.True(t, strings.HasSuffix(username, "_bot"), "username should end with _bot: %s", username)
 		require.Len(t, username, len("tclaw_12345678_bot"))
 
-		// Display name: tclaw · <purpose>
-		require.Equal(t, "tclaw · assistant", displayName)
+		// Display name: tclaw_<8hex> · <purpose> — random hex in both for non-discoverability
+		randomHex := strings.TrimPrefix(strings.TrimSuffix(username, "_bot"), "tclaw_")
+		require.Equal(t, "tclaw_"+randomHex+" · assistant", displayName)
 	})
 
-	t.Run("generates unique names", func(t *testing.T) {
+	t.Run("display name is non-discoverable", func(t *testing.T) {
+		_, d1, err := telegramclient.GenerateBotNamesForTest("assistant")
+		require.NoError(t, err)
+		_, d2, err := telegramclient.GenerateBotNamesForTest("assistant")
+		require.NoError(t, err)
+
+		// Same purpose produces different display names — can't be guessed or searched.
+		require.NotEqual(t, d1, d2)
+	})
+
+	t.Run("truncates long purpose to fit 64-character limit", func(t *testing.T) {
+		longPurpose := strings.Repeat("x", 200)
+		_, displayName, err := telegramclient.GenerateBotNamesForTest(longPurpose)
+		require.NoError(t, err)
+		require.LessOrEqual(t, len([]rune(displayName)), 64)
+	})
+
+	t.Run("generates unique usernames", func(t *testing.T) {
 		u1, _, err := telegramclient.GenerateBotNamesForTest("test")
 		require.NoError(t, err)
 		u2, _, err := telegramclient.GenerateBotNamesForTest("test")
