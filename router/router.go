@@ -625,6 +625,15 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 	firstBoot := true
 	for {
+		// Drain any stale channel change signals from a previous iteration.
+		// Without this, a change from the previous agent session could fire
+		// immediately in the select, starting the 30s force-kill timer before
+		// the new agent even processes its first message.
+		select {
+		case <-channelChangeCh:
+		default:
+		}
+
 		// Seed memory/CLAUDE.md and the home/.claude/ symlink on each iteration.
 		// This is idempotent — only writes if the file/link doesn't exist — and
 		// ensures re-seeding after a reset that clears these files.
