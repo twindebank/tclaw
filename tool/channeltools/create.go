@@ -160,6 +160,19 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			botToken = result.Token
 			teardownState = result.TeardownState
 			channelType = channel.TypeTelegram
+
+			// Auto-start the bot by sending /start as the user via MTProto.
+			// Without this, the bot can't message the user (Telegram restriction).
+			if ts, ok := teardownState.(channel.TelegramTeardownState); ok && len(a.AllowedUsers) > 0 {
+				type botStarter interface {
+					StartBot(ctx context.Context, botUsername string, userID int64) error
+				}
+				if starter, ok := provisioner.(botStarter); ok {
+					if startErr := starter.StartBot(ctx, ts.BotUsername, a.AllowedUsers[0]); startErr != nil {
+						slog.Warn("failed to auto-start bot (user will need to /start manually)", "bot", ts.BotUsername, "err", startErr)
+					}
+				}
+			}
 		default:
 			return nil, fmt.Errorf("unsupported channel type %q (must be 'socket' or 'telegram')", a.Type)
 		}
