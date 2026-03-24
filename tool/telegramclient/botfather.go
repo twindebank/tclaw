@@ -401,8 +401,12 @@ func (bf *BotFather) waitForResponse(ctx context.Context, substring string) (str
 			if msg.ID <= bf.lastSeenMsgID {
 				continue
 			}
-			from, ok := msg.FromID.(*tg.PeerUser)
-			if !ok || from.UserID != bf.peer.UserID {
+			// Skip our own messages. In private chats with BotFather, bot
+			// replies may have FromID=nil (MTProto uses peer context). Our
+			// own sent messages have FromID set to our user ID. So: skip
+			// messages with a known non-BotFather FromID, accept everything else.
+			if from, ok := msg.FromID.(*tg.PeerUser); ok && from.UserID != bf.peer.UserID {
+				// Message from us (or another user), not BotFather — skip.
 				continue
 			}
 
