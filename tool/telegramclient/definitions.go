@@ -90,8 +90,10 @@ var toolDefs = []mcp.ToolDef{
 		Name: "telegram_client_create_bot",
 		Description: "Create a new Telegram bot via BotFather. The bot gets a randomized, " +
 			"non-searchable username (tclaw_<random>_bot) and is automatically configured " +
-			"with privacy mode ON and join groups OFF. Returns the bot token — pass it to " +
-			"channel_create to set up a new tclaw channel.",
+			"with privacy mode ON and join groups OFF. The token is stored securely " +
+			"server-side and NEVER returned in the response. Prefer channel_create with " +
+			"type=telegram which calls this internally — only use this tool directly " +
+			"for standalone bot creation outside the channel flow.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {

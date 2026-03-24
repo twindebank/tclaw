@@ -374,7 +374,20 @@ func createBotHandler(s *handlerState) mcp.ToolHandler {
 			return nil, fmt.Errorf("create bot: %w", err)
 		}
 
-		return json.Marshal(result)
+		// Store the token server-side so it can be used by channel_create later.
+		// Key format matches what channel_create expects.
+		tokenKey := "bot/" + result.Username + "/token"
+		if storeErr := s.deps.SecretStore.Set(ctx, tokenKey, result.Token); storeErr != nil {
+			return nil, fmt.Errorf("store bot token: %w", storeErr)
+		}
+
+		// Return only non-sensitive fields — the token must never appear in
+		// tool call output or chat history.
+		return json.Marshal(map[string]string{
+			"username":     result.Username,
+			"display_name": result.DisplayName,
+			"message":      result.Message,
+		})
 	}
 }
 
