@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
@@ -360,6 +361,8 @@ func (bf *BotFather) waitForResponse(ctx context.Context, substring string) (str
 	// Small initial delay to let BotFather process the message.
 	time.Sleep(pollInterval)
 
+	slog.Info("botfather: waiting for response", "substring", substring, "last_seen_id", bf.lastSeenMsgID)
+
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
@@ -367,8 +370,6 @@ func (bf *BotFather) waitForResponse(ctx context.Context, substring string) (str
 		default:
 		}
 
-		// Fetch a small batch — BotFather might send multiple messages
-		// (e.g. a prompt + inline keyboard description).
 		history, err := bf.client.API().MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
 			Peer:  bf.peer,
 			Limit: 5,
@@ -390,11 +391,9 @@ func (bf *BotFather) waitForResponse(ctx context.Context, substring string) (str
 			if !ok {
 				continue
 			}
-			// Only accept messages newer than what we've already seen.
 			if msg.ID <= bf.lastSeenMsgID {
 				continue
 			}
-			// Only accept messages FROM BotFather (not our own).
 			from, ok := msg.FromID.(*tg.PeerUser)
 			if !ok || from.UserID != bf.peer.UserID {
 				continue
@@ -402,15 +401,17 @@ func (bf *BotFather) waitForResponse(ctx context.Context, substring string) (str
 
 			text := msg.Message
 			if substring == "" || strings.Contains(strings.ToLower(text), substring) {
-				// Advance the cursor past this message.
 				bf.lastSeenMsgID = msg.ID
+				slog.Info("botfather: got response", "msg_id", msg.ID, "text_prefix", truncate(text, 80))
 				return text, nil
 			}
+			slog.Debug("botfather: skipping message (no substring match)", "msg_id", msg.ID, "text_prefix", truncate(text, 80), "want", substring)
 		}
 
 		time.Sleep(pollInterval)
 	}
 
+	slog.Error("botfather: timeout waiting for response", "substring", substring, "last_seen_id", bf.lastSeenMsgID)
 	return "", fmt.Errorf("timeout waiting for BotFather response (expected %q)", substring)
 }
 
@@ -466,6 +467,13 @@ func generateRandomID() int64 {
 		id |= int64(b[i]) << (i * 8)
 	}
 	return id
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 // containsError checks if a BotFather response indicates an error.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gotd/td/telegram/auth"
@@ -25,6 +26,11 @@ type handlerState struct {
 
 	// client is lazily initialized on the first tool call that needs it.
 	client *Client
+
+	// botFatherMu serializes BotFather conversations. BotFather is a sequential
+	// chat — interleaving two /newbot flows corrupts both. Any tool that talks
+	// to BotFather must hold this lock for the duration of the conversation.
+	botFatherMu sync.Mutex
 
 	// pendingPhone and pendingCodeHash track the in-progress auth flow.
 	pendingPhone    string
@@ -358,6 +364,10 @@ func createBotHandler(s *handlerState) mcp.ToolHandler {
 			return nil, err
 		}
 
+		// Serialize BotFather conversations — only one at a time.
+		s.botFatherMu.Lock()
+		defer s.botFatherMu.Unlock()
+
 		bf := NewBotFather(s.client)
 		result, err := bf.CreateBot(ctx, a.Purpose)
 		if err != nil {
@@ -383,6 +393,9 @@ func deleteBotHandler(s *handlerState) mcp.ToolHandler {
 		if err := ensureConnected(ctx, s); err != nil {
 			return nil, err
 		}
+
+		s.botFatherMu.Lock()
+		defer s.botFatherMu.Unlock()
 
 		bf := NewBotFather(s.client)
 		if err := bf.DeleteBot(ctx, a.Username); err != nil {
@@ -415,6 +428,9 @@ func configureBotHandler(s *handlerState) mcp.ToolHandler {
 		if err := ensureConnected(ctx, s); err != nil {
 			return nil, err
 		}
+
+		s.botFatherMu.Lock()
+		defer s.botFatherMu.Unlock()
 
 		bf := NewBotFather(s.client)
 		if err := bf.ConfigureBot(ctx, ConfigureBotParams{
