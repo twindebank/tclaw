@@ -104,6 +104,22 @@ func TestCloneOrFetch(t *testing.T) {
 		require.NotEmpty(t, sha)
 	})
 
+	t.Run("stale non-empty dir without .git is removed and re-cloned", func(t *testing.T) {
+		// Old code stored bare git repos at the repo_dir path. When the code
+		// switched to regular clones, existing bare repos caused git clone to
+		// fail with "already exists and is not an empty directory".
+		remote := createTestRemote(t, "main")
+		repoDir := filepath.Join(t.TempDir(), "clone")
+		require.NoError(t, os.MkdirAll(repoDir, 0o755))
+		// Simulate a stale file left over from a previous code version.
+		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644))
+
+		require.NoError(t, cloneOrFetch(repoDir, remote, "main", "", 50))
+
+		_, err := os.Stat(filepath.Join(repoDir, ".git"))
+		require.NoError(t, err, ".git should exist after re-clone")
+	})
+
 	t.Run("deleted files removed on fetch", func(t *testing.T) {
 		remote := createTestRemote(t, "main")
 		repoDir := filepath.Join(t.TempDir(), "clone")
