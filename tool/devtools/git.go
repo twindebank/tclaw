@@ -167,6 +167,16 @@ func gitHeadCommit(dir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// gitHeadCommitRef returns the short hash and subject of a ref.
+func gitHeadCommitRef(repoDir string, ref string) (string, error) {
+	cmd := exec.Command("git", "-C", repoDir, "log", "-1", "--format=%h %s", ref)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git log %s: %s: %w", ref, string(out), err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // gitLogRange returns the one-line commit log between two refs.
 func gitLogRange(repoDir string, from string, to string) (string, error) {
 	cmd := exec.Command("git", "-C", repoDir, "log", "--oneline", from+".."+to)
