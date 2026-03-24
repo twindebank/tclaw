@@ -45,10 +45,19 @@ When the user asks to set up a new channel:
 
 The `telegram_client_*` tools let you act as the user's Telegram account via the MTProto protocol — creating bots, managing chats, reading history, and searching messages. Tool descriptions contain full parameter details.
 
-**Auth flow** (one-time setup): `telegram_client_setup` (API credentials) → `telegram_client_auth` (sends OTP) → `telegram_client_verify` (OTP code) → optionally `telegram_client_2fa` (password). Use `telegram_client_status` to check state.
+**Auth flow** (one-time setup):
+1. `telegram_client_setup` — store API credentials (collect via `secret_form_request` first, then call with no args)
+2. `telegram_client_auth` — sends OTP to the user's phone
+3. **Immediately** call `secret_form_request` with key `telegram_otp_code` to collect the code via secure form — do NOT ask for it in chat, the code expires quickly
+4. `secret_form_wait` — blocks until submitted
+5. `telegram_client_verify` — complete sign-in with the submitted code
+6. Optionally `telegram_client_2fa` if password is required
+
+Use `telegram_client_status` to check state at any time.
 
 **Key rules:**
-- **Collect API credentials via `secret_form_request`** — api_id and api_hash are sensitive, never accept them in chat
+- **Collect API credentials via `secret_form_request`** — use keys `telegram_client_api_id` and `telegram_client_api_hash`, then call `telegram_client_setup` with no arguments
+- **Collect OTP via `secret_form_request`** — call immediately after `telegram_client_auth`, do not wait for the user to type it in chat
 - **Bot creation is fully automatic** — `telegram_client_create_bot` handles the entire BotFather conversation internally, generates a random non-searchable username, and configures privacy. You just provide a purpose label.
 - **`channel_create` auto-provisions** — for Telegram channels, `channel_create` calls `telegram_client_create_bot` internally when no token is provided. You don't need to call both tools separately.
 
