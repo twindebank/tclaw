@@ -33,6 +33,10 @@ func scheduleCreateDef() mcp.ToolDef {
 				"channel_name": {
 					"type": "string",
 					"description": "Target channel name. If omitted, defaults to the channel from the current message context."
+				},
+				"wait_for_free": {
+					"type": "boolean",
+					"description": "If true, the schedule only fires when the target channel is not busy (no active turn or recent messages). If the channel is busy at fire time, the schedule is deferred and retried shortly. Use this to avoid interrupting conversations."
 				}
 			},
 			"required": ["prompt", "cron_expr"]
@@ -44,6 +48,7 @@ type scheduleCreateArgs struct {
 	Prompt      string `json:"prompt"`
 	CronExpr    string `json:"cron_expr"`
 	ChannelName string `json:"channel_name"`
+	WaitForFree bool   `json:"wait_for_free"`
 }
 
 func scheduleCreateHandler(deps Deps) mcp.ToolHandler {
@@ -80,6 +85,7 @@ func scheduleCreateHandler(deps Deps) mcp.ToolHandler {
 			Status:      schedule.StatusActive,
 			CreatedAt:   now,
 			NextRunAt:   cronSched.Next(now),
+			WaitForFree: a.WaitForFree,
 		}
 
 		if err := deps.Store.Add(ctx, sched); err != nil {
