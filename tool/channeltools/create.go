@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"regexp"
 	"time"
 
@@ -289,6 +291,13 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			}
 		}
 
+		// Send an initial message so the bot appears in the user's Telegram
+		// sidebar without them having to find and /start it manually.
+		if botToken != "" && len(allowedUsers) > 0 {
+			greeting := fmt.Sprintf("👋 Channel <b>%s</b> is now active.\n\n%s", a.Name, a.Description)
+			sendBotGreeting(botToken, allowedUsers[0], greeting)
+		}
+
 		if deps.OnChannelChange != nil {
 			deps.OnChannelChange()
 		}
@@ -300,5 +309,25 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			"message":     fmt.Sprintf("Channel %q created. The agent will restart automatically to activate it.", a.Name),
 		}
 		return json.Marshal(result)
+	}
+}
+
+// sendBotGreeting sends an initial message from a newly created bot to a user
+// so the bot appears in their Telegram sidebar. Best-effort — errors are logged
+// but don't fail channel creation.
+func sendBotGreeting(token string, chatID int64, text string) {
+	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", token)
+	resp, err := http.PostForm(apiURL, url.Values{
+		"chat_id":    {fmt.Sprintf("%d", chatID)},
+		"text":       {text},
+		"parse_mode": {"HTML"},
+	})
+	if err != nil {
+		slog.Warn("failed to send bot greeting", "err", err)
+		return
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		slog.Warn("bot greeting returned non-200", "status", resp.StatusCode)
 	}
 }
