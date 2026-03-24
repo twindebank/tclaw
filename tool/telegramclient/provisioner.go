@@ -21,6 +21,9 @@ func (p *Provisioner) Provision(ctx context.Context, name, purpose string) (*cha
 		return nil, fmt.Errorf("connect to Telegram: %w", err)
 	}
 
+	p.state.botFatherMu.Lock()
+	defer p.state.botFatherMu.Unlock()
+
 	bf := NewBotFather(p.state.client)
 	result, err := bf.CreateBot(ctx, purpose)
 	if err != nil {
@@ -45,6 +48,9 @@ func (p *Provisioner) Teardown(ctx context.Context, state channel.TeardownState)
 	if err := ensureConnected(ctx, p.state); err != nil {
 		return fmt.Errorf("connect to Telegram for bot deletion: %w", err)
 	}
+
+	p.state.botFatherMu.Lock()
+	defer p.state.botFatherMu.Unlock()
 
 	bf := NewBotFather(p.state.client)
 	if err := bf.DeleteBot(ctx, ts.BotUsername); err != nil {
