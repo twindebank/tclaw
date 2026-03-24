@@ -5,12 +5,16 @@ ARG GO_BUILD_PARALLEL=""
 
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 COPY . .
-# GO_BUILD_PARALLEL limits build parallelism via -p flag. Set to "2" on
-# memory-constrained remote builders (Depot) where gotd/td/tg OOM-kills
-# the compiler. Leave empty for local builds to use all cores.
-RUN CGO_ENABLED=0 go build ${GO_BUILD_PARALLEL:+-p $GO_BUILD_PARALLEL} -ldflags "-X tclaw/version.Commit=${COMMIT}" -o /bin/tclaw .
+# GO_BUILD_PARALLEL limits build parallelism via -p flag. Set to "1" on
+# memory-constrained remote builders where gotd/td/tg OOM-kills the
+# compiler. Leave empty for local builds to use all cores.
+# --mount=type=cache persists the Go build cache across builds, so
+# unchanged packages (especially gotd/td) aren't recompiled every time.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build ${GO_BUILD_PARALLEL:+-p $GO_BUILD_PARALLEL} -ldflags "-X tclaw/version.Commit=${COMMIT}" -o /bin/tclaw .
 
 # ---
 
