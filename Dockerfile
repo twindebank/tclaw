@@ -1,12 +1,16 @@
 FROM golang:1.26-bookworm AS builder
 
 ARG COMMIT=""
+ARG GO_BUILD_PARALLEL=""
 
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -ldflags "-X tclaw/version.Commit=${COMMIT}" -o /bin/tclaw .
+# GO_BUILD_PARALLEL limits build parallelism via -p flag. Set to "2" on
+# memory-constrained remote builders (Depot) where gotd/td/tg OOM-kills
+# the compiler. Leave empty for local builds to use all cores.
+RUN CGO_ENABLED=0 go build ${GO_BUILD_PARALLEL:+-p $GO_BUILD_PARALLEL} -ldflags "-X tclaw/version.Commit=${COMMIT}" -o /bin/tclaw .
 
 # ---
 
