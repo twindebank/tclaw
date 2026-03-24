@@ -12,7 +12,11 @@ import (
 func devEndDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name:        "dev_end",
-		Description: "End a dev session: commits any uncommitted changes, pushes the branch, creates a PR (or reports the existing PR URL), and tears down the worktree. If PR creation fails after a successful push, the session is preserved — call dev_end again to retry. To iterate on an open PR after the session is torn down, call dev_start with branch=<branch-name> (the branch name is in the dev_end output and the PR URL). Note: the 'session' parameter on this tool is only for disambiguating which session to end — it is NOT the way to resume a session.",
+		Description: "Tear down a dev session. Commits any uncommitted changes, pushes, and cleans up the worktree. " +
+			"Preferred workflow: use dev_pr to open/update the PR and iterate, then call dev_end when the PR is merged or you're done. " +
+			"dev_end also creates a PR if none exists yet. " +
+			"If PR creation fails after a successful push, the session is preserved — call dev_end again to retry. " +
+			"Note: the 'session' parameter is only for disambiguating which session to end — it is NOT the way to resume a session.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
