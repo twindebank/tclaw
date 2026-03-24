@@ -207,12 +207,16 @@ func deployHandler(deps Deps) mcp.ToolHandler {
 		// fly deploy reads FLY_API_TOKEN from env (no stdin alternative). The token is
 		// only visible to this subprocess — the claude CLI runs in a separate PID namespace
 		// (--unshare-pid in sandbox.go) and cannot read /proc/<pid>/environ.
-		cmd = exec.Command("fly", "deploy", "--remote-only", "-a", appName)
+		cmd = exec.Command("fly", "deploy", "--remote-only", "--build-arg", "GO_BUILD_PARALLEL=2", "-a", appName)
 		cmd.Dir = checkoutDir
 		cmd.Env = append(cmd.Env, "FLY_API_TOKEN="+flyToken, "PATH="+os.Getenv("PATH"), "HOME="+os.Getenv("HOME"))
 		deployOut, err := cmd.CombinedOutput()
 		if err != nil {
-			return nil, fmt.Errorf("fly deploy failed: %s: %w", string(deployOut), err)
+			out := string(deployOut)
+			if strings.Contains(out, "signal: killed") {
+				return nil, fmt.Errorf("fly deploy failed: remote builder ran out of memory (OOM) compiling Go — try increasing GO_BUILD_PARALLEL or deploying locally with `tclaw deploy`: %w", err)
+			}
+			return nil, fmt.Errorf("fly deploy failed: %s: %w", out, err)
 		}
 
 		// Record the deployed commit and app URL. Non-fatal since deploy already succeeded.
