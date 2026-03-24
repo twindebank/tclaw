@@ -32,7 +32,9 @@ var toolDefs = []mcp.ToolDef{
 	{
 		Name: "telegram_client_auth",
 		Description: "Start Telegram authentication by sending an OTP code to the given phone number. " +
-			"After calling this, ask the user for the code they received and call telegram_client_verify.",
+			"After calling this, IMMEDIATELY call secret_form_request with key \"telegram_otp_code\" to collect " +
+			"the Telegram OTP via a secure web form — do NOT ask for it in chat. " +
+			"Sharing the code directly in Telegram chat triggers a security block on the account.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -46,17 +48,18 @@ var toolDefs = []mcp.ToolDef{
 	},
 	{
 		Name: "telegram_client_verify",
-		Description: "Complete Telegram authentication with the OTP code the user received. " +
+		Description: "Complete Telegram authentication with the OTP the user received. " +
+			"Call with NO arguments — reads the code from the secret store automatically " +
+			"(put there by secret_form_request with key \"telegram_otp_code\"). " +
 			"If 2FA is enabled, the response will indicate that — call telegram_client_2fa next.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"code": {
 					"type": "string",
-					"description": "The verification code the user received via Telegram."
+					"description": "Omit to read from secret store (preferred). Only pass directly if secret_form was not used."
 				}
-			},
-			"required": ["code"]
+			}
 		}`),
 	},
 	{
