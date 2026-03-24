@@ -48,16 +48,17 @@ The `telegram_client_*` tools let you act as the user's Telegram account via the
 **Auth flow** (one-time setup):
 1. `telegram_client_setup` — store API credentials (collect via `secret_form_request` first, then call with no args)
 2. `telegram_client_auth` — sends OTP to the user's phone
-3. **Immediately** call `secret_form_request` with key `telegram_otp_code` to collect the code via secure form — do NOT ask for it in chat, the code expires quickly
-4. `secret_form_wait` — blocks until submitted
-5. `telegram_client_verify` — complete sign-in with the submitted code
-6. Optionally `telegram_client_2fa` if password is required
+3. **Immediately** call `secret_form_request` with key `telegram_otp_code` to collect the code via secure form — do NOT ask for it in chat. Sharing it directly in Telegram chat triggers a security block on the account
+4. Send the form URL and **6-digit verification code** to the user. Make clear there are **two separate codes**: the tclaw form verification code (shown alongside the form URL, proves it's them), and the actual Telegram OTP they receive in their Telegram app in a separate chat. They enter the **Telegram OTP** into the form field
+5. `secret_form_wait` — blocks until submitted
+6. `telegram_client_verify` with **no arguments** — reads the code from the secret store automatically
+7. Optionally `telegram_client_2fa` if password is required
 
 Use `telegram_client_status` to check state at any time.
 
 **Key rules:**
 - **Collect API credentials via `secret_form_request`** — use keys `telegram_client_api_id` and `telegram_client_api_hash`, then call `telegram_client_setup` with no arguments
-- **Collect OTP via `secret_form_request`** — call immediately after `telegram_client_auth`, do not wait for the user to type it in chat
+- **Collect OTP via `secret_form_request`** — call immediately after `telegram_client_auth`. Never ask the user to type the code in chat — Telegram blocks logins when the OTP is shared directly in a Telegram conversation
 - **Bot creation is fully automatic** — `telegram_client_create_bot` handles the entire BotFather conversation internally, generates a random non-searchable username, and configures privacy. You just provide a purpose label.
 - **`channel_create` auto-provisions** — for Telegram channels, `channel_create` calls `telegram_client_create_bot` internally when no token is provided. You don't need to call both tools separately.
 
