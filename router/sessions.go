@@ -30,7 +30,7 @@ func loadSession(ctx context.Context, s store.Store, chID channel.ChannelID) (st
 		slog.Warn("ignoring invalid session ID", "channel", chID, "len", len(sid))
 		return "", nil
 	}
-	slog.Info("resumed session", "channel", chID, "session_id", sid)
+	slog.Debug("resumed session", "channel", chID, "session_id", sid)
 	return sid, nil
 }
 
