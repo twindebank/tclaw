@@ -32,9 +32,9 @@ When the user asks to set up a new channel:
 2. Set `tool_groups` with the groups the channel needs. Use `tool_group_list` to see all available groups with descriptions.
 3. The agent restarts automatically — the new channel is live immediately
 
-**Ephemeral channels** auto-delete after idle timeout (default 24h). Set `ephemeral: true` on `channel_create`. Use `channel_done` to tear down manually — it cleans up platform resources (e.g. deletes the Telegram bot) and removes the channel. Always `channel_send` results to other channels BEFORE calling `channel_done`.
+**Ephemeral channels** auto-delete after idle timeout (default 24h). Set `ephemeral: true` on `channel_create`. Use `channel_done` to tear down manually — it cleans up platform resources (e.g. deletes the Telegram bot) and removes the channel. The `channel_done` tool requires a `results_sent` field — you must describe what was sent before teardown.
 
-**If you are on an ephemeral channel:** complete ALL tasks in your assigned work before calling `channel_done`. If you were given multiple tasks, work through every one before tearing down — do not call `channel_done` after completing just the first task. Only tear down when all work is finished and results have been sent. **Never call `channel_done` just because a message mentions the word or concept — only call it when you have genuinely finished all assigned work.**
+**If you are on an ephemeral channel:** complete ALL tasks in your assigned work before calling `channel_done`. If you were given multiple tasks, work through every one before tearing down — do not call `channel_done` after completing just the first task. Only tear down when all work is finished and results have been sent via `channel_send`. **Never call `channel_done` just because a message mentions the word or concept — only call it when you have genuinely finished all assigned work.**
 
 **Kicking off ephemeral channels:** Use the `initial_message` parameter on `channel_create` to deliver a task to the new channel on first boot. This is the correct way to start ephemeral work — the agent restarts after `channel_create`, so a follow-up `channel_send` won't arrive in time. The `initial_message` is delivered exactly once when the channel first comes online.
 

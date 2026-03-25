@@ -320,6 +320,7 @@ func TestChannelDone(t *testing.T) {
 		// Tear it down.
 		result := callTool(t, th.handler, "channel_done", map[string]any{
 			"channel_name": "temp",
+			"results_sent": "No outbound links configured",
 		})
 
 		var got map[string]string
@@ -337,6 +338,7 @@ func TestChannelDone(t *testing.T) {
 
 		err := callToolExpectError(t, th.handler, "channel_done", map[string]any{
 			"channel_name": "desktop",
+			"results_sent": "No outbound links configured",
 		})
 		require.Contains(t, err.Error(), "static channel")
 	})
@@ -346,14 +348,26 @@ func TestChannelDone(t *testing.T) {
 
 		err := callToolExpectError(t, th.handler, "channel_done", map[string]any{
 			"channel_name": "nonexistent",
+			"results_sent": "No outbound links configured",
 		})
 		require.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("rejects missing results_sent", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		err := callToolExpectError(t, th.handler, "channel_done", map[string]any{
+			"channel_name": "temp",
+		})
+		require.Contains(t, err.Error(), "results_sent is required")
 	})
 
 	t.Run("rejects empty channel name", func(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 
-		err := callToolExpectError(t, th.handler, "channel_done", map[string]any{})
+		err := callToolExpectError(t, th.handler, "channel_done", map[string]any{
+			"results_sent": "No outbound links configured",
+		})
 		require.Contains(t, err.Error(), "channel_name is required")
 	})
 
@@ -374,6 +388,7 @@ func TestChannelDone(t *testing.T) {
 
 		result := callTool(t, th.handler, "channel_done", map[string]any{
 			"channel_name": "ephemeral-test",
+			"results_sent": "Sent PR URL to admin channel",
 		})
 
 		var got map[string]string
@@ -410,6 +425,7 @@ func TestChannelDone(t *testing.T) {
 
 		toolErr := callToolExpectError(t, th.handler, "channel_done", map[string]any{
 			"channel_name": "failing-ephemeral",
+			"results_sent": "Sent results to admin channel",
 		})
 		require.Contains(t, toolErr.Error(), "platform teardown failed")
 		require.Contains(t, toolErr.Error(), "BotFather unreachable")
