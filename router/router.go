@@ -658,6 +658,11 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		dynamicCtx, cancelDynamic := context.WithCancel(ctx)
 		dynamicChMap, dynamicMsgs := r.buildDynamicChannels(dynamicCtx, mu.cfg.ID, dynamicStore, secretStore, s)
 
+		// Inject initial_message for any newly created channels that have one.
+		// Must run after buildDynamicChannels so channel IDs are known, and
+		// before MergeFanIns so the messages are ready to read from mergedMsgs.
+		r.injectInitialMessages(dynamicCtx, mu.cfg.ID, dynamicStore, dynamicChMap, crossChannelMsgs)
+
 		// Merge static + dynamic into a combined view for this iteration.
 		allChMap := make(map[channel.ChannelID]channel.Channel, len(staticChMap)+len(dynamicChMap))
 		for id, ch := range staticChMap {
