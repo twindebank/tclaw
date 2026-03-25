@@ -52,6 +52,12 @@ type DynamicChannelConfig struct {
 	// Ephemeral is true.
 	EphemeralIdleTimeout time.Duration `json:"ephemeral_idle_timeout,omitempty"`
 
+	// InitialMessage is delivered to the channel as its first inbound message
+	// once the channel comes online after creation. Cleared after delivery so it
+	// fires exactly once. Enables ephemeral channels to self-start without
+	// requiring a separate channel_send from the creator.
+	InitialMessage string `json:"initial_message,omitempty"`
+
 	// TeardownState holds platform-specific state needed to clean up
 	// resources when the channel is deleted (e.g. Telegram bot username).
 	// Nil for channels with no platform resources to clean up.

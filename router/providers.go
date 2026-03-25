@@ -19,6 +19,57 @@ import (
 	"tclaw/user"
 )
 
+// injectInitialMessages delivers the initial_message for any dynamic channels
+// that have one set, then clears the field so it fires exactly once. Must be
+// called after buildDynamicChannels so channel IDs are known.
+func (r *Router) injectInitialMessages(ctx context.Context, userID user.ID, dynamicStore *channel.DynamicStore, dynamicChMap map[channel.ChannelID]channel.Channel, output chan<- channel.TaggedMessage) {
+	configs, err := dynamicStore.List(ctx)
+	if err != nil {
+		slog.Error("failed to list dynamic channels for initial message injection", "user", userID, "err", err)
+		return
+	}
+
+	for _, cfg := range configs {
+		if cfg.InitialMessage == "" {
+			continue
+		}
+
+		// Find the ChannelID for this channel name in the current dynamic map.
+		var targetID channel.ChannelID
+		for id, ch := range dynamicChMap {
+			if ch.Info().Name == cfg.Name {
+				targetID = id
+				break
+			}
+		}
+		if targetID == "" {
+			slog.Warn("initial_message: channel not found in dynamic map, skipping", "channel", cfg.Name)
+			continue
+		}
+
+		// Clear before delivery — if the send below fails we still don't retry,
+		// which is preferable to firing the message on every subsequent restart.
+		clearErr := dynamicStore.Update(ctx, cfg.Name, func(c *channel.DynamicChannelConfig) {
+			c.InitialMessage = ""
+		})
+		if clearErr != nil {
+			slog.Error("failed to clear initial_message, skipping delivery to prevent duplicate fires", "channel", cfg.Name, "err", clearErr)
+			continue
+		}
+
+		msg := channel.TaggedMessage{
+			ChannelID: targetID,
+			Text:      cfg.InitialMessage,
+		}
+		select {
+		case output <- msg:
+			slog.Info("injected initial_message for channel", "channel", cfg.Name)
+		default:
+			slog.Warn("initial_message output channel full, dropping message", "channel", cfg.Name)
+		}
+	}
+}
+
 // buildDynamicChannels loads dynamic channel configs from the store and creates
 // SocketServer instances for each. Returns a channel map and a fan-in of messages.
 // The caller should cancel dynamicCtx when the agent exits to close the listeners.
