@@ -18,6 +18,7 @@
 - Channel hot-reload — avoid full agent restart when a channel is created/deleted. Currently the router restarts to pick up the new channel config, which clears in-flight state. Hot-reload would let the router register new channels without tearing down existing sessions.
 - Graceful message queuing on restart — when the router restarts (e.g. after channel_create/delete), inbound messages that arrive during the restart window should be queued and delivered once the new session is ready, not silently dropped.
 - Agent auto-resume on restart — when a restart interrupts an in-progress agent turn (e.g. mid-tool-call), the agent should detect the incomplete state on boot and resume or replay the interrupted work, rather than starting fresh with no context of what it was doing.
+- `channel_delete` cleanup — when a channel is deleted, archive the Telegram chat (so history is preserved but the bot is removed) and automatically cancel any dev sessions associated with that channel. Requires channels to track their associated dev sessions, and dev sessions to be tagged with the channel that created them.
 
 ### Maintenance
 - Periodic jobs to check Claude Code changelog and dynamically update agent/CLI behavior
