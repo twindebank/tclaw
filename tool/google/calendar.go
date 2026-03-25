@@ -16,6 +16,7 @@ import (
 
 type calendarListArgs struct {
 	Connection string `json:"connection"`
+	StartDate  string `json:"start_date"`
 	DaysAhead  int    `json:"days_ahead"`
 	Query      string `json:"query"`
 	MaxResults int    `json:"max_results"`
@@ -99,14 +100,6 @@ func calendarListHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandl
 			return nil, err
 		}
 
-		daysAhead := a.DaysAhead
-		if daysAhead <= 0 {
-			daysAhead = 7
-		}
-		if daysAhead > 90 {
-			daysAhead = 90
-		}
-
 		maxResults := a.MaxResults
 		if maxResults <= 0 {
 			maxResults = 50
@@ -120,13 +113,14 @@ func calendarListHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandl
 			calendarID = "primary"
 		}
 
-		now := time.Now()
-		// Start from the beginning of today so we include events already in progress.
-		startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		timeMin := startOfDay.Format(time.RFC3339)
-		timeMax := startOfDay.AddDate(0, 0, daysAhead).Format(time.RFC3339)
+		windowStart, windowEnd, err := calendarTimeWindow(a.StartDate, a.DaysAhead, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		timeMin := windowStart.Format(time.RFC3339)
+		timeMax := windowEnd.Format(time.RFC3339)
 
-		slog.Info("calendar list starting", "connection", a.Connection, "days_ahead", daysAhead, "query", a.Query)
+		slog.Info("calendar list starting", "connection", a.Connection, "start_date", a.StartDate, "days_ahead", a.DaysAhead, "query", a.Query)
 
 		params := map[string]any{
 			"calendarId":   calendarID,
@@ -158,7 +152,7 @@ func calendarListHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandl
 			summaries = append(summaries, extractEventSummary(event))
 		}
 
-		timeRange := fmt.Sprintf("%s to %s", startOfDay.Format("2006-01-02"), startOfDay.AddDate(0, 0, daysAhead).Format("2006-01-02"))
+		timeRange := fmt.Sprintf("%s to %s", windowStart.Format("2006-01-02"), windowEnd.Format("2006-01-02"))
 
 		slog.Info("calendar list done", "connection", a.Connection, "event_count", len(summaries))
 
@@ -324,6 +318,32 @@ func calendarCreateHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHan
 			Created: &summary,
 		})
 	}
+}
+
+// calendarTimeWindow returns the start and end times for a calendar list query.
+// If startDate is provided (YYYY-MM-DD), it is used as the start; otherwise now's start-of-day is used.
+// daysAhead controls the window length from the start (defaults to 7, max 90).
+func calendarTimeWindow(startDate string, daysAhead int, now time.Time) (time.Time, time.Time, error) {
+	if daysAhead <= 0 {
+		daysAhead = 7
+	}
+	if daysAhead > 90 {
+		daysAhead = 90
+	}
+
+	var start time.Time
+	if startDate != "" {
+		parsed, err := time.ParseInLocation("2006-01-02", startDate, now.Location())
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("invalid start_date %q — use YYYY-MM-DD", startDate)
+		}
+		start = parsed
+	} else {
+		// Start from the beginning of today so we include events already in progress.
+		start = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	}
+
+	return start, start.AddDate(0, 0, daysAhead), nil
 }
 
 // findDuplicate checks if an event with a similar title already exists on the given date.

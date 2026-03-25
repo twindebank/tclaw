@@ -130,11 +130,13 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 		},
 		{
 			Name: "google_calendar_list",
-			Description: "List upcoming calendar events with full details (title, time, attendees, location, meeting links). " +
+			Description: "List calendar events with full details (title, time, attendees, location, meeting links). " +
 				"Returns a clean summary for each event — no need to parse raw API responses. " +
 				"Defaults: days_ahead=7 (max 90), max_results=50 (max 250), calendar_id=primary. " +
 				"Recurring events are expanded into individual instances. Cancelled events are excluded. " +
 				"Use the query parameter to search by text (title, description, location). " +
+				"Use start_date (YYYY-MM-DD) to query a window starting on a specific date instead of today — days_ahead still controls the length. " +
+				"NOTE: time_min and time_max are NOT valid parameters — they are silently ignored. Use start_date + days_ahead instead. " +
 				"For creating events, use google_calendar_create which handles formatting and duplicate detection automatically.",
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
@@ -144,9 +146,13 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 						"description": %q,
 						"enum": %s
 					},
+					"start_date": {
+						"type": "string",
+						"description": "Start date for the query window (YYYY-MM-DD). When provided, the window starts at the beginning of this date instead of today. days_ahead still controls the window length from this start date. Example: start_date='2026-06-01', days_ahead=14 fetches 1–15 Jun."
+					},
 					"days_ahead": {
 						"type": "integer",
-						"description": "Number of days ahead to fetch events for. Defaults to 7, maximum 90. Starts from the beginning of today."
+						"description": "Number of days ahead to fetch events for. Defaults to 7, maximum 90. Starts from start_date if provided, otherwise from today."
 					},
 					"query": {
 						"type": "string",
