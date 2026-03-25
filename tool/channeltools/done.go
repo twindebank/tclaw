@@ -15,23 +15,33 @@ func channelDoneDef() mcp.ToolDef {
 		Name: "channel_done",
 		Description: "Tear down a dynamic channel — deletes platform resources (e.g. Telegram bot), " +
 			"removes channel config, and removes channel secrets. Works on both ephemeral and " +
-			"non-ephemeral dynamic channels. Send any results via channel_send BEFORE calling this — " +
-			"once called, the channel is gone. Fails if platform teardown fails (no half-states). " +
-			"Cannot be used on static channels (from config file).",
+			"non-ephemeral dynamic channels. Fails if platform teardown fails (no half-states). " +
+			"Cannot be used on static channels (from config file).\n\n" +
+			"REQUIRED: Before calling this, you MUST send all results to other channels via channel_send " +
+			"(PR URLs, summaries, findings, etc.). The results_sent field is mandatory — provide a brief " +
+			"summary of what was sent and to which channel(s). If you have outbound links but sent nothing, " +
+			"send results first. If there are genuinely no results to report (e.g. no outbound links, or " +
+			"task produced nothing noteworthy), explain why in results_sent.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"channel_name": {
 					"type": "string",
 					"description": "Name of the channel to tear down. Defaults to the current channel if omitted."
+				},
+				"results_sent": {
+					"type": "string",
+					"description": "Required. Describe what results were sent via channel_send before teardown (e.g. 'Sent PR #57 URL and summary to admin'). If nothing was sent, explain why (e.g. 'No outbound links configured' or 'Task produced no results')."
 				}
-			}
+			},
+			"required": ["results_sent"]
 		}`),
 	}
 }
 
 type channelDoneArgs struct {
 	ChannelName string `json:"channel_name"`
+	ResultsSent string `json:"results_sent"`
 }
 
 func channelDoneHandler(deps Deps) mcp.ToolHandler {
@@ -39,6 +49,10 @@ func channelDoneHandler(deps Deps) mcp.ToolHandler {
 		var a channelDoneArgs
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
+		}
+
+		if a.ResultsSent == "" {
+			return nil, fmt.Errorf("results_sent is required — describe what was sent via channel_send before teardown, or explain why nothing was sent")
 		}
 
 		// If no channel name specified, we can't infer the current channel
@@ -91,9 +105,10 @@ func channelDoneHandler(deps Deps) mcp.ToolHandler {
 		}
 
 		return json.Marshal(map[string]string{
-			"status":  "deleted",
-			"channel": a.ChannelName,
-			"message": fmt.Sprintf("Channel %q has been torn down. Platform resources cleaned up.", a.ChannelName),
+			"status":       "deleted",
+			"channel":      a.ChannelName,
+			"results_sent": a.ResultsSent,
+			"message":      fmt.Sprintf("Channel %q has been torn down. Platform resources cleaned up.", a.ChannelName),
 		})
 	}
 }
