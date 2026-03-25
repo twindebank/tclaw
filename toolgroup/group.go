@@ -92,7 +92,7 @@ var cliToolsAll = []claudecli.Tool{
 	claudecli.ToolBash, claudecli.ToolRead, claudecli.ToolEdit, claudecli.ToolWrite,
 	claudecli.ToolGlob, claudecli.ToolGrep, claudecli.ToolLS, claudecli.ToolLSP,
 	claudecli.ToolWebFetch, claudecli.ToolWebSearch, claudecli.ToolNotebookEdit,
-	claudecli.ToolAgent, claudecli.ToolTask, claudecli.ToolTaskOutput, claudecli.ToolTaskStop,
+	claudecli.ToolAgent, claudecli.ToolTask, claudecli.ToolTaskStop,
 	claudecli.ToolTodoWrite, claudecli.ToolToolSearch, claudecli.ToolSkill,
 	claudecli.ToolAskUserQuestion, claudecli.ToolEnterPlanMode, claudecli.ToolExitPlanMode,
 	claudecli.ToolEnterWorktree, claudecli.ToolListMcpResources, claudecli.ToolReadMcpResource,

@@ -99,7 +99,6 @@ const (
 	ToolNotebookEdit     Tool = "NotebookEdit"
 	ToolAgent            Tool = "Agent"
 	ToolTask             Tool = "Task"
-	ToolTaskOutput       Tool = "TaskOutput"
 	ToolTaskStop         Tool = "TaskStop"
 	ToolTodoWrite        Tool = "TodoWrite"
 	ToolToolSearch       Tool = "ToolSearch"
@@ -184,7 +183,7 @@ var validTools = map[Tool]bool{
 	ToolBash: true, ToolRead: true, ToolEdit: true, ToolWrite: true,
 	ToolGlob: true, ToolGrep: true, ToolLS: true, ToolLSP: true,
 	ToolWebFetch: true, ToolWebSearch: true, ToolNotebookEdit: true,
-	ToolAgent: true, ToolTask: true, ToolTaskOutput: true, ToolTaskStop: true,
+	ToolAgent: true, ToolTask: true, ToolTaskStop: true,
 	ToolTodoWrite: true, ToolToolSearch: true, ToolSkill: true,
 	ToolAskUserQuestion: true, ToolEnterPlanMode: true, ToolExitPlanMode: true,
 	ToolEnterWorktree: true, ToolListMcpResources: true, ToolReadMcpResource: true,
