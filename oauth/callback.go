@@ -156,14 +156,14 @@ func (s *CallbackServer) Handle(pattern string, handler http.Handler) {
 	if existing, ok := s.handlers[pattern]; ok {
 		// Pattern already registered — swap the inner handler.
 		existing.swap(handler)
-		slog.Info("swapped http handler", "pattern", pattern)
+		slog.Debug("swapped http handler", "pattern", pattern)
 		return
 	}
 
 	sw := &swappableHandler{handler: handler}
 	s.handlers[pattern] = sw
 	s.mux.Handle(pattern, sw)
-	slog.Info("registered http handler", "pattern", pattern)
+	slog.Debug("registered http handler", "pattern", pattern)
 }
 
 // Start begins listening for HTTP requests.

@@ -67,7 +67,7 @@ func seedUserMemory(userID user.ID, memoryDir, homeDir string) {
 		} else if wErr := os.WriteFile(memoryMDPath, []byte(agent.DefaultMemoryTemplate), 0o600); wErr != nil {
 			slog.Error("failed to seed CLAUDE.md", "user", userID, "err", wErr)
 		} else {
-			slog.Info("seeded memory/CLAUDE.md", "user", userID, "path", memoryMDPath)
+			slog.Debug("seeded memory/CLAUDE.md", "user", userID, "path", memoryMDPath)
 		}
 	}
 
@@ -79,7 +79,7 @@ func seedUserMemory(userID user.ID, memoryDir, homeDir string) {
 		} else if linkErr := os.Symlink(filepath.Join("..", "..", "memory", "CLAUDE.md"), symlinkPath); linkErr != nil {
 			slog.Error("failed to create CLAUDE.md symlink", "user", userID, "err", linkErr)
 		} else {
-			slog.Info("created CLAUDE.md symlink", "user", userID, "link", symlinkPath)
+			slog.Debug("created CLAUDE.md symlink", "user", userID, "link", symlinkPath)
 		}
 	}
 
@@ -94,7 +94,7 @@ func seedUserMemory(userID user.ID, memoryDir, homeDir string) {
 		} else if wErr := os.WriteFile(settingsPath, []byte("{}\n"), 0o600); wErr != nil {
 			slog.Error("failed to seed settings.json", "user", userID, "err", wErr)
 		} else {
-			slog.Info("seeded settings.json", "user", userID, "path", settingsPath)
+			slog.Debug("seeded settings.json", "user", userID, "path", settingsPath)
 		}
 	}
 }

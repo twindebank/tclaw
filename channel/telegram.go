@@ -243,9 +243,9 @@ func (t *Telegram) Messages(ctx context.Context) <-chan string {
 
 // startPolling uses long polling to receive updates (local dev).
 func (t *Telegram) startPolling(ctx context.Context, b *bot.Bot) {
-	slog.Info("telegram bot starting (polling)", "channel", t.name)
+	slog.Debug("telegram bot starting (polling)", "channel", t.name)
 	b.Start(ctx)
-	slog.Info("telegram bot stopped", "channel", t.name)
+	slog.Debug("telegram bot stopped", "channel", t.name)
 }
 
 // startWebhook registers a webhook with Telegram and serves updates via HTTP.
@@ -265,11 +265,11 @@ func (t *Telegram) startWebhook(ctx context.Context, b *bot.Bot) {
 		slog.Error("failed to set telegram webhook", "err", err, "channel", t.name, "url", t.opts.WebhookURL)
 		return
 	}
-	slog.Info("telegram webhook registered", "channel", t.name, "url", t.opts.WebhookURL, "ok", ok)
+	slog.Debug("telegram webhook registered", "channel", t.name, "url", t.opts.WebhookURL, "ok", ok)
 
 	// StartWebhook processes updates from the internal channel (fed by WebhookHandler).
 	// It blocks until ctx is cancelled.
-	slog.Info("telegram bot starting (webhook)", "channel", t.name)
+	slog.Debug("telegram bot starting (webhook)", "channel", t.name)
 	b.StartWebhook(ctx)
 	slog.Info("telegram bot stopped", "channel", t.name)
 }
