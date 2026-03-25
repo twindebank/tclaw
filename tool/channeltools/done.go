@@ -17,6 +17,9 @@ func channelDoneDef() mcp.ToolDef {
 			"removes channel config, and removes channel secrets. Works on both ephemeral and " +
 			"non-ephemeral dynamic channels. Fails if platform teardown fails (no half-states). " +
 			"Cannot be used on static channels (from config file).\n\n" +
+			"IMPORTANT: This tool requires explicit user confirmation. A confirmation prompt is sent " +
+			"to the channel and the tool blocks until the user replies 'yes'. If the user does not " +
+			"confirm within 60 seconds, the teardown is aborted and the channel stays open.\n\n" +
 			"REQUIRED: Before calling this, you MUST send all results to other channels via channel_send " +
 			"(PR URLs, summaries, findings, etc.). The results_sent field is mandatory — provide a brief " +
 			"summary of what was sent and to which channel(s). If you have outbound links but sent nothing, " +
@@ -72,6 +75,26 @@ func channelDoneHandler(deps Deps) mcp.ToolHandler {
 		}
 		if cfg == nil {
 			return nil, fmt.Errorf("channel %q not found", a.ChannelName)
+		}
+
+		// Confirm with the user before tearing down. The provisioner sends a
+		// prompt via the platform's messaging API and blocks until the user
+		// replies "yes". This prevents the agent from closing channels without
+		// explicit human consent.
+		if cfg.PlatformState != nil {
+			provisioner, ok := deps.Provisioners[cfg.Type]
+			if !ok {
+				return nil, fmt.Errorf("no provisioner for channel type %q — cannot confirm teardown with user", cfg.Type)
+			}
+
+			token, tokenErr := deps.SecretStore.Get(ctx, channel.ChannelSecretKey(a.ChannelName))
+			if tokenErr != nil {
+				return nil, fmt.Errorf("read channel token for confirmation: %w", tokenErr)
+			}
+
+			if confirmErr := provisioner.ConfirmTeardown(ctx, token, cfg.PlatformState); confirmErr != nil {
+				return nil, fmt.Errorf("teardown not confirmed for channel %q: %w", a.ChannelName, confirmErr)
+			}
 		}
 
 		// Platform-specific teardown (e.g. delete Telegram bot).
