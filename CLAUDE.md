@@ -21,6 +21,7 @@
 - `channel_delete` cleanup — when a channel is deleted, archive the Telegram chat (so history is preserved but the bot is removed) and automatically cancel any dev sessions associated with that channel. Requires channels to track their associated dev sessions, and dev sessions to be tagged with the channel that created them.
 - GitHub PR merged notifications — notify the relevant channel when a PR is merged (e.g. notify admin when a dev PR merges). Could be driven by a webhook, polling, or a scheduled job using `gh pr list --state merged`.
 - Email notifications and auto-categorisation — surface important incoming emails as push notifications on the assistant channel without waiting for the scheduled check. Auto-categorise emails (e.g. receipts, travel, action-required) and apply a skill to handle each category automatically (e.g. log receipts, create calendar events for travel confirmations).
+- Ephemeral channel system prompt enrichment — when a channel is created as ephemeral, inject context into its system prompt: the `initial_message` (so the agent knows its task from the start, not just from the first inbound message), and a note that it is a purpose-scoped ephemeral channel (so it stays focused and knows to call `channel_done` when done).
 
 ### Maintenance
 - Periodic jobs to check Claude Code changelog and dynamically update agent/CLI behavior
