@@ -133,6 +133,12 @@ type Options struct {
 
 	Channels map[channel.ChannelID]channel.Channel
 
+	// ChannelsFunc returns the live channel map. When set, takes precedence
+	// over Channels for all per-message lookups, enabling the router to
+	// hot-add new channels without restarting the agent. Falls back to
+	// Channels when nil. Analogous to AddDirsFunc.
+	ChannelsFunc func() map[channel.ChannelID]channel.Channel
+
 	// Sessions maps channel IDs to their last-known CLI session IDs.
 	// Loaded by the caller (e.g. router) from persistent storage.
 	Sessions map[channel.ChannelID]string
@@ -225,6 +231,15 @@ type handleResult struct {
 	err       error
 }
 
+// channels returns the current channel map. Uses ChannelsFunc when set for
+// live updates (e.g. hot-added channels); falls back to the static Channels map.
+func (opts Options) channels() map[channel.ChannelID]channel.Channel {
+	if opts.ChannelsFunc != nil {
+		return opts.ChannelsFunc()
+	}
+	return opts.Channels
+}
+
 // Run reads messages from all channels and responds until ctx is cancelled.
 // Each channel gets its own Claude session for full isolation.
 // Sending "stop" interrupts the active turn. Other messages queue behind it.
@@ -313,7 +328,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		// Notify the user when a message arrives from another channel, so
 		// it's clear what triggered the agent turn before the response appears.
 		if msg.SourceInfo != nil && msg.SourceInfo.Source == channel.SourceChannel {
-			if ch, ok := opts.Channels[msg.ChannelID]; ok {
+			if ch, ok := opts.channels()[msg.ChannelID]; ok {
 				notification := fmt.Sprintf("↩️ Message from %s channel", msg.SourceInfo.FromChannel)
 				if _, err := ch.Send(ctx, notification); err != nil {
 					slog.Error("failed to send cross-channel notification", "channel", msg.ChannelID, "err", err)
@@ -342,7 +357,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				sendDenied(ctx, opts, msg.ChannelID)
 				continue
 			}
-			if ch, ok := opts.Channels[msg.ChannelID]; ok {
+			if ch, ok := opts.channels()[msg.ChannelID]; ok {
 				if _, err := ch.Send(ctx, "🗜️ Compacting conversation context..."); err != nil {
 					slog.Error("failed to send compact notice", "err", err)
 				}
@@ -361,7 +376,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				flow.cleanup()
 				delete(authFlows, msg.ChannelID)
 			}
-			ch, ok := opts.Channels[msg.ChannelID]
+			ch, ok := opts.channels()[msg.ChannelID]
 			if ok {
 				levels := allowedResetLevels(opts, msg.ChannelID)
 				if _, err := ch.Send(ctx, dynamicResetMenuPrompt(levels, ch.Markup())); err != nil {
@@ -377,7 +392,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 
 		// Handle reset flow responses (per-channel).
 		if flow, ok := resetFlows[msg.ChannelID]; ok {
-			ch, chOK := opts.Channels[msg.ChannelID]
+			ch, chOK := opts.channels()[msg.ChannelID]
 			if !chOK {
 				delete(resetFlows, msg.ChannelID)
 				continue
@@ -474,7 +489,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				sendDenied(ctx, opts, msg.ChannelID)
 				continue
 			}
-			ch, ok := opts.Channels[msg.ChannelID]
+			ch, ok := opts.channels()[msg.ChannelID]
 			if ok {
 				if _, err := ch.Send(ctx, authPrompt(ch.Markup())); err != nil {
 					// Channel is dead — don't register the flow.
@@ -493,7 +508,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				sendDenied(ctx, opts, msg.ChannelID)
 				continue
 			}
-			ch, ok := opts.Channels[msg.ChannelID]
+			ch, ok := opts.channels()[msg.ChannelID]
 			if ok {
 				handleAuthStatus(ctx, opts, ch)
 				if err := ch.Done(ctx); err != nil {
@@ -505,7 +520,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 
 		// Handle auth flow responses (per-channel).
 		if flow, ok := authFlows[msg.ChannelID]; ok {
-			ch, chOK := opts.Channels[msg.ChannelID]
+			ch, chOK := opts.channels()[msg.ChannelID]
 			if !chOK {
 				delete(authFlows, msg.ChannelID)
 				continue
@@ -649,7 +664,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 
 		// Handle pending tool approval responses (per-channel).
 		if approval, ok := toolApprovals[msg.ChannelID]; ok {
-			ch, chOK := opts.Channels[msg.ChannelID]
+			ch, chOK := opts.channels()[msg.ChannelID]
 			if !chOK {
 				delete(toolApprovals, msg.ChannelID)
 				continue
@@ -721,7 +736,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		turnCtx, cancelTurn := context.WithCancel(ctx)
 
 		if opts.OnTurnStart != nil {
-			if ch, ok := opts.Channels[msg.ChannelID]; ok {
+			if ch, ok := opts.channels()[msg.ChannelID]; ok {
 				opts.OnTurnStart(ch.Info().Name)
 			}
 		}
@@ -746,7 +761,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 					"attempt", attempt+1, "max_retries", rateLimitMaxRetries,
 					"delay", delay, "channel", msg.ChannelID)
 
-				if retryCh, ok := opts.Channels[msg.ChannelID]; ok {
+				if retryCh, ok := opts.channels()[msg.ChannelID]; ok {
 					notice := fmt.Sprintf("⏳ Rate limited — retrying in %ds (attempt %d/%d)...",
 						int(delay.Seconds()), attempt+1, rateLimitMaxRetries)
 					if _, sendErr := retryCh.Send(turnCtx, notice); sendErr != nil {
@@ -779,7 +794,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 						state:       authChoosing,
 						originalMsg: msg,
 					}
-					ch, chOK := opts.Channels[msg.ChannelID]
+					ch, chOK := opts.channels()[msg.ChannelID]
 					if chOK {
 						if _, sendErr := ch.Send(ctx, authPrompt(ch.Markup())); sendErr != nil {
 							// Channel is dead (e.g. socket disconnected) — don't
@@ -803,7 +818,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 						deniedTools: denied.Tools,
 						sessionID:   denied.SessionID,
 					}
-					if approvalCh, chOK := opts.Channels[msg.ChannelID]; chOK {
+					if approvalCh, chOK := opts.channels()[msg.ChannelID]; chOK {
 						m := approvalCh.Markup()
 						toolList := strings.Join(denied.Tools, ", ")
 						prompt := fmt.Sprintf("⚠️ %s was not available on this channel.\nReply %s to retry with %s enabled, or send any other message to continue.",
@@ -820,7 +835,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 					// the channel so the user knows — especially important for
 					// scheduled turns where nobody is watching.
 					slog.Error("handle failed", "err", result.err)
-					if errCh, errChOK := opts.Channels[msg.ChannelID]; errChOK {
+					if errCh, errChOK := opts.channels()[msg.ChannelID]; errChOK {
 						errText := "⚠️ Turn failed: " + result.err.Error()
 						if _, sendErr := errCh.Send(ctx, errText); sendErr != nil {
 							slog.Error("failed to send error notification", "err", sendErr)
@@ -850,7 +865,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				} else {
 					queue = append(queue, newMsg)
 					// Acknowledge the queued message so the user knows it was received.
-					if queueCh, ok := opts.Channels[newMsg.ChannelID]; ok {
+					if queueCh, ok := opts.channels()[newMsg.ChannelID]; ok {
 						if _, sendErr := queueCh.Send(ctx, "📥 Queued — will send to the agent once the current turn finishes."); sendErr != nil {
 							slog.Error("failed to send queue acknowledgment", "channel", newMsg.ChannelID, "err", sendErr)
 						}
@@ -873,12 +888,12 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			restoreOverride()
 		}
 		if opts.OnTurnEnd != nil {
-			if ch, ok := opts.Channels[msg.ChannelID]; ok {
+			if ch, ok := opts.channels()[msg.ChannelID]; ok {
 				opts.OnTurnEnd(ch.Info().Name)
 			}
 		}
 		idle.Reset()
-		ch, ok := opts.Channels[msg.ChannelID]
+		ch, ok := opts.channels()[msg.ChannelID]
 		if ok {
 			if err := ch.Done(ctx); err != nil {
 				slog.Error("failed to close turn", "err", err)
@@ -986,7 +1001,7 @@ const builtinDeniedMessage = "⛔ This command is not available on this channel.
 
 // sendDenied sends the denial message and closes the turn.
 func sendDenied(ctx context.Context, opts Options, channelID channel.ChannelID) {
-	ch, ok := opts.Channels[channelID]
+	ch, ok := opts.channels()[channelID]
 	if !ok {
 		return
 	}
