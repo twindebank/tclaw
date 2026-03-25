@@ -19,9 +19,16 @@ type Deps struct {
 	// exactly which file to modify.
 	ConfigPath string
 
-	// OnChannelChange is called after a channel is created, edited, or deleted.
-	// The router uses this to trigger an automatic agent restart so the new
-	// channel configuration takes effect immediately.
+	// OnChannelAdded is called after a new channel is created with the channel's
+	// name. Unlike OnChannelChange (which triggers a full restart), this signals
+	// a hot-add: the router wires in the new channel without restarting existing
+	// sessions. If nil, falls back to OnChannelChange for compatibility.
+	OnChannelAdded func(name string)
+
+	// OnChannelChange is called after a channel is edited or deleted, or when
+	// a channel is created and OnChannelAdded is nil. The router uses this to
+	// trigger an automatic agent restart so the new channel configuration takes
+	// effect immediately.
 	OnChannelChange func()
 
 	// ActivityTracker tracks per-channel processing state for channel_is_busy.

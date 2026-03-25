@@ -474,6 +474,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		SecretStore:     secretStore,
 		ConfigPath:      r.configPath,
 		ActivityTracker: activityTracker,
+		OnChannelAdded:  onChannelAdded,
 		OnChannelChange: onChannelChange,
 		Provisioners: map[channel.ChannelType]channel.EphemeralProvisioner{
 			channel.TypeTelegram: tgProvisioner,
@@ -624,9 +625,84 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Register tool_list last so it can see all MCP tools from every package.
 	channeltools.RegisterToolListTool(mcpHandler)
 
+	// hotAddMsgs carries messages from channels added mid-session via hot-reload.
+	// Lives at user lifetime (like scheduleMsgs) so it outlives agent sessions.
+	hotAddMsgs := make(chan channel.TaggedMessage, 8)
+
+	// hotAddCtxRef holds the dynamicCtx for the current loop iteration. Updated
+	// at the start of each iteration so onChannelAdded goroutines are bound to
+	// the correct context and stop when the agent restarts.
+	type ctxHolder struct{ ctx context.Context }
+	var hotAddCtxRef atomic.Pointer[ctxHolder]
+
+	// onChannelAdded wires a newly created channel into the running agent without
+	// restarting. It builds the channel transport, starts forwarding messages to
+	// hotAddMsgs, and atomically updates currentChannels so the agent can route
+	// responses back.
+	onChannelAdded := func(channelName string) {
+		ref := hotAddCtxRef.Load()
+		if ref == nil {
+			// No active iteration context — fall back to a full restart.
+			slog.Warn("hot-add: no active context, signalling restart", "channel", channelName)
+			onChannelChange()
+			return
+		}
+		activeCtx := ref.ctx
+
+		newChMap, newMsgs := r.buildSingleDynamicChannel(activeCtx, mu.cfg.ID, dynamicStore, secretStore, s, channelName)
+		if newChMap == nil {
+			// Build failed — fall back to restart so the channel isn't silently lost.
+			slog.Error("hot-add: failed to build channel, signalling restart", "channel", channelName)
+			onChannelChange()
+			return
+		}
+
+		// Inject initial_message for the new channel, if one was set.
+		r.injectInitialMessages(activeCtx, mu.cfg.ID, dynamicStore, newChMap, crossChannelMsgs)
+
+		// Forward the new channel's messages to hotAddMsgs so the running agent
+		// receives them. The goroutine exits when newMsgs closes (i.e. when
+		// activeCtx is cancelled on the next agent restart).
+		if newMsgs != nil {
+			go func() {
+				for msg := range newMsgs {
+					select {
+					case hotAddMsgs <- msg:
+					case <-activeCtx.Done():
+						return
+					}
+				}
+			}()
+		}
+
+		// Atomically extend currentChannels so the agent's ChannelsFunc and the
+		// bridge's activity tracker can resolve the new channel ID.
+		for {
+			old := currentChannels.Load()
+			var updated map[channel.ChannelID]channel.Channel
+			if old != nil {
+				updated = make(map[channel.ChannelID]channel.Channel, len(*old)+len(newChMap))
+				for id, ch := range *old {
+					updated[id] = ch
+				}
+			} else {
+				updated = make(map[channel.ChannelID]channel.Channel, len(newChMap))
+			}
+			for id, ch := range newChMap {
+				updated[id] = ch
+			}
+			if currentChannels.CompareAndSwap(old, &updated) {
+				break
+			}
+		}
+
+		slog.Info("channel hot-added", "channel", channelName, "user", mu.cfg.ID)
+	}
+
 	// Merge schedule and cross-channel messages into the static stream so
-	// they outlive the agent.
-	allStaticMsgs := channel.MergeFanIns(ctx, staticMsgs, scheduleMsgs, crossChannelMsgs)
+	// they outlive the agent. hotAddMsgs is included here too — it outlives
+	// agent sessions and collects messages from hot-added channels.
+	allStaticMsgs := channel.MergeFanIns(ctx, staticMsgs, scheduleMsgs, crossChannelMsgs, hotAddMsgs)
 
 	firstBoot := true
 	for {
@@ -656,6 +732,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// Build dynamic channels from the store each iteration so
 		// creates/deletes from the previous agent session take effect.
 		dynamicCtx, cancelDynamic := context.WithCancel(ctx)
+		// Publish the new context so onChannelAdded goroutines bind to it.
+		// When cancelDynamic fires at the end of the iteration, any hot-add
+		// goroutines using this context stop automatically.
+		hotAddCtxRef.Store(&ctxHolder{ctx: dynamicCtx})
 		dynamicChMap, dynamicMsgs := r.buildDynamicChannels(dynamicCtx, mu.cfg.ID, dynamicStore, secretStore, s)
 
 		// Inject initial_message for any newly created channels that have one.
@@ -874,8 +954,12 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 					// Record message arrival for activity tracking before
 					// forwarding to the agent, so IsBusy returns true
 					// as soon as the message enters the pipeline.
-					if ch, ok := allChMap[msg.ChannelID]; ok {
-						activityTracker.MessageReceived(ch.Info().Name)
+					// Use currentChannels (atomic) rather than the snapshot
+					// allChMap so hot-added channels are visible here too.
+					if chMap := currentChannels.Load(); chMap != nil {
+						if ch, ok := (*chMap)[msg.ChannelID]; ok {
+							activityTracker.MessageReceived(ch.Info().Name)
+						}
 					}
 					select {
 					case bridgeCh <- msg:
@@ -928,6 +1012,9 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				return dirs
 			},
 			Channels: allChMap,
+			// ChannelsFunc provides live channel lookups so hot-added channels
+			// are reachable by the agent without restarting.
+			ChannelsFunc: channelsFunc,
 			Sessions: sessions,
 			OnSessionUpdate: func(chID channel.ChannelID, sessionID string) {
 				if saveErr := saveSession(ctx, sessionStore, chID, sessionID); saveErr != nil {
