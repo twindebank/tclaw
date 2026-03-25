@@ -70,6 +70,69 @@ func (r *Router) injectInitialMessages(ctx context.Context, userID user.ID, dyna
 	}
 }
 
+// buildSingleDynamicChannel loads one dynamic channel by name and starts it.
+// Returns a single-entry map and its message fan-in, or nil on error. Used for
+// hot-adding a newly created channel without restarting the whole agent session.
+func (r *Router) buildSingleDynamicChannel(ctx context.Context, userID user.ID, dynamicStore *channel.DynamicStore, secretStore secret.Store, stateStore store.Store, name string) (map[channel.ChannelID]channel.Channel, <-chan channel.TaggedMessage) {
+	cfg, err := dynamicStore.Get(ctx, name)
+	if err != nil {
+		slog.Error("hot-add: failed to load channel config", "channel", name, "user", userID, "err", err)
+		return nil, nil
+	}
+	if cfg == nil {
+		slog.Warn("hot-add: channel not found in store", "channel", name, "user", userID)
+		return nil, nil
+	}
+
+	channels := make(map[channel.ChannelID]channel.Channel, 1)
+	switch cfg.Type {
+	case channel.TypeSocket:
+		if !r.env.IsLocal() {
+			slog.Info("hot-add: skipping socket channel (non-local env)", "channel", cfg.Name, "env", r.env)
+			return nil, nil
+		}
+		socketPath := filepath.Join(r.baseDir, string(userID), cfg.Name+".sock")
+		sock := channel.NewDynamicSocketServer(socketPath, cfg.Name, cfg.Description)
+		channels[sock.Info().ID] = sock
+	case channel.TypeTelegram:
+		token, tokenErr := secretStore.Get(ctx, channel.ChannelSecretKey(cfg.Name))
+		if tokenErr != nil {
+			slog.Error("hot-add: failed to read telegram bot token", "channel", cfg.Name, "err", tokenErr)
+			return nil, nil
+		}
+		if token == "" {
+			slog.Error("hot-add: telegram bot token not found", "channel", cfg.Name)
+			return nil, nil
+		}
+
+		var opts channel.TelegramOptions
+		if r.publicURL != "" && r.callback != nil {
+			webhookSecret := make([]byte, 16)
+			if _, webhookErr := rand.Read(webhookSecret); webhookErr != nil {
+				slog.Error("hot-add: failed to generate webhook path", "channel", cfg.Name, "err", webhookErr)
+				return nil, nil
+			}
+			webhookPath := "/telegram/" + hex.EncodeToString(webhookSecret)
+			opts.WebhookURL = r.publicURL + webhookPath
+			opts.WebhookPath = webhookPath
+			opts.RegisterHandler = func(pattern string, handler http.Handler) {
+				r.callback.Handle(pattern, handler)
+			}
+		}
+		opts.ChatID = loadChatID(ctx, stateStore, cfg.Name)
+		opts.OnChatID = saveChatIDFunc(stateStore, cfg.Name)
+		opts.MediaDir = filepath.Join(r.baseDir, string(userID), "memory", "media")
+		tg := channel.NewDynamicTelegram(token, cfg.Name, cfg.Description, cfg.AllowedUsers, opts)
+		channels[tg.Info().ID] = tg
+	default:
+		slog.Warn("hot-add: unsupported channel type", "channel", cfg.Name, "type", cfg.Type)
+		return nil, nil
+	}
+
+	slog.Info("hot-added dynamic channel", "channel", name, "user", userID)
+	return channels, channel.FanIn(ctx, channels)
+}
+
 // buildDynamicChannels loads dynamic channel configs from the store and creates
 // SocketServer instances for each. Returns a channel map and a fan-in of messages.
 // The caller should cancel dynamicCtx when the agent exits to close the listeners.

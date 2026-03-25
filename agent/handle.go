@@ -282,7 +282,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	slog.Info("handling message", "prompt_len", len(msg.Text), "channel", msg.ChannelID, "session_id", sessionID,
 		"has_api_key", opts.APIKey != "", "home_dir", opts.HomeDir)
 
-	ch, ok := opts.Channels[msg.ChannelID]
+	ch, ok := opts.channels()[msg.ChannelID]
 	if !ok {
 		return "", fmt.Errorf("unknown channel %q", msg.ChannelID)
 	}

@@ -233,6 +233,19 @@ func TestChannelChangeCallback(t *testing.T) {
 			"name": "test", "description": "Test channel", "type": "socket",
 		})
 	})
+
+	t.Run("create calls OnChannelAdded when set", func(t *testing.T) {
+		var addedName string
+		var changeCalled int
+		th := setupHarnessWithHotAdd(t, config.EnvLocal, func() { changeCalled++ }, func(name string) { addedName = name })
+
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "hottest", "description": "Hot-add channel", "type": "socket",
+		})
+
+		require.Equal(t, "hottest", addedName, "OnChannelAdded should be called with the channel name")
+		require.Equal(t, 0, changeCalled, "OnChannelChange should NOT be called when OnChannelAdded is set")
+	})
 }
 
 func TestChannelDelete(t *testing.T) {
@@ -512,6 +525,31 @@ type testHarness struct {
 
 func setupHarness(t *testing.T, env config.Env) testHarness {
 	return setupHarnessWithCallback(t, env, nil)
+}
+
+func setupHarnessWithHotAdd(t *testing.T, env config.Env, onChange func(), onAdded func(string)) testHarness {
+	t.Helper()
+	s, err := store.NewFS(t.TempDir())
+	require.NoError(t, err)
+
+	dynamicStore := channel.NewDynamicStore(s)
+	handler := mcp.NewHandler()
+	secrets := newMemorySecretStore()
+
+	staticEntries := []channel.RegistryEntry{
+		{Info: channel.Info{ID: "/tmp/test/desktop.sock", Type: channel.TypeSocket, Name: "desktop", Description: "Desktop workstation", Source: channel.SourceStatic}},
+	}
+	registry := channel.NewRegistry(staticEntries, dynamicStore)
+
+	channeltools.RegisterTools(handler, channeltools.Deps{
+		Registry:        registry,
+		Env:             env,
+		SecretStore:     secrets,
+		OnChannelChange: onChange,
+		OnChannelAdded:  onAdded,
+	})
+
+	return testHarness{handler: handler, dynamicStore: dynamicStore, secretStore: secrets}
 }
 
 func setupHarnessWithCallback(t *testing.T, env config.Env, onChange func()) testHarness {

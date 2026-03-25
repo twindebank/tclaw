@@ -323,15 +323,23 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			sendBotGreeting(botToken, allowedUsers[0], greeting)
 		}
 
-		if deps.OnChannelChange != nil {
+		// Hot-add if the router supports it; fall back to full restart otherwise.
+		if deps.OnChannelAdded != nil {
+			deps.OnChannelAdded(a.Name)
+		} else if deps.OnChannelChange != nil {
 			deps.OnChannelChange()
 		}
 
+		hotAdd := deps.OnChannelAdded != nil
 		result := map[string]any{
 			"name":        cfg.Name,
 			"type":        string(cfg.Type),
 			"description": cfg.Description,
-			"message":     fmt.Sprintf("Channel %q created. The agent will restart automatically to activate it.", a.Name),
+		}
+		if hotAdd {
+			result["message"] = fmt.Sprintf("Channel %q created and is now active.", a.Name)
+		} else {
+			result["message"] = fmt.Sprintf("Channel %q created. The agent will restart automatically to activate it.", a.Name)
 		}
 
 		// For Telegram channels, include the bot username and a link so the
@@ -339,10 +347,17 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 		if ts, ok := teardownState.(channel.TelegramTeardownState); ok && ts.BotUsername != "" {
 			result["bot_username"] = ts.BotUsername
 			result["bot_link"] = fmt.Sprintf("https://t.me/%s", ts.BotUsername)
-			result["message"] = fmt.Sprintf(
-				"Channel %q created with bot @%s. The agent will restart automatically. "+
-					"IMPORTANT: The user must open the bot link and tap Start before the channel can receive messages: https://t.me/%s",
-				a.Name, ts.BotUsername, ts.BotUsername)
+			if hotAdd {
+				result["message"] = fmt.Sprintf(
+					"Channel %q created with bot @%s and is now active. "+
+						"IMPORTANT: The user must open the bot link and tap Start before the channel can receive messages: https://t.me/%s",
+					a.Name, ts.BotUsername, ts.BotUsername)
+			} else {
+				result["message"] = fmt.Sprintf(
+					"Channel %q created with bot @%s. The agent will restart automatically. "+
+						"IMPORTANT: The user must open the bot link and tap Start before the channel can receive messages: https://t.me/%s",
+					a.Name, ts.BotUsername, ts.BotUsername)
+			}
 		}
 
 		return json.Marshal(result)
