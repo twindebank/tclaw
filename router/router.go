@@ -468,6 +468,9 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		default:
 		}
 	}
+	// Forward-declared so it can be referenced by channeltools.RegisterTools
+	// before the full implementation is defined later alongside hotAddMsgs.
+	var onChannelAdded func(string)
 	channeltools.RegisterTools(mcpHandler, channeltools.Deps{
 		Registry:        registry,
 		Env:             r.env,
@@ -590,6 +593,11 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		ActiveChannel: activeChannelFunc,
 	})
 
+	// Persistent message queue — survives agent restarts so queued user
+	// messages are not silently dropped. Also tracks interrupted turns
+	// so the agent can resume where it left off.
+	queueStore := channel.NewQueueStore(s)
+
 	// Deferred cross-channel delivery — waits until the target is free.
 	// Uses a durable queue in the state store so pending messages survive restarts.
 	pendingStore := channel.NewPendingStore(s)
@@ -639,7 +647,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// restarting. It builds the channel transport, starts forwarding messages to
 	// hotAddMsgs, and atomically updates currentChannels so the agent can route
 	// responses back.
-	onChannelAdded := func(channelName string) {
+	onChannelAdded = func(channelName string) {
 		ref := hotAddCtxRef.Load()
 		if ref == nil {
 			// No active iteration context — fall back to a full restart.
@@ -1015,7 +1023,8 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			// ChannelsFunc provides live channel lookups so hot-added channels
 			// are reachable by the agent without restarting.
 			ChannelsFunc: channelsFunc,
-			Sessions: sessions,
+			Sessions:     sessions,
+			QueueStore:   queueStore,
 			OnSessionUpdate: func(chID channel.ChannelID, sessionID string) {
 				if saveErr := saveSession(ctx, sessionStore, chID, sessionID); saveErr != nil {
 					slog.Error("failed to save session", "err", saveErr)
@@ -1099,13 +1108,23 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 		if errors.Is(err, agent.ErrIdleTimeout) {
 			slog.Info("agent shut down due to idle timeout, will restart on next message", "user", mu.cfg.ID)
+			// Idle timeout means the agent wasn't doing anything — don't resume.
+			if clearErr := queueStore.ClearInterrupted(ctx); clearErr != nil {
+				slog.Error("failed to clear interrupted marker on idle timeout", "err", clearErr)
+			}
 			continue
 		}
 		if errors.Is(err, agent.ErrResetRequested) {
 			slog.Info("agent reset requested, restarting", "user", mu.cfg.ID)
+			// User explicitly reset — don't resume old work.
+			if clearErr := queueStore.ClearInterrupted(ctx); clearErr != nil {
+				slog.Error("failed to clear interrupted marker on reset", "err", clearErr)
+			}
 			continue
 		}
 		if errors.Is(err, agent.ErrChannelChanged) {
+			// Channel changed mid-session — the interrupted marker (if set) is
+			// preserved so the agent resumes the interrupted turn on restart.
 			slog.Info("agent restarting after channel change", "user", mu.cfg.ID)
 			continue
 		}
