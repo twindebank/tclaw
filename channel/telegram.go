@@ -281,7 +281,7 @@ func (t *Telegram) Send(ctx context.Context, text string) (MessageID, error) {
 	t.mu.Unlock()
 
 	if chatID == 0 {
-		return "", nil
+		return "", fmt.Errorf("telegram send: no chat ID set — channel %q has not received an inbound message yet", t.name)
 	}
 
 	// Create a send-only bot if Messages() hasn't been called yet (e.g. lifecycle notifications).
@@ -312,7 +312,7 @@ func (t *Telegram) Edit(ctx context.Context, msgID MessageID, text string) error
 	t.mu.Unlock()
 
 	if chatID == 0 {
-		return nil
+		return fmt.Errorf("telegram edit: no chat ID set — channel %q has not received an inbound message yet", t.name)
 	}
 
 	if b == nil {
