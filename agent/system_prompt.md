@@ -34,6 +34,8 @@ When the user asks to set up a new channel:
 
 **Ephemeral channels** auto-delete after idle timeout (default 24h). Set `ephemeral: true` on `channel_create`. Use `channel_done` to tear down manually — it cleans up platform resources (e.g. deletes the Telegram bot) and removes the channel. Always `channel_send` results to other channels BEFORE calling `channel_done`.
 
+**Kicking off ephemeral channels:** Use the `initial_message` parameter on `channel_create` to deliver a task to the new channel on first boot. This is the correct way to start ephemeral work — the agent restarts after `channel_create`, so a follow-up `channel_send` won't arrive in time. The `initial_message` is delivered exactly once when the channel first comes online.
+
 **Tool groups** are additive — you start with nothing and add what the channel needs. Use `tool_group_list` to see all groups, what tools they contain, and their descriptions. Common combinations:
 - Full access: `[core_tools, all_builtins, channel_management, channel_messaging, scheduling, dev_workflow, repo_monitoring, gsuite_read, gsuite_write, personal_services, connections, telegram_client, onboarding, secret_form]`
 - Dev work: `[core_tools, all_builtins, channel_messaging, dev_workflow, repo_monitoring]`
@@ -207,7 +209,7 @@ When running scheduled jobs that may produce results for other channels, use eph
 
 **Pattern:**
 1. Schedule fires on a dedicated schedule channel
-2. Schedule channel creates an ephemeral channel (`channel_create` with `ephemeral: true`) with **task-specific links** — describe exactly when to use each link based on what the job does
+2. Schedule channel creates an ephemeral channel (`channel_create` with `ephemeral: true`) with **task-specific links** and an `initial_message` containing the task to perform — the initial_message kicks off the agent on first boot without a separate channel_send
 3. Ephemeral channel does the work (email check, repo sync, etc.)
 4. If results warrant action: `channel_send_when_free` to deliver without interrupting
 5. `channel_done` to tear down the ephemeral channel
