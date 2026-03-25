@@ -286,6 +286,14 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			resolvedAllowed = a.AllowedTools
 		}
 
+		// Build platform-specific state so the channel can operate before any
+		// inbound user message (e.g. Telegram needs a chat ID to send responses).
+		var platformState channel.PlatformState
+		if channelType == channel.TypeTelegram && len(allowedUsers) > 0 {
+			// For Telegram DMs, chatID == userID.
+			platformState = channel.TelegramPlatformState{ChatID: allowedUsers[0]}
+		}
+
 		cfg := channel.DynamicChannelConfig{
 			Name:                 a.Name,
 			Type:                 channelType,
@@ -299,6 +307,7 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			Ephemeral:            a.Ephemeral,
 			EphemeralIdleTimeout: idleTimeout,
 			TeardownState:        teardownState,
+			PlatformState:        platformState,
 			InitialMessage:       a.InitialMessage,
 		}
 		if err := deps.Registry.DynamicStore().Add(ctx, cfg); err != nil {

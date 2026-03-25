@@ -435,6 +435,62 @@ func TestChannelDone(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, cfg)
 	})
+
+	t.Run("calls confirm teardown when platform state is set", func(t *testing.T) {
+		th := setupHarnessWithProvisioner(t, config.EnvLocal)
+
+		err := th.dynamicStore.Add(context.Background(), channel.DynamicChannelConfig{
+			Name:          "confirm-test",
+			Type:          channel.TypeTelegram,
+			Ephemeral:     true,
+			PlatformState: channel.TelegramPlatformState{ChatID: 12345},
+			TeardownState: channel.TelegramTeardownState{
+				BotUsername: "tclaw_confirm_bot",
+			},
+		})
+		require.NoError(t, err)
+		th.secretStore.data[channel.ChannelSecretKey("confirm-test")] = "fake-token"
+
+		result := callTool(t, th.handler, "channel_done", map[string]any{
+			"channel_name": "confirm-test",
+			"results_sent": "Sent PR URL to admin",
+		})
+
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(result, &got))
+		require.Equal(t, "deleted", got["status"])
+		require.True(t, th.provisioner.confirmTeardownCalled)
+		require.True(t, th.provisioner.teardownCalled)
+	})
+
+	t.Run("aborts teardown when confirmation is rejected", func(t *testing.T) {
+		th := setupHarnessWithProvisioner(t, config.EnvLocal)
+		th.provisioner.confirmTeardownErr = fmt.Errorf("teardown rejected by user")
+
+		err := th.dynamicStore.Add(context.Background(), channel.DynamicChannelConfig{
+			Name:          "reject-test",
+			Type:          channel.TypeTelegram,
+			Ephemeral:     true,
+			PlatformState: channel.TelegramPlatformState{ChatID: 12345},
+			TeardownState: channel.TelegramTeardownState{
+				BotUsername: "tclaw_reject_bot",
+			},
+		})
+		require.NoError(t, err)
+		th.secretStore.data[channel.ChannelSecretKey("reject-test")] = "fake-token"
+
+		toolErr := callToolExpectError(t, th.handler, "channel_done", map[string]any{
+			"channel_name": "reject-test",
+			"results_sent": "Sent results",
+		})
+		require.Contains(t, toolErr.Error(), "teardown not confirmed")
+
+		// Channel should still exist — teardown was never called.
+		cfg, getErr := th.dynamicStore.Get(context.Background(), "reject-test")
+		require.NoError(t, getErr)
+		require.NotNil(t, cfg)
+		require.False(t, th.provisioner.teardownCalled)
+	})
 }
 
 func TestCreatableGroups(t *testing.T) {
@@ -669,12 +725,14 @@ func setupHarnessWithProvisioner(t *testing.T, env config.Env) testHarnessWithPr
 }
 
 type mockProvisioner struct {
-	teardownCalled   bool
-	teardownUsername string
-	teardownErr      error
-	provisionCalled  bool
-	provisionResult  *channel.ProvisionResult
-	provisionErr     error
+	teardownCalled        bool
+	teardownUsername      string
+	teardownErr           error
+	provisionCalled       bool
+	provisionResult       *channel.ProvisionResult
+	provisionErr          error
+	confirmTeardownCalled bool
+	confirmTeardownErr    error
 }
 
 func (m *mockProvisioner) Provision(_ context.Context, name, purpose string) (*channel.ProvisionResult, error) {
@@ -700,4 +758,9 @@ func (m *mockProvisioner) Teardown(_ context.Context, state channel.TeardownStat
 		m.teardownUsername = tg.BotUsername
 	}
 	return m.teardownErr
+}
+
+func (m *mockProvisioner) ConfirmTeardown(_ context.Context, _ string, _ channel.PlatformState) error {
+	m.confirmTeardownCalled = true
+	return m.confirmTeardownErr
 }
