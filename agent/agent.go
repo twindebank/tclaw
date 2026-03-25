@@ -946,9 +946,10 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		if restoreOverride != nil {
 			restoreOverride()
 		}
-		// Turn completed (successfully or otherwise) — clear the interrupted
-		// marker so the agent won't inject a spurious resume on next restart.
-		if opts.QueueStore != nil {
+		// Only clear the interrupted marker if the turn completed normally.
+		// If the parent context was cancelled (deploy, shutdown), preserve
+		// the marker so the agent can resume the interrupted turn on restart.
+		if opts.QueueStore != nil && ctx.Err() == nil {
 			if err := opts.QueueStore.ClearInterrupted(ctx); err != nil {
 				slog.Error("failed to clear interrupted channel", "err", err)
 			}
