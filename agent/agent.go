@@ -224,6 +224,12 @@ type Options struct {
 	// restart notice, and returns ErrChannelChanged so the router can
 	// rebuild channels and restart.
 	ChannelChangeCh <-chan struct{}
+
+	// QueueStore persists messages that arrive while a turn is running.
+	// On startup, queued messages are restored before reading new ones.
+	// Also tracks interrupted turns so the agent can resume on restart.
+	// May be nil if persistence is not needed.
+	QueueStore *channel.QueueStore
 }
 
 type handleResult struct {
@@ -274,6 +280,43 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 	}
 
 	var queue []channel.TaggedMessage
+
+	// Restore persisted queue and resume state from a previous agent session.
+	if opts.QueueStore != nil {
+		qState, err := opts.QueueStore.Load(ctx)
+		if err != nil {
+			slog.Error("failed to load persisted queue", "err", err)
+		} else {
+			// Inject a resume message for the channel that was interrupted mid-turn.
+			if qState.InterruptedChannel != "" {
+				resumeMsg := channel.TaggedMessage{
+					ChannelID:  qState.InterruptedChannel,
+					Text:       "[SYSTEM: You were interrupted mid-turn. Review your conversation history and continue what you were doing. If you were waiting for user input, let the user know you're back.]",
+					SourceInfo: &channel.MessageSourceInfo{Source: channel.SourceResume},
+				}
+				queue = append(queue, resumeMsg)
+				slog.Info("injecting resume message for interrupted channel", "channel", qState.InterruptedChannel)
+			}
+			for _, qm := range qState.Messages {
+				queue = append(queue, channel.TaggedMessage{
+					ChannelID:  qm.ChannelID,
+					Text:       qm.Text,
+					SourceInfo: qm.SourceInfo,
+				})
+			}
+			if len(qState.Messages) > 0 {
+				slog.Info("restored persisted queued messages", "count", len(qState.Messages))
+			}
+			// Clear persisted state now that it's loaded into memory.
+			if err := opts.QueueStore.Save(ctx, nil); err != nil {
+				slog.Error("failed to clear persisted queue after load", "err", err)
+			}
+			if err := opts.QueueStore.ClearInterrupted(ctx); err != nil {
+				slog.Error("failed to clear interrupted marker after load", "err", err)
+			}
+		}
+	}
+
 	idle := newIdleTimer()
 	defer idle.Stop()
 
@@ -300,6 +343,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		if len(queue) > 0 {
 			msg = queue[0]
 			queue = queue[1:]
+			persistQueue(ctx, opts.QueueStore, queue)
 		} else {
 			select {
 			case <-ctx.Done():
@@ -740,6 +784,13 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				opts.OnTurnStart(ch.Info().Name)
 			}
 		}
+		// Mark which channel is being processed so we can inject a resume
+		// message if the agent is interrupted before the turn completes.
+		if opts.QueueStore != nil {
+			if err := opts.QueueStore.SetInterrupted(ctx, msg.ChannelID); err != nil {
+				slog.Error("failed to set interrupted channel", "err", err)
+			}
+		}
 
 		handleDone := make(chan handleResult, 1)
 		go func() {
@@ -864,9 +915,17 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 					}
 				} else {
 					queue = append(queue, newMsg)
+					persistQueue(ctx, opts.QueueStore, queue)
 					// Acknowledge the queued message so the user knows it was received.
 					if queueCh, ok := opts.channels()[newMsg.ChannelID]; ok {
-						if _, sendErr := queueCh.Send(ctx, "📥 Queued — will send to the agent once the current turn finishes."); sendErr != nil {
+						ackMsg := "📥 Queued — will process after the current turn finishes."
+						if newMsg.ChannelID != msg.ChannelID {
+							// Show which channel is busy so the user knows what's blocking.
+							if busyCh, busyOK := opts.channels()[msg.ChannelID]; busyOK {
+								ackMsg = fmt.Sprintf("📥 Queued — agent is busy on %s. Will process once the current turn finishes.", busyCh.Info().Name)
+							}
+						}
+						if _, sendErr := queueCh.Send(ctx, ackMsg); sendErr != nil {
 							slog.Error("failed to send queue acknowledgment", "channel", newMsg.ChannelID, "err", sendErr)
 						}
 						// Only call Done() if the queued message is on a different channel.
@@ -886,6 +945,13 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		cancelTurn()
 		if restoreOverride != nil {
 			restoreOverride()
+		}
+		// Turn completed (successfully or otherwise) — clear the interrupted
+		// marker so the agent won't inject a spurious resume on next restart.
+		if opts.QueueStore != nil {
+			if err := opts.QueueStore.ClearInterrupted(ctx); err != nil {
+				slog.Error("failed to clear interrupted channel", "err", err)
+			}
 		}
 		if opts.OnTurnEnd != nil {
 			if ch, ok := opts.channels()[msg.ChannelID]; ok {
@@ -1149,4 +1215,24 @@ func buildArgs(opts Options, sessionID string, systemPrompt string, prompt strin
 	// mistaken for CLI options.
 	args = append(args, "--", prompt)
 	return args
+}
+
+// persistQueue saves the in-memory queue to the QueueStore. Best-effort:
+// errors are logged but don't interrupt message processing.
+func persistQueue(ctx context.Context, qs *channel.QueueStore, queue []channel.TaggedMessage) {
+	if qs == nil {
+		return
+	}
+	messages := make([]channel.QueuedMessage, len(queue))
+	for i, m := range queue {
+		messages[i] = channel.QueuedMessage{
+			ChannelID:  m.ChannelID,
+			Text:       m.Text,
+			SourceInfo: m.SourceInfo,
+			QueuedAt:   time.Now(),
+		}
+	}
+	if err := qs.Save(ctx, messages); err != nil {
+		slog.Error("failed to persist queue", "err", err)
+	}
 }

@@ -78,17 +78,18 @@ const (
 	SourceUser     MessageSource = "user"     // typed by a human on the channel
 	SourceSchedule MessageSource = "schedule" // fired by a cron schedule
 	SourceChannel  MessageSource = "channel"  // sent from another channel via channel_send
+	SourceResume   MessageSource = "resume"   // auto-injected to continue interrupted work
 )
 
 // MessageSourceInfo carries attribution details for a message.
 type MessageSourceInfo struct {
-	Source MessageSource
+	Source MessageSource `json:"source"`
 
 	// FromChannel is the name of the source channel (set when Source == SourceChannel).
-	FromChannel string
+	FromChannel string `json:"from_channel,omitempty"`
 
 	// ScheduleName is the schedule's human-readable name (set when Source == SourceSchedule).
-	ScheduleName string
+	ScheduleName string `json:"schedule_name,omitempty"`
 }
 
 // TaggedMessage pairs an incoming message with the channel it arrived on

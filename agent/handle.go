@@ -290,7 +290,11 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	split := ch.SplitStatusMessages()
 
 	tw := &turnWriter{ch: ch, ctx: ctx, split: split, statusWrap: ch.StatusWrap()}
-	if err := tw.write(phaseStatus, "🤔 Thinking...\n"); err != nil {
+	thinkingMsg := "🤔 Thinking...\n"
+	if msg.SourceInfo != nil && msg.SourceInfo.Source == channel.SourceResume {
+		thinkingMsg = "🔄 Resuming interrupted turn...\n"
+	}
+	if err := tw.write(phaseStatus, thinkingMsg); err != nil {
 		return "", fmt.Errorf("initial write: %w", err)
 	}
 
@@ -308,6 +312,8 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		contextSection += fmt.Sprintf("Source: scheduled prompt (%s)\n", source.ScheduleName)
 	case channel.SourceChannel:
 		contextSection += fmt.Sprintf("Source: cross-channel message from **%s**\n", source.FromChannel)
+	case channel.SourceResume:
+		contextSection += "Source: auto-resume after interrupted turn\n"
 	default:
 		contextSection += "Source: user message\n"
 	}
