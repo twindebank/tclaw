@@ -46,7 +46,6 @@ func toolListHandler(handler *mcp.Handler) mcp.ToolHandler {
 			string(claudecli.ToolNotebookEdit),
 			string(claudecli.ToolAgent),
 			string(claudecli.ToolTask),
-			string(claudecli.ToolTaskOutput),
 			string(claudecli.ToolTaskStop),
 			string(claudecli.ToolTodoWrite),
 			string(claudecli.ToolToolSearch),
