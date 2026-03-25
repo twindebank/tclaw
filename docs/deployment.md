@@ -2,7 +2,7 @@
 
 ## Overview
 - Hosted on Fly.io, app name configured in `fly.toml`
-- **GitHub Actions CI deploys automatically on push to main** (`.github/workflows/deploy.yml`)
+- **GitHub Actions CI deploys automatically on push to main** (`.github/workflows/deploy.yml`) — add `[no-deploy]` to the commit message to skip the deploy (e.g. for doc-only or TODO changes)
 - Local deploys also work via `tclaw deploy` (builds locally with Docker)
 - Persistent volume `tclaw_data` at `/data` for per-user state
 - Health check at `/healthz` on port 9876
