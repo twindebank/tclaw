@@ -68,7 +68,7 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 | `tool/tfl/` | Transport for London tools (line status, journey planning, arrivals, disruptions). Always registered — API key stored per-user in secret store. |
 | `tool/restauranttools/` | Restaurant search and booking tools via provider interface (currently Resy). Always registered — credentials stored per-user in secret store. |
 | `tool/bankingtools/` | Open Banking tools via Enable Banking API (PSD2). Bank account connection, balance and transaction queries across multiple UK banks. Always registered — JWT credentials stored per-user in secret store, bank sessions in state store. |
-| `tool/devtools/` | MCP tools for dev workflow (dev_start, dev_status, dev_end, dev_cancel, deploy, dev_logs). Git worktree management, PR creation via `gh`, Fly.io deployment, application log inspection. |
+| `tool/devtools/` | MCP tools for dev workflow (dev_start, dev_status, dev_end, dev_cancel, deploy, dev_logs, config_get, config_set). Git worktree management, PR creation via `gh`, Fly.io deployment, application log inspection, and tclaw.yaml config read/update. |
 | `tool/repotools/` | MCP tools for read-only monitoring of external git repos (add, sync, log, list, remove). Shallow clones with last-seen commit tracking. |
 | `tool/onboardingtools/` | MCP tools for new user onboarding (status, set_info, advance, tip_shown, skip). Tracks onboarding progress and manages the daily tips schedule. |
 | `tool/telegramclient/` | MCP tools for Telegram Client API (MTProto) — auth, bot management via BotFather, chat creation, message history, search. Uses `gotd/td` library with session persistence via encrypted secret store. |
