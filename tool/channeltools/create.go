@@ -30,7 +30,9 @@ func channelCreateDef() mcp.ToolDef {
 			"For Telegram: if telegram_client_setup has been completed, the bot is created automatically " +
 			"(no manual @BotFather needed). Otherwise, provide a token in telegram_config. " +
 			"Set ephemeral: true for channels that should auto-delete after idle timeout (default 24h). " +
-			"The agent restarts automatically to activate the new channel.",
+			"Use initial_message to deliver a kick-off task to the new channel on first boot — " +
+			"this is the preferred way to start ephemeral channels since the agent restarts before " +
+			"any channel_send could be delivered. The agent restarts automatically to activate the new channel.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -91,6 +93,10 @@ func channelCreateDef() mcp.ToolDef {
 						},
 						"required": ["target", "description"]
 					}
+				},
+				"initial_message": {
+					"type": "string",
+					"description": "Message delivered to the new channel as its first inbound message once it comes online. Use this to kick off work on ephemeral channels without a separate channel_send call. Fires exactly once — cleared after delivery."
 				}
 			},
 			"required": ["name", "description", "type"]
@@ -110,6 +116,7 @@ type channelCreateArgs struct {
 	DisallowedTools           []string       `json:"disallowed_tools"`
 	CreatableGroups           []string       `json:"creatable_groups"`
 	Links                     []channel.Link `json:"links"`
+	InitialMessage            string         `json:"initial_message"`
 }
 
 const defaultEphemeralIdleTimeout = 24 * time.Hour
@@ -292,6 +299,7 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			Ephemeral:            a.Ephemeral,
 			EphemeralIdleTimeout: idleTimeout,
 			TeardownState:        teardownState,
+			InitialMessage:       a.InitialMessage,
 		}
 		if err := deps.Registry.DynamicStore().Add(ctx, cfg); err != nil {
 			return nil, fmt.Errorf("create channel: %w", err)
