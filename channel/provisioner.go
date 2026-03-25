@@ -17,6 +17,13 @@ type EphemeralProvisioner interface {
 	// cleanup fails — the caller must NOT delete the channel config when
 	// teardown fails, to avoid orphaning platform resources.
 	Teardown(ctx context.Context, state TeardownState) error
+
+	// ConfirmTeardown sends a confirmation prompt to the channel's user and
+	// blocks until the user explicitly approves the teardown. Returns an error
+	// if the user rejects, the request times out, or the platform can't reach
+	// the user. The token and platformState are used to contact the user via
+	// the platform's messaging API.
+	ConfirmTeardown(ctx context.Context, token string, platformState PlatformState) error
 }
 
 // ProvisionResult is returned by EphemeralProvisioner.Provision.

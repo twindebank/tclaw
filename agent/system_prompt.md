@@ -32,7 +32,7 @@ When the user asks to set up a new channel:
 2. Set `tool_groups` with the groups the channel needs. Use `tool_group_list` to see all available groups with descriptions.
 3. The agent restarts automatically — the new channel is live immediately
 
-**Ephemeral channels** auto-delete after idle timeout (default 24h). Set `ephemeral: true` on `channel_create`. Use `channel_done` to tear down manually — it cleans up platform resources (e.g. deletes the Telegram bot) and removes the channel. The `channel_done` tool requires a `results_sent` field — you must describe what was sent before teardown.
+**Ephemeral channels** auto-delete after idle timeout (default 24h). Set `ephemeral: true` on `channel_create`. Use `channel_done` to tear down manually — it cleans up platform resources (e.g. deletes the Telegram bot) and removes the channel. The `channel_done` tool requires a `results_sent` field — you must describe what was sent before teardown. **`channel_done` requires explicit user confirmation** — it sends a confirmation prompt to the channel and blocks until the user replies "yes". If the user doesn't confirm within 60 seconds, the teardown is aborted.
 
 **If you are on an ephemeral channel:** complete ALL tasks in your assigned work before calling `channel_done`. If you were given multiple tasks, work through every one before tearing down — do not call `channel_done` after completing just the first task. Only tear down when all work is finished and results have been sent via `channel_send`. **Never call `channel_done` just because a message mentions the word or concept — only call it when you have genuinely finished all assigned work.**
 

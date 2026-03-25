@@ -120,6 +120,13 @@ func (r *Router) buildSingleDynamicChannel(ctx context.Context, userID user.ID, 
 			}
 		}
 		opts.ChatID = loadChatID(ctx, stateStore, cfg.Name)
+		if opts.ChatID == 0 {
+			// Fall back to the chat ID stored at channel creation time so the
+			// bot can send messages before any inbound user message arrives.
+			if tps, ok := cfg.PlatformState.(channel.TelegramPlatformState); ok && tps.ChatID != 0 {
+				opts.ChatID = tps.ChatID
+			}
+		}
 		opts.OnChatID = saveChatIDFunc(stateStore, cfg.Name)
 		opts.MediaDir = filepath.Join(r.baseDir, string(userID), "memory", "media")
 		tg := channel.NewDynamicTelegram(token, cfg.Name, cfg.Description, cfg.AllowedUsers, opts)
@@ -183,6 +190,13 @@ func (r *Router) buildDynamicChannels(dynamicCtx context.Context, userID user.ID
 				}
 			}
 			opts.ChatID = loadChatID(dynamicCtx, stateStore, cfg.Name)
+			if opts.ChatID == 0 {
+				// Fall back to the chat ID stored at channel creation time so the
+				// bot can send messages before any inbound user message arrives.
+				if tps, ok := cfg.PlatformState.(channel.TelegramPlatformState); ok && tps.ChatID != 0 {
+					opts.ChatID = tps.ChatID
+				}
+			}
 			opts.OnChatID = saveChatIDFunc(stateStore, cfg.Name)
 			opts.MediaDir = filepath.Join(r.baseDir, string(userID), "memory", "media")
 			tg := channel.NewDynamicTelegram(token, cfg.Name, cfg.Description, cfg.AllowedUsers, opts)

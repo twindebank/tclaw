@@ -52,6 +52,15 @@ type DynamicChannelConfig struct {
 	// Ephemeral is true.
 	EphemeralIdleTimeout time.Duration `json:"ephemeral_idle_timeout,omitempty"`
 
+	// PlatformState holds platform-specific channel metadata that needs to
+	// persist across restarts (e.g. Telegram chat ID so the bot can send
+	// messages before any inbound user message arrives).
+	PlatformState PlatformState `json:"-"`
+
+	// PlatformStateRaw is the JSON-serialized form of PlatformState, used
+	// for transparent JSON round-tripping via the store.
+	PlatformStateRaw json.RawMessage `json:"platform_state,omitempty"`
+
 	// InitialMessage is delivered to the channel as its first inbound message
 	// once the channel comes online after creation. Cleared after delivery so it
 	// fires exactly once. Enables ephemeral channels to self-start without
@@ -70,21 +79,28 @@ type DynamicChannelConfig struct {
 	TeardownStateRaw json.RawMessage `json:"teardown_state,omitempty"`
 }
 
-// MarshalJSON implements json.Marshaler to serialize TeardownState via the
-// typed envelope format.
+// MarshalJSON implements json.Marshaler to serialize TeardownState and
+// PlatformState via the typed envelope format.
 func (c DynamicChannelConfig) MarshalJSON() ([]byte, error) {
-	// Marshal TeardownState into the raw field before encoding.
 	type Alias DynamicChannelConfig
+
 	raw, err := MarshalTeardownState(c.TeardownState)
 	if err != nil {
 		return nil, fmt.Errorf("marshal teardown state: %w", err)
 	}
 	c.TeardownStateRaw = raw
+
+	psRaw, err := MarshalPlatformState(c.PlatformState)
+	if err != nil {
+		return nil, fmt.Errorf("marshal platform state: %w", err)
+	}
+	c.PlatformStateRaw = psRaw
+
 	return json.Marshal((*Alias)(&c))
 }
 
-// UnmarshalJSON implements json.Unmarshaler to deserialize TeardownState
-// from the typed envelope format.
+// UnmarshalJSON implements json.Unmarshaler to deserialize TeardownState and
+// PlatformState from the typed envelope format.
 func (c *DynamicChannelConfig) UnmarshalJSON(data []byte) error {
 	type Alias DynamicChannelConfig
 	if err := json.Unmarshal(data, (*Alias)(c)); err != nil {
@@ -96,6 +112,13 @@ func (c *DynamicChannelConfig) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("unmarshal teardown state: %w", err)
 		}
 		c.TeardownState = ts
+	}
+	if len(c.PlatformStateRaw) > 0 {
+		ps, err := UnmarshalPlatformState(c.PlatformStateRaw)
+		if err != nil {
+			return fmt.Errorf("unmarshal platform state: %w", err)
+		}
+		c.PlatformState = ps
 	}
 	return nil
 }
