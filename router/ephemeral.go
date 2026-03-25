@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -36,12 +37,15 @@ func cleanupEphemeralChannels(
 	ticker := time.NewTicker(ephemeralCheckInterval)
 	defer ticker.Stop()
 
+	// Track last-logged error per channel to suppress repeated identical failures.
+	lastLoggedError := make(map[string]string)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			cleanupOnce(ctx, dynamicStore, tracker, secretStore, provisioners, onChannelChange)
+			cleanupOnce(ctx, dynamicStore, tracker, secretStore, provisioners, onChannelChange, lastLoggedError)
 		}
 	}
 }
@@ -53,6 +57,7 @@ func cleanupOnce(
 	secretStore secret.Store,
 	provisioners map[channel.ChannelType]channel.EphemeralProvisioner,
 	onChannelChange func(),
+	lastLoggedError map[string]string,
 ) {
 	configs, err := dynamicStore.List(ctx)
 	if err != nil {
@@ -76,21 +81,29 @@ func cleanupOnce(
 			continue
 		}
 
-		slog.Info("ephemeral cleanup: channel idle past timeout, tearing down",
+		slog.Debug("ephemeral cleanup: channel idle past timeout",
 			"channel", cfg.Name, "timeout", timeout)
 
 		// Platform-specific teardown.
 		if cfg.TeardownState != nil {
 			provisioner, ok := provisioners[cfg.Type]
 			if !ok {
-				slog.Error("ephemeral cleanup: no provisioner for channel type, skipping",
-					"channel", cfg.Name, "type", cfg.Type)
+				errMsg := fmt.Sprintf("no provisioner for channel type %s", cfg.Type)
+				if lastLoggedError[cfg.Name] != errMsg {
+					slog.Error("ephemeral cleanup: no provisioner for channel type, skipping",
+						"channel", cfg.Name, "type", cfg.Type)
+					lastLoggedError[cfg.Name] = errMsg
+				}
 				continue
 			}
 			if teardownErr := provisioner.Teardown(ctx, cfg.TeardownState); teardownErr != nil {
 				// Don't delete the channel config — would orphan platform resources.
-				slog.Error("ephemeral cleanup: platform teardown failed, will retry next tick",
-					"channel", cfg.Name, "err", teardownErr)
+				errMsg := teardownErr.Error()
+				if lastLoggedError[cfg.Name] != errMsg {
+					slog.Error("ephemeral cleanup: platform teardown failed, will retry next tick",
+						"channel", cfg.Name, "err", teardownErr)
+					lastLoggedError[cfg.Name] = errMsg
+				}
 				continue
 			}
 		}
@@ -108,6 +121,7 @@ func cleanupOnce(
 				"channel", cfg.Name, "err", deleteErr)
 		}
 
+		delete(lastLoggedError, cfg.Name)
 		cleaned = true
 		slog.Info("ephemeral cleanup: channel torn down", "channel", cfg.Name)
 	}

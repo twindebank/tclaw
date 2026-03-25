@@ -20,7 +20,7 @@ const MasterKeyEnv = "TCLAW_SECRET_KEY"
 // is unavailable). masterKey may be empty if keychain is available.
 func Resolve(userID string, storeDir string, masterKey string) (Store, error) {
 	if KeychainAvailable() {
-		slog.Info("using OS keychain for secrets", "user", userID)
+		slog.Debug("using OS keychain for secrets", "user", userID)
 		return NewKeychainStore(userID), nil
 	}
 
@@ -36,6 +36,6 @@ func Resolve(userID string, storeDir string, masterKey string) (Store, error) {
 		return nil, fmt.Errorf("%s must be at least %d characters (got %d)", MasterKeyEnv, minKeyLength, len(masterKey))
 	}
 
-	slog.Info("using encrypted filesystem for secrets", "user", userID, "dir", storeDir)
+	slog.Debug("using encrypted filesystem for secrets", "user", userID, "dir", storeDir)
 	return NewEncryptedFSStore(storeDir, []byte(masterKey), userID)
 }

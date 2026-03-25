@@ -444,7 +444,7 @@ func resolveSecret(name string) (string, string, error) {
 			return "", "", fmt.Errorf("keychain lookup %q: %w", name, err)
 		}
 		if val != "" {
-			slog.Info("resolved secret from keychain", "name", name)
+			slog.Debug("resolved secret from keychain", "name", name)
 			return val, "", nil
 		}
 	}
@@ -452,7 +452,7 @@ func resolveSecret(name string) (string, string, error) {
 	// Fall back to env var with the same name.
 	val := os.Getenv(name)
 	if val != "" {
-		slog.Info("resolved secret from env var", "name", name)
+		slog.Debug("resolved secret from env var", "name", name)
 		return val, name, nil
 	}
 
