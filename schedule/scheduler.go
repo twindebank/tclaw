@@ -96,7 +96,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 			waitDuration = 0
 		}
 
-		slog.Info("scheduler: sleeping until next fire", "next", earliest, "wait", waitDuration)
+		slog.Debug("scheduler: sleeping until next fire", "next", earliest, "wait", waitDuration)
 
 		timer := time.NewTimer(waitDuration)
 		select {

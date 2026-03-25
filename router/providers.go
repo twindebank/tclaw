@@ -158,7 +158,7 @@ func (r *Router) buildDynamicChannels(dynamicCtx context.Context, userID user.ID
 		switch cfg.Type {
 		case channel.TypeSocket:
 			if !r.env.IsLocal() {
-				slog.Info("skipping dynamic socket channel (non-local env)", "channel", cfg.Name, "env", r.env)
+				slog.Debug("skipping dynamic socket channel (non-local env)", "channel", cfg.Name, "env", r.env)
 				continue
 			}
 			socketPath := filepath.Join(r.baseDir, string(userID), cfg.Name+".sock")
@@ -206,7 +206,7 @@ func (r *Router) buildDynamicChannels(dynamicCtx context.Context, userID user.ID
 		}
 	}
 
-	slog.Info("built dynamic channels", "user", userID, "count", len(channels))
+	slog.Debug("built dynamic channels", "user", userID, "count", len(channels))
 	return channels, channel.FanIn(dynamicCtx, channels)
 }
 
@@ -250,7 +250,7 @@ func (r *Router) registerToolsForProvider(h *mcp.Handler, connID connection.Conn
 			Provider: p,
 		}
 		googletools.RegisterTools(h, googleConns)
-		slog.Info("registered google workspace tools", "connection", connID, "total_connections", len(googleConns))
+		slog.Debug("registered google workspace tools", "connection", connID, "total_connections", len(googleConns))
 	case provider.MonzoProviderID:
 		monzoConns[connID] = monzotools.Deps{
 			ConnID:   connID,
@@ -258,7 +258,7 @@ func (r *Router) registerToolsForProvider(h *mcp.Handler, connID connection.Conn
 			Provider: p,
 		}
 		monzotools.RegisterTools(h, monzoConns)
-		slog.Info("registered monzo tools", "connection", connID, "total_connections", len(monzoConns))
+		slog.Debug("registered monzo tools", "connection", connID, "total_connections", len(monzoConns))
 	}
 }
 

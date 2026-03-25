@@ -340,7 +340,7 @@ func (bf *BotFather) sendMessage(ctx context.Context, text string) error {
 	if id := bf.latestMessageID(ctx); id > bf.lastSeenMsgID {
 		bf.lastSeenMsgID = id
 	}
-	slog.Info("botfather: sending message", "text", truncate(text, 40), "last_seen_id", bf.lastSeenMsgID)
+	slog.Debug("botfather: sending message", "text", truncate(text, 40), "last_seen_id", bf.lastSeenMsgID)
 
 	_, err := bf.client.API().MessagesSendMessage(ctx, &tg.MessagesSendMessageRequest{
 		Peer:     bf.peer,
@@ -363,7 +363,7 @@ func (bf *BotFather) waitForResponse(ctx context.Context, substring string) (str
 	// Small initial delay to let BotFather process the message.
 	time.Sleep(pollInterval)
 
-	slog.Info("botfather: waiting for response", "substring", substring, "last_seen_id", bf.lastSeenMsgID)
+	slog.Debug("botfather: waiting for response", "substring", substring, "last_seen_id", bf.lastSeenMsgID)
 
 	for time.Now().Before(deadline) {
 		select {
@@ -393,11 +393,6 @@ func (bf *BotFather) waitForResponse(ctx context.Context, substring string) (str
 			if !ok {
 				continue
 			}
-			slog.Debug("botfather: poll saw message",
-				"msg_id", msg.ID,
-				"last_seen_id", bf.lastSeenMsgID,
-				"from_id", msg.FromID,
-				"text_prefix", truncate(msg.Message, 60))
 			if msg.ID <= bf.lastSeenMsgID {
 				continue
 			}

@@ -395,7 +395,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		}
 	}()
 
-	newSessionID, err := streamResponse(ctx, opts, tw, stdout, allowed)
+	newSessionID, err := streamResponse(ctx, opts, tw, stdout, allowed, msg.ChannelID)
 	if err != nil {
 		return "", fmt.Errorf("stream response: %w", err)
 	}
@@ -489,7 +489,7 @@ func allowedEnvVar(key string) bool {
 // allowedTools is the resolved allowed tool list for the channel — when
 // non-empty, tool_use events for tools not in this list are tracked and
 // returned as a ToolsDeniedError after the turn completes.
-func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Reader, allowedTools []claudecli.Tool) (string, error) {
+func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Reader, allowedTools []claudecli.Tool, channelID channel.ChannelID) (string, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 256*1024), 10*1024*1024)
 
@@ -736,6 +736,7 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				return "", err
 			}
 			logArgs := []any{
+				"channel", channelID,
 				"turns", result.NumTurns,
 				"duration_ms", result.DurationMs,
 				"cost_usd", result.CostUSD,

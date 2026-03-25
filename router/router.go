@@ -155,7 +155,7 @@ func (r *Router) Register(ctx context.Context, cfg user.Config, channels []chann
 
 	go r.waitAndStart(ctx, mu, staticChMap, staticMsgs)
 
-	slog.Info("user registered (agent will start on first message)", "user", cfg.ID)
+	slog.Info("user registered (agent will start on first message)", "user", cfg.ID, "channels", len(channels))
 	return nil
 }
 
@@ -277,7 +277,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		if genErr != nil {
 			return fmt.Errorf("regenerate mcp config: %w", genErr)
 		}
-		slog.Info("mcp config regenerated", "user", mu.cfg.ID, "remote_count", len(remotes))
+		slog.Debug("mcp config regenerated", "user", mu.cfg.ID, "remote_count", len(remotes))
 		return nil
 	}
 
@@ -308,7 +308,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	setupToken := os.Getenv(setupTokenEnvVar)
 	if setupToken != "" {
 		os.Unsetenv(setupTokenEnvVar)
-		slog.Info("found and scrubbed setup token", "user", mu.cfg.ID, "env_var", setupTokenEnvVar)
+		slog.Debug("found and scrubbed setup token", "user", mu.cfg.ID, "env_var", setupTokenEnvVar)
 	}
 
 	// Seed GitHub token from Fly secret (e.g. GITHUB_TOKEN_THEO) into the
@@ -322,7 +322,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			slog.Error("failed to seed github token from env", "user", mu.cfg.ID, "err", seedErr)
 		} else {
 			os.Unsetenv(githubTokenEnvVar)
-			slog.Info("seeded and scrubbed github token from env", "user", mu.cfg.ID, "env_var", githubTokenEnvVar)
+			slog.Debug("seeded and scrubbed github token from env", "user", mu.cfg.ID, "env_var", githubTokenEnvVar)
 		}
 	}
 
@@ -334,7 +334,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			slog.Error("failed to seed fly api token from env", "user", mu.cfg.ID, "err", seedErr)
 		} else {
 			os.Unsetenv(flyTokenEnvVar)
-			slog.Info("seeded and scrubbed fly api token from env", "user", mu.cfg.ID, "env_var", flyTokenEnvVar)
+			slog.Debug("seeded and scrubbed fly api token from env", "user", mu.cfg.ID, "env_var", flyTokenEnvVar)
 		}
 	}
 
@@ -346,7 +346,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			slog.Error("failed to seed tfl api key from env", "user", mu.cfg.ID, "err", seedErr)
 		} else {
 			os.Unsetenv(tflKeyEnvVar)
-			slog.Info("seeded and scrubbed tfl api key from env", "user", mu.cfg.ID, "env_var", tflKeyEnvVar)
+			slog.Debug("seeded and scrubbed tfl api key from env", "user", mu.cfg.ID, "env_var", tflKeyEnvVar)
 		}
 	}
 
@@ -358,7 +358,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			slog.Error("failed to seed resy api key from env", "user", mu.cfg.ID, "err", seedErr)
 		} else {
 			os.Unsetenv(resyAPIKeyEnvVar)
-			slog.Info("seeded and scrubbed resy api key from env", "user", mu.cfg.ID, "env_var", resyAPIKeyEnvVar)
+			slog.Debug("seeded and scrubbed resy api key from env", "user", mu.cfg.ID, "env_var", resyAPIKeyEnvVar)
 		}
 	}
 
@@ -369,7 +369,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			slog.Error("failed to seed resy auth token from env", "user", mu.cfg.ID, "err", seedErr)
 		} else {
 			os.Unsetenv(resyAuthTokenEnvVar)
-			slog.Info("seeded and scrubbed resy auth token from env", "user", mu.cfg.ID, "env_var", resyAuthTokenEnvVar)
+			slog.Debug("seeded and scrubbed resy auth token from env", "user", mu.cfg.ID, "env_var", resyAuthTokenEnvVar)
 		}
 	}
 
@@ -380,7 +380,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			slog.Error("failed to seed enable banking app id from env", "user", mu.cfg.ID, "err", seedErr)
 		} else {
 			os.Unsetenv(ebAppIDEnvVar)
-			slog.Info("seeded and scrubbed enable banking app id from env", "user", mu.cfg.ID, "env_var", ebAppIDEnvVar)
+			slog.Debug("seeded and scrubbed enable banking app id from env", "user", mu.cfg.ID, "env_var", ebAppIDEnvVar)
 		}
 	}
 
@@ -391,7 +391,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			slog.Error("failed to seed enable banking private key from env", "user", mu.cfg.ID, "err", seedErr)
 		} else {
 			os.Unsetenv(ebPrivKeyEnvVar)
-			slog.Info("seeded and scrubbed enable banking private key from env", "user", mu.cfg.ID, "env_var", ebPrivKeyEnvVar)
+			slog.Debug("seeded and scrubbed enable banking private key from env", "user", mu.cfg.ID, "env_var", ebPrivKeyEnvVar)
 		}
 	}
 
@@ -402,7 +402,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			slog.Error("failed to seed telegram client api id from env", "user", mu.cfg.ID, "err", seedErr)
 		} else {
 			os.Unsetenv(tgAPIIDEnvVar)
-			slog.Info("seeded and scrubbed telegram client api id from env", "user", mu.cfg.ID, "env_var", tgAPIIDEnvVar)
+			slog.Debug("seeded and scrubbed telegram client api id from env", "user", mu.cfg.ID, "env_var", tgAPIIDEnvVar)
 		}
 	}
 	tgAPIHashEnvVar := agent.TelegramClientAPIHashEnvVarName(string(mu.cfg.ID))
@@ -411,7 +411,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			slog.Error("failed to seed telegram client api hash from env", "user", mu.cfg.ID, "err", seedErr)
 		} else {
 			os.Unsetenv(tgAPIHashEnvVar)
-			slog.Info("seeded and scrubbed telegram client api hash from env", "user", mu.cfg.ID, "env_var", tgAPIHashEnvVar)
+			slog.Debug("seeded and scrubbed telegram client api hash from env", "user", mu.cfg.ID, "env_var", tgAPIHashEnvVar)
 		}
 	}
 
@@ -1107,7 +1107,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		r.mu.Unlock()
 
 		if errors.Is(err, agent.ErrIdleTimeout) {
-			slog.Info("agent shut down due to idle timeout, will restart on next message", "user", mu.cfg.ID)
+			slog.Info("agent restarting", "user", mu.cfg.ID, "reason", "idle_timeout")
 			// Idle timeout means the agent wasn't doing anything — don't resume.
 			if clearErr := queueStore.ClearInterrupted(ctx); clearErr != nil {
 				slog.Error("failed to clear interrupted marker on idle timeout", "err", clearErr)
@@ -1115,7 +1115,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			continue
 		}
 		if errors.Is(err, agent.ErrResetRequested) {
-			slog.Info("agent reset requested, restarting", "user", mu.cfg.ID)
+			slog.Info("agent restarting", "user", mu.cfg.ID, "reason", "reset")
 			// User explicitly reset — don't resume old work.
 			if clearErr := queueStore.ClearInterrupted(ctx); clearErr != nil {
 				slog.Error("failed to clear interrupted marker on reset", "err", clearErr)
@@ -1125,11 +1125,11 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		if errors.Is(err, agent.ErrChannelChanged) {
 			// Channel changed mid-session — the interrupted marker (if set) is
 			// preserved so the agent resumes the interrupted turn on restart.
-			slog.Info("agent restarting after channel change", "user", mu.cfg.ID)
+			slog.Info("agent restarting", "user", mu.cfg.ID, "reason", "channel_change")
 			continue
 		}
 		if err != nil {
-			slog.Error("agent exited with error", "user", mu.cfg.ID, "err", err)
+			slog.Error("agent exited with error", "user", mu.cfg.ID, "reason", "error", "err", err)
 		}
 		return
 	}
