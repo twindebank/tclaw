@@ -42,4 +42,6 @@ func RegisterTools(handler *mcp.Handler, deps Deps) {
 	handler.Register(devLogsDef(), devLogsHandler(deps))
 	handler.Register(devBrowseDef(), devBrowseHandler(deps))
 	handler.Register(devPRChecksDef(), devPRChecksHandler(deps))
+	handler.Register(configGetDef(), configGetHandler(deps))
+	handler.Register(configSetDef(), configSetHandler(deps))
 }
