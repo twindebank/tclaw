@@ -17,9 +17,12 @@ func channelDoneDef() mcp.ToolDef {
 			"removes channel config, and removes channel secrets. Works on both ephemeral and " +
 			"non-ephemeral dynamic channels. Fails if platform teardown fails (no half-states). " +
 			"Cannot be used on static channels (from config file).\n\n" +
-			"IMPORTANT: This tool requires explicit user confirmation. A confirmation prompt is sent " +
-			"to the channel and the tool blocks until the user replies 'yes'. If the user does not " +
-			"confirm within 60 seconds, the teardown is aborted and the channel stays open.\n\n" +
+			"IMPORTANT: This tool uses an async confirmation flow. For channels with a user chat " +
+			"(e.g. Telegram), it sends a confirmation prompt and returns immediately with status " +
+			"\"awaiting_confirmation\". The teardown completes when the user replies \"yes\" as " +
+			"their next message — the router handles this without another agent turn. Any other " +
+			"reply cancels the teardown. For channels without a user chat, teardown happens " +
+			"immediately.\n\n" +
 			"REQUIRED: Before calling this, you MUST send all results to other channels via channel_send " +
 			"(PR URLs, summaries, findings, etc.). The results_sent field is mandatory — provide a brief " +
 			"summary of what was sent and to which channel(s). If you have outbound links but sent nothing, " +
@@ -77,14 +80,15 @@ func channelDoneHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("channel %q not found", a.ChannelName)
 		}
 
-		// Confirm with the user before tearing down. The provisioner sends a
-		// prompt via the platform's messaging API and blocks until the user
-		// replies "yes". This prevents the agent from closing channels without
-		// explicit human consent.
+		// For channels with a platform chat (e.g. Telegram), send a confirmation
+		// prompt and return immediately. The router intercepts the user's reply on
+		// the next inbound message — "yes" triggers teardown, anything else cancels.
+		// This avoids a deadlock where the tool blocks waiting for a reply that can
+		// only arrive after the current tool call returns.
 		if cfg.PlatformState != nil {
 			provisioner, ok := deps.Provisioners[cfg.Type]
 			if !ok {
-				return nil, fmt.Errorf("no provisioner for channel type %q — cannot confirm teardown with user", cfg.Type)
+				return nil, fmt.Errorf("no provisioner for channel type %q — cannot send teardown confirmation", cfg.Type)
 			}
 
 			token, tokenErr := deps.SecretStore.Get(ctx, channel.ChannelSecretKey(a.ChannelName))
@@ -92,12 +96,27 @@ func channelDoneHandler(deps Deps) mcp.ToolHandler {
 				return nil, fmt.Errorf("read channel token for confirmation: %w", tokenErr)
 			}
 
-			if confirmErr := provisioner.ConfirmTeardown(ctx, token, cfg.PlatformState); confirmErr != nil {
-				return nil, fmt.Errorf("teardown not confirmed for channel %q: %w", a.ChannelName, confirmErr)
+			if promptErr := provisioner.SendTeardownPrompt(ctx, token, cfg.PlatformState); promptErr != nil {
+				return nil, fmt.Errorf("send teardown prompt for channel %q: %w", a.ChannelName, promptErr)
 			}
+
+			// Persist the pending state so the router knows to intercept the next
+			// message on this channel as a confirmation response.
+			if updateErr := deps.Registry.DynamicStore().Update(ctx, a.ChannelName, func(c *channel.DynamicChannelConfig) {
+				c.PendingDone = true
+			}); updateErr != nil {
+				return nil, fmt.Errorf("set pending_done for channel %q: %w", a.ChannelName, updateErr)
+			}
+
+			slog.Info("channel_done: confirmation prompt sent, awaiting user reply", "channel", a.ChannelName)
+			return json.Marshal(map[string]string{
+				"status":  "awaiting_confirmation",
+				"channel": a.ChannelName,
+				"message": fmt.Sprintf("Confirmation prompt sent to channel %q. Teardown will complete when the user replies \"yes\".", a.ChannelName),
+			})
 		}
 
-		// Platform-specific teardown (e.g. delete Telegram bot).
+		// No platform chat — tear down immediately (no interactive confirmation possible).
 		if cfg.TeardownState != nil {
 			provisioner, ok := deps.Provisioners[cfg.Type]
 			if !ok {

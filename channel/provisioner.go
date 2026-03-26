@@ -18,12 +18,11 @@ type EphemeralProvisioner interface {
 	// teardown fails, to avoid orphaning platform resources.
 	Teardown(ctx context.Context, state TeardownState) error
 
-	// ConfirmTeardown sends a confirmation prompt to the channel's user and
-	// blocks until the user explicitly approves the teardown. Returns an error
-	// if the user rejects, the request times out, or the platform can't reach
-	// the user. The token and platformState are used to contact the user via
-	// the platform's messaging API.
-	ConfirmTeardown(ctx context.Context, token string, platformState PlatformState) error
+	// SendTeardownPrompt sends a confirmation prompt to the channel's user asking
+	// them to confirm teardown by replying "yes". Returns immediately after
+	// sending — does NOT wait for the user's response. The router intercepts the
+	// reply asynchronously via the PendingDone flag on the channel config.
+	SendTeardownPrompt(ctx context.Context, token string, platformState PlatformState) error
 }
 
 // ProvisionResult is returned by EphemeralProvisioner.Provision.
