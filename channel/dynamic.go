@@ -67,6 +67,12 @@ type DynamicChannelConfig struct {
 	// requiring a separate channel_send from the creator.
 	InitialMessage string `json:"initial_message,omitempty"`
 
+	// PendingDone is true when the agent has called channel_done and sent a
+	// confirmation prompt to the user. The router intercepts the next inbound
+	// message on this channel: "yes" triggers actual teardown, anything else
+	// clears the flag and forwards the message to the agent normally.
+	PendingDone bool `json:"pending_done,omitempty"`
+
 	// TeardownState holds platform-specific state needed to clean up
 	// resources when the channel is deleted (e.g. Telegram bot username).
 	// Nil for channels with no platform resources to clean up.

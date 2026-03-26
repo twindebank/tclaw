@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
-	"time"
 
 	"github.com/gotd/td/tg"
 
@@ -69,10 +67,10 @@ func (p *Provisioner) Teardown(ctx context.Context, state channel.TeardownState)
 	return nil
 }
 
-// ConfirmTeardown sends a confirmation prompt to the channel's Telegram chat
-// and polls for the user to reply "yes". Blocks until confirmation is received
-// or the 60-second timeout expires.
-func (p *Provisioner) ConfirmTeardown(ctx context.Context, token string, platformState channel.PlatformState) error {
+// SendTeardownPrompt sends a confirmation prompt to the channel's Telegram chat
+// asking the user to reply "yes" to confirm teardown. Returns immediately after
+// sending — the router intercepts the reply asynchronously via PendingDone.
+func (p *Provisioner) SendTeardownPrompt(ctx context.Context, token string, platformState channel.PlatformState) error {
 	tps, ok := platformState.(channel.TelegramPlatformState)
 	if !ok {
 		return fmt.Errorf("unexpected platform state type: %T (expected TelegramPlatformState)", platformState)
@@ -81,62 +79,11 @@ func (p *Provisioner) ConfirmTeardown(ctx context.Context, token string, platfor
 		return fmt.Errorf("no chat ID available — cannot send confirmation to user")
 	}
 
-	// Send the confirmation prompt via the Bot HTTP API.
-	prompt := "⚠️ <b>This channel is about to be closed.</b>\n\nReply <b>yes</b> to confirm, or anything else to cancel."
-	msgID, err := telegramBotSend(token, tps.ChatID, prompt)
-	if err != nil {
-		return fmt.Errorf("send confirmation prompt: %w", err)
+	prompt := "⚠️ <b>This channel is about to be closed.</b>\n\nReply <b>yes</b> to confirm teardown, or anything else to cancel."
+	if _, err := telegramBotSend(token, tps.ChatID, prompt); err != nil {
+		return fmt.Errorf("send teardown prompt: %w", err)
 	}
-
-	// Poll for the user's response via getUpdates. We use a short-lived
-	// polling loop rather than webhooks because the channel's webhook handler
-	// may not be running (it's about to be torn down).
-	const pollTimeout = 60 * time.Second
-	const pollInterval = 2 * time.Second
-
-	deadline := time.Now().Add(pollTimeout)
-	// Only look at updates after our confirmation message.
-	updateOffset := 0
-
-	for time.Now().Before(deadline) {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("teardown confirmation cancelled: %w", ctx.Err())
-		default:
-		}
-
-		updates, pollErr := telegramBotGetUpdates(token, updateOffset, 5)
-		if pollErr != nil {
-			slog.Warn("confirm teardown: poll error, retrying", "err", pollErr)
-			time.Sleep(pollInterval)
-			continue
-		}
-
-		for _, update := range updates {
-			updateOffset = update.UpdateID + 1
-
-			if update.Message == nil {
-				continue
-			}
-			// Only accept responses to our confirmation message.
-			if update.Message.ReplyToMessage != nil && update.Message.ReplyToMessage.MessageID != msgID {
-				continue
-			}
-
-			text := strings.TrimSpace(strings.ToLower(update.Message.Text))
-			if text == "yes" || text == "y" {
-				slog.Info("teardown confirmed by user", "chat_id", tps.ChatID)
-				return nil
-			}
-
-			// Any non-yes response is a rejection.
-			return fmt.Errorf("teardown rejected by user (replied %q)", update.Message.Text)
-		}
-
-		time.Sleep(pollInterval)
-	}
-
-	return fmt.Errorf("teardown confirmation timed out after %s — channel NOT closed", pollTimeout)
+	return nil
 }
 
 // telegramBotSend sends a message via the Telegram Bot HTTP API and returns
