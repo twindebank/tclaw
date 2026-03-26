@@ -471,6 +471,13 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Forward-declared so it can be referenced by channeltools.RegisterTools
 	// before the full implementation is defined later alongside hotAddMsgs.
 	var onChannelAdded func(string)
+	// provisioners maps channel types to their EphemeralProvisioner. Defined
+	// once here so it can be used by both channeltools (channel_done/channel_create)
+	// and the bridge goroutine (interceptPendingDone for async teardown confirmation).
+	provisioners := map[channel.ChannelType]channel.EphemeralProvisioner{
+		channel.TypeTelegram: tgProvisioner,
+	}
+
 	channeltools.RegisterTools(mcpHandler, channeltools.Deps{
 		Registry:        registry,
 		Env:             r.env,
@@ -479,10 +486,8 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		ActivityTracker: activityTracker,
 		OnChannelAdded:  onChannelAdded,
 		OnChannelChange: onChannelChange,
-		Provisioners: map[channel.ChannelType]channel.EphemeralProvisioner{
-			channel.TypeTelegram: tgProvisioner,
-		},
-		ActiveChannel: activeChannelFunc,
+		Provisioners:    provisioners,
+		ActiveChannel:   activeChannelFunc,
 	})
 
 	// Set up the scheduler — runs at user lifetime, outlives the agent.
@@ -968,6 +973,12 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 						if ch, ok := (*chMap)[msg.ChannelID]; ok {
 							activityTracker.MessageReceived(ch.Info().Name)
 						}
+					}
+					// Intercept messages that are responses to a pending channel_done
+					// confirmation. If the channel has PendingDone set (from a prior
+					// channel_done call), handle it here instead of passing to the agent.
+					if interceptPendingDone(agentCtx, msg, channelsFunc, dynamicStore, secretStore, provisioners, onChannelChange) {
+						continue
 					}
 					select {
 					case bridgeCh <- msg:
