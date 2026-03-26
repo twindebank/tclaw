@@ -777,3 +777,7 @@ func (m *mockProvisioner) SendTeardownPrompt(_ context.Context, _ string, _ chan
 	m.sendTeardownPromptCalled = true
 	return m.sendTeardownPromptErr
 }
+
+func (m *mockProvisioner) SendClosingMessage(_ context.Context, _ string, _ channel.PlatformState) error {
+	return nil
+}

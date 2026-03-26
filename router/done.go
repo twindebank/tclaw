@@ -69,6 +69,21 @@ func interceptPendingDone(
 	// User replied "yes" — execute teardown.
 	slog.Info("interceptPendingDone: teardown confirmed by user, tearing down", "channel", chName)
 
+	// Send a closing acknowledgement before deleting the bot so the user sees
+	// feedback. Best-effort — we don't abort teardown if the message fails.
+	if cfg.PlatformState != nil {
+		if provisioner, hasProv := provisioners[cfg.Type]; hasProv {
+			token, tokenErr := secretStore.Get(ctx, channel.ChannelSecretKey(chName))
+			if tokenErr != nil {
+				slog.Warn("interceptPendingDone: failed to read token for closing message",
+					"channel", chName, "err", tokenErr)
+			} else if msgErr := provisioner.SendClosingMessage(ctx, token, cfg.PlatformState); msgErr != nil {
+				slog.Warn("interceptPendingDone: failed to send closing message",
+					"channel", chName, "err", msgErr)
+			}
+		}
+	}
+
 	if cfg.TeardownState != nil {
 		provisioner, hasProv := provisioners[cfg.Type]
 		if !hasProv {
