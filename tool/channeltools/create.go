@@ -5,14 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/http"
-	"net/url"
 	"regexp"
 	"time"
 
 	"tclaw/channel"
 	"tclaw/mcp"
-	"tclaw/tool/telegramclient"
 	"tclaw/toolgroup"
 )
 
@@ -27,8 +24,7 @@ func channelCreateDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name: "channel_create",
 		Description: "Create a new dynamic channel. Supported types: 'socket' (local only) and 'telegram'. " +
-			"For Telegram: if telegram_client_setup has been completed, the bot is created automatically " +
-			"(no manual @BotFather needed). Otherwise, provide a token in telegram_config. " +
+			"For platforms that support auto-provisioning, channel resources are created automatically. " +
 			"Set ephemeral: true for channels that should auto-delete after idle timeout (default 24h). " +
 			"Use initial_message to deliver a kick-off task to the new channel on first boot — " +
 			"this is the preferred way to start ephemeral channels since the agent restarts before " +
@@ -52,7 +48,7 @@ func channelCreateDef() mcp.ToolDef {
 				"allowed_users": {
 					"type": "array",
 					"items": {"type": "integer"},
-					"description": "Telegram user IDs allowed to interact with this bot. Required for Telegram channels."
+					"description": "Platform user IDs for access control. Required for some channel types."
 				},
 				"ephemeral": {
 					"type": "boolean",
@@ -147,33 +143,28 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 				return nil, fmt.Errorf("socket channels are not allowed in %q environment (no authentication)", deps.Env)
 			}
 			channelType = channel.TypeSocket
-		case "telegram":
-			if len(a.AllowedUsers) == 0 {
-				return nil, fmt.Errorf("allowed_users is required for Telegram channels — at least one Telegram user ID must be specified (get your user ID from @userinfobot on Telegram)")
-			}
-			if len([]rune(a.Description)) > telegramclient.MaxBotPurposeRunes {
-				return nil, fmt.Errorf("description too long for Telegram channel: %d characters, max %d (used as bot display name)", len([]rune(a.Description)), telegramclient.MaxBotPurposeRunes)
+		default:
+			channelType = channel.ChannelType(a.Type)
+			provisioner, hasProvisioner := deps.Provisioners[channelType]
+			if !hasProvisioner {
+				return nil, fmt.Errorf("unsupported channel type %q (no provisioner configured)", a.Type)
 			}
 
-			// Always auto-provision via the Telegram provisioner. The bot token
-			// is stored server-side in the secret store — never exposed to the
-			// agent or chat history.
-			provisioner, hasProvisioner := deps.Provisioners[channel.TypeTelegram]
-			if !hasProvisioner {
-				return nil, fmt.Errorf("Telegram Client API not configured — run telegram_client_setup first to enable automatic bot creation")
+			if err := provisioner.ValidateCreate(a.AllowedUsers, a.Description); err != nil {
+				return nil, err
 			}
 
 			result, provErr := provisioner.Provision(ctx, a.Name, a.Description)
 			if provErr != nil {
-				return nil, fmt.Errorf("auto-create Telegram bot: %w", provErr)
+				return nil, fmt.Errorf("provision channel: %w", provErr)
 			}
 
 			botToken = result.Token
 			teardownState = result.TeardownState
-			channelType = channel.TypeTelegram
 
-			// Auto-start the bot by sending /start as the user via MTProto.
-			// Without this, the bot can't message the user (Telegram restriction).
+			// Auto-start the bot if the provisioner supports it and users are
+			// specified. Without this, some platforms block the bot from messaging
+			// users who haven't initiated conversation.
 			if ts, ok := teardownState.(channel.TelegramTeardownState); ok && len(a.AllowedUsers) > 0 {
 				type botStarter interface {
 					StartBot(ctx context.Context, botUsername string, userID int64) error
@@ -184,8 +175,6 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 					}
 				}
 			}
-		default:
-			return nil, fmt.Errorf("unsupported channel type %q (must be 'socket' or 'telegram')", a.Type)
 		}
 
 		// Validate tool_groups / allowed_tools mutual exclusion.
@@ -325,11 +314,14 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			}
 		}
 
-		// Send an initial message so the bot appears in the user's Telegram
-		// sidebar without them having to find and /start it manually.
+		// Send an initial greeting so the channel appears active for users.
 		if botToken != "" && len(allowedUsers) > 0 {
-			greeting := fmt.Sprintf("👋 Channel <b>%s</b> is now active.\n\n%s", a.Name, a.Description)
-			sendBotGreeting(botToken, allowedUsers[0], greeting)
+			if provisioner, ok := deps.Provisioners[channelType]; ok {
+				greeting := fmt.Sprintf("👋 Channel <b>%s</b> is now active.\n\n%s", a.Name, a.Description)
+				if _, err := provisioner.Notify(ctx, botToken, allowedUsers, greeting); err != nil {
+					slog.Warn("failed to send channel greeting", "channel", a.Name, "err", err)
+				}
+			}
 		}
 
 		// Hot-add if the router supports it; fall back to full restart otherwise.
@@ -351,44 +343,15 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			result["message"] = fmt.Sprintf("Channel %q created. The agent will restart automatically to activate it.", a.Name)
 		}
 
-		// For Telegram channels, include the bot username and a link so the
-		// agent can tell the user to open the bot to start the conversation.
-		if ts, ok := teardownState.(channel.TelegramTeardownState); ok && ts.BotUsername != "" {
-			result["bot_username"] = ts.BotUsername
-			result["bot_link"] = fmt.Sprintf("https://t.me/%s", ts.BotUsername)
-			if hotAdd {
-				result["message"] = fmt.Sprintf(
-					"Channel %q created with bot @%s and is now active. "+
-						"IMPORTANT: The user must open the bot link and tap Start before the channel can receive messages: https://t.me/%s",
-					a.Name, ts.BotUsername, ts.BotUsername)
-			} else {
-				result["message"] = fmt.Sprintf(
-					"Channel %q created with bot @%s. The agent will restart automatically. "+
-						"IMPORTANT: The user must open the bot link and tap Start before the channel can receive messages: https://t.me/%s",
-					a.Name, ts.BotUsername, ts.BotUsername)
+		// Add platform-specific info if a provisioner is available.
+		if provisioner, ok := deps.Provisioners[channelType]; ok {
+			if info := provisioner.PlatformResponseInfo(teardownState); info != nil {
+				for k, v := range info {
+					result[k] = v
+				}
 			}
 		}
 
 		return json.Marshal(result)
-	}
-}
-
-// sendBotGreeting sends an initial message from a newly created bot to a user
-// so the bot appears in their Telegram sidebar. Best-effort — errors are logged
-// but don't fail channel creation.
-func sendBotGreeting(token string, chatID int64, text string) {
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", token)
-	resp, err := http.PostForm(apiURL, url.Values{
-		"chat_id":    {fmt.Sprintf("%d", chatID)},
-		"text":       {text},
-		"parse_mode": {"HTML"},
-	})
-	if err != nil {
-		slog.Warn("failed to send bot greeting", "err", err)
-		return
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		slog.Warn("bot greeting returned non-200", "status", resp.StatusCode)
 	}
 }

@@ -7,6 +7,11 @@ import "context"
 // own provisioner implementation. The provisioner is called by channel_create
 // (when no explicit token is provided) and channel_done/auto-cleanup.
 type EphemeralProvisioner interface {
+	// ValidateCreate checks platform-specific constraints before provisioning.
+	// Called by channel_create with the user-provided args so each platform can
+	// enforce its own requirements (e.g. Telegram needs at least one allowed user).
+	ValidateCreate(allowedUsers []int64, description string) error
+
 	// Provision creates the platform-specific resources for a channel
 	// (e.g. mints a Telegram bot via BotFather). Returns the connection
 	// credential (e.g. bot token) and teardown state to persist.
@@ -29,6 +34,15 @@ type EphemeralProvisioner interface {
 	// the bot can still send messages. Best-effort — callers should log errors but
 	// not abort teardown if this fails.
 	SendClosingMessage(ctx context.Context, token string, platformState PlatformState) error
+
+	// Notify sends an out-of-band message to channel users via the platform.
+	// Returns number of users notified. Used by channel_notify tool.
+	Notify(ctx context.Context, token string, allowedUsers []int64, message string) (int, error)
+
+	// PlatformResponseInfo returns platform-specific fields to include in tool
+	// responses (e.g. {"platform_link": "https://t.me/bot", "platform_username": "bot"}).
+	// Returns nil if there's no extra info to include.
+	PlatformResponseInfo(teardownState TeardownState) map[string]any
 }
 
 // ProvisionResult is returned by EphemeralProvisioner.Provision.

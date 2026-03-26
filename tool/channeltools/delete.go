@@ -55,13 +55,11 @@ func channelDeleteHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("delete channel: %w", err)
 		}
 
-		// Clean up any associated secrets (e.g. Telegram bot token). Non-fatal
-		// since the channel config is already removed — an orphaned secret is
-		// less harmful than telling the agent the delete failed.
-		if cfg.Type == channel.TypeTelegram {
-			if err := deps.SecretStore.Delete(ctx, channel.ChannelSecretKey(a.Name)); err != nil {
-				slog.Warn("failed to clean up channel secret after delete", "channel", a.Name, "err", err)
-			}
+		// Clean up any associated secrets (e.g. bot token). Non-fatal since the
+		// channel config is already removed — an orphaned secret is less harmful
+		// than telling the agent the delete failed.
+		if err := deps.SecretStore.Delete(ctx, channel.ChannelSecretKey(a.Name)); err != nil {
+			slog.Warn("failed to clean up channel secret after delete", "channel", a.Name, "err", err)
 		}
 
 		if deps.OnChannelChange != nil {
