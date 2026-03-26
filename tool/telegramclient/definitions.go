@@ -87,39 +87,6 @@ var toolDefs = []mcp.ToolDef{
 		}`),
 	},
 	{
-		Name: "telegram_client_create_bot",
-		Description: "Create a new Telegram bot via BotFather. The bot gets a randomized, " +
-			"non-searchable username (tclaw_<random>_bot) and is automatically configured " +
-			"with privacy mode ON and join groups OFF. The token is stored securely " +
-			"server-side and NEVER returned in the response. Prefer channel_create with " +
-			"type=telegram which calls this internally — only use this tool directly " +
-			"for standalone bot creation outside the channel flow.",
-		InputSchema: json.RawMessage(`{
-			"type": "object",
-			"properties": {
-				"purpose": {
-					"type": "string",
-					"description": "Short label for the bot's purpose (e.g. 'assistant', 'admin'). Used in the display name only."
-				}
-			},
-			"required": ["purpose"]
-		}`),
-	},
-	{
-		Name:        "telegram_client_delete_bot",
-		Description: "Delete a Telegram bot via BotFather. This is permanent and cannot be undone.",
-		InputSchema: json.RawMessage(`{
-			"type": "object",
-			"properties": {
-				"username": {
-					"type": "string",
-					"description": "Bot username (e.g. tclaw_a3f7b21e_bot)."
-				}
-			},
-			"required": ["username"]
-		}`),
-	},
-	{
 		Name: "telegram_client_configure_bot",
 		Description: "Configure a Telegram bot via BotFather. All parameters are optional — " +
 			"only the provided ones are updated. Each setting runs a separate BotFather command internally.",

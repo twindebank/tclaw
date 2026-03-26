@@ -78,9 +78,9 @@ func TestInterceptPendingDone(t *testing.T) {
 	t.Run("sends closing message before teardown when platform state present", func(t *testing.T) {
 		ds, ss := setupDoneTest(t)
 		require.NoError(t, ds.Add(context.Background(), channel.DynamicChannelConfig{
-			Name:        "ephemeral",
-			Type:        channel.TypeTelegram,
-			PendingDone: true,
+			Name:          "ephemeral",
+			Type:          channel.TypeTelegram,
+			PendingDone:   true,
 			PlatformState: channel.TelegramPlatformState{ChatID: 12345},
 			TeardownState: channel.TelegramTeardownState{BotUsername: "tclaw_test_bot"},
 		}))
@@ -232,19 +232,25 @@ type stubDoneChannel struct {
 	info channel.Info
 }
 
-func (s *stubDoneChannel) Info() channel.Info                                        { return s.info }
-func (s *stubDoneChannel) Messages(_ context.Context) <-chan string                  { return nil }
-func (s *stubDoneChannel) Send(_ context.Context, _ string) (channel.MessageID, error) { return "", nil }
+func (s *stubDoneChannel) Info() channel.Info                       { return s.info }
+func (s *stubDoneChannel) Messages(_ context.Context) <-chan string { return nil }
+func (s *stubDoneChannel) Send(_ context.Context, _ string) (channel.MessageID, error) {
+	return "", nil
+}
 func (s *stubDoneChannel) Edit(_ context.Context, _ channel.MessageID, _ string) error { return nil }
-func (s *stubDoneChannel) Done(_ context.Context) error                               { return nil }
-func (s *stubDoneChannel) SplitStatusMessages() bool                                  { return false }
-func (s *stubDoneChannel) Markup() channel.Markup                                     { return channel.MarkupMarkdown }
-func (s *stubDoneChannel) StatusWrap() channel.StatusWrap                             { return channel.StatusWrap{} }
+func (s *stubDoneChannel) Done(_ context.Context) error                                { return nil }
+func (s *stubDoneChannel) SplitStatusMessages() bool                                   { return false }
+func (s *stubDoneChannel) Markup() channel.Markup                                      { return channel.MarkupMarkdown }
+func (s *stubDoneChannel) StatusWrap() channel.StatusWrap                              { return channel.StatusWrap{} }
 
 type mockDoneProvisioner struct {
-	teardownCalled      bool
-	teardownErr         error
+	teardownCalled       bool
+	teardownErr          error
 	closingMessageCalled bool
+}
+
+func (m *mockDoneProvisioner) ValidateCreate(_ []int64, _ string) error {
+	return nil
 }
 
 func (m *mockDoneProvisioner) Provision(_ context.Context, _, _ string) (*channel.ProvisionResult, error) {
@@ -262,6 +268,14 @@ func (m *mockDoneProvisioner) SendTeardownPrompt(_ context.Context, _ string, _ 
 
 func (m *mockDoneProvisioner) SendClosingMessage(_ context.Context, _ string, _ channel.PlatformState) error {
 	m.closingMessageCalled = true
+	return nil
+}
+
+func (m *mockDoneProvisioner) Notify(_ context.Context, _ string, _ []int64, _ string) (int, error) {
+	return 0, nil
+}
+
+func (m *mockDoneProvisioner) PlatformResponseInfo(_ channel.TeardownState) map[string]any {
 	return nil
 }
 

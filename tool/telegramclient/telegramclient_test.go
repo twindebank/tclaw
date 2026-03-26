@@ -143,37 +143,6 @@ func TestTwoFA(t *testing.T) {
 	})
 }
 
-func TestCreateBot(t *testing.T) {
-	t.Run("rejects empty purpose", func(t *testing.T) {
-		h, _ := setup(t)
-
-		err := callToolExpectError(t, h, "telegram_client_create_bot", map[string]any{
-			"purpose": "",
-		})
-		require.Contains(t, err.Error(), "purpose")
-	})
-
-	t.Run("rejects when no credentials stored", func(t *testing.T) {
-		h, _ := setup(t)
-
-		err := callToolExpectError(t, h, "telegram_client_create_bot", map[string]any{
-			"purpose": "assistant",
-		})
-		require.Contains(t, err.Error(), "credentials not configured")
-	})
-}
-
-func TestDeleteBot(t *testing.T) {
-	t.Run("rejects empty username", func(t *testing.T) {
-		h, _ := setup(t)
-
-		err := callToolExpectError(t, h, "telegram_client_delete_bot", map[string]any{
-			"username": "",
-		})
-		require.Contains(t, err.Error(), "username")
-	})
-}
-
 func TestConfigureBot(t *testing.T) {
 	t.Run("rejects empty username", func(t *testing.T) {
 		h, _ := setup(t)
@@ -390,8 +359,6 @@ func TestAllToolsRegistered(t *testing.T) {
 		"telegram_client_verify",
 		"telegram_client_2fa",
 		"telegram_client_status",
-		"telegram_client_create_bot",
-		"telegram_client_delete_bot",
 		"telegram_client_configure_bot",
 		"telegram_client_create_group",
 		"telegram_client_list_chats",

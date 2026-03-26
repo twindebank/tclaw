@@ -168,6 +168,47 @@ type telegramMessage struct {
 	ReplyToMessage *telegramMessage `json:"reply_to_message"`
 }
 
+// ValidateCreate checks Telegram-specific constraints before provisioning.
+func (p *Provisioner) ValidateCreate(allowedUsers []int64, description string) error {
+	if len(allowedUsers) == 0 {
+		return fmt.Errorf("allowed_users is required for Telegram channels — at least one Telegram user ID must be specified (get your user ID from @userinfobot on Telegram)")
+	}
+	if len([]rune(description)) > MaxBotPurposeRunes {
+		return fmt.Errorf("description too long for Telegram channel: %d characters, max %d (used as bot display name)", len([]rune(description)), MaxBotPurposeRunes)
+	}
+	return nil
+}
+
+// Notify sends an out-of-band message to allowed users via the Telegram Bot API.
+// Returns the number of users successfully notified.
+func (p *Provisioner) Notify(ctx context.Context, token string, allowedUsers []int64, message string) (int, error) {
+	var sent int
+	for _, userID := range allowedUsers {
+		if _, err := telegramBotSend(token, userID, message); err != nil {
+			slog.Warn("failed to notify user", "user_id", userID, "err", err)
+			continue
+		}
+		sent++
+	}
+	if sent == 0 && len(allowedUsers) > 0 {
+		return 0, fmt.Errorf("failed to notify any of %d users", len(allowedUsers))
+	}
+	return sent, nil
+}
+
+// PlatformResponseInfo returns Telegram-specific fields (bot username and link)
+// for inclusion in tool responses.
+func (p *Provisioner) PlatformResponseInfo(teardownState channel.TeardownState) map[string]any {
+	ts, ok := teardownState.(channel.TelegramTeardownState)
+	if !ok || ts.BotUsername == "" {
+		return nil
+	}
+	return map[string]any{
+		"platform_username": ts.BotUsername,
+		"platform_link":     "https://t.me/" + ts.BotUsername,
+	}
+}
+
 // StartBot sends /start to a bot as the authenticated user via MTProto.
 // This initiates the conversation so the bot can message the user back
 // (Telegram blocks bots from messaging users who haven't /started them).

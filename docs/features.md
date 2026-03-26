@@ -43,7 +43,15 @@ Channels are the transport layer between users and the agent. See `channel_creat
 
 ### Static vs Dynamic Channels
 
-**Static channels** are defined in the config file (`tclaw.yaml`). **Dynamic channels** are created at runtime via MCP tools. Dynamic channels persist across agent restarts (stored in the user's state directory). Channel mutations trigger an automatic agent restart.
+**Static channels** are defined in the config file (`tclaw.yaml`). **Dynamic channels** are created at runtime via MCP tools. Dynamic channels persist across agent restarts (stored in the user's state directory). Channel creation hot-adds to the running agent; edits, deletes, and teardowns trigger a restart.
+
+### Ephemeral Channels
+
+Set `ephemeral: true` on `channel_create` for channels that should auto-delete after an idle timeout (default 24h). Use `channel_done` to tear down manually — it sends a confirmation prompt to the user and only proceeds when the user replies "yes" (async flow via the router). Platform resources (bots, tokens) are cleaned up automatically.
+
+### Platform Abstraction
+
+Channel tools are platform-agnostic — the agent creates channels without needing to know the underlying transport. Platform-specific logic (bot creation, teardown, notifications) is handled by `EphemeralProvisioner` implementations behind the scenes. Each channel stores `PlatformState` (e.g. chat ID for Telegram) and `TeardownState` (e.g. bot username) as discriminated types for transparent serialization.
 
 ### Tool Groups
 

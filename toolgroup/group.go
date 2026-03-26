@@ -46,7 +46,7 @@ func AllGroups() []GroupInfo {
 		{GroupGSuiteWrite, "Google Workspace full access: send emails, create/update calendar events, edit docs and sheets. Includes all read capabilities."},
 		{GroupPersonalServices, "Personal service integrations: TfL transport, restaurant reservations, banking (Open Banking), Monzo."},
 		{GroupConnections, "Manage OAuth connections to external services and remote MCP server connections."},
-		{GroupTelegramClient, "Telegram Client API (MTProto): authenticate, create/delete/configure bots via BotFather, manage chats, read message history."},
+		{GroupTelegramClient, "Telegram Client API (MTProto): authenticate, configure bots via BotFather, manage chats, read message history."},
 		{GroupOnboarding, "New user onboarding flow: track progress, deliver tips, manage setup phases."},
 		{GroupSecretForm, "Collect sensitive information (API keys, tokens, passwords) via secure web forms. Values go directly to encrypted storage, never through chat."},
 	}
@@ -135,7 +135,7 @@ var groupTools = map[ToolGroup][]claudecli.Tool{
 		claudecli.Tool("mcp__tclaw__channel_delete"),
 		claudecli.Tool("mcp__tclaw__channel_edit"),
 		claudecli.Tool("mcp__tclaw__channel_list"),
-		claudecli.Tool("mcp__tclaw__channel_ping"),
+		claudecli.Tool("mcp__tclaw__channel_notify"),
 		MCPToolChannelDone,
 		claudecli.Tool("mcp__tclaw__channel_is_busy"),
 		MCPToolChannelSend,
