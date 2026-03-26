@@ -23,6 +23,12 @@ type EphemeralProvisioner interface {
 	// sending — does NOT wait for the user's response. The router intercepts the
 	// reply asynchronously via the PendingDone flag on the channel config.
 	SendTeardownPrompt(ctx context.Context, token string, platformState PlatformState) error
+
+	// SendClosingMessage sends a brief acknowledgement to the channel immediately
+	// after the user confirms teardown ("yes"). Called before platform teardown so
+	// the bot can still send messages. Best-effort — callers should log errors but
+	// not abort teardown if this fails.
+	SendClosingMessage(ctx context.Context, token string, platformState PlatformState) error
 }
 
 // ProvisionResult is returned by EphemeralProvisioner.Provision.

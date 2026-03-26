@@ -406,8 +406,17 @@ func (bf *BotFather) waitForResponse(ctx context.Context, substring string) (str
 			}
 
 			text := msg.Message
+			bf.lastSeenMsgID = msg.ID
+
+			// Fail fast on BotFather error messages (rate limits, invalid input, etc.)
+			// even when they don't match the expected substring. Without this, we'd
+			// silently wait until stepTimeout before surfacing the error.
+			if substring != "" && !strings.Contains(strings.ToLower(text), substring) && containsError(text) {
+				slog.Error("botfather: received error response", "msg_id", msg.ID, "text", truncate(text, 120))
+				return "", fmt.Errorf("BotFather error: %s", text)
+			}
+
 			if substring == "" || strings.Contains(strings.ToLower(text), substring) {
-				bf.lastSeenMsgID = msg.ID
 				slog.Info("botfather: got response", "msg_id", msg.ID, "text_prefix", truncate(text, 80))
 				return text, nil
 			}
@@ -502,11 +511,12 @@ func truncate(s string, n int) string {
 	return s[:n] + "..."
 }
 
-// containsError checks if a BotFather response indicates an error.
+// containsError checks if a BotFather response indicates an error or rate limit.
 func containsError(text string) bool {
 	lower := strings.ToLower(text)
 	return strings.Contains(lower, "sorry") ||
 		strings.Contains(lower, "error") ||
 		strings.Contains(lower, "invalid") ||
-		strings.Contains(lower, "can't")
+		strings.Contains(lower, "can't") ||
+		strings.Contains(lower, "too many")
 }

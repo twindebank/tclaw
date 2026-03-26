@@ -75,6 +75,33 @@ func TestInterceptPendingDone(t *testing.T) {
 		require.Empty(t, token)
 	})
 
+	t.Run("sends closing message before teardown when platform state present", func(t *testing.T) {
+		ds, ss := setupDoneTest(t)
+		require.NoError(t, ds.Add(context.Background(), channel.DynamicChannelConfig{
+			Name:        "ephemeral",
+			Type:        channel.TypeTelegram,
+			PendingDone: true,
+			PlatformState: channel.TelegramPlatformState{ChatID: 12345},
+			TeardownState: channel.TelegramTeardownState{BotUsername: "tclaw_test_bot"},
+		}))
+		require.NoError(t, ss.Set(context.Background(), channel.ChannelSecretKey("ephemeral"), "fake-token"))
+
+		prov := &mockDoneProvisioner{}
+
+		consumed := interceptPendingDone(
+			context.Background(),
+			doneTaggedMsg("ephemeral-id", "yes"),
+			doneChannelsFunc("ephemeral-id", "ephemeral"),
+			ds, ss,
+			map[channel.ChannelType]channel.EphemeralProvisioner{channel.TypeTelegram: prov},
+			nil,
+		)
+
+		require.True(t, consumed)
+		require.True(t, prov.closingMessageCalled, "closing message should be sent before teardown")
+		require.True(t, prov.teardownCalled)
+	})
+
 	t.Run("accepts y as confirmation", func(t *testing.T) {
 		ds, ss := setupDoneTest(t)
 		require.NoError(t, ds.Add(context.Background(), channel.DynamicChannelConfig{
@@ -215,8 +242,9 @@ func (s *stubDoneChannel) Markup() channel.Markup                               
 func (s *stubDoneChannel) StatusWrap() channel.StatusWrap                             { return channel.StatusWrap{} }
 
 type mockDoneProvisioner struct {
-	teardownCalled bool
-	teardownErr    error
+	teardownCalled      bool
+	teardownErr         error
+	closingMessageCalled bool
 }
 
 func (m *mockDoneProvisioner) Provision(_ context.Context, _, _ string) (*channel.ProvisionResult, error) {
@@ -229,6 +257,11 @@ func (m *mockDoneProvisioner) Teardown(_ context.Context, _ channel.TeardownStat
 }
 
 func (m *mockDoneProvisioner) SendTeardownPrompt(_ context.Context, _ string, _ channel.PlatformState) error {
+	return nil
+}
+
+func (m *mockDoneProvisioner) SendClosingMessage(_ context.Context, _ string, _ channel.PlatformState) error {
+	m.closingMessageCalled = true
 	return nil
 }
 
