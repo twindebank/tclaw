@@ -33,7 +33,9 @@ var toolDefs = []mcp.ToolDef{
 	{
 		Name: "tfl_journey",
 		Description: "Plan a journey using TfL. Accepts postcodes, station names, coordinates (lat,lon), or NaPTAN IDs " +
-			"as from/to locations. Returns route options with step-by-step directions, durations, and live departure times.",
+			"as from/to locations. Returns route options with step-by-step directions, durations, and live departure times. " +
+			"Tip: departure/arrival points in the response include individualStopId — useful for finding the correct " +
+			"individual stop ID to pass to tfl_arrivals (group stop IDs return empty from tfl_arrivals).",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -73,13 +75,16 @@ var toolDefs = []mcp.ToolDef{
 	{
 		Name: "tfl_arrivals",
 		Description: "Get live arrivals at a TfL stop or station. Returns the next vehicles/trains with estimated arrival times. " +
-			"Use tfl_stop_search first to find the stop ID if you only have a name.",
+			"Use tfl_stop_search first to find the stop ID if you only have a name.\n\n" +
+			"IMPORTANT: Group stop IDs (e.g. '490G00010561') return empty results — always use individual stop IDs " +
+			"(e.g. '490010561W'). To find individual stop IDs from a group ID or location, use tfl_journey: " +
+			"the response includes individualStopId in the departure/arrival point details.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"stop_id": {
 					"type": "string",
-					"description": "NaPTAN stop/station ID (e.g. '940GZZLUKSX' for King's Cross). Use tfl_stop_search to find IDs."
+					"description": "NaPTAN individual stop ID (e.g. '490010561W'). Group stop IDs (starting with '490G') return empty — use individual IDs only. Use tfl_stop_search or tfl_journey to find individual IDs."
 				},
 				"api_key": {
 					"type": "string",
