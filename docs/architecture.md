@@ -42,7 +42,7 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 | `cli/` | CLI subcommand dispatch. `serve` (start server), `chat` (TUI client), `secret` (keychain management), `deploy` (Fly.io deployment, secrets, suspend/resume), `oneshot` (single-message test mode). |
 | `router/` | Per-user agent lifecycle management. Owns goroutine lifetimes, directory setup, MCP server creation, tool registration. Builds per-channel tool overrides from `config.Channel` (static) and `DynamicChannelConfig` (dynamic) tool fields. The only stateful orchestrator. |
 | `agent/` | Stateless package. `Run(ctx, opts)` reads messages from channels, handles auth flows, spawns CLI subprocess per turn, streams responses back. `ChannelToolOverrides` in `Options` enables per-channel tool permissions. `reset.go` computes `allowedResetLevels()` to build dynamic reset menus filtered by channel. |
-| `channel/` | Transport abstraction. `Channel` interface with implementations: Socket, Stdio, Telegram. `FanIn()` multiplexer, `ChannelMap()` helper. `DynamicStore` for runtime channel configs, `ChannelSecretKey()` for deriving secret store keys. |
+| `channel/` | Transport abstraction. `Channel` interface with implementations: Socket, Stdio, Telegram. `FanIn()` multiplexer, `ChannelMap()` helper. `DynamicStore` for runtime channel configs, `ChannelSecretKey()` for deriving secret store keys. `EphemeralProvisioner` interface for platform-specific channel lifecycle (provision, teardown, confirm, notify). `PlatformState` and `TeardownState` discriminated types for platform-specific persistent data. `QueueStore` for persisting messages and interrupted-turn markers across agent restarts. |
 | `config/` | YAML parsing, secret resolution, config validation. |
 
 ### Auth & Connections
@@ -59,7 +59,7 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 |---------|----------------|
 | `mcp/` | JSON-RPC tool registry (`Handler`), HTTP server (`Server`), config file generation (`GenerateConfigFile`). |
 | `mcp/discovery/` | OAuth discovery for remote MCP servers (RFC 7591 dynamic registration). Safe HTTP client that blocks private IPs and requires HTTPS. |
-| `tool/channeltools/` | MCP tools for dynamic channel management (create, list, edit, delete) and cross-channel messaging (`channel_send`). Channel CRUD stores/rotates/deletes secrets alongside config. Cross-channel send validates config links and active channel server-side, then injects into the target channel's message stream. |
+| `tool/channeltools/` | MCP tools for dynamic channel management (create, list, edit, delete, notify, done) and cross-channel messaging (`channel_send`). Channel tools are platform-agnostic — platform-specific logic is delegated to `EphemeralProvisioner` implementations. `channel_done` uses an async confirmation flow: sends a prompt to the user, the router intercepts the reply. |
 | `tool/connectiontools/` | MCP tools for OAuth connection management (add, remove, list, auth_wait). |
 | `tool/remotemcp/` | MCP tools for remote MCP server management (add, remove, list, auth_wait). |
 | `tool/scheduletools/` | MCP tools for cron schedule management (create, list, edit, delete, pause, resume). |
@@ -125,9 +125,11 @@ Messages arrive from three sources, all as `TaggedMessage{ChannelID, Text, Sourc
 
 All sources are merged via `MergeFanIns(ctx, staticMsgs, scheduleMsgs, crossChannelMsgs)` into a single stream.
 
+**Message persistence and auto-resume:** When a message arrives during an active turn, it's queued in memory and persisted to disk via `QueueStore`. If the agent is killed mid-turn (deploy, crash), the `QueueStore` also stores which channel was interrupted. On restart, `RunWithMessages` loads the persisted queue and injects a resume message for the interrupted channel so the agent can continue where it left off. The interrupted marker is only cleared on normal turn completion — context cancellation (deploy/shutdown) preserves it.
+
 1. Message arrives on the merged stream
 2. Router's `waitAndStart()` receives the first message and starts the agent
-3. `agent.RunWithMessages()` processes messages in a loop:
+3. `agent.RunWithMessages()` loads persisted queue + interrupted state, then processes messages in a loop:
    - `OnTurnStart` callback fires with the channel name (used for cross-channel send validation)
    - Builtin commands (`stop`, `compact`, `reset`, `login`, `auth`) are gated by `isBuiltinAllowed()` — if the channel's tool permissions don't include the corresponding `builtin__*` entry, the command is denied with a message
    - `stop` cancels the active turn and clears any pending reset/auth flows
@@ -214,29 +216,44 @@ Claude CLI picks up new MCP on next turn (reads --mcp-config)
 ### Dynamic Channel Lifecycle
 
 ```
-channel_create(type: "telegram", telegram_config: {token: "..."})
+channel_create(type: "telegram", allowed_users: [12345])
     │
     ▼
 Validate name, type, env (socket blocked in non-local)
     │
     ▼
-Store DynamicChannelConfig in user's state (name, type, description — no token)
+provisioner.ValidateCreate(allowedUsers, description) — platform-specific checks
     │
     ▼
-Store bot token in secret store (key: "channel/<name>/token")
+provisioner.Provision(name, description) — creates platform resources (e.g. Telegram bot)
     │
     ▼
-OnChannelChange callback signals router → agent restarts automatically
+Store DynamicChannelConfig + PlatformState in user's state
+    │
+    ▼
+Store platform token in secret store (key: "channel/<name>/token")
+    │
+    ▼
+provisioner.Notify() — sends greeting to users
+    │
+    ▼
+OnChannelAdded hot-adds channel (or OnChannelChange restarts agent)
     buildDynamicChannels() reads config + token from secret store
-    └─► Constructs live Telegram channel with webhook/polling
+    └─► Constructs live channel with platform-appropriate transport
 
-channel_edit(telegram_config: {token: "new-token"})
+channel_done(channel_name: "mybot", results_sent: "...")
     │
     ▼
-Overwrite token in secret store (same key) — token rotation
+provisioner.SendTeardownPrompt() — asks user to reply "yes"
     │
     ▼
-OnChannelChange callback signals router → agent restarts automatically
+Sets PendingDone=true on channel config, returns immediately
+    │
+    ▼
+Router intercepts next inbound message on this channel:
+    "yes" → provisioner.SendClosingMessage() → provisioner.Teardown()
+            → remove config + secret → OnChannelChange (restart)
+    anything else → clears PendingDone, forwards message to agent normally
 
 channel_delete(name: "mybot")
     │
@@ -244,7 +261,7 @@ channel_delete(name: "mybot")
 Remove DynamicChannelConfig from store
     │
     ▼
-Delete token from secret store (key: "channel/<name>/token")
+Delete token from secret store (best-effort)
     │
     ▼
 OnChannelChange callback signals router → agent restarts automatically

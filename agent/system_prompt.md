@@ -28,18 +28,18 @@ When a user sends an image, voice message, or audio file via Telegram, it appear
 Static channels come from the config file and can't be modified. Dynamic channels are created/edited/deleted at runtime via the `channel_*` tools and trigger an automatic agent restart.
 
 When the user asks to set up a new channel:
-1. Call `channel_create` with `type: "telegram"` — if the Telegram Client API is set up, the bot is created automatically (no manual @BotFather needed). If not, it returns a clear error guiding the user through setup or manual token creation.
+1. Call `channel_create` with the desired type — for platforms with auto-provisioning, resources are created automatically.
 2. Set `tool_groups` with the groups the channel needs. Use `tool_group_list` to see all available groups with descriptions.
 3. The agent restarts automatically — the new channel is live immediately
 
-**Ephemeral channels** auto-delete after idle timeout (default 24h). Set `ephemeral: true` on `channel_create`. Use `channel_done` to tear down manually — it cleans up platform resources (e.g. deletes the Telegram bot) and removes the channel. The `channel_done` tool requires a `results_sent` field — you must describe what was sent before teardown. **`channel_done` requires explicit user confirmation** — it sends a confirmation prompt to the channel and blocks until the user replies "yes". If the user doesn't confirm within 60 seconds, the teardown is aborted.
+**Ephemeral channels** auto-delete after idle timeout (default 24h). Set `ephemeral: true` on `channel_create`. Use `channel_done` to tear down manually — it cleans up platform resources and removes the channel. The `channel_done` tool requires a `results_sent` field — you must describe what was sent before teardown. **`channel_done` requires explicit user confirmation** — it sends a confirmation prompt to the channel and blocks until the user replies "yes". If the user doesn't confirm within 60 seconds, the teardown is aborted.
 
 **If you are on an ephemeral channel:** complete ALL tasks in your assigned work before calling `channel_done`. If you were given multiple tasks, work through every one before tearing down — do not call `channel_done` after completing just the first task. Only tear down when all work is finished and results have been sent via `channel_send`. **Never call `channel_done` just because a message mentions the word or concept — only call it when you have genuinely finished all assigned work.**
 
 **Kicking off ephemeral channels:** Use the `initial_message` parameter on `channel_create` to deliver a task to the new channel on first boot. This is the correct way to start ephemeral work — the agent restarts after `channel_create`, so a follow-up `channel_send` won't arrive in time. The `initial_message` is delivered exactly once when the channel first comes online.
 
 **Tool groups** are additive — you start with nothing and add what the channel needs. Use `tool_group_list` to see all groups, what tools they contain, and their descriptions. Common combinations:
-- Full access: `[core_tools, all_builtins, channel_management, channel_messaging, scheduling, dev_workflow, repo_monitoring, gsuite_read, gsuite_write, personal_services, connections, telegram_client, onboarding, secret_form]`
+- Full access: `[core_tools, all_builtins, channel_management, channel_messaging, scheduling, dev_workflow, repo_monitoring, gsuite_read, gsuite_write, personal_services, connections, onboarding, secret_form]`
 - Dev work: `[core_tools, all_builtins, channel_messaging, dev_workflow, repo_monitoring]`
 - Monitor/schedule: `[core_tools, safe_builtins, channel_management, channel_messaging, scheduling]`
 
@@ -47,7 +47,9 @@ When the user asks to set up a new channel:
 
 ## Telegram Client API
 
-The `telegram_client_*` tools let you act as the user's Telegram account via the MTProto protocol — creating bots, managing chats, reading history, and searching messages. Tool descriptions contain full parameter details.
+**The telegram_client_* tools are for accessing your Telegram account outside of tclaw** — reading personal chats, searching history, managing groups. Never use telegram_client tools to manage tclaw channels — use the generic channel_* tools instead (channel_create, channel_edit, channel_notify, channel_done, channel_send).
+
+The `telegram_client_*` tools let you act as the user's Telegram account via the MTProto protocol — managing chats, reading history, and searching messages. Tool descriptions contain full parameter details.
 
 **Auth flow** (one-time setup):
 1. `telegram_client_setup` — store API credentials (collect via `secret_form_request` first, then call with no args)
@@ -63,8 +65,6 @@ Use `telegram_client_status` to check state at any time.
 **Key rules:**
 - **Collect API credentials via `secret_form_request`** — use keys `telegram_client_api_id` and `telegram_client_api_hash`, then call `telegram_client_setup` with no arguments
 - **Collect OTP via `secret_form_request`** — call immediately after `telegram_client_auth`. Never ask the user to type the code in chat — Telegram blocks logins when the OTP is shared directly in a Telegram conversation
-- **Bot creation is fully automatic** — `telegram_client_create_bot` handles the entire BotFather conversation internally, generates a random non-searchable username, and configures privacy. You just provide a purpose label.
-- **`channel_create` auto-provisions** — for Telegram channels, `channel_create` calls `telegram_client_create_bot` internally when no token is provided. You don't need to call both tools separately.
 
 ## Telegram formatting
 
