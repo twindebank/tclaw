@@ -9,23 +9,22 @@ import (
 	"tclaw/mcp"
 )
 
-func channelPingDef() mcp.ToolDef {
+func channelNotifyDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name: "channel_ping",
-		Description: "Send a message from a Telegram bot to its allowed users. " +
-			"Useful for making a newly created bot appear in users' Telegram sidebars " +
-			"without them having to find and /start it manually. " +
-			"The message is sent as the bot, not as the user.",
+		Name: "channel_notify",
+		Description: "Send a notification message directly to a channel's users via the platform. " +
+			"Useful for making newly created channels visible or sending out-of-band alerts. " +
+			"Only works for channel types that support direct notifications.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"channel_name": {
 					"type": "string",
-					"description": "Name of the Telegram channel to ping."
+					"description": "Name of the channel to notify."
 				},
 				"message": {
 					"type": "string",
-					"description": "Message to send. Supports Telegram HTML formatting."
+					"description": "Message to send to channel users."
 				}
 			},
 			"required": ["channel_name", "message"]
@@ -33,14 +32,14 @@ func channelPingDef() mcp.ToolDef {
 	}
 }
 
-type channelPingArgs struct {
+type channelNotifyArgs struct {
 	ChannelName string `json:"channel_name"`
 	Message     string `json:"message"`
 }
 
-func channelPingHandler(deps Deps) mcp.ToolHandler {
+func channelNotifyHandler(deps Deps) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
-		var a channelPingArgs
+		var a channelNotifyArgs
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
@@ -51,7 +50,6 @@ func channelPingHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("message is required")
 		}
 
-		// Look up the channel config to get allowed_users.
 		cfg, err := deps.Registry.DynamicStore().Get(ctx, a.ChannelName)
 		if err != nil {
 			return nil, fmt.Errorf("look up channel: %w", err)
@@ -59,27 +57,27 @@ func channelPingHandler(deps Deps) mcp.ToolHandler {
 		if cfg == nil {
 			return nil, fmt.Errorf("channel %q not found", a.ChannelName)
 		}
-		if cfg.Type != channel.TypeTelegram {
-			return nil, fmt.Errorf("channel %q is not a Telegram channel", a.ChannelName)
+
+		provisioner, ok := deps.Provisioners[cfg.Type]
+		if !ok {
+			return nil, fmt.Errorf("channel %q (type %s) does not support direct notifications", a.ChannelName, cfg.Type)
 		}
+
 		if len(cfg.AllowedUsers) == 0 {
 			return nil, fmt.Errorf("channel %q has no allowed_users to send to", a.ChannelName)
 		}
 
-		// Read the bot token from the secret store.
 		token, err := deps.SecretStore.Get(ctx, channel.ChannelSecretKey(a.ChannelName))
 		if err != nil {
-			return nil, fmt.Errorf("read bot token: %w", err)
+			return nil, fmt.Errorf("read channel token: %w", err)
 		}
 		if token == "" {
-			return nil, fmt.Errorf("no bot token found for channel %q", a.ChannelName)
+			return nil, fmt.Errorf("no token found for channel %q", a.ChannelName)
 		}
 
-		// Send to all allowed users.
-		var sent int
-		for _, userID := range cfg.AllowedUsers {
-			sendBotGreeting(token, userID, a.Message)
-			sent++
+		sent, err := provisioner.Notify(ctx, token, cfg.AllowedUsers, a.Message)
+		if err != nil {
+			return nil, fmt.Errorf("notify channel users: %w", err)
 		}
 
 		return json.Marshal(map[string]any{

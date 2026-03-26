@@ -105,7 +105,7 @@ func TestChannelCreate(t *testing.T) {
 			"type":          "telegram",
 			"allowed_users": []any{float64(123456789)},
 		})
-		require.Contains(t, err.Error(), "Telegram Client API not configured")
+		require.Contains(t, err.Error(), "no provisioner configured")
 	})
 
 	t.Run("telegram requires allowed_users", func(t *testing.T) {
@@ -746,6 +746,21 @@ type mockProvisioner struct {
 	provisionErr             error
 	sendTeardownPromptCalled bool
 	sendTeardownPromptErr    error
+	validateCreateErr        error
+	notifyCalled             bool
+	notifyErr                error
+	platformResponseInfo     map[string]any
+}
+
+func (m *mockProvisioner) ValidateCreate(allowedUsers []int64, description string) error {
+	if m.validateCreateErr != nil {
+		return m.validateCreateErr
+	}
+	// Default Telegram-like validation: require at least one allowed user.
+	if len(allowedUsers) == 0 {
+		return fmt.Errorf("allowed_users is required")
+	}
+	return nil
 }
 
 func (m *mockProvisioner) Provision(_ context.Context, name, purpose string) (*channel.ProvisionResult, error) {
@@ -780,4 +795,16 @@ func (m *mockProvisioner) SendTeardownPrompt(_ context.Context, _ string, _ chan
 
 func (m *mockProvisioner) SendClosingMessage(_ context.Context, _ string, _ channel.PlatformState) error {
 	return nil
+}
+
+func (m *mockProvisioner) Notify(_ context.Context, _ string, _ []int64, _ string) (int, error) {
+	m.notifyCalled = true
+	if m.notifyErr != nil {
+		return 0, m.notifyErr
+	}
+	return 1, nil
+}
+
+func (m *mockProvisioner) PlatformResponseInfo(state channel.TeardownState) map[string]any {
+	return m.platformResponseInfo
 }
