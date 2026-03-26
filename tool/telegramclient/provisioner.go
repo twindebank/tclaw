@@ -86,6 +86,25 @@ func (p *Provisioner) SendTeardownPrompt(ctx context.Context, token string, plat
 	return nil
 }
 
+// SendClosingMessage sends a brief acknowledgement after the user confirms channel
+// teardown, before the bot is deleted. Best-effort — the caller should log but
+// not abort teardown if this fails.
+func (p *Provisioner) SendClosingMessage(ctx context.Context, token string, platformState channel.PlatformState) error {
+	tps, ok := platformState.(channel.TelegramPlatformState)
+	if !ok {
+		return fmt.Errorf("unexpected platform state type: %T (expected TelegramPlatformState)", platformState)
+	}
+	if tps.ChatID == 0 {
+		return fmt.Errorf("no chat ID available — cannot send closing message")
+	}
+
+	msg := "✅ Confirmed — closing channel..."
+	if _, err := telegramBotSend(token, tps.ChatID, msg); err != nil {
+		return fmt.Errorf("send closing message: %w", err)
+	}
+	return nil
+}
+
 // telegramBotSend sends a message via the Telegram Bot HTTP API and returns
 // the message ID.
 func telegramBotSend(token string, chatID int64, text string) (int, error) {
