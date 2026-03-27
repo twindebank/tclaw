@@ -95,6 +95,10 @@ func setCredentialsHandler(s *handlerState) mcp.ToolHandler {
 			return nil, fmt.Errorf("store private key: %w", err)
 		}
 
+		if s.deps.OnCredentialsStored != nil {
+			s.deps.OnCredentialsStored()
+		}
+
 		return json.Marshal(map[string]string{
 			"status":  "stored",
 			"message": "Enable Banking credentials saved. You can now use banking_list_banks and banking_connect.",
