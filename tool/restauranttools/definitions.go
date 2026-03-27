@@ -6,7 +6,9 @@ import (
 	"tclaw/mcp"
 )
 
-var toolDefs = []mcp.ToolDef{
+// infoToolDefs are always registered — they let the agent learn about the
+// provider and set up credentials.
+var infoToolDefs = []mcp.ToolDef{
 	{
 		Name: "restaurant_set_credentials",
 		Description: "Store credentials for a restaurant booking provider. " +
@@ -33,6 +35,10 @@ var toolDefs = []mcp.ToolDef{
 			"required": ["api_key", "auth_token"]
 		}`),
 	},
+}
+
+// operationalToolDefs are only registered when credentials are configured.
+var operationalToolDefs = []mcp.ToolDef{
 	{
 		Name: "restaurant_search",
 		Description: "Search for restaurants. Returns venue IDs, names, and availability overview. " +
