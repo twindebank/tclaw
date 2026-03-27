@@ -57,7 +57,8 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 		{
 			Name: "google_gmail_read",
 			Description: "Read a single Gmail message and return its body as clean plain text. " +
-				"Strips HTML formatting, signatures, and styling — returns only readable text content with headers (from, to, subject, date). " +
+				"Converts HTML emails (marketing newsletters, booking confirmations, etc.) to readable text — " +
+				"preserves table content (prices, dates, structured data), link text, and block formatting. " +
 				"Use this after google_gmail_list to read specific emails you need the full content of. " +
 				"You MUST read an email before summarizing its content — never guess or fabricate content from the snippet alone. " +
 				"Much more efficient than google_workspace with format=full, which returns raw HTML that bloats context.",
@@ -83,6 +84,8 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 				"no Bash or external encoding needed. " +
 				"For replies: use google_gmail_read first to get the message_id (use as in_reply_to), references, and thread_id, " +
 				"then pass them here to thread the reply correctly. " +
+				"TIP: For simpler replies, use google_workspace with 'gmail +reply --message-id ID --body TEXT' — " +
+				"it handles threading headers automatically without needing to read the message first. " +
 				"Sends plain text emails. The From address is set automatically from the authenticated Google account.",
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
@@ -229,6 +232,11 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 				"Supports Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks, and more. " +
 				"The 'command' is the gws CLI arguments (e.g. 'gmail users messages list', 'drive files list'). " +
 				"Use google_workspace_schema to discover available methods and their parameters. " +
+				"gws also has built-in skills ('+' commands) for common workflows — run 'gws gmail --help' to see them. " +
+				"Key skills: 'gmail +triage' (unread summary), 'gmail +reply --message-id ID --body TEXT' (auto-threaded reply), " +
+				"'gmail +forward --message-id ID --to ADDR' (forward with attachments), 'gmail +send' (compose). " +
+				"Skills handle threading headers, MIME encoding, and attachments automatically. " +
+				"Skill reference: https://github.com/googleworkspace/cli/tree/main/skills " +
 				"IMPORTANT: Never use with Gmail format=full — it returns huge HTML blobs that waste context. Use google_gmail_read instead. " +
 				"Calendar updates: use 'calendar events update' (full PUT), NOT 'calendar events patch' — patching date to dateTime causes a 400. " +
 				"For timezone in dateTime, use UTC offset in the ISO string (e.g. 2026-03-13T17:26:00+00:00), NOT a separate timeZone field.",
