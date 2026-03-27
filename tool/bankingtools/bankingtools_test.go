@@ -269,11 +269,13 @@ func setup(t *testing.T) (*mcp.Handler, *memorySecretStore, store.Store) {
 	require.NoError(t, err)
 
 	handler := mcp.NewHandler()
-	bankingtools.RegisterTools(handler, bankingtools.Deps{
+	deps := bankingtools.Deps{
 		SecretStore: secrets,
 		StateStore:  stateStore,
 		Callback:    nil, // No callback server in tests.
-	})
+	}
+	bankingtools.RegisterInfoTools(handler, deps)
+	bankingtools.RegisterTools(handler, deps)
 
 	return handler, secrets, stateStore
 }

@@ -219,9 +219,9 @@ func setup(t *testing.T) (*mcp.Handler, *memorySecretStore) {
 	t.Helper()
 	secrets := &memorySecretStore{data: map[string]string{}}
 	handler := mcp.NewHandler()
-	restauranttools.RegisterTools(handler, restauranttools.Deps{
-		SecretStore: secrets,
-	})
+	deps := restauranttools.Deps{SecretStore: secrets}
+	restauranttools.RegisterInfoTools(handler, deps)
+	restauranttools.RegisterTools(handler, deps)
 	return handler, secrets
 }
 
@@ -232,9 +232,9 @@ func setupWithCredentials(t *testing.T) (*mcp.Handler, *memorySecretStore) {
 		restauranttools.ResyAuthTokenStoreKey: "test-auth-token",
 	}}
 	handler := mcp.NewHandler()
-	restauranttools.RegisterTools(handler, restauranttools.Deps{
-		SecretStore: secrets,
-	})
+	deps := restauranttools.Deps{SecretStore: secrets}
+	restauranttools.RegisterInfoTools(handler, deps)
+	restauranttools.RegisterTools(handler, deps)
 	return handler, secrets
 }
 
