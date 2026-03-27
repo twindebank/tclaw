@@ -8,10 +8,9 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/k3a/html2text"
-
 	"tclaw/connection"
 	"tclaw/gws"
+	"tclaw/libraries/htmlconv"
 	"tclaw/mcp"
 )
 
@@ -151,7 +150,7 @@ func extractBody(part *gmailFullPart) string {
 			return text
 		}
 		if strings.HasPrefix(part.MimeType, "text/html") {
-			return html2text.HTML2Text(text)
+			return htmlconv.ToText(text)
 		}
 
 		// Skip non-text parts (images, attachments).
@@ -190,7 +189,7 @@ func extractBody(part *gmailFullPart) string {
 		return plainText
 	}
 	if htmlText != "" {
-		return html2text.HTML2Text(htmlText)
+		return htmlconv.ToText(htmlText)
 	}
 
 	// Last resort — recurse into any remaining multipart children.
