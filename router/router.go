@@ -1019,7 +1019,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				// Read from the dev store each turn so worktrees created
 				// mid-session (via dev_start) are immediately accessible.
 				// Always include the parent worktrees dir so bwrap can bind it.
-				dirs := []string{worktreesDir}
+				dirs := []string{worktreesDir, reposDir}
 				sessions, err := devStore.ListSessions(ctx)
 				if err != nil {
 					slog.Error("failed to list dev sessions for add-dirs", "err", err)
