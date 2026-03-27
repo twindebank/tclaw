@@ -622,7 +622,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Ephemeral channel cleanup goroutine. Runs at user lifetime and
 	// periodically tears down ephemeral channels that have been idle past
 	// their timeout. Reads from the persistent DynamicStore each tick.
-	go cleanupEphemeralChannels(ctx, dynamicStore, activityTracker, secretStore, nil, onChannelChange)
+	go cleanupEphemeralChannels(ctx, dynamicStore, activityTracker, secretStore, provisioners, onChannelChange)
 
 	// Register secret form tools for collecting sensitive user input via web forms.
 	var secretFormDeps secretform.Deps
