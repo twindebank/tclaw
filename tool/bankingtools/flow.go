@@ -3,6 +3,7 @@ package bankingtools
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -16,7 +17,8 @@ type BankingPendingFlow struct {
 	ASPSPID      string
 	Country      string
 
-	done chan struct{}
+	done      chan struct{}
+	closeOnce sync.Once
 
 	// Set before done is closed.
 	Result *BankSession
@@ -37,7 +39,7 @@ func NewBankingPendingFlow(client *Client, sessionStore *SessionStore, bankName 
 
 // Complete exchanges the authorization code for a session and stores it.
 func (f *BankingPendingFlow) Complete(ctx context.Context, code string, _ string) error {
-	defer close(f.done)
+	defer f.closeOnce.Do(func() { close(f.done) })
 
 	resp, err := f.Client.CreateSession(ctx, code)
 	if err != nil {
@@ -70,9 +72,10 @@ func (f *BankingPendingFlow) Complete(ctx context.Context, code string, _ string
 }
 
 // Fail records an error and closes the done channel.
+// Safe to call after Complete — uses sync.Once to prevent double-close panic.
 func (f *BankingPendingFlow) Fail(err error) {
 	f.Err = err
-	close(f.done)
+	f.closeOnce.Do(func() { close(f.done) })
 }
 
 // DoneChan returns a channel that's closed when the flow completes.

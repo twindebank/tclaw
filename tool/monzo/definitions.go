@@ -9,6 +9,32 @@ import (
 	"tclaw/mcp"
 )
 
+// setCredentialsDef is always registered so the agent can discover Monzo and
+// set up the OAuth client credentials at runtime.
+var setCredentialsDef = mcp.ToolDef{
+	Name: "monzo_set_credentials",
+	Description: "Store Monzo API OAuth client credentials. After storing, use connection_add " +
+		"with provider 'monzo' to start the OAuth flow.\n\n" +
+		"To get credentials: create an API client at developers.monzo.com (personal use only), " +
+		"set the redirect URI to your tclaw callback URL (shown in the response). " +
+		"Once connected, Monzo tools let you: list accounts, check balances, view pots, and browse transactions.\n\n" +
+		"Monzo requires Strong Customer Authentication — after browser auth, the user must also approve access in the Monzo app.",
+	InputSchema: json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"client_id": {
+				"type": "string",
+				"description": "Monzo OAuth client ID from developers.monzo.com."
+			},
+			"client_secret": {
+				"type": "string",
+				"description": "Monzo OAuth client secret from developers.monzo.com."
+			}
+		},
+		"required": ["client_id", "client_secret"]
+	}`),
+}
+
 // ToolDefs returns the MCP tool definitions for Monzo.
 // connIDs lists all active connections — used to build the connection enum.
 func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
