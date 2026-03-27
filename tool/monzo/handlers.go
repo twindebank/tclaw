@@ -11,6 +11,41 @@ import (
 	"tclaw/mcp"
 )
 
+func setCredentialsHandler(deps SetCredentialsDeps) mcp.ToolHandler {
+	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
+		var a struct {
+			ClientID     string `json:"client_id"`
+			ClientSecret string `json:"client_secret"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil {
+			return nil, fmt.Errorf("parse args: %w", err)
+		}
+
+		if a.ClientID == "" {
+			return nil, fmt.Errorf("client_id is required")
+		}
+		if a.ClientSecret == "" {
+			return nil, fmt.Errorf("client_secret is required")
+		}
+
+		if err := deps.SecretStore.Set(ctx, ClientIDStoreKey, a.ClientID); err != nil {
+			return nil, fmt.Errorf("store client ID: %w", err)
+		}
+		if err := deps.SecretStore.Set(ctx, ClientSecretStoreKey, a.ClientSecret); err != nil {
+			return nil, fmt.Errorf("store client secret: %w", err)
+		}
+
+		if deps.OnCredentialsStored != nil {
+			deps.OnCredentialsStored()
+		}
+
+		return json.Marshal(map[string]string{
+			"status":  "stored",
+			"message": "Monzo credentials saved. Use connection_add with provider 'monzo' to start the OAuth flow.",
+		})
+	}
+}
+
 type connectionArgs struct {
 	Connection string `json:"connection"`
 }

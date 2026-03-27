@@ -179,9 +179,10 @@ func connectHandler(s *handlerState) mcp.ToolHandler {
 		s.pendingFlows.Store(a.ASPSPName, flow)
 
 		return json.Marshal(map[string]string{
-			"status":  "pending",
-			"url":     authResp.URL,
-			"message": fmt.Sprintf("Send this authorization URL to the user. After they complete bank login, call banking_auth_wait with aspsp_name=%q.", a.ASPSPName),
+			"status":       "pending",
+			"url":          authResp.URL,
+			"redirect_url": s.deps.Callback.CallbackURL(),
+			"message":      fmt.Sprintf("Send this authorization URL to the user. After they complete bank login at their bank, they'll be redirected to %s. Then call banking_auth_wait with aspsp_name=%q.", s.deps.Callback.CallbackURL(), a.ASPSPName),
 		})
 	}
 }
@@ -209,11 +210,7 @@ func authWaitHandler(s *handlerState) mcp.ToolHandler {
 			return nil, fmt.Errorf("authorization wait cancelled")
 		case <-time.After(authWaitTimeout):
 			s.pendingFlows.Delete(a.ASPSPName)
-			return json.Marshal(map[string]string{
-				"aspsp_name": a.ASPSPName,
-				"status":     "timeout",
-				"message":    "Authorization timed out. The user may not have completed bank login. Try banking_connect again.",
-			})
+			return nil, fmt.Errorf("authorization timed out for %q — the user may not have completed bank login, try banking_connect again", a.ASPSPName)
 		case <-flow.DoneChan():
 			s.pendingFlows.Delete(a.ASPSPName)
 

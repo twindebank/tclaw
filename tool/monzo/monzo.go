@@ -10,14 +10,35 @@ import (
 	"time"
 
 	"tclaw/connection"
+	"tclaw/libraries/secret"
 	"tclaw/mcp"
 	"tclaw/tool/providerutil"
 )
 
 const baseURL = "https://api.monzo.com"
 
+const (
+	// ClientIDStoreKey is the secret store key for the Monzo OAuth client ID.
+	ClientIDStoreKey = "monzo_client_id"
+
+	// ClientSecretStoreKey is the secret store key for the Monzo OAuth client secret.
+	ClientSecretStoreKey = "monzo_client_secret"
+)
+
 // Deps holds dependencies for a single Monzo connection.
 type Deps = providerutil.Deps
+
+// SetCredentialsDeps holds dependencies for the monzo_set_credentials tool.
+type SetCredentialsDeps struct {
+	SecretStore         secret.Store
+	OnCredentialsStored func()
+}
+
+// RegisterSetCredentialsTool registers the monzo_set_credentials tool.
+// Always visible so the agent can discover Monzo and set up credentials at runtime.
+func RegisterSetCredentialsTool(handler *mcp.Handler, deps SetCredentialsDeps) {
+	handler.Register(setCredentialsDef, setCredentialsHandler(deps))
+}
 
 // RegisterTools registers (or re-registers) the Monzo tools with handlers
 // that resolve the connection dynamically from connMap.

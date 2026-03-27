@@ -533,6 +533,31 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		UserDir:     userDir,
 	})
 
+	// Monzo set_credentials tool: always visible so the agent can discover Monzo
+	// and set up credentials at runtime. When credentials are stored, the Monzo
+	// provider is registered dynamically so connection_add can start the OAuth flow.
+	monzotools.RegisterSetCredentialsTool(mcpHandler, monzotools.SetCredentialsDeps{
+		SecretStore: secretStore,
+		OnCredentialsStored: func() {
+			clientID, err := secretStore.Get(ctx, monzotools.ClientIDStoreKey)
+			if err != nil {
+				slog.Error("failed to read Monzo client ID after credentials stored", "err", err)
+				return
+			}
+			clientSecret, err := secretStore.Get(ctx, monzotools.ClientSecretStoreKey)
+			if err != nil {
+				slog.Error("failed to read Monzo client secret after credentials stored", "err", err)
+				return
+			}
+			if clientID == "" || clientSecret == "" {
+				slog.Error("Monzo credentials empty after store — client_id or client_secret missing")
+				return
+			}
+			r.registry.Register(provider.NewMonzoProvider(clientID, clientSecret))
+			slog.Info("registered Monzo provider after credentials stored")
+		},
+	})
+
 	// TfL tools work without an API key (rate-limited) — always registered.
 	tfltools.RegisterTools(mcpHandler, tfltools.Deps{
 		SecretStore: secretStore,
@@ -1287,14 +1312,30 @@ func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel, 
 
 // hasRestyCredentials checks if Resy API credentials are stored.
 func hasRestyCredentials(ctx context.Context, s secret.Store) bool {
-	key, _ := s.Get(ctx, restauranttools.ResyAPIKeyStoreKey)
-	token, _ := s.Get(ctx, restauranttools.ResyAuthTokenStoreKey)
+	key, err := s.Get(ctx, restauranttools.ResyAPIKeyStoreKey)
+	if err != nil {
+		slog.Warn("failed to check Resy API key", "err", err)
+		return false
+	}
+	token, err := s.Get(ctx, restauranttools.ResyAuthTokenStoreKey)
+	if err != nil {
+		slog.Warn("failed to check Resy auth token", "err", err)
+		return false
+	}
 	return key != "" && token != ""
 }
 
 // hasBankingCredentials checks if Enable Banking credentials are stored.
 func hasBankingCredentials(ctx context.Context, s secret.Store) bool {
-	appID, _ := s.Get(ctx, bankingtools.ApplicationIDStoreKey)
-	privKey, _ := s.Get(ctx, bankingtools.PrivateKeyStoreKey)
+	appID, err := s.Get(ctx, bankingtools.ApplicationIDStoreKey)
+	if err != nil {
+		slog.Warn("failed to check Enable Banking app ID", "err", err)
+		return false
+	}
+	privKey, err := s.Get(ctx, bankingtools.PrivateKeyStoreKey)
+	if err != nil {
+		slog.Warn("failed to check Enable Banking private key", "err", err)
+		return false
+	}
 	return appID != "" && privKey != ""
 }
