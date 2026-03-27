@@ -33,24 +33,32 @@ func TestSetCredentials(t *testing.T) {
 		require.NotEmpty(t, secrets.data[bankingtools.PrivateKeyStoreKey])
 	})
 
-	t.Run("rejects missing application_id", func(t *testing.T) {
+	t.Run("returns credential error when store empty and no params", func(t *testing.T) {
 		h, _, _ := setup(t)
 
-		err := callToolExpectError(t, h, "banking_set_credentials", map[string]any{
-			"application_id":  "",
-			"private_key_pem": testPrivateKeyPEM(t),
-		})
-		require.Contains(t, err.Error(), "application_id")
+		err := callToolExpectError(t, h, "banking_set_credentials", map[string]any{})
+		require.Contains(t, err.Error(), "CREDENTIALS_NEEDED")
 	})
 
-	t.Run("rejects missing private_key_pem", func(t *testing.T) {
-		h, _, _ := setup(t)
+	t.Run("reads from store when called with no params", func(t *testing.T) {
+		h, secrets, _ := setup(t)
+		pemKey := testPrivateKeyPEM(t)
+		secrets.data[bankingtools.ApplicationIDStoreKey] = "stored-app-id"
+		secrets.data[bankingtools.PrivateKeyStoreKey] = pemKey
 
-		err := callToolExpectError(t, h, "banking_set_credentials", map[string]any{
-			"application_id":  "test-app-id",
-			"private_key_pem": "",
-		})
-		require.Contains(t, err.Error(), "private_key_pem")
+		result := callTool(t, h, "banking_set_credentials", map[string]any{})
+
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(result, &got))
+		require.Equal(t, "stored", got["status"])
+	})
+
+	t.Run("returns credential error when only one field in store", func(t *testing.T) {
+		h, secrets, _ := setup(t)
+		secrets.data[bankingtools.ApplicationIDStoreKey] = "stored-app-id"
+
+		err := callToolExpectError(t, h, "banking_set_credentials", map[string]any{})
+		require.Contains(t, err.Error(), "CREDENTIALS_NEEDED")
 	})
 
 	t.Run("rejects invalid PEM", func(t *testing.T) {

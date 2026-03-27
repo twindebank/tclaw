@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"tclaw/libraries/credentialerror"
 	"tclaw/mcp"
 )
 
@@ -84,9 +85,36 @@ func setCredentialsHandler(providers map[string]Provider, deps Deps) mcp.ToolHan
 			return nil, err
 		}
 
+		// Resolve from params, falling back to secret store.
+		apiKey := a.APIKey
+		if apiKey == "" {
+			stored, err := deps.SecretStore.Get(ctx, ResyAPIKeyStoreKey)
+			if err != nil {
+				return nil, fmt.Errorf("read stored api key: %w", err)
+			}
+			apiKey = stored
+		}
+		authToken := a.AuthToken
+		if authToken == "" {
+			stored, err := deps.SecretStore.Get(ctx, ResyAuthTokenStoreKey)
+			if err != nil {
+				return nil, fmt.Errorf("read stored auth token: %w", err)
+			}
+			authToken = stored
+		}
+
+		if apiKey == "" || authToken == "" {
+			return nil, credentialerror.New(
+				"Resy Configuration",
+				"Get your credentials from browser dev tools on resy.com — open Network tab, find any API request, copy the Authorization header value (after 'ResyAPI api_key=') and the x-resy-auth-token header value.",
+				credentialerror.Field{Key: ResyAPIKeyStoreKey, Label: "Resy API Key", Description: "Authorization header value (after 'ResyAPI api_key=')"},
+				credentialerror.Field{Key: ResyAuthTokenStoreKey, Label: "Resy Auth Token", Description: "x-resy-auth-token header value"},
+			)
+		}
+
 		creds := map[string]string{
-			"api_key":    a.APIKey,
-			"auth_token": a.AuthToken,
+			"api_key":    apiKey,
+			"auth_token": authToken,
 		}
 		if err := p.PersistCredentials(ctx, creds); err != nil {
 			return nil, fmt.Errorf("store credentials: %w", err)

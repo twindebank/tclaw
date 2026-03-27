@@ -11,7 +11,9 @@ import (
 var infoToolDefs = []mcp.ToolDef{
 	{
 		Name: "restaurant_set_credentials",
-		Description: "Store credentials for a restaurant booking provider. " +
+		Description: "Set up credentials for a restaurant booking provider. Call with no parameters " +
+			"to trigger the secure credential collection flow (returns CREDENTIALS_NEEDED if not yet stored). " +
+			"Call with api_key and auth_token to store them directly.\n\n" +
 			"For Resy: get your api_key and auth_token from browser dev tools on resy.com — " +
 			"open Network tab, find any API request, copy the Authorization header value " +
 			"(after 'ResyAPI api_key=') and the x-resy-auth-token header value.",
@@ -31,8 +33,7 @@ var infoToolDefs = []mcp.ToolDef{
 					"type": "string",
 					"description": "Auth token for the provider."
 				}
-			},
-			"required": ["api_key", "auth_token"]
+			}
 		}`),
 	},
 }

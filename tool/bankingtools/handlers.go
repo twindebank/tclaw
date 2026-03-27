@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"tclaw/libraries/credentialerror"
 	"tclaw/mcp"
 )
 
@@ -77,22 +78,42 @@ func setCredentialsHandler(s *handlerState) mcp.ToolHandler {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
-		if a.ApplicationID == "" {
-			return nil, fmt.Errorf("application_id is required")
+		// Resolve from params, falling back to secret store.
+		appID := a.ApplicationID
+		if appID == "" {
+			stored, err := s.deps.SecretStore.Get(ctx, ApplicationIDStoreKey)
+			if err != nil {
+				return nil, fmt.Errorf("read stored application ID: %w", err)
+			}
+			appID = stored
 		}
-		if a.PrivateKeyPEM == "" {
-			return nil, fmt.Errorf("private_key_pem is required")
+		privateKey := a.PrivateKeyPEM
+		if privateKey == "" {
+			stored, err := s.deps.SecretStore.Get(ctx, PrivateKeyStoreKey)
+			if err != nil {
+				return nil, fmt.Errorf("read stored private key: %w", err)
+			}
+			privateKey = stored
+		}
+
+		if appID == "" || privateKey == "" {
+			return nil, credentialerror.New(
+				"Enable Banking Configuration",
+				"Register for free at enablebanking.com: create an application, generate a self-signed certificate with OpenSSL, upload the public cert, and provide the app ID and private key PEM.",
+				credentialerror.Field{Key: ApplicationIDStoreKey, Label: "Application ID", Description: "Enable Banking application ID from the control panel."},
+				credentialerror.Field{Key: PrivateKeyStoreKey, Label: "Private Key PEM", Description: "RSA private key in PEM format (the full -----BEGIN PRIVATE KEY----- block)."},
+			)
 		}
 
 		// Validate the key parses before storing.
-		if _, err := NewClient(a.ApplicationID, a.PrivateKeyPEM); err != nil {
+		if _, err := NewClient(appID, privateKey); err != nil {
 			return nil, fmt.Errorf("invalid credentials: %w", err)
 		}
 
-		if err := s.deps.SecretStore.Set(ctx, ApplicationIDStoreKey, a.ApplicationID); err != nil {
+		if err := s.deps.SecretStore.Set(ctx, ApplicationIDStoreKey, appID); err != nil {
 			return nil, fmt.Errorf("store application ID: %w", err)
 		}
-		if err := s.deps.SecretStore.Set(ctx, PrivateKeyStoreKey, a.PrivateKeyPEM); err != nil {
+		if err := s.deps.SecretStore.Set(ctx, PrivateKeyStoreKey, privateKey); err != nil {
 			return nil, fmt.Errorf("store private key: %w", err)
 		}
 

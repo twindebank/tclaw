@@ -55,26 +55,35 @@ func TestSetCredentials(t *testing.T) {
 		require.Contains(t, err.Error(), "unknown restaurant provider")
 	})
 
-	t.Run("rejects missing api_key", func(t *testing.T) {
+	t.Run("returns credential error when store empty and no params", func(t *testing.T) {
 		h, _ := setup(t)
 
-		err := callToolExpectError(t, h, "restaurant_set_credentials", map[string]any{
-			"provider":   "resy",
-			"api_key":    "",
-			"auth_token": "token",
-		})
-		require.Contains(t, err.Error(), "api_key")
+		err := callToolExpectError(t, h, "restaurant_set_credentials", map[string]any{})
+		require.Contains(t, err.Error(), "CREDENTIALS_NEEDED")
 	})
 
-	t.Run("rejects missing auth_token", func(t *testing.T) {
-		h, _ := setup(t)
+	t.Run("reads from store when called with no params", func(t *testing.T) {
+		h, secrets := setup(t)
+		secrets.data[restauranttools.ResyAPIKeyStoreKey] = "stored-key"
+		secrets.data[restauranttools.ResyAuthTokenStoreKey] = "stored-token"
 
-		err := callToolExpectError(t, h, "restaurant_set_credentials", map[string]any{
-			"provider":   "resy",
-			"api_key":    "key",
-			"auth_token": "",
-		})
-		require.Contains(t, err.Error(), "auth_token")
+		result := callTool(t, h, "restaurant_set_credentials", map[string]any{})
+
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(result, &got))
+		require.Equal(t, "ok", got["status"])
+
+		// Values re-persisted from store.
+		require.Equal(t, "stored-key", secrets.data[restauranttools.ResyAPIKeyStoreKey])
+		require.Equal(t, "stored-token", secrets.data[restauranttools.ResyAuthTokenStoreKey])
+	})
+
+	t.Run("returns credential error when only one field in store", func(t *testing.T) {
+		h, secrets := setup(t)
+		secrets.data[restauranttools.ResyAPIKeyStoreKey] = "stored-key"
+
+		err := callToolExpectError(t, h, "restaurant_set_credentials", map[string]any{})
+		require.Contains(t, err.Error(), "CREDENTIALS_NEEDED")
 	})
 }
 
