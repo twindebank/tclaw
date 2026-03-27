@@ -156,6 +156,22 @@ const (
 // IsLocal returns true if this is the local development environment.
 func (e Env) IsLocal() bool { return e == EnvLocal }
 
+// HasEnv checks whether the config file at path contains a section for the
+// given environment. Useful for detecting whether a prod deployment is
+// configured without fully loading the config.
+func HasEnv(path string, env Env) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var envMap map[string]yaml.Node
+	if err := yaml.Unmarshal(data, &envMap); err != nil {
+		return false
+	}
+	_, ok := envMap[string(env)]
+	return ok
+}
+
 // ChannelType is an alias for channel.ChannelType to avoid repeating
 // the type definition. Config YAML values unmarshal into channel's type.
 type ChannelType = channel.ChannelType
