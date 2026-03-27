@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -152,6 +153,13 @@ func connectHandler(s *handlerState) mcp.ToolHandler {
 			return nil, err
 		}
 
+		// Validate the ASPSP name against the actual bank list to catch typos
+		// before hitting the API. On mismatch, return fuzzy matches so the
+		// agent can self-correct.
+		if err := validateASPSPName(ctx, client, a.ASPSPName, a.ASPSPCountry); err != nil {
+			return nil, err
+		}
+
 		flow := NewBankingPendingFlow(client, s.sessions, a.ASPSPName, a.ASPSPName, a.ASPSPCountry)
 
 		// Register the flow with the callback server to get a state token.
@@ -179,9 +187,10 @@ func connectHandler(s *handlerState) mcp.ToolHandler {
 		s.pendingFlows.Store(a.ASPSPName, flow)
 
 		return json.Marshal(map[string]string{
-			"status":  "pending",
-			"url":     authResp.URL,
-			"message": fmt.Sprintf("Send this authorization URL to the user. After they complete bank login, call banking_auth_wait with aspsp_name=%q.", a.ASPSPName),
+			"status":       "pending",
+			"url":          authResp.URL,
+			"redirect_url": s.deps.Callback.CallbackURL(),
+			"message":      fmt.Sprintf("Send this authorization URL to the user. After they complete bank login at their bank, they'll be redirected to %s. Then call banking_auth_wait with aspsp_name=%q.", s.deps.Callback.CallbackURL(), a.ASPSPName),
 		})
 	}
 }
@@ -209,11 +218,7 @@ func authWaitHandler(s *handlerState) mcp.ToolHandler {
 			return nil, fmt.Errorf("authorization wait cancelled")
 		case <-time.After(authWaitTimeout):
 			s.pendingFlows.Delete(a.ASPSPName)
-			return json.Marshal(map[string]string{
-				"aspsp_name": a.ASPSPName,
-				"status":     "timeout",
-				"message":    "Authorization timed out. The user may not have completed bank login. Try banking_connect again.",
-			})
+			return nil, fmt.Errorf("authorization timed out for %q — the user may not have completed bank login, try banking_connect again", a.ASPSPName)
 		case <-flow.DoneChan():
 			s.pendingFlows.Delete(a.ASPSPName)
 
@@ -349,4 +354,48 @@ func getTransactionsHandler(s *handlerState) mcp.ToolHandler {
 			ContinuationKey: a.ContinuationKey,
 		})
 	}
+}
+
+// validateASPSPName fetches the bank list and checks that the given name
+// matches exactly. On mismatch, returns an error with fuzzy-matched
+// suggestions so the agent can self-correct.
+func validateASPSPName(ctx context.Context, client *Client, name string, country string) error {
+	raw, err := client.ListBanks(ctx, country)
+	if err != nil {
+		// Can't validate — let the API return its own error.
+		return nil
+	}
+
+	var banks []struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(raw, &banks); err != nil {
+		// Unexpected response shape — skip validation.
+		return nil
+	}
+
+	nameLower := strings.ToLower(name)
+	for _, b := range banks {
+		if b.Name == name {
+			return nil
+		}
+	}
+
+	// No exact match — find fuzzy matches (case-insensitive substring).
+	var matches []string
+	for _, b := range banks {
+		if strings.Contains(strings.ToLower(b.Name), nameLower) || strings.Contains(nameLower, strings.ToLower(b.Name)) {
+			matches = append(matches, b.Name)
+		}
+	}
+
+	if len(matches) > 10 {
+		matches = matches[:10]
+	}
+
+	if len(matches) > 0 {
+		return fmt.Errorf("bank %q not found — did you mean one of these? %s (names must match exactly as returned by banking_list_banks)", name, strings.Join(matches, ", "))
+	}
+
+	return fmt.Errorf("bank %q not found in %s — call banking_list_banks to see available banks (names must match exactly)", name, country)
 }

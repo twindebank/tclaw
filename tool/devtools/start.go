@@ -64,6 +64,12 @@ func devStartHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("description is required")
 		}
 
+		// Check disk space before creating a worktree — the vendor directory
+		// alone is ~500MB and running out mid-checkout leaves broken state.
+		if err := checkDiskSpace(filepath.Dir(deps.UserDir)); err != nil {
+			return nil, err
+		}
+
 		// Resolve and persist repo URL.
 		repoURL, err := deps.Store.GetRepoURL(ctx)
 		if err != nil {
