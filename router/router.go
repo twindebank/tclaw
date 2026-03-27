@@ -1069,9 +1069,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			OnReset: func(level agent.ResetLevel) error {
 				return resetUser(level, memoryDir, homeDir, sessionsDir, stateDir, secretsDir, mcpConfigDir)
 			},
-			Env:        r.env,
-			UserID:     string(mu.cfg.ID),
-			SetupToken: setupToken,
+			Env:           r.env,
+			UserID:        string(mu.cfg.ID),
+			SetupToken:    setupToken,
+			HasProdConfig: config.HasEnv(r.configPath, config.EnvProd),
 		}
 
 		agentErr := make(chan error, 1)
