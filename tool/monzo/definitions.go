@@ -13,8 +13,10 @@ import (
 // set up the OAuth client credentials at runtime.
 var setCredentialsDef = mcp.ToolDef{
 	Name: "monzo_set_credentials",
-	Description: "Store Monzo API OAuth client credentials. After storing, use connection_add " +
-		"with provider 'monzo' to start the OAuth flow.\n\n" +
+	Description: "Set up Monzo API OAuth client credentials. Call with no parameters to trigger " +
+		"the secure credential collection flow (returns CREDENTIALS_NEEDED if not yet stored). " +
+		"Call with client_id and client_secret to store them directly.\n\n" +
+		"After credentials are stored, use connection_add with provider 'monzo' to start the OAuth flow.\n\n" +
 		"To get credentials: create an API client at developers.monzo.com (personal use only), " +
 		"set the redirect URI to your tclaw callback URL (shown in the response). " +
 		"Once connected, Monzo tools let you: list accounts, check balances, view pots, and browse transactions.\n\n" +
@@ -30,8 +32,7 @@ var setCredentialsDef = mcp.ToolDef{
 				"type": "string",
 				"description": "Monzo OAuth client secret from developers.monzo.com."
 			}
-		},
-		"required": ["client_id", "client_secret"]
+		}
 	}`),
 }
 

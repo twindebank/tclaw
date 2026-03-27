@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"tclaw/connection"
+	"tclaw/libraries/credentialerror"
 	"tclaw/mcp"
 )
 
@@ -21,17 +22,37 @@ func setCredentialsHandler(deps SetCredentialsDeps) mcp.ToolHandler {
 			return nil, fmt.Errorf("parse args: %w", err)
 		}
 
-		if a.ClientID == "" {
-			return nil, fmt.Errorf("client_id is required")
+		// Resolve from params, falling back to secret store.
+		clientID := a.ClientID
+		if clientID == "" {
+			stored, err := deps.SecretStore.Get(ctx, ClientIDStoreKey)
+			if err != nil {
+				return nil, fmt.Errorf("read stored client ID: %w", err)
+			}
+			clientID = stored
 		}
-		if a.ClientSecret == "" {
-			return nil, fmt.Errorf("client_secret is required")
+		clientSecret := a.ClientSecret
+		if clientSecret == "" {
+			stored, err := deps.SecretStore.Get(ctx, ClientSecretStoreKey)
+			if err != nil {
+				return nil, fmt.Errorf("read stored client secret: %w", err)
+			}
+			clientSecret = stored
 		}
 
-		if err := deps.SecretStore.Set(ctx, ClientIDStoreKey, a.ClientID); err != nil {
+		if clientID == "" || clientSecret == "" {
+			return nil, credentialerror.New(
+				"Monzo Configuration",
+				"Create an API client at developers.monzo.com (personal use only). Set the redirect URI to your tclaw callback URL.",
+				credentialerror.Field{Key: ClientIDStoreKey, Label: "Client ID", Description: "Monzo OAuth client ID from developers.monzo.com."},
+				credentialerror.Field{Key: ClientSecretStoreKey, Label: "Client Secret", Description: "Monzo OAuth client secret from developers.monzo.com."},
+			)
+		}
+
+		if err := deps.SecretStore.Set(ctx, ClientIDStoreKey, clientID); err != nil {
 			return nil, fmt.Errorf("store client ID: %w", err)
 		}
-		if err := deps.SecretStore.Set(ctx, ClientSecretStoreKey, a.ClientSecret); err != nil {
+		if err := deps.SecretStore.Set(ctx, ClientSecretStoreKey, clientSecret); err != nil {
 			return nil, fmt.Errorf("store client secret: %w", err)
 		}
 

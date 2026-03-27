@@ -11,9 +11,12 @@ import (
 var infoToolDefs = []mcp.ToolDef{
 	{
 		Name: "banking_set_credentials",
-		Description: "Store Enable Banking credentials (application ID and RSA private key). " +
+		Description: "Set up Enable Banking credentials (application ID and RSA private key). " +
+			"Call with no parameters to trigger the secure credential collection flow " +
+			"(returns CREDENTIALS_NEEDED if not yet stored). Call with application_id and " +
+			"private_key_pem to store them directly.\n\n" +
 			"Register for free at enablebanking.com: create an application, generate a self-signed " +
-			"certificate with OpenSSL, upload the public cert, and provide the app ID and private key PEM here.",
+			"certificate with OpenSSL, upload the public cert, and provide the app ID and private key PEM.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -25,8 +28,7 @@ var infoToolDefs = []mcp.ToolDef{
 					"type": "string",
 					"description": "RSA private key in PEM format (the full -----BEGIN PRIVATE KEY----- block)."
 				}
-			},
-			"required": ["application_id", "private_key_pem"]
+			}
 		}`),
 	},
 }

@@ -562,6 +562,13 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			slog.Info("registered Monzo provider after credentials stored")
 		},
 	})
+	// If Monzo credentials already exist in the secret store (from a previous
+	// session's set_credentials or secret form), register the provider so
+	// connection_add works without re-running monzo_set_credentials.
+	if monzoClientID, monzoClientSecret, ok := loadMonzoCredentials(ctx, secretStore); ok {
+		r.registry.Register(provider.NewMonzoProvider(monzoClientID, monzoClientSecret))
+		slog.Info("registered Monzo provider from existing credentials at startup")
+	}
 
 	// TfL tools work without an API key (rate-limited) — always registered.
 	tfltools.RegisterTools(mcpHandler, tfltools.Deps{
@@ -1343,4 +1350,23 @@ func hasBankingCredentials(ctx context.Context, s secret.Store) bool {
 		return false
 	}
 	return appID != "" && privKey != ""
+}
+
+// loadMonzoCredentials reads Monzo OAuth credentials from the secret store.
+// Returns the client ID, client secret, and true if both are present.
+func loadMonzoCredentials(ctx context.Context, s secret.Store) (string, string, bool) {
+	clientID, err := s.Get(ctx, monzotools.ClientIDStoreKey)
+	if err != nil {
+		slog.Warn("failed to check Monzo client ID", "err", err)
+		return "", "", false
+	}
+	clientSecret, err := s.Get(ctx, monzotools.ClientSecretStoreKey)
+	if err != nil {
+		slog.Warn("failed to check Monzo client secret", "err", err)
+		return "", "", false
+	}
+	if clientID == "" || clientSecret == "" {
+		return "", "", false
+	}
+	return clientID, clientSecret, true
 }
