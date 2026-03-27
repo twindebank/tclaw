@@ -16,7 +16,7 @@ func connectionProvidersDef() mcp.ToolDef {
 	}
 }
 
-func connectionProvidersHandler(reg *provider.Registry) mcp.ToolHandler {
+func connectionProvidersHandler(reg *provider.Registry, deps Deps) mcp.ToolHandler {
 	return func(_ context.Context, _ json.RawMessage) (json.RawMessage, error) {
 		ids := reg.List()
 		if len(ids) == 0 {
@@ -30,15 +30,25 @@ func connectionProvidersHandler(reg *provider.Registry) mcp.ToolHandler {
 			Services []string            `json:"services,omitempty"`
 		}
 
-		var result []providerInfo
+		var result struct {
+			Providers   []providerInfo `json:"providers"`
+			RedirectURL string         `json:"redirect_url,omitempty"`
+		}
+
 		for _, id := range ids {
 			p := reg.Get(id)
-			result = append(result, providerInfo{
+			result.Providers = append(result.Providers, providerInfo{
 				ID:       p.ID,
 				Name:     p.Name,
 				Auth:     p.Auth,
 				Services: p.Services,
 			})
+		}
+
+		// Include the OAuth redirect URL so the agent can guide users
+		// through provider setup (e.g. setting redirect URIs in developer consoles).
+		if deps.Callback != nil {
+			result.RedirectURL = deps.Callback.CallbackURL()
 		}
 
 		return json.Marshal(result)

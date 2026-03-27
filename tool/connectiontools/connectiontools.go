@@ -28,7 +28,7 @@ type Deps struct {
 // These are always available regardless of which providers are connected.
 func RegisterTools(h *mcp.Handler, deps Deps) {
 	h.Register(connectionListDef(), connectionListHandler(deps.Manager))
-	h.Register(connectionProvidersDef(), connectionProvidersHandler(deps.Registry))
+	h.Register(connectionProvidersDef(), connectionProvidersHandler(deps.Registry, deps))
 	h.Register(connectionAddDef(), connectionAddHandler(deps))
 	h.Register(connectionRemoveDef(), connectionRemoveHandler(deps.Manager, deps.OnProviderDisconnect))
 }
