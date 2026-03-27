@@ -20,8 +20,8 @@ func TestValidSetupToken(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := validSetupToken(tt.token); got != tt.want {
-				t.Errorf("validSetupToken(%q) = %v, want %v", tt.token, got, tt.want)
+			if got := ValidSetupToken(tt.token); got != tt.want {
+				t.Errorf("ValidSetupToken(%q) = %v, want %v", tt.token, got, tt.want)
 			}
 		})
 	}
@@ -30,14 +30,14 @@ func TestValidSetupToken(t *testing.T) {
 func TestExtractSetupToken_ValidatesFormat(t *testing.T) {
 	// A token that's too short should be rejected even if the prefix matches.
 	output := "Your token:\nsk-ant-oat01-short\nDone."
-	if got := extractSetupToken(output); got != "" {
+	if got := ExtractSetupToken(output); got != "" {
 		t.Errorf("expected empty for short token, got %q", got)
 	}
 
 	// A valid-length token should be extracted.
 	validToken := "sk-ant-oat01-" + strings.Repeat("x", 50)
 	output = "Your token:\n" + validToken + "\nDone."
-	if got := extractSetupToken(output); got != validToken {
+	if got := ExtractSetupToken(output); got != validToken {
 		t.Errorf("expected %q, got %q", validToken, got)
 	}
 }
