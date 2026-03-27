@@ -172,7 +172,7 @@ func startSetupToken(ctx context.Context, opts Options, flow *pendingAuth, chann
 
 		slog.Info("claude setup-token finished", "stdout_len", stdout.Len())
 
-		token := extractSetupToken(stdout.String())
+		token := ExtractSetupToken(stdout.String())
 		if token == "" {
 			slog.Error("claude setup-token: no token found in output", "stdout_len", stdout.Len())
 			flow.oauthDone <- oauthResult{loginMessage: "Setup token generation succeeded but no token found in output."}
@@ -308,12 +308,12 @@ var validTokenPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 // validAPIKeyPattern matches the expected character set for Anthropic API keys.
 var validAPIKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
-// extractSetupToken parses the setup token from `claude setup-token` output.
+// ExtractSetupToken parses the setup token from `claude setup-token` output.
 // The command outputs a banner, the token on its own line, and instructions.
 // We find the line containing the expected token prefix and extract it.
 // Output may contain ANSI escape codes from the pty, so we strip those first.
 // Returns "" if the extracted token fails format validation.
-func extractSetupToken(output string) string {
+func ExtractSetupToken(output string) string {
 	clean := stripANSI(output)
 	for _, line := range strings.Split(clean, "\n") {
 		line = strings.TrimSpace(line)
@@ -323,7 +323,7 @@ func extractSetupToken(output string) string {
 			if sp := strings.IndexByte(token, ' '); sp >= 0 {
 				token = token[:sp]
 			}
-			if !validSetupToken(token) {
+			if !ValidSetupToken(token) {
 				slog.Warn("extracted setup token failed validation", "token_len", len(token))
 				return ""
 			}
@@ -333,9 +333,14 @@ func extractSetupToken(output string) string {
 	return ""
 }
 
-// validSetupToken checks that a token has reasonable length and expected characters.
-func validSetupToken(token string) bool {
+// ValidSetupToken checks that a token has reasonable length and expected characters.
+func ValidSetupToken(token string) bool {
 	return len(token) >= 50 && validTokenPattern.MatchString(token)
+}
+
+// ValidAPIKey checks that a key has the expected prefix, length, and character set.
+func ValidAPIKey(key string) bool {
+	return strings.HasPrefix(key, apiKeyPrefix) && len(key) >= 50 && validAPIKeyPattern.MatchString(key)
 }
 
 // handleAPIKeyEntry validates and persists an API key the user pasted.
@@ -343,7 +348,7 @@ func validSetupToken(token string) bool {
 func handleAPIKeyEntry(ctx context.Context, opts Options, ch channel.Channel, key string) bool {
 	key = strings.TrimSpace(key)
 
-	if !strings.HasPrefix(key, apiKeyPrefix) || len(key) < 50 || !validAPIKeyPattern.MatchString(key) {
+	if !ValidAPIKey(key) {
 		m := ch.Markup()
 		if _, err := ch.Send(ctx, "❌ Invalid key — must start with "+code(m, "sk-ant-")+" and be a valid length. Try again or type "+bold(m, "stop")+" to cancel."); err != nil {
 			slog.Error("failed to send validation error", "err", err)

@@ -12,15 +12,22 @@ type FeatureArea struct {
 // FeatureAreas is the set of features the agent can introduce during
 // the tips phase. Order is a suggestion, not a requirement.
 var FeatureAreas = []FeatureArea{
+	// Universally useful — shown first.
 	{ID: "memory", Name: "Memory system", Description: "CLAUDE.md, topic files, @references, what gets loaded automatically"},
-	{ID: "connections", Name: "Service connections", Description: "Google Workspace, Monzo, built-in providers vs remote MCPs"},
 	{ID: "scheduling", Name: "Scheduled prompts", Description: "cron schedules, recurring tasks, daily briefings"},
-	{ID: "channels", Name: "Multiple channels", Description: "separate Telegram bots, roles, per-channel tool permissions"},
-	{ID: "tfl", Name: "Transport for London", Description: "line status, journey planning, arrivals, commute checks"},
 	{ID: "web_search", Name: "Web access", Description: "search, fetch pages, weather, news, prices, current events"},
+	{ID: "connections", Name: "Service connections", Description: "Google Workspace, Monzo, built-in providers vs remote MCPs"},
+	{ID: "channels", Name: "Multiple channels", Description: "separate Telegram bots, roles, per-channel tool permissions"},
+	{ID: "channel_management", Name: "Dynamic channels", Description: "creating ephemeral channels at runtime, tool groups, cross-channel messaging"},
 	{ID: "remote_mcps", Name: "MCP ecosystem", Description: "remote MCP servers, directory of available services"},
 	{ID: "compact_reset", Name: "Context management", Description: "compact command, reset options, session management"},
 	{ID: "dev_workflow", Name: "Dev workflow", Description: "self-modification, git worktrees, PRs, deployment"},
+
+	// Optional / regional — shown later.
+	{ID: "tfl", Name: "Transport for London", Description: "line status, journey planning, arrivals, commute checks"},
+	{ID: "restaurant", Name: "Restaurant reservations", Description: "search, availability, booking via Resy"},
+	{ID: "banking", Name: "Open Banking", Description: "connect UK bank accounts, view balances and transactions via Enable Banking"},
+	{ID: "telegram_client", Name: "Telegram management", Description: "create bots, manage chats, search messages via Telegram Client API"},
 }
 
 // UnshownAreas returns feature areas that haven't been shown yet.

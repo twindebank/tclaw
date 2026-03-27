@@ -11,11 +11,8 @@ cd tclaw
 make install-dev
 source ~/.zshrc
 
-# Set your API key
-tclaw secret set ANTHROPIC_API_KEY sk-ant-...
-
-# Copy the example config
-cp tclaw.example.yaml tclaw.yaml
+# Interactive setup — creates config, checks prereqs, handles auth
+tclaw init
 
 # Start the server
 tclaw serve

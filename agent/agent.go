@@ -219,6 +219,11 @@ type Options struct {
 	// from the per-user Fly secret; locally, captured from `claude setup-token`.
 	SetupToken string
 
+	// HasProdConfig indicates whether the config file contains a prod
+	// environment section. When false, the OAuth flow skips the "deploy
+	// setup token to production?" prompt.
+	HasProdConfig bool
+
 	// ChannelChangeCh is closed by the router when a channel is created,
 	// edited, or deleted. The agent finishes the current turn, sends a
 	// restart notice, and returns ErrChannelChanged so the router can
@@ -607,11 +612,30 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				case result := <-flow.oauthDone:
 					m := ch.Markup()
 					if result.setupToken != "" {
-						flow.setupToken = result.setupToken
-						flow.state = authDeployConfirm
-						if _, err := ch.Send(ctx, "✅ "+result.loginMessage+"\n\n"+
-							"Deploy setup token to production? Reply "+bold(m, "yes")+" or "+bold(m, "no")+"."); err != nil {
-							slog.Error("failed to send deploy prompt", "err", err)
+						// Always persist locally so the token survives agent restarts.
+						opts.SetupToken = result.setupToken
+						if err := persistSetupToken(ctx, opts, result.setupToken); err != nil {
+							slog.Error("failed to persist setup token", "err", err)
+						}
+
+						if opts.HasProdConfig {
+							// Prod config exists — ask whether to deploy the token.
+							flow.setupToken = result.setupToken
+							flow.state = authDeployConfirm
+							if _, err := ch.Send(ctx, "✅ "+result.loginMessage+"\n\n"+
+								"Deploy setup token to production? Reply "+bold(m, "yes")+" or "+bold(m, "no")+"."); err != nil {
+								slog.Error("failed to send deploy prompt", "err", err)
+							}
+						} else {
+							// No prod config — skip deploy prompt, retry immediately.
+							if _, err := ch.Send(ctx, "✅ "+result.loginMessage); err != nil {
+								slog.Error("failed to send oauth success", "err", err)
+							}
+							retryMsg := flow.originalMsg
+							delete(authFlows, msg.ChannelID)
+							if retryMsg.Text != "" {
+								queue = append([]channel.TaggedMessage{retryMsg}, queue...)
+							}
 						}
 					} else {
 						if _, err := ch.Send(ctx, "❌ "+result.loginMessage); err != nil {
@@ -632,16 +656,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				slog.Info("deploy confirm received", "answer", answer, "user_id", opts.UserID, "token_len", len(flow.setupToken))
 				switch answer {
 				case "yes", "y":
-					// Persist locally first so the token survives even if deploy fails.
-					opts.SetupToken = flow.setupToken
-					if err := persistSetupToken(ctx, opts, flow.setupToken); err != nil {
-						slog.Error("failed to persist setup token", "err", err)
-					} else {
-						if _, sendErr := ch.Send(ctx, "✅ Token saved locally."); sendErr != nil {
-							slog.Error("failed to send persist confirmation", "err", sendErr)
-						}
-					}
-
+					// Token already persisted locally when OAuth completed.
 					if _, sendErr := ch.Send(ctx, "⏳ Deploying to production..."); sendErr != nil {
 						slog.Error("failed to send deploy progress", "err", sendErr)
 					}
@@ -663,14 +678,9 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 						queue = append([]channel.TaggedMessage{retryMsg}, queue...)
 					}
 				case "no", "n", "skip":
-					// Persist locally so the token survives agent restarts.
-					opts.SetupToken = flow.setupToken
-					if err := persistSetupToken(ctx, opts, flow.setupToken); err != nil {
-						slog.Error("failed to persist setup token", "err", err)
-					} else {
-						if _, sendErr := ch.Send(ctx, "✅ Token saved locally."); sendErr != nil {
-							slog.Error("failed to send persist confirmation", "err", sendErr)
-						}
+					// Token already persisted locally when OAuth completed.
+					if _, sendErr := ch.Send(ctx, "✅ Skipped deploy. Token saved locally."); sendErr != nil {
+						slog.Error("failed to send skip confirmation", "err", sendErr)
 					}
 					retryMsg := flow.originalMsg
 					delete(authFlows, msg.ChannelID)

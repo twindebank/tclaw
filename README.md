@@ -23,8 +23,8 @@ cd tclaw
 make install-dev
 source ~/.zshrc
 
-# Create your config
-cp tclaw.example.yaml tclaw.yaml
+# Interactive setup — creates config and walks through auth
+tclaw init
 
 # Start the server (terminal 1)
 tclaw serve
@@ -33,21 +33,15 @@ tclaw serve
 tclaw chat
 ```
 
-On your first message, the agent will detect that it's not authenticated and walk you through logging in — it opens your browser for Claude OAuth, and you're done. No keys to copy.
+`tclaw init` checks prerequisites, creates `tclaw.yaml`, and optionally authenticates (Claude OAuth via browser, or API key). If you skip auth during init, the agent walks you through it on your first message.
 
-**If you prefer an API key instead:**
-
-```bash
-tclaw secret set ANTHROPIC_API_KEY sk-ant-...
-```
-
-Then remove the `api_key` line from `tclaw.yaml` or set it to `${secret:ANTHROPIC_API_KEY}`.
-
-For a quick smoke test without running the server:
+For a quick smoke test without the TUI:
 
 ```bash
 tclaw oneshot "hello, what can you do?" 2>/dev/null
 ```
+
+> **Tip:** See `tclaw.example.yaml` for a fully commented config reference.
 
 ## What You Can Do Locally
 
@@ -162,47 +156,53 @@ The agent can also connect to any remote MCP server (like those in the [Anthropi
 
 The agent handles OAuth discovery and registration automatically. Remote MCP connections are scoped per-channel, and URLs are validated against SSRF (HTTPS required, private IPs blocked).
 
-## Secrets
+## Secrets & Credentials
 
-tclaw uses a two-layer secret system:
+tclaw manages secrets at three levels:
 
-### Local development
+### 1. Config-time secrets (OS keychain)
 
-Secrets are stored in the **OS keychain** (macOS Keychain):
+For values referenced in `tclaw.yaml` via `${secret:NAME}`:
 
 ```bash
-tclaw secret set ANTHROPIC_API_KEY sk-ant-...
-tclaw secret set GOOGLE_CLIENT_ID ...
-tclaw secret set TELEGRAM_BOT_TOKEN ...
+tclaw secret set GOOGLE_CLIENT_ID <value>
+tclaw secret set TELEGRAM_BOT_TOKEN <value>
 ```
 
-In your config, reference them with `${secret:NAME}` — tclaw tries the keychain first, falls back to env vars, then scrubs the env var from the process so subprocesses can't read it.
+tclaw tries the keychain first, falls back to env vars, then scrubs the env var from the process so subprocesses can't read it.
 
-### Runtime (per-user encrypted store)
+**When to use:** Provider credentials (Google, Monzo), Telegram bot tokens, API keys — anything your config file references.
 
-Secrets entered during conversations (API keys, OAuth tokens, GitHub PATs) are stored in an **encrypted store** using NaCl secretbox with per-user derived keys. These persist across agent restarts.
+### 2. Runtime secrets (encrypted store)
 
-The agent manages these automatically — when it needs a GitHub token for dev workflow, it asks you, stores it encrypted, and uses it for all future operations.
+Secrets the agent collects during conversation (OAuth tokens, GitHub PATs, TfL API keys) are stored in a per-user NaCl-encrypted store. These persist across restarts.
 
-### Deployed (Fly.io)
+**When to use:** Managed automatically. The agent asks for credentials when tools need them and stores them encrypted via secure web forms.
 
-For production, secrets flow: **keychain → Fly.io → encrypted store**.
+### 3. Production secrets (Fly.io)
+
+For deployed instances, secrets flow from keychain to Fly:
 
 ```bash
-# Push all config-referenced secrets to Fly in one command
+# Push all config-referenced secrets at once
 tclaw deploy secrets
 
 # Per-user tool secrets use a naming convention
 fly secrets set GITHUB_TOKEN_MYUSER=ghp_... -a your-app
 fly secrets set FLY_TOKEN_MYUSER=... -a your-app
-fly secrets set TFL_API_KEY_MYUSER=... -a your-app
 ```
 
 On boot, tclaw reads per-user env vars (`<PREFIX>_<USER>`) and seeds them into the encrypted store. The env vars are then scrubbed — the claude subprocess never sees them.
 
-## Deploying to Fly.io
+**When to use:** Only when deploying to Fly.io. `tclaw deploy secrets` handles config secrets; per-user secrets need manual `fly secrets set`.
 
-Once you're happy with your local setup, deploy to Fly.io for always-on access via Telegram:
+## Going to Production
+
+Once you're happy locally, deploy to Fly.io for always-on access via Telegram. This is entirely optional — tclaw works great as a local-only tool.
+
+> **Tip:** Use the `/deploy-to-prod` Claude Code skill for guided, interactive setup that auto-generates your prod config.
+
+The manual steps:
 
 ```bash
 # 1. Install Fly CLI and log in
@@ -213,25 +213,34 @@ fly auth login
 fly apps create your-app-name
 fly volumes create tclaw_data --region lhr --size 1 -a your-app-name -y
 
-# 3. Update fly.toml with your app name
-
-# 4. Push your secrets
+# 3. Add a prod section to tclaw.yaml
+# 4. Update fly.toml with your app name
+# 5. Push secrets and deploy
 tclaw deploy secrets
-
-# 5. Deploy
 tclaw deploy
 ```
 
-Your config file is baked into the Docker image. The `prod:` section of `tclaw.yaml` is selected via `--env prod`:
+Your config file is baked into the Docker image. The `prod:` section is selected via `--env prod`:
 
 ```yaml
-# tclaw.yaml — add a prod section
 prod:
   base_dir: /data/tclaw
   server:
     addr: 0.0.0.0:9876
     public_url: https://your-app.fly.dev  # enables Telegram webhooks
-  # ... users, providers, channels same as local but with Telegram
+  users:
+    - id: default
+      model: claude-sonnet-4-6
+      permission_mode: dontAsk
+      role: superuser
+      channels:
+        - type: telegram
+          name: mobile
+          description: Mobile assistant
+          role: assistant
+          telegram:
+            token: ${secret:TELEGRAM_BOT_TOKEN}
+            allowed_users: [123456789]
 ```
 
 Set the OAuth callback URL in your provider consoles to `https://your-app.fly.dev/oauth/callback`.
@@ -242,6 +251,7 @@ See [docs/deployment.md](docs/deployment.md) for memory tuning, suspend/resume, 
 
 | Command | Description |
 |---------|-------------|
+| `tclaw init` | Interactive setup — create config and authenticate |
 | `tclaw serve` | Start the agent server |
 | `tclaw serve --dev` | Hot-reload server (restarts on `.go` changes, requires `air`) |
 | `tclaw chat` | Connect the TUI chat client |

@@ -1,5 +1,8 @@
 # tclaw configuration
 #
+# Top-level keys are environment names (local, prod, etc.).
+# Use --env to select which section to load (default: local).
+#
 # System-derived paths (not configurable):
 #   Socket:  <base_dir>/<user_id>/<channel_name>.sock
 #   Home:    <base_dir>/<user_id>/home/
@@ -9,40 +12,41 @@
 #   ${secret:NAME}  — tries OS keychain first, falls back to env var
 #   ${NAME}         — env var only
 #
-# Store secrets locally:  go run ./cmd/secret set ANTHROPIC_API_KEY sk-ant-...
+# Store secrets locally:  tclaw secret set ANTHROPIC_API_KEY sk-ant-...
 
-base_dir: /tmp/tclaw
+local:
+  base_dir: /tmp/tclaw
 
-# providers:
-#   # Google Workspace (Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks)
-#   google:
-#     client_id: ${secret:GOOGLE_CLIENT_ID}
-#     client_secret: ${secret:GOOGLE_CLIENT_SECRET}
-#     # gws binary is auto-discovered from PATH or common install locations
+  # providers:
+  #   # Google Workspace (Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks)
+  #   google:
+  #     client_id: ${secret:GOOGLE_CLIENT_ID}
+  #     client_secret: ${secret:GOOGLE_CLIENT_SECRET}
+  #     # gws binary is auto-discovered from PATH or common install locations
 
-users:
-  - id: default
-    # api_key: ${secret:ANTHROPIC_API_KEY}  # uncomment if using an API key instead of OAuth
-    model: claude-sonnet-4-6
-    permission_mode: dontAsk
-    # Optional: custom system prompt appended after tclaw's default.
-    # system_prompt: |
-    #   You are a personal assistant. Be concise and direct.
+  users:
+    - id: default
+      # api_key: ${secret:ANTHROPIC_API_KEY}  # uncomment if using an API key instead of OAuth
+      model: claude-sonnet-4-6
+      permission_mode: dontAsk
+      # Optional: custom system prompt appended after tclaw's default.
+      # system_prompt: |
+      #   You are a personal assistant. Be concise and direct.
 
-    # Role-based permissions (superuser | developer | assistant).
-    # Roles are simpler than listing individual tools — see docs/features.md for details.
-    role: superuser
+      # Role-based permissions (superuser | developer | assistant).
+      # Roles are simpler than listing individual tools — see docs/features.md for details.
+      role: superuser
 
-    channels:
-      - type: socket
-        name: main
-        description: Primary desktop workstation
+      channels:
+        - type: socket
+          name: main
+          description: Primary desktop workstation
 
-      # Additional channels can override the user-level role:
-      # - type: telegram
-      #   name: mobile
-      #   description: Mobile assistant — concise responses
-      #   role: assistant
-      #   telegram:
-      #     token: ${secret:TELEGRAM_BOT_TOKEN}
-      #     allowed_users: [123456789]  # your Telegram user ID
+        # Additional channels can override the user-level role:
+        # - type: telegram
+        #   name: mobile
+        #   description: Mobile assistant — concise responses
+        #   role: assistant
+        #   telegram:
+        #     token: ${secret:TELEGRAM_BOT_TOKEN}
+        #     allowed_users: [123456789]  # your Telegram user ID

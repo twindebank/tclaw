@@ -10,6 +10,7 @@ const usage = `tclaw — multi-user Claude Code host
 Usage: tclaw <command> [args]
 
 Commands:
+  init               Create a tclaw.yaml config (interactive setup)
   serve              Start the agent server
   serve --dev        Start with hot reload (requires air)
   chat               Connect a TUI chat session to the running server
@@ -39,6 +40,8 @@ func Run() {
 	command := os.Args[1]
 
 	switch command {
+	case "init":
+		runInit()
 	case "serve":
 		runServe()
 	case "oneshot":
