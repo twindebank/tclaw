@@ -86,6 +86,7 @@ func readAllLines(path string) ([]string, error) {
 
 	var lines []string
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	for scanner.Scan() {
 		if line := scanner.Text(); line != "" {
 			lines = append(lines, line)
