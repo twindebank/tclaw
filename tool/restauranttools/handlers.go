@@ -50,7 +50,7 @@ func persistInlineCredentials(ctx context.Context, provider Provider, apiKey, au
 func makeHandler(name string, providers map[string]Provider, deps Deps) mcp.ToolHandler {
 	switch name {
 	case "restaurant_set_credentials":
-		return setCredentialsHandler(providers)
+		return setCredentialsHandler(providers, deps)
 	case "restaurant_search":
 		return searchHandler(providers)
 	case "restaurant_availability":
@@ -68,7 +68,7 @@ func makeHandler(name string, providers map[string]Provider, deps Deps) mcp.Tool
 	}
 }
 
-func setCredentialsHandler(providers map[string]Provider) mcp.ToolHandler {
+func setCredentialsHandler(providers map[string]Provider, deps Deps) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 		var a struct {
 			Provider  string `json:"provider"`
@@ -90,6 +90,10 @@ func setCredentialsHandler(providers map[string]Provider) mcp.ToolHandler {
 		}
 		if err := p.PersistCredentials(ctx, creds); err != nil {
 			return nil, fmt.Errorf("store credentials: %w", err)
+		}
+
+		if deps.OnCredentialsStored != nil {
+			deps.OnCredentialsStored()
 		}
 
 		return json.Marshal(map[string]string{

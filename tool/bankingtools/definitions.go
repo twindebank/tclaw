@@ -6,7 +6,9 @@ import (
 	"tclaw/mcp"
 )
 
-var toolDefs = []mcp.ToolDef{
+// infoToolDefs are always registered — they let the agent learn about the
+// provider and set up credentials.
+var infoToolDefs = []mcp.ToolDef{
 	{
 		Name: "banking_set_credentials",
 		Description: "Store Enable Banking credentials (application ID and RSA private key). " +
@@ -27,6 +29,10 @@ var toolDefs = []mcp.ToolDef{
 			"required": ["application_id", "private_key_pem"]
 		}`),
 	},
+}
+
+// operationalToolDefs are only registered when credentials are configured.
+var operationalToolDefs = []mcp.ToolDef{
 	{
 		Name: "banking_list_banks",
 		Description: "List available banks that support Open Banking connections. " +

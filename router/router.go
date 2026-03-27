@@ -533,25 +533,44 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		UserDir:     userDir,
 	})
 
-	// Register TfL tools unconditionally — they work without an API key
-	// (rate-limited to ~50 req/min) and prompt for one if not stored.
+	// TfL tools work without an API key (rate-limited) — always registered.
 	tfltools.RegisterTools(mcpHandler, tfltools.Deps{
 		SecretStore: secretStore,
 	})
 
-	// Register restaurant tools unconditionally — they check for
-	// credentials at call time and return a helpful error if missing.
-	restauranttools.RegisterTools(mcpHandler, restauranttools.Deps{
+	// Restaurant tools: info/setup tool always visible, operational tools
+	// only when credentials are configured.
+	restaurantDeps := restauranttools.Deps{
 		SecretStore: secretStore,
-	})
+		OnCredentialsStored: func() {
+			restauranttools.RegisterTools(mcpHandler, restauranttools.Deps{SecretStore: secretStore})
+			slog.Info("registered restaurant operational tools after credentials stored")
+		},
+	}
+	restauranttools.RegisterInfoTools(mcpHandler, restaurantDeps)
+	if hasRestyCredentials(ctx, secretStore) {
+		restauranttools.RegisterTools(mcpHandler, restaurantDeps)
+	}
 
-	// Register banking tools unconditionally — they check for
-	// credentials at call time and return a helpful error if missing.
-	bankingtools.RegisterTools(mcpHandler, bankingtools.Deps{
+	// Banking tools: info/setup tool always visible, operational tools
+	// only when credentials are configured.
+	bankingDeps := bankingtools.Deps{
 		SecretStore: secretStore,
 		StateStore:  s,
 		Callback:    r.callback,
-	})
+		OnCredentialsStored: func() {
+			bankingtools.RegisterTools(mcpHandler, bankingtools.Deps{
+				SecretStore: secretStore,
+				StateStore:  s,
+				Callback:    r.callback,
+			})
+			slog.Info("registered banking operational tools after credentials stored")
+		},
+	}
+	bankingtools.RegisterInfoTools(mcpHandler, bankingDeps)
+	if hasBankingCredentials(ctx, secretStore) {
+		bankingtools.RegisterTools(mcpHandler, bankingDeps)
+	}
 
 	// Telegram Client API tools were registered earlier (before channeltools)
 	// so the provisioner is available for channel_create auto-provisioning.
@@ -1264,4 +1283,18 @@ func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel, 
 		}
 	}
 	return channels, nil
+}
+
+// hasRestyCredentials checks if Resy API credentials are stored.
+func hasRestyCredentials(ctx context.Context, s secret.Store) bool {
+	key, _ := s.Get(ctx, restauranttools.ResyAPIKeyStoreKey)
+	token, _ := s.Get(ctx, restauranttools.ResyAuthTokenStoreKey)
+	return key != "" && token != ""
+}
+
+// hasBankingCredentials checks if Enable Banking credentials are stored.
+func hasBankingCredentials(ctx context.Context, s secret.Store) bool {
+	appID, _ := s.Get(ctx, bankingtools.ApplicationIDStoreKey)
+	privKey, _ := s.Get(ctx, bankingtools.PrivateKeyStoreKey)
+	return appID != "" && privKey != ""
 }
