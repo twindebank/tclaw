@@ -55,6 +55,12 @@ const (
 // safe headroom (HTML entities, emoji encoding, etc.).
 const maxMessageLen = 3500
 
+// telegramTruncateLen is the cap applied to status messages before Send/Edit.
+// A single large tool output can push accumulated status content past Telegram's
+// 4096-char hard limit before the proactive split fires. We truncate at 3900 to
+// leave room for wrap close tags (e.g. </blockquote>) and the truncation suffix.
+const telegramTruncateLen = 3900
+
 // turnWriter accumulates output for a single turn. In split mode (Telegram),
 // status and response content go to separate channel messages. In normal mode
 // everything goes to one message.
@@ -180,7 +186,7 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 		}
 
 		if tw.statusID == "" {
-			id, err := tw.ch.Send(tw.ctx, content)
+			id, err := tw.ch.Send(tw.ctx, truncateForTelegram(content))
 			if err != nil {
 				// Status is informational — log and swallow.
 				slog.Warn("failed to send status message", "err", err)
@@ -196,7 +202,7 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 			return nil
 		}
 
-		if err := tw.ch.Edit(tw.ctx, tw.statusID, content); err != nil {
+		if err := tw.ch.Edit(tw.ctx, tw.statusID, truncateForTelegram(content)); err != nil {
 			if strings.Contains(err.Error(), "message is not modified") {
 				return nil
 			}
@@ -207,7 +213,7 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 			tw.statusBuf.WriteString(freshText)
 			tw.statusID = ""
 			recoveryContent := tw.statusSuffix(freshText)
-			id, err := tw.ch.Send(tw.ctx, recoveryContent)
+			id, err := tw.ch.Send(tw.ctx, truncateForTelegram(recoveryContent))
 			if err != nil {
 				// Status is informational — log and swallow.
 				slog.Warn("failed to send replacement status message", "err", err)
@@ -805,6 +811,17 @@ func friendlyErrorMessage(raw string) string {
 	default:
 		return "claude error: " + raw
 	}
+}
+
+// truncateForTelegram caps s at telegramTruncateLen and appends a truncation
+// notice. Applied to status messages before Send/Edit — a single large tool
+// output can push accumulated content past Telegram's 4096-char hard limit
+// before the proactive split has a chance to fire.
+func truncateForTelegram(s string) string {
+	if len(s) <= telegramTruncateLen {
+		return s
+	}
+	return s[:telegramTruncateLen] + "…[truncated]"
 }
 
 // shortModelName converts a full model ID (possibly with context window suffix)

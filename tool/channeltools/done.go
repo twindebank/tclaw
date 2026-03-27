@@ -61,10 +61,15 @@ func channelDoneHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("results_sent is required — describe what was sent via channel_send before teardown, or explain why nothing was sent")
 		}
 
-		// If no channel name specified, we can't infer the current channel
-		// from tool context — require it explicitly.
+		// If no channel name specified, infer from the active channel (the one
+		// currently being processed — i.e. the channel the agent is running on).
 		if a.ChannelName == "" {
-			return nil, fmt.Errorf("channel_name is required")
+			if deps.ActiveChannel != nil {
+				a.ChannelName = deps.ActiveChannel()
+			}
+			if a.ChannelName == "" {
+				return nil, fmt.Errorf("channel_name is required")
+			}
 		}
 
 		// Validate the channel exists and is dynamic.

@@ -362,13 +362,34 @@ func TestChannelDone(t *testing.T) {
 		require.Contains(t, err.Error(), "results_sent is required")
 	})
 
-	t.Run("rejects empty channel name", func(t *testing.T) {
+	t.Run("rejects empty channel name when no active channel", func(t *testing.T) {
+		// setupHarness sets ActiveChannel to nil — can't infer, must error.
 		th := setupHarness(t, config.EnvLocal)
 
 		err := callToolExpectError(t, th.handler, "channel_done", map[string]any{
 			"results_sent": "No outbound links configured",
 		})
 		require.Contains(t, err.Error(), "channel_name is required")
+	})
+
+	t.Run("infers channel name from active channel", func(t *testing.T) {
+		th := setupHarnessWithActiveChannel(t, config.EnvLocal, "temp")
+
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name":        "temp",
+			"description": "Temporary channel",
+			"type":        "socket",
+		})
+
+		// Omit channel_name — should be inferred from ActiveChannel.
+		result := callTool(t, th.handler, "channel_done", map[string]any{
+			"results_sent": "No results to report",
+		})
+
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(result, &got))
+		require.Equal(t, "deleted", got["status"])
+		require.Equal(t, "temp", got["channel"])
 	})
 
 	t.Run("calls provisioner teardown", func(t *testing.T) {

@@ -204,6 +204,27 @@ func TestWriteSplit_ResponseSealedAfterInterleavedStatus(t *testing.T) {
 	}
 }
 
+func TestWriteSplit_TruncatesOversizedStatusMessage(t *testing.T) {
+	ch := &mockChannel{}
+	tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
+
+	// Write a single chunk that exceeds the telegram truncation limit.
+	oversized := strings.Repeat("x", telegramTruncateLen+500)
+	if err := tw.writeSplit(phaseStatus, oversized); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(ch.sends) != 1 {
+		t.Fatalf("expected 1 send, got %d", len(ch.sends))
+	}
+	if len(ch.sends[0]) > telegramTruncateLen+20 {
+		t.Fatalf("sent message too long: %d chars (limit %d)", len(ch.sends[0]), telegramTruncateLen+20)
+	}
+	if !strings.Contains(ch.sends[0], "[truncated]") {
+		t.Fatal("expected truncation notice in sent message")
+	}
+}
+
 func TestBuildEnv_AllowlistExcludesDangerousVars(t *testing.T) {
 	// Set dangerous env vars that should NOT leak to the subprocess.
 	dangerous := map[string]string{
