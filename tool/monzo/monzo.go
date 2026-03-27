@@ -32,6 +32,10 @@ type Deps = providerutil.Deps
 type SetCredentialsDeps struct {
 	SecretStore         secret.Store
 	OnCredentialsStored func()
+
+	// RedirectURL is the OAuth callback URL to include in the response so the
+	// agent can guide the user through developer portal setup.
+	RedirectURL string
 }
 
 // RegisterSetCredentialsTool registers the monzo_set_credentials tool.

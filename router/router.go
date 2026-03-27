@@ -536,8 +536,13 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Monzo set_credentials tool: always visible so the agent can discover Monzo
 	// and set up credentials at runtime. When credentials are stored, the Monzo
 	// provider is registered dynamically so connection_add can start the OAuth flow.
+	var monzoRedirectURL string
+	if r.callback != nil {
+		monzoRedirectURL = r.callback.CallbackURL()
+	}
 	monzotools.RegisterSetCredentialsTool(mcpHandler, monzotools.SetCredentialsDeps{
 		SecretStore: secretStore,
+		RedirectURL: monzoRedirectURL,
 		OnCredentialsStored: func() {
 			clientID, err := secretStore.Get(ctx, monzotools.ClientIDStoreKey)
 			if err != nil {

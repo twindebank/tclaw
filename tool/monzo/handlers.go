@@ -39,10 +39,15 @@ func setCredentialsHandler(deps SetCredentialsDeps) mcp.ToolHandler {
 			deps.OnCredentialsStored()
 		}
 
-		return json.Marshal(map[string]string{
+		result := map[string]string{
 			"status":  "stored",
 			"message": "Monzo credentials saved. Use connection_add with provider 'monzo' to start the OAuth flow.",
-		})
+		}
+		if deps.RedirectURL != "" {
+			result["redirect_url"] = deps.RedirectURL
+			result["message"] += fmt.Sprintf(" Set %s as the redirect URI in your Monzo developer portal.", deps.RedirectURL)
+		}
+		return json.Marshal(result)
 	}
 }
 

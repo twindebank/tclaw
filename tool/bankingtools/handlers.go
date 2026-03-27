@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -149,6 +150,13 @@ func connectHandler(s *handlerState) mcp.ToolHandler {
 
 		client, err := buildClient(ctx, s)
 		if err != nil {
+			return nil, err
+		}
+
+		// Validate the ASPSP name against the actual bank list to catch typos
+		// before hitting the API. On mismatch, return fuzzy matches so the
+		// agent can self-correct.
+		if err := validateASPSPName(ctx, client, a.ASPSPName, a.ASPSPCountry); err != nil {
 			return nil, err
 		}
 
@@ -346,4 +354,48 @@ func getTransactionsHandler(s *handlerState) mcp.ToolHandler {
 			ContinuationKey: a.ContinuationKey,
 		})
 	}
+}
+
+// validateASPSPName fetches the bank list and checks that the given name
+// matches exactly. On mismatch, returns an error with fuzzy-matched
+// suggestions so the agent can self-correct.
+func validateASPSPName(ctx context.Context, client *Client, name string, country string) error {
+	raw, err := client.ListBanks(ctx, country)
+	if err != nil {
+		// Can't validate — let the API return its own error.
+		return nil
+	}
+
+	var banks []struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(raw, &banks); err != nil {
+		// Unexpected response shape — skip validation.
+		return nil
+	}
+
+	nameLower := strings.ToLower(name)
+	for _, b := range banks {
+		if b.Name == name {
+			return nil
+		}
+	}
+
+	// No exact match — find fuzzy matches (case-insensitive substring).
+	var matches []string
+	for _, b := range banks {
+		if strings.Contains(strings.ToLower(b.Name), nameLower) || strings.Contains(nameLower, strings.ToLower(b.Name)) {
+			matches = append(matches, b.Name)
+		}
+	}
+
+	if len(matches) > 10 {
+		matches = matches[:10]
+	}
+
+	if len(matches) > 0 {
+		return fmt.Errorf("bank %q not found — did you mean one of these? %s (names must match exactly as returned by banking_list_banks)", name, strings.Join(matches, ", "))
+	}
+
+	return fmt.Errorf("bank %q not found in %s — call banking_list_banks to see available banks (names must match exactly)", name, country)
 }
