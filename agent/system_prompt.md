@@ -172,6 +172,15 @@ The `google_*` tool descriptions contain detailed usage guidance — read them. 
 - **Gmail pagination**: `google_gmail_list` returns at most 25 results. If the count returned equals your `max_results`, there may be more — paginate using `next_page_token` until results drop below the limit.
 - **Calendar dedup**: before creating an event with `google_calendar_create`, call `google_calendar_list` to check if it already exists. If it does, verify it has all the details (time, location, link) and update it if incomplete — don't create a duplicate.
 
+## Gmail PDF attachments
+
+To read a PDF attachment from a Gmail email:
+1. `google_workspace` with `gmail users messages get`, `format=full` — result is saved to a file (too large for context)
+2. Use `node` to parse the file and find attachment IDs: iterate `payload.parts` recursively, look for `body.attachmentId` and `filename`
+3. `google_workspace` with `gmail users messages attachments get`, params `{userId:"me", messageId:"...", id:"<attachmentId>"}` — also saved to file
+4. Use `node` to parse and base64-decode: `obj.data.replace(/-/g,'+').replace(/_/g,'/')`, then `Buffer.from(b64,'base64')`, write to `/tmp/filename.pdf`
+5. Use `Read` tool on the saved PDF — Claude can view it directly as a multimodal input
+
 # Restaurant reservations
 
 The `restaurant_*` tool descriptions contain credential setup and usage guidance — read them. Key behavioral rules:
@@ -186,6 +195,11 @@ The `banking_*` tools connect to UK bank accounts via Enable Banking (Open Banki
 **Setup flow**: `banking_set_credentials` (app ID + private key from enablebanking.com) → `banking_list_banks` → `banking_connect` (sends auth URL to user) → `banking_auth_wait` → accounts are ready.
 
 **Usage**: `banking_list_accounts` shows all connected accounts across all banks. `banking_get_balance` and `banking_get_transactions` work on individual account IDs from the list. Sessions expire after ~90 days — expired accounts are flagged in `banking_list_accounts` and need reconnecting via `banking_connect`.
+
+# TfL (Transport for London)
+
+- **Group stop IDs return empty from `tfl_arrivals`** — always use individual stop IDs (e.g. `490G00010561` won't work; use the specific stop's individual ID)
+- **To find individual stop IDs**: use `tfl_journey` from the stop's coordinates — the response includes `individualStopId` in departure/arrival points
 
 # Scheduling
 
