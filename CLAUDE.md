@@ -121,8 +121,10 @@ Do NOT duplicate information across these layers. If you're documenting how a sp
 - **Deploys happen automatically via GitHub Actions CI** on push to main (`.github/workflows/deploy.yml`)
 - CI builds locally on the GitHub runner (7GB RAM) and pushes to Fly — avoids the remote builder OOM from gotd/td
 - `tclaw.yaml` is stored as a GitHub secret (`TCLAW_YAML`) and written during CI builds
+- **NEVER commit or `git add` tclaw.yaml** — it is intentionally gitignored. It contains `${secret:...}` refs and environment-specific config. Deploy it via `gh secret set TCLAW_YAML` or the GitHub web UI.
 - **Local deploys** still work: `go run . deploy` builds with Docker and deploys via `fly deploy --local-only`
 - **The `deploy` MCP tool is status-only** — it checks what's deployed vs main, does NOT deploy. Deploys are CI's job.
+- **Config sync**: `tclaw config sync` pushes local config to remote Fly volume. `tclaw config diff` shows differences.
 - **Logs**: `go run . deploy logs` (or `go run . logs`) to view recent production logs
 - Never deploy (`go run . deploy` or any deploy command) without the user explicitly asking to deploy. Committing code does not imply permission to deploy.
 
