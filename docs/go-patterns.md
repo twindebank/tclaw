@@ -241,3 +241,52 @@ func gitRun(t *testing.T, dir string, args ...string) {
 - **Don't shorten/abbreviate names** — use full words for packages, variables, functions
 - **Inline struct creation** when used once — don't create unnecessary intermediate variables
 - **Self-documenting function/method names** — choose clear, descriptive names that eliminate the need for comments
+
+## Adding New Tool Packages
+
+Tool packages implement the `toolpkg.Package` interface (see `tool/toolpkg/toolpkg.go`). This makes adding a new tool package a single-package operation:
+
+1. Create a new directory under `tool/` (e.g. `tool/mytools/`)
+2. Implement the `toolpkg.Package` interface:
+   - `Name()` — stable identifier (e.g. "mytool")
+   - `Description()` — human-readable summary
+   - `Group()` — which toolgroup this belongs to
+   - `ToolPatterns()` — CLI glob patterns for permission matching
+   - `RequiredSecrets()` — what secrets this package needs (with env var prefix for seeding)
+   - `Info()` — returns structured `PackageInfo` with credential status
+   - `Register()` — registers tools on the MCP handler
+3. Add the package to the registry in router.go
+
+The registry auto-generates a `<name>_info` tool for every package. Packages don't need to register their own info tool.
+
+**Secret seeding is automatic.** Each `SecretSpec` declares an `EnvVarPrefix` — the registry combines it with the user ID to form the full env var name and seeds it into the secret store at boot.
+
+**Tool groups are declared by the package.** Each package returns its group from `Group()` and its tool patterns from `ToolPatterns()`.
+
+**See `tool/tfl/package.go` for a minimal example** (simple package with optional secret), or `tool/scheduletools/package.go` for a package with extra deps via `RegistrationContext.Extra`.
+
+## State Management Rules
+
+- **Helpers that mutate state must return errors** — never log-and-swallow. The *caller* decides whether to surface, log, or continue, but the error must never be invisible.
+- **State machines must use explicit typed states** — not implicit map membership. Use enums for states, explicit `Start`/`Cancel`/`Complete` transitions, and a typed result struct for outcomes.
+- **Prefer single source of truth** over overlapping tracking mechanisms. One `ChannelSet` instead of three separate maps tracking the same data.
+- **Avoid forward-declared closures** — define functions before referencing them. If a closure needs to be passed to a constructor before it's defined, extract it into a method or use a callback interface.
+- **Serialize read-modify-write cycles** — use a mutex when updating store-backed state to prevent TOCTOU races (see `DynamicStore`).
+- **Prefer explicit over implicit** — pass dependencies explicitly in params, not via closures capturing ambient state. Avoid default/inferred arguments.
+
+## Channel Types
+
+Adding a new channel type requires:
+
+1. Implement the `Channel` interface (e.g. `channel/slack.go`)
+2. Implement `EphemeralProvisioner` if the channel supports ephemeral lifecycle
+3. Define platform state and teardown state types, register them:
+   ```go
+   func init() {
+       channel.RegisterPlatformState("slack", func() channel.PlatformState { return &SlackPlatformState{} })
+       channel.RegisterTeardownState("slack", func() channel.TeardownState { return &SlackTeardownState{} })
+   }
+   ```
+4. Add the provisioner to the `provisioners` map in router.go
+
+No switch statements need updating — the registries handle deserialization automatically.

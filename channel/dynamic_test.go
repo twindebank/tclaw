@@ -2,31 +2,21 @@ package channel_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"tclaw/channel"
 	"tclaw/libraries/store"
 )
 
-func newTestStore(t *testing.T) store.Store {
-	t.Helper()
-	s, err := store.NewFS(t.TempDir())
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	return s
-}
-
 func TestDynamicStore_EmptyList(t *testing.T) {
 	ds := channel.NewDynamicStore(newTestStore(t))
 	configs, err := ds.List(context.Background())
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(configs) != 0 {
-		t.Fatalf("expected empty list, got %d items", len(configs))
-	}
+	require.NoError(t, err)
+	require.Empty(t, configs)
 }
 
 func TestDynamicStore_AddAndList(t *testing.T) {
@@ -39,23 +29,13 @@ func TestDynamicStore_AddAndList(t *testing.T) {
 		Description: "Mobile device",
 		CreatedAt:   time.Now(),
 	}
-	if err := ds.Add(ctx, cfg); err != nil {
-		t.Fatalf("add: %v", err)
-	}
+	require.NoError(t, ds.Add(ctx, cfg))
 
 	configs, err := ds.List(ctx)
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(configs) != 1 {
-		t.Fatalf("expected 1 item, got %d", len(configs))
-	}
-	if configs[0].Name != "phone" {
-		t.Fatalf("expected name 'phone', got %q", configs[0].Name)
-	}
-	if configs[0].Description != "Mobile device" {
-		t.Fatalf("expected description 'Mobile device', got %q", configs[0].Description)
-	}
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+	require.Equal(t, "phone", configs[0].Name)
+	require.Equal(t, "Mobile device", configs[0].Description)
 }
 
 func TestDynamicStore_AddDuplicate(t *testing.T) {
@@ -63,42 +43,31 @@ func TestDynamicStore_AddDuplicate(t *testing.T) {
 	ds := channel.NewDynamicStore(newTestStore(t))
 
 	cfg := channel.DynamicChannelConfig{Name: "phone", Type: channel.TypeSocket}
-	if err := ds.Add(ctx, cfg); err != nil {
-		t.Fatalf("first add: %v", err)
-	}
-	if err := ds.Add(ctx, cfg); err == nil {
-		t.Fatal("expected error on duplicate add, got nil")
-	}
+	require.NoError(t, ds.Add(ctx, cfg))
+
+	err := ds.Add(ctx, cfg)
+	require.Error(t, err, "duplicate add should fail")
 }
 
 func TestDynamicStore_Get(t *testing.T) {
 	ctx := context.Background()
 	ds := channel.NewDynamicStore(newTestStore(t))
 
-	// Not found returns nil.
-	got, err := ds.Get(ctx, "nonexistent")
-	if err != nil {
-		t.Fatalf("get nonexistent: %v", err)
-	}
-	if got != nil {
-		t.Fatalf("expected nil for nonexistent, got %+v", got)
-	}
+	t.Run("not found returns nil", func(t *testing.T) {
+		got, err := ds.Get(ctx, "nonexistent")
+		require.NoError(t, err)
+		require.Nil(t, got)
+	})
 
 	cfg := channel.DynamicChannelConfig{Name: "tablet", Type: channel.TypeSocket, Description: "iPad"}
-	if err := ds.Add(ctx, cfg); err != nil {
-		t.Fatalf("add: %v", err)
-	}
+	require.NoError(t, ds.Add(ctx, cfg))
 
-	got, err = ds.Get(ctx, "tablet")
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	if got == nil {
-		t.Fatal("expected non-nil result")
-	}
-	if got.Description != "iPad" {
-		t.Fatalf("expected 'iPad', got %q", got.Description)
-	}
+	t.Run("returns existing entry", func(t *testing.T) {
+		got, err := ds.Get(ctx, "tablet")
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Equal(t, "iPad", got.Description)
+	})
 }
 
 func TestDynamicStore_Update(t *testing.T) {
@@ -106,28 +75,23 @@ func TestDynamicStore_Update(t *testing.T) {
 	ds := channel.NewDynamicStore(newTestStore(t))
 
 	cfg := channel.DynamicChannelConfig{Name: "phone", Type: channel.TypeSocket, Description: "Old phone"}
-	if err := ds.Add(ctx, cfg); err != nil {
-		t.Fatalf("add: %v", err)
-	}
+	require.NoError(t, ds.Add(ctx, cfg))
 
-	if err := ds.Update(ctx, "phone", func(c *channel.DynamicChannelConfig) {
-		c.Description = "New phone"
-	}); err != nil {
-		t.Fatalf("update: %v", err)
-	}
+	t.Run("updates existing entry", func(t *testing.T) {
+		err := ds.Update(ctx, "phone", func(c *channel.DynamicChannelConfig) {
+			c.Description = "New phone"
+		})
+		require.NoError(t, err)
 
-	got, err := ds.Get(ctx, "phone")
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	if got.Description != "New phone" {
-		t.Fatalf("expected 'New phone', got %q", got.Description)
-	}
+		got, err := ds.Get(ctx, "phone")
+		require.NoError(t, err)
+		require.Equal(t, "New phone", got.Description)
+	})
 
-	// Update nonexistent returns error.
-	if err := ds.Update(ctx, "nonexistent", func(c *channel.DynamicChannelConfig) {}); err == nil {
-		t.Fatal("expected error on update nonexistent, got nil")
-	}
+	t.Run("nonexistent returns error", func(t *testing.T) {
+		err := ds.Update(ctx, "nonexistent", func(c *channel.DynamicChannelConfig) {})
+		require.Error(t, err)
+	})
 }
 
 func TestDynamicStore_Remove(t *testing.T) {
@@ -136,30 +100,61 @@ func TestDynamicStore_Remove(t *testing.T) {
 
 	cfg1 := channel.DynamicChannelConfig{Name: "phone", Type: channel.TypeSocket}
 	cfg2 := channel.DynamicChannelConfig{Name: "tablet", Type: channel.TypeSocket}
-	if err := ds.Add(ctx, cfg1); err != nil {
-		t.Fatalf("add phone: %v", err)
-	}
-	if err := ds.Add(ctx, cfg2); err != nil {
-		t.Fatalf("add tablet: %v", err)
-	}
+	require.NoError(t, ds.Add(ctx, cfg1))
+	require.NoError(t, ds.Add(ctx, cfg2))
 
-	if err := ds.Remove(ctx, "phone"); err != nil {
-		t.Fatalf("remove: %v", err)
-	}
+	t.Run("removes existing entry", func(t *testing.T) {
+		require.NoError(t, ds.Remove(ctx, "phone"))
 
-	configs, err := ds.List(ctx)
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(configs) != 1 {
-		t.Fatalf("expected 1 item after remove, got %d", len(configs))
-	}
-	if configs[0].Name != "tablet" {
-		t.Fatalf("expected 'tablet' to remain, got %q", configs[0].Name)
-	}
+		configs, err := ds.List(ctx)
+		require.NoError(t, err)
+		require.Len(t, configs, 1)
+		require.Equal(t, "tablet", configs[0].Name)
+	})
 
-	// Remove nonexistent returns error.
-	if err := ds.Remove(ctx, "nonexistent"); err == nil {
-		t.Fatal("expected error on remove nonexistent, got nil")
+	t.Run("nonexistent returns error", func(t *testing.T) {
+		err := ds.Remove(ctx, "nonexistent")
+		require.Error(t, err)
+	})
+}
+
+func TestDynamicStore_ConcurrentAccess(t *testing.T) {
+	ctx := context.Background()
+	ds := channel.NewDynamicStore(newTestStore(t))
+
+	// Seed an initial entry.
+	require.NoError(t, ds.Add(ctx, channel.DynamicChannelConfig{
+		Name: "shared",
+		Type: channel.TypeSocket,
+	}))
+
+	// Run concurrent updates — documents the TOCTOU race. Without a mutex
+	// on the store, some updates may be lost. This test ensures no panics
+	// or data corruption occur.
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			_ = ds.Update(ctx, "shared", func(c *channel.DynamicChannelConfig) {
+				c.Description = time.Now().String()
+			})
+		}(i)
 	}
+	wg.Wait()
+
+	// Verify the entry still exists and is readable.
+	got, err := ds.Get(ctx, "shared")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, "shared", got.Name)
+}
+
+// --- helpers ---
+
+func newTestStore(t *testing.T) store.Store {
+	t.Helper()
+	s, err := store.NewFS(t.TempDir())
+	require.NoError(t, err)
+	return s
 }

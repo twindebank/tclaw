@@ -32,9 +32,10 @@ func resolveProvider(providers map[string]Provider, name string) (Provider, erro
 }
 
 // persistInlineCredentials stores credentials if passed inline on any tool call.
-func persistInlineCredentials(ctx context.Context, provider Provider, apiKey, authToken string) {
+// Returns an error if persistence fails — the caller decides whether to surface it.
+func persistInlineCredentials(ctx context.Context, provider Provider, apiKey, authToken string) error {
 	if apiKey == "" && authToken == "" {
-		return
+		return nil
 	}
 	creds := map[string]string{}
 	if apiKey != "" {
@@ -44,8 +45,9 @@ func persistInlineCredentials(ctx context.Context, provider Provider, apiKey, au
 		creds["auth_token"] = authToken
 	}
 	if err := provider.PersistCredentials(ctx, creds); err != nil {
-		slog.Warn("failed to persist inline restaurant credentials", "provider", provider.Name(), "err", err)
+		return fmt.Errorf("persist inline credentials for %s: %w", provider.Name(), err)
 	}
+	return nil
 }
 
 func makeHandler(name string, providers map[string]Provider, deps Deps) mcp.ToolHandler {
@@ -154,7 +156,9 @@ func searchHandler(providers map[string]Provider) mcp.ToolHandler {
 		if err != nil {
 			return nil, err
 		}
-		persistInlineCredentials(ctx, p, a.APIKey, a.AuthToken)
+		if err := persistInlineCredentials(ctx, p, a.APIKey, a.AuthToken); err != nil {
+			slog.Warn("failed to persist inline credentials", "err", err)
+		}
 
 		return p.Search(ctx, SearchParams{
 			Query:     a.Query,
@@ -189,7 +193,9 @@ func availabilityHandler(providers map[string]Provider) mcp.ToolHandler {
 		if err != nil {
 			return nil, err
 		}
-		persistInlineCredentials(ctx, p, a.APIKey, a.AuthToken)
+		if err := persistInlineCredentials(ctx, p, a.APIKey, a.AuthToken); err != nil {
+			slog.Warn("failed to persist inline credentials", "err", err)
+		}
 
 		return p.Availability(ctx, AvailabilityParams{
 			VenueID:   a.VenueID,
@@ -229,7 +235,9 @@ func bookHandler(providers map[string]Provider) mcp.ToolHandler {
 		if err != nil {
 			return nil, err
 		}
-		persistInlineCredentials(ctx, p, a.APIKey, a.AuthToken)
+		if err := persistInlineCredentials(ctx, p, a.APIKey, a.AuthToken); err != nil {
+			slog.Warn("failed to persist inline credentials", "err", err)
+		}
 
 		result, err := p.Book(ctx, BookParams{
 			ConfigID:        a.ConfigID,
@@ -262,7 +270,9 @@ func cancelHandler(providers map[string]Provider) mcp.ToolHandler {
 		if err != nil {
 			return nil, err
 		}
-		persistInlineCredentials(ctx, p, a.APIKey, a.AuthToken)
+		if err := persistInlineCredentials(ctx, p, a.APIKey, a.AuthToken); err != nil {
+			slog.Warn("failed to persist inline credentials", "err", err)
+		}
 
 		result, err := p.CancelBooking(ctx, CancelParams{
 			ReservationID: a.ReservationID,
@@ -287,7 +297,9 @@ func listBookingsHandler(providers map[string]Provider) mcp.ToolHandler {
 		if err != nil {
 			return nil, err
 		}
-		persistInlineCredentials(ctx, p, a.APIKey, a.AuthToken)
+		if err := persistInlineCredentials(ctx, p, a.APIKey, a.AuthToken); err != nil {
+			slog.Warn("failed to persist inline credentials", "err", err)
+		}
 
 		result, err := p.ListBookings(ctx)
 		if errors.Is(err, ErrNotSupported) {
