@@ -15,7 +15,7 @@ import (
 // seedConfigCredentials creates credential sets and writes secrets from the
 // config file's credentials section. Runs every startup — idempotent because
 // it overwrites existing field values with the config values.
-func seedConfigCredentials(ctx context.Context, credMgr *credential.Manager, cfg config.CredentialsConfig) {
+func seedConfigCredentials(ctx context.Context, credMgr *credential.Manager, cfg config.CredentialsConfig) error {
 	for pkg, entries := range cfg {
 		for _, entry := range entries {
 			label := entry.Label
@@ -25,47 +25,27 @@ func seedConfigCredentials(ctx context.Context, credMgr *credential.Manager, cfg
 
 			setID := credential.NewCredentialSetID(pkg, label)
 
-			// Ensure the credential set exists.
 			existing, err := credMgr.Get(ctx, setID)
 			if err != nil {
-				slog.Error("config seed: failed to check credential set", "set", setID, "err", err)
-				continue
+				return fmt.Errorf("check credential set %s: %w", setID, err)
 			}
 			if existing == nil {
 				if _, err := credMgr.Add(ctx, pkg, label, entry.Channel); err != nil {
-					slog.Error("config seed: failed to create credential set", "set", setID, "err", err)
-					continue
+					return fmt.Errorf("create credential set %s: %w", setID, err)
 				}
 			}
 
-			// Write each secret field.
 			for key, val := range entry.Secrets {
 				if val == "" {
 					continue
 				}
 				if err := credMgr.SetField(ctx, setID, key, val); err != nil {
-					slog.Error("config seed: failed to set field", "set", setID, "field", key, "err", err)
+					return fmt.Errorf("set field %s on %s: %w", key, setID, err)
 				}
 			}
 		}
 	}
-}
-
-// buildConfigSecretsMap converts config credentials into a flat map for the
-// legacy connection migration. Maps package name → field → value using the
-// first entry's secrets for each package (legacy connections only had one
-// set of client credentials per provider).
-func buildConfigSecretsMap(cfg config.CredentialsConfig) map[string]map[string]string {
-	result := make(map[string]map[string]string, len(cfg))
-	for pkg, entries := range cfg {
-		if len(entries) == 0 {
-			continue
-		}
-		// Use the first entry's secrets for migration — legacy connections
-		// didn't support multiple credential sets per provider.
-		result[pkg] = entries[0].Secrets
-	}
-	return result
+	return nil
 }
 
 // registerCredentialSystem sets up the unified credential management for all
