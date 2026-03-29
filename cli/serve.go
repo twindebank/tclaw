@@ -19,7 +19,6 @@ import (
 	"tclaw/libraries/logbuffer"
 	"tclaw/libraries/store"
 	"tclaw/oauth"
-	"tclaw/provider"
 	"tclaw/router"
 	"tclaw/version"
 )
@@ -79,21 +78,6 @@ func runServe() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Build provider registry from config.
-	reg := provider.NewRegistry()
-	if cfg.Providers.Google != nil {
-		reg.Register(provider.NewGoogleProvider(
-			cfg.Providers.Google.ClientID,
-			cfg.Providers.Google.ClientSecret,
-		))
-	}
-	if cfg.Providers.Monzo != nil {
-		reg.Register(provider.NewMonzoProvider(
-			cfg.Providers.Monzo.ClientID,
-			cfg.Providers.Monzo.ClientSecret,
-		))
-	}
-
 	// Start the HTTP server (health checks, OAuth callbacks, Telegram webhooks).
 	callback := oauth.NewCallbackServer(cfg.Server.Addr, cfg.Server.PublicURL)
 	if err := callback.Start(); err != nil {
@@ -108,7 +92,7 @@ func runServe() {
 		fmt.Fprintln(w, version.Commit)
 	}))
 
-	r := router.New(cfg.BaseDir, cfg.Env, reg, callback, cfg.Server.PublicURL, logBuf, *configPath)
+	r := router.New(cfg.BaseDir, cfg.Env, cfg.Credentials, callback, cfg.Server.PublicURL, logBuf, *configPath)
 	defer r.StopAll()
 
 	for _, u := range cfg.Users {

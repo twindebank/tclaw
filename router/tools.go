@@ -8,9 +8,9 @@ import (
 	"tclaw/channel"
 	"tclaw/claudecli"
 	"tclaw/config"
-	"tclaw/connection"
 	"tclaw/credential"
 	"tclaw/mcp"
+	"tclaw/remotemcpstore"
 	"tclaw/toolgroup"
 	"tclaw/user"
 )
@@ -34,7 +34,7 @@ func buildChannelToolOverrides(
 	registry *channel.Registry,
 	ctx context.Context,
 	userCfg user.Config,
-	connMgr *connection.Manager,
+	connMgr *remotemcpstore.Manager,
 	credMgr *credential.Manager,
 ) map[channel.ChannelID]agent.ChannelToolPermissions {
 	overrides := make(map[channel.ChannelID]agent.ChannelToolPermissions)
@@ -86,7 +86,7 @@ func buildChannelToolOverrides(
 // buildChannelContext constructs the ChannelContext for role resolution by
 // looking up which provider connections and remote MCPs are scoped to this
 // channel.
-func buildChannelContext(ctx context.Context, connMgr *connection.Manager, credMgr *credential.Manager, channelName string) toolgroup.ChannelContext {
+func buildChannelContext(ctx context.Context, connMgr *remotemcpstore.Manager, credMgr *credential.Manager, channelName string) toolgroup.ChannelContext {
 	var channelCtx toolgroup.ChannelContext
 
 	// Credential-based tool packages.
@@ -120,7 +120,7 @@ func buildChannelContext(ctx context.Context, connMgr *connection.Manager, credM
 func buildMCPConfigPaths(
 	ctx context.Context,
 	allChMap map[channel.ChannelID]channel.Channel,
-	connMgr *connection.Manager,
+	connMgr *remotemcpstore.Manager,
 	mcpConfigDir string,
 	mcpAddr string,
 	mcpToken string,

@@ -5,15 +5,15 @@ import (
 	"fmt"
 
 	"tclaw/claudecli"
-	"tclaw/connection"
 	"tclaw/libraries/secret"
 	"tclaw/mcp"
+	"tclaw/remotemcpstore"
 	"tclaw/tool/toolpkg"
 	"tclaw/toolgroup"
 )
 
-// ExtraKeyConnManager is the RegistrationContext.Extra key for *connection.Manager.
-const ExtraKeyConnManager = "connection_manager"
+// ExtraKeyRemoteMCPManager is the RegistrationContext.Extra key for *remotemcpstore.Manager.
+const ExtraKeyRemoteMCPManager = "remote_mcp_manager"
 
 // ExtraKeyConfigUpdater is the RegistrationContext.Extra key for the config updater callback.
 const ExtraKeyConfigUpdater = "remote_mcp_config_updater"
@@ -45,9 +45,9 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 }
 
 func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationContext) error {
-	connMgr, ok := regCtx.Extra[ExtraKeyConnManager].(*connection.Manager)
+	connMgr, ok := regCtx.Extra[ExtraKeyRemoteMCPManager].(*remotemcpstore.Manager)
 	if !ok || connMgr == nil {
-		return fmt.Errorf("remotemcp: missing %s in Extra", ExtraKeyConnManager)
+		return fmt.Errorf("remotemcp: missing %s in Extra", ExtraKeyRemoteMCPManager)
 	}
 
 	var configUpdater func(context.Context) error

@@ -40,8 +40,8 @@ func TestMigrateFromConnections(t *testing.T) {
 		require.NoError(t, sec.Set(ctx, "conn/google/work", string(credsJSON)))
 
 		// Run migration.
-		clients := map[string]credential.OAuthClientCredentials{
-			"google": {ClientID: "goog-id", ClientSecret: "goog-secret"},
+		clients := map[string]map[string]string{
+			"google": {"client_id": "goog-id", "client_secret": "goog-secret"},
 		}
 		err = credential.MigrateFromConnections(ctx, s, sec, credMgr, clients)
 		require.NoError(t, err)
