@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"sync"
 
-	"tclaw/connection"
+	"tclaw/credential"
 	"tclaw/gws"
 	"tclaw/mcp"
 )
@@ -25,9 +25,9 @@ const (
 )
 
 type gmailListArgs struct {
-	Connection string `json:"connection"`
-	Query      string `json:"query"`
-	MaxResults int    `json:"max_results"`
+	CredentialSet string `json:"credential_set"`
+	Query         string `json:"query"`
+	MaxResults    int    `json:"max_results"`
 }
 
 // gmailListResponse matches the Gmail API's users.messages.list response.
@@ -90,14 +90,14 @@ type gmailListToolResponse struct {
 //     for each message using format=metadata
 //
 // This avoids the agent needing two separate tool calls per email scan.
-func gmailListHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler {
+func gmailListHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var a gmailListArgs
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
-		deps, err := resolveDeps(connMap, a.Connection)
+		deps, err := resolveDeps(depsMap, a.CredentialSet)
 		if err != nil {
 			return nil, err
 		}
@@ -110,7 +110,7 @@ func gmailListHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler 
 			maxResults = maxGmailListResults
 		}
 
-		slog.Info("gmail list starting", "connection", a.Connection, "query", a.Query, "max_results", maxResults)
+		slog.Info("gmail list starting", "connection", a.CredentialSet, "query", a.Query, "max_results", maxResults)
 
 		// Step 1: list message IDs.
 		listParams := map[string]any{
@@ -123,17 +123,17 @@ func gmailListHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler 
 
 		listOutput, err := runGWS(ctx, deps, gws.Gmail.ListMessages(listParams))
 		if err != nil {
-			slog.Error("gmail list failed", "connection", a.Connection, "error", err)
+			slog.Error("gmail list failed", "connection", a.CredentialSet, "error", err)
 			return nil, fmt.Errorf("list messages: %w", err)
 		}
 
 		var listRsp gmailListResponse
 		if err := json.Unmarshal(listOutput, &listRsp); err != nil {
-			slog.Error("gmail list response parse failed", "connection", a.Connection, "error", err, "raw_output_len", len(listOutput))
+			slog.Error("gmail list response parse failed", "connection", a.CredentialSet, "error", err, "raw_output_len", len(listOutput))
 			return nil, fmt.Errorf("parse list response: %w", err)
 		}
 
-		slog.Info("gmail list results", "connection", a.Connection, "message_count", len(listRsp.Messages), "total_estimate", listRsp.ResultSizeEstimate)
+		slog.Info("gmail list results", "connection", a.CredentialSet, "message_count", len(listRsp.Messages), "total_estimate", listRsp.ResultSizeEstimate)
 
 		if len(listRsp.Messages) == 0 {
 			return json.Marshal(gmailListToolResponse{
@@ -199,7 +199,7 @@ func gmailListHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler 
 		}
 
 		if errorCount > 0 {
-			slog.Warn("gmail metadata fetch errors", "connection", a.Connection, "fetched", len(summaries), "errors", errorCount)
+			slog.Warn("gmail metadata fetch errors", "connection", a.CredentialSet, "fetched", len(summaries), "errors", errorCount)
 		}
 
 		return json.Marshal(gmailListToolResponse{

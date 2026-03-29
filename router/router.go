@@ -21,6 +21,7 @@ import (
 	"tclaw/claudecli"
 	"tclaw/config"
 	"tclaw/connection"
+	"tclaw/credential"
 	"tclaw/dev"
 	"tclaw/libraries/logbuffer"
 	"tclaw/libraries/secret"
@@ -186,33 +187,68 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	memoryDir := dirs.Memory
 	mcpConfigDir := dirs.MCPConfig
 
-	// Set up connection manager and MCP server.
+	// Set up connection manager (for remote MCPs) and credential manager.
 	connMgr := connection.NewManager(s, secretStore)
+	credMgr := credential.NewManager(s, secretStore)
 	mcpHandler := mcp.NewHandler()
 
-	// Track active Google connections so tools can list all available
-	// connections in their enum. Shared across connect/disconnect callbacks.
-	googleConns := make(map[connection.ConnectionID]googletools.Deps)
-	monzoConns := make(map[connection.ConnectionID]monzotools.Deps)
+	// One-time migration: copy legacy connection OAuth tokens into the
+	// new credential system. Idempotent — skips connections that are
+	// already migrated. After all connections are migrated, the old
+	// connectiontools and connection/provider packages can be removed.
+	oauthClients := make(map[string]credential.OAuthClientCredentials)
+	for _, pid := range r.registry.List() {
+		p := r.registry.Get(pid)
+		if p != nil && p.OAuth2 != nil {
+			oauthClients[string(pid)] = credential.OAuthClientCredentials{
+				ClientID:     p.OAuth2.ClientID,
+				ClientSecret: p.OAuth2.ClientSecret,
+			}
+		}
+	}
+	if err := credential.MigrateFromConnections(ctx, s, secretStore, credMgr, oauthClients); err != nil {
+		slog.Error("failed to migrate connections to credential sets", "user", mu.cfg.ID, "err", err)
+	}
 
+	// Track active credential sets for provider tools.
+	googleDepsMap := make(map[credential.CredentialSetID]googletools.Deps)
+	monzoDepsMap := make(map[credential.CredentialSetID]monzotools.Deps)
+
+	// Register legacy connection tools (kept for backward compat with
+	// existing connections).
 	connectiontools.RegisterTools(mcpHandler, connectiontools.Deps{
 		Manager:  connMgr,
+		CredMgr:  credMgr,
 		Registry: r.registry,
 		Callback: r.callback,
 		Handler:  mcpHandler,
 		OnProviderConnect: func(connID connection.ConnectionID, mgr *connection.Manager, p *provider.Provider) {
-			r.registerToolsForProvider(mcpHandler, connID, mgr, p, googleConns, monzoConns)
+			// Bridge: connection ID format is "<provider>/<label>" which maps
+			// directly to credential set ID format "<package>/<label>".
+			setID := credential.CredentialSetID(connID)
+			creds, err := mgr.GetCredentials(ctx, connID)
+			if err == nil && creds != nil {
+				conn, _ := mgr.Get(ctx, connID)
+				if conn != nil {
+					migrateConnectionToCredentialSet(ctx, *conn, creds, p, credMgr, setID)
+				}
+			}
+			r.registerToolsForProvider(mcpHandler, setID, credMgr, p, googleDepsMap, monzoDepsMap)
 		},
 		OnProviderDisconnect: func(connID connection.ConnectionID) {
-			r.unregisterToolsForProvider(mcpHandler, connID, googleConns, monzoConns)
+			// Try to find and remove from both maps — the connection ID format
+			// is "<provider>/<label>" which happens to match credential set ID format.
+			setID := credential.CredentialSetID(connID)
+			r.unregisterToolsForProvider(mcpHandler, setID, googleDepsMap, monzoDepsMap)
 		},
 	})
 	if r.callback != nil {
 		connectiontools.RegisterAuthWaitTool(mcpHandler, connMgr)
 	}
 
-	// Register provider-specific tools for existing connections.
-	r.registerProviderTools(ctx, mcpHandler, connMgr, googleConns, monzoConns)
+	// Register provider-specific tools for existing connections, bridging
+	// them into the new credential system.
+	r.registerProviderTools(ctx, mcpHandler, connMgr, credMgr, googleDepsMap, monzoDepsMap)
 
 	mcpServer := mcp.NewServer(mcpHandler)
 	mcpToken := mcpServer.Token()
@@ -823,7 +859,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 		// Build per-channel tool overrides from config (static), store (dynamic),
 		// and tool groups. Groups are resolved with channel context (connections, remote MCPs).
-		channelToolOverrides := buildChannelToolOverrides(allChMap, registry, dynamicCtx, mu.cfg, connMgr)
+		channelToolOverrides := buildChannelToolOverrides(allChMap, registry, dynamicCtx, mu.cfg, connMgr, credMgr)
 
 		// Generate per-channel MCP config files for channels with scoped remote MCPs.
 		mcpConfigPaths := buildMCPConfigPaths(dynamicCtx, allChMap, connMgr, mcpConfigDir, mcpAddr, mcpToken)

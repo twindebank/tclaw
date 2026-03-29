@@ -2,6 +2,7 @@ package connectiontools
 
 import (
 	"tclaw/connection"
+	"tclaw/credential"
 	"tclaw/mcp"
 	"tclaw/oauth"
 	"tclaw/provider"
@@ -10,6 +11,7 @@ import (
 // Deps holds the dependencies for connection management tools.
 type Deps struct {
 	Manager  *connection.Manager
+	CredMgr  *credential.Manager // for bridging OAuth tokens to the new credential system
 	Registry *provider.Registry
 	Callback *oauth.CallbackServer // nil if OAuth is not configured
 	Handler  *mcp.Handler          // MCP handler for dynamic tool registration

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"tclaw/connection"
+	"tclaw/credential"
 	"tclaw/mcp"
 	"tclaw/oauth"
 	"tclaw/provider"
@@ -103,11 +104,22 @@ func handleOAuthAdd(ctx context.Context, deps Deps, p *provider.Provider, conn *
 		return nil, fmt.Errorf("OAuth is not configured — set providers.%s.client_id and client_secret in tclaw.yaml", p.ID)
 	}
 
+	// Bridge: create a credential set and use the new PendingFlow type.
+	credSetID := credential.CredentialSetID(conn.ID)
+	oauthCfg := &oauth.OAuth2Config{
+		AuthURL:      p.OAuth2.AuthURL,
+		TokenURL:     p.OAuth2.TokenURL,
+		ClientID:     p.OAuth2.ClientID,
+		ClientSecret: p.OAuth2.ClientSecret,
+		Scopes:       p.OAuth2.Scopes,
+		ExtraParams:  p.OAuth2.ExtraParams,
+	}
+
 	flow := &oauth.PendingFlow{
-		ConnID:   conn.ID,
-		Provider: p,
-		Manager:  deps.Manager,
-		OnConnect: func() {
+		CredSetID:   credSetID,
+		OAuthConfig: oauthCfg,
+		Manager:     deps.CredMgr,
+		OnComplete: func() {
 			if deps.OnProviderConnect != nil {
 				deps.OnProviderConnect(conn.ID, deps.Manager, p)
 			}
@@ -119,7 +131,7 @@ func handleOAuthAdd(ctx context.Context, deps Deps, p *provider.Provider, conn *
 		return nil, fmt.Errorf("start oauth flow: %w", err)
 	}
 
-	authURL := oauth.BuildAuthURL(p.OAuth2, state, flow.CallbackURL)
+	authURL := oauth.BuildAuthURL(oauthCfg, state, flow.CallbackURL)
 
 	result := map[string]any{
 		"connection_id": conn.ID,

@@ -4,32 +4,32 @@ import (
 	"context"
 	"encoding/json"
 
-	"tclaw/connection"
+	"tclaw/credential"
 	"tclaw/gws"
 	"tclaw/mcp"
 	"tclaw/tool/providerutil"
 )
 
-// Deps holds dependencies for a single Google Workspace connection.
+// Deps holds dependencies for a single Google Workspace credential set.
 type Deps = providerutil.Deps
 
 // RegisterTools registers (or re-registers) the Google Workspace tools
-// with handlers that resolve the connection dynamically from connMap.
-// Call this each time a Google connection is added or removed.
-func RegisterTools(handler *mcp.Handler, connMap map[connection.ConnectionID]Deps) {
-	connIDs := make([]connection.ConnectionID, 0, len(connMap))
-	for id := range connMap {
-		connIDs = append(connIDs, id)
+// with handlers that resolve the credential set dynamically from depsMap.
+// Call this each time a Google credential set is added or removed.
+func RegisterTools(handler *mcp.Handler, depsMap map[credential.CredentialSetID]Deps) {
+	setIDs := make([]credential.CredentialSetID, 0, len(depsMap))
+	for id := range depsMap {
+		setIDs = append(setIDs, id)
 	}
 
-	defs := ToolDefs(connIDs)
-	handler.Register(defs[0], gmailListHandler(connMap))
-	handler.Register(defs[1], gmailReadHandler(connMap))
-	handler.Register(defs[2], gmailSendHandler(connMap))
-	handler.Register(defs[3], calendarListHandler(connMap))
-	handler.Register(defs[4], calendarCreateHandler(connMap))
-	handler.Register(defs[5], workspaceHandler(connMap))
-	handler.Register(defs[6], schemaHandler(connMap))
+	defs := ToolDefs(setIDs)
+	handler.Register(defs[0], gmailListHandler(depsMap))
+	handler.Register(defs[1], gmailReadHandler(depsMap))
+	handler.Register(defs[2], gmailSendHandler(depsMap))
+	handler.Register(defs[3], calendarListHandler(depsMap))
+	handler.Register(defs[4], calendarCreateHandler(depsMap))
+	handler.Register(defs[5], workspaceHandler(depsMap))
+	handler.Register(defs[6], schemaHandler(depsMap))
 }
 
 // UnregisterTools removes the Google Workspace tools from the handler.
@@ -39,17 +39,17 @@ func UnregisterTools(handler *mcp.Handler) {
 	}
 }
 
-// resolveDeps looks up the Deps for a connection ID from the tool args.
-func resolveDeps(connMap map[connection.ConnectionID]Deps, connIDStr string) (Deps, error) {
-	return providerutil.ResolveDeps(connMap, connIDStr)
+// resolveDeps looks up the Deps for a credential set ID from the tool args.
+func resolveDeps(depsMap map[credential.CredentialSetID]Deps, idStr string) (Deps, error) {
+	return providerutil.ResolveDeps(depsMap, idStr)
 }
 
-// accessToken gets a valid access token for the connection, refreshing if needed.
+// accessToken gets a valid access token for the credential set, refreshing if needed.
 func accessToken(ctx context.Context, deps Deps) (string, error) {
 	return providerutil.AccessToken(ctx, deps)
 }
 
-// runGWS executes a typed gws command with the connection's access token.
+// runGWS executes a typed gws command with the credential set's access token.
 // Returns the raw JSON output.
 func runGWS(ctx context.Context, deps Deps, cmd gws.Command) (json.RawMessage, error) {
 	token, err := accessToken(ctx, deps)

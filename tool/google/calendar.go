@@ -9,18 +9,18 @@ import (
 	"strings"
 	"time"
 
-	"tclaw/connection"
+	"tclaw/credential"
 	"tclaw/gws"
 	"tclaw/mcp"
 )
 
 type calendarListArgs struct {
-	Connection string `json:"connection"`
-	StartDate  string `json:"start_date"`
-	DaysAhead  int    `json:"days_ahead"`
-	Query      string `json:"query"`
-	MaxResults int    `json:"max_results"`
-	CalendarID string `json:"calendar_id"`
+	CredentialSet string `json:"credential_set"`
+	StartDate     string `json:"start_date"`
+	DaysAhead     int    `json:"days_ahead"`
+	Query         string `json:"query"`
+	MaxResults    int    `json:"max_results"`
+	CalendarID    string `json:"calendar_id"`
 }
 
 // calendarEventsResponse matches the Google Calendar API's events.list response.
@@ -88,14 +88,14 @@ type calendarListToolResponse struct {
 	EventCount int                    `json:"event_count"`
 }
 
-func calendarListHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler {
+func calendarListHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var a calendarListArgs
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
-		deps, err := resolveDeps(connMap, a.Connection)
+		deps, err := resolveDeps(depsMap, a.CredentialSet)
 		if err != nil {
 			return nil, err
 		}
@@ -120,7 +120,7 @@ func calendarListHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandl
 		timeMin := windowStart.Format(time.RFC3339)
 		timeMax := windowEnd.Format(time.RFC3339)
 
-		slog.Info("calendar list starting", "connection", a.Connection, "start_date", a.StartDate, "days_ahead", a.DaysAhead, "query", a.Query)
+		slog.Info("calendar list starting", "connection", a.CredentialSet, "start_date", a.StartDate, "days_ahead", a.DaysAhead, "query", a.Query)
 
 		params := map[string]any{
 			"calendarId":   calendarID,
@@ -154,7 +154,7 @@ func calendarListHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandl
 
 		timeRange := fmt.Sprintf("%s to %s", windowStart.Format("2006-01-02"), windowEnd.Format("2006-01-02"))
 
-		slog.Info("calendar list done", "connection", a.Connection, "event_count", len(summaries))
+		slog.Info("calendar list done", "connection", a.CredentialSet, "event_count", len(summaries))
 
 		return json.Marshal(calendarListToolResponse{
 			Events:     summaries,
@@ -165,14 +165,14 @@ func calendarListHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandl
 }
 
 type calendarCreateArgs struct {
-	Connection  string `json:"connection"`
-	Title       string `json:"title"`
-	Date        string `json:"date"`
-	StartTime   string `json:"start_time"`
-	EndTime     string `json:"end_time"`
-	Description string `json:"description"`
-	Location    string `json:"location"`
-	CalendarID  string `json:"calendar_id"`
+	CredentialSet string `json:"credential_set"`
+	Title         string `json:"title"`
+	Date          string `json:"date"`
+	StartTime     string `json:"start_time"`
+	EndTime       string `json:"end_time"`
+	Description   string `json:"description"`
+	Location      string `json:"location"`
+	CalendarID    string `json:"calendar_id"`
 
 	// AddMeet adds a Google Meet video conference link to the event.
 	AddMeet bool `json:"add_meet"`
@@ -184,14 +184,14 @@ type calendarCreateToolResponse struct {
 	DuplicateAction string                `json:"duplicate_action,omitempty"`
 }
 
-func calendarCreateHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler {
+func calendarCreateHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var a calendarCreateArgs
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
-		deps, err := resolveDeps(connMap, a.Connection)
+		deps, err := resolveDeps(depsMap, a.CredentialSet)
 		if err != nil {
 			return nil, err
 		}
@@ -216,7 +216,7 @@ func calendarCreateHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHan
 
 		isAllDay := a.StartTime == "" && a.EndTime == ""
 
-		slog.Info("calendar create starting", "connection", a.Connection, "title", a.Title, "date", a.Date, "all_day", isAllDay)
+		slog.Info("calendar create starting", "connection", a.CredentialSet, "title", a.Title, "date", a.Date, "all_day", isAllDay)
 
 		// Check for duplicates on the same day with similar title.
 		duplicate, err := findDuplicate(ctx, deps, calendarID, a.Title, eventDate)
@@ -312,7 +312,7 @@ func calendarCreateHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHan
 
 		summary := extractEventSummary(created)
 
-		slog.Info("calendar create done", "connection", a.Connection, "event_id", created.ID, "title", a.Title)
+		slog.Info("calendar create done", "connection", a.CredentialSet, "event_id", created.ID, "title", a.Title)
 
 		return json.Marshal(calendarCreateToolResponse{
 			Created: &summary,

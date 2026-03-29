@@ -12,8 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"tclaw/connection"
-	"tclaw/provider"
+	"tclaw/credential"
 )
 
 const (
@@ -34,17 +33,15 @@ type PendingOAuthFlow interface {
 	DoneChan() <-chan struct{}
 }
 
-// PendingFlow tracks an in-progress OAuth authorization for built-in providers.
+// PendingFlow tracks an in-progress OAuth authorization.
 type PendingFlow struct {
-	ConnID      connection.ConnectionID
-	Provider    *provider.Provider
-	Manager     *connection.Manager
+	CredSetID   credential.CredentialSetID
+	OAuthConfig *OAuth2Config
+	Manager     *credential.Manager
 	CallbackURL string
 
-	// OnConnect is called after credentials are stored successfully.
-	// The router uses this to register provider tools dynamically
-	// so they're available in the current session without restart.
-	OnConnect func()
+	// OnComplete is called after tokens are stored successfully.
+	OnComplete func()
 
 	// Done is closed when the flow completes (success or failure).
 	// Result and Err are set before closing.
@@ -56,20 +53,20 @@ type PendingFlow struct {
 }
 
 func (f *PendingFlow) Complete(ctx context.Context, code string, callbackURL string) error {
-	creds, err := ExchangeCode(ctx, f.Provider.OAuth2, code, f.CallbackURL)
+	tokens, err := ExchangeCode(ctx, f.OAuthConfig, code, f.CallbackURL)
 	if err != nil {
 		return fmt.Errorf("code exchange failed: %w", err)
 	}
 
-	if err := f.Manager.SetCredentials(ctx, f.ConnID, creds); err != nil {
-		return fmt.Errorf("store credentials: %w", err)
+	if err := f.Manager.SetOAuthTokens(ctx, f.CredSetID, tokens); err != nil {
+		return fmt.Errorf("store oauth tokens: %w", err)
 	}
 
-	if f.OnConnect != nil {
-		f.OnConnect()
+	if f.OnComplete != nil {
+		f.OnComplete()
 	}
 
-	f.Result = fmt.Sprintf("Connection %s authorized successfully", f.ConnID)
+	f.Result = fmt.Sprintf("Credential set %s authorized successfully", f.CredSetID)
 	close(f.Done)
 	return nil
 }

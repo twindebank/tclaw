@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"tclaw/claudecli"
+	"tclaw/credential"
 	"tclaw/libraries/secret"
 	"tclaw/mcp"
 	"tclaw/toolgroup"
@@ -105,6 +106,61 @@ func (r *Registry) BuildGroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
 // Packages returns all registered packages.
 func (r *Registry) Packages() []Package {
 	return r.packages
+}
+
+// SeedCredentials reads pre-provisioned secrets from environment variables and
+// stores them in credential sets for packages that implement CredentialProvider.
+// For each CredentialField with an EnvVarPrefix, it checks for an env var of
+// the form PREFIX_USERID and seeds the value into the credential manager.
+func (r *Registry) SeedCredentials(ctx context.Context, userID string, credMgr *credential.Manager) error {
+	for _, pkg := range r.packages {
+		cp, ok := pkg.(CredentialProvider)
+		if !ok {
+			continue
+		}
+
+		spec := cp.CredentialSpec()
+		for _, field := range spec.Fields {
+			if field.EnvVarPrefix == "" {
+				continue
+			}
+			envVar := field.EnvVarPrefix + "_" + sanitizeEnvSuffix(userID)
+			val := os.Getenv(envVar)
+			if val == "" {
+				continue
+			}
+
+			// Ensure a default credential set exists for this package.
+			id := credential.NewCredentialSetID(pkg.Name(), "default")
+			existing, err := credMgr.Get(ctx, id)
+			if err != nil {
+				return fmt.Errorf("check credential set %s: %w", id, err)
+			}
+			if existing == nil {
+				if _, err := credMgr.Add(ctx, pkg.Name(), "default", ""); err != nil {
+					return fmt.Errorf("create default credential set for %s: %w", pkg.Name(), err)
+				}
+			}
+
+			if err := credMgr.SetField(ctx, id, field.Key, val); err != nil {
+				return fmt.Errorf("seed %s/%s from %s: %w", pkg.Name(), field.Key, envVar, err)
+			}
+			os.Unsetenv(envVar)
+			slog.Debug("seeded credential field from env", "env_var", envVar, "package", pkg.Name(), "field", field.Key)
+		}
+	}
+	return nil
+}
+
+// CredentialProviders returns all packages that implement CredentialProvider.
+func (r *Registry) CredentialProviders() []CredentialProvider {
+	var providers []CredentialProvider
+	for _, pkg := range r.packages {
+		if cp, ok := pkg.(CredentialProvider); ok {
+			providers = append(providers, cp)
+		}
+	}
+	return providers
 }
 
 // sanitizeEnvSuffix uppercases a user ID and replaces non-alphanumeric chars

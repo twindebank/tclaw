@@ -10,12 +10,13 @@ import (
 	"tclaw/toolgroup"
 )
 
-// Package implements toolpkg.Package for Google Workspace tools.
+// Package implements toolpkg.Package and toolpkg.CredentialProvider for
+// Google Workspace tools.
 //
-// Google is a provider-based package: tools are registered dynamically
-// per-connection by the router's OnProviderConnect callback. The Package
-// interface provides metadata only — Register is a no-op because connection
-// lifecycle is managed by connectiontools.
+// Currently, tools are still registered dynamically per-connection by the
+// router's OnProviderConnect callback. The CredentialProvider interface
+// declares the OAuth config so it's owned by this package rather than
+// provider/google.go.
 type Package struct{}
 
 func (p *Package) Name() string { return "google" }
@@ -48,5 +49,45 @@ func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationCont
 	// No-op: Google tools are registered dynamically per-connection by the
 	// router's OnProviderConnect callback. This package provides metadata
 	// and info tool only.
+	return nil
+}
+
+// CredentialSpec implements toolpkg.CredentialProvider. Google requires OAuth2
+// with client_id/client_secret from the tclaw config.
+func (p *Package) CredentialSpec() toolpkg.CredentialSpec {
+	return toolpkg.CredentialSpec{
+		AuthType: toolpkg.AuthOAuth2,
+		Fields: []toolpkg.CredentialField{
+			{Key: "client_id", Label: "Google OAuth Client ID", Required: true},
+			{Key: "client_secret", Label: "Google OAuth Client Secret", Required: true},
+		},
+		OAuth: &toolpkg.OAuthSpec{
+			AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
+			TokenURL: "https://oauth2.googleapis.com/token",
+			Scopes: []string{
+				"https://www.googleapis.com/auth/gmail.modify",
+				"https://www.googleapis.com/auth/drive",
+				"https://www.googleapis.com/auth/calendar",
+				"https://www.googleapis.com/auth/documents",
+				"https://www.googleapis.com/auth/spreadsheets",
+				"https://www.googleapis.com/auth/presentations",
+				"https://www.googleapis.com/auth/tasks",
+			},
+			ExtraParams: map[string]string{
+				"access_type": "offline",
+				"prompt":      "consent",
+			},
+			Services: []string{"Gmail", "Google Drive", "Google Calendar", "Google Docs", "Google Sheets", "Google Slides", "Google Tasks"},
+		},
+		SupportsMultiple: true,
+		ConfigKey:        "providers.google",
+	}
+}
+
+// OnCredentialSetChange implements toolpkg.CredentialProvider. Currently a
+// no-op — Google tools are still registered via the old provider/connection
+// system. This will be wired up when the router's provider-specific code is
+// removed.
+func (p *Package) OnCredentialSetChange(handler *mcp.Handler, ctx toolpkg.RegistrationContext, sets []toolpkg.ResolvedCredentialSet) error {
 	return nil
 }

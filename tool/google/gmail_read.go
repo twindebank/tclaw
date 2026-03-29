@@ -8,15 +8,15 @@ import (
 	"log/slog"
 	"strings"
 
-	"tclaw/connection"
+	"tclaw/credential"
 	"tclaw/gws"
 	"tclaw/libraries/htmlconv"
 	"tclaw/mcp"
 )
 
 type gmailReadArgs struct {
-	Connection string `json:"connection"`
-	MessageID  string `json:"message_id"`
+	CredentialSet string `json:"credential_set"`
+	MessageID     string `json:"message_id"`
 }
 
 // gmailFullMessage is the full message response from the Gmail API.
@@ -62,14 +62,14 @@ type gmailReadResponse struct {
 // as clean plain text. It fetches format=full, extracts text/plain if available,
 // otherwise strips HTML from text/html. This avoids dumping raw HTML blobs into
 // the agent context.
-func gmailReadHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler {
+func gmailReadHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var a gmailReadArgs
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
-		deps, err := resolveDeps(connMap, a.Connection)
+		deps, err := resolveDeps(depsMap, a.CredentialSet)
 		if err != nil {
 			return nil, err
 		}
@@ -78,7 +78,7 @@ func gmailReadHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler 
 			return nil, fmt.Errorf("message_id is required")
 		}
 
-		slog.Info("gmail read starting", "connection", a.Connection, "message_id", a.MessageID)
+		slog.Info("gmail read starting", "connection", a.CredentialSet, "message_id", a.MessageID)
 
 		output, err := runGWS(ctx, deps, gws.Gmail.GetMessage(map[string]any{
 			"userId": "me",
@@ -120,7 +120,7 @@ func gmailReadHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler 
 
 		rsp.Body = extractBody(msg.Payload)
 
-		slog.Info("gmail read done", "connection", a.Connection, "message_id", a.MessageID, "body_len", len(rsp.Body))
+		slog.Info("gmail read done", "connection", a.CredentialSet, "message_id", a.MessageID, "body_len", len(rsp.Body))
 
 		return json.Marshal(rsp)
 	}

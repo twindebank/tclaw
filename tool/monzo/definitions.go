@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"tclaw/connection"
+	"tclaw/credential"
 	"tclaw/mcp"
 )
 
@@ -55,7 +55,7 @@ var setCredentialsDef = mcp.ToolDef{
 
 // ToolDefs returns the MCP tool definitions for Monzo.
 // connIDs lists all active connections — used to build the connection enum.
-func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
+func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 	connEnum := make([]string, len(connIDs))
 	for i, id := range connIDs {
 		connEnum[i] = fmt.Sprintf("%q", id)

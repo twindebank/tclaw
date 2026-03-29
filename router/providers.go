@@ -10,12 +10,15 @@ import (
 
 	"tclaw/channel"
 	"tclaw/connection"
+	"tclaw/credential"
 	"tclaw/libraries/secret"
 	"tclaw/libraries/store"
 	"tclaw/mcp"
+	"tclaw/oauth"
 	"tclaw/provider"
 	googletools "tclaw/tool/google"
 	monzotools "tclaw/tool/monzo"
+	"tclaw/tool/providerutil"
 	"tclaw/user"
 )
 
@@ -212,7 +215,9 @@ func (r *Router) buildDynamicChannels(dynamicCtx context.Context, userID user.ID
 
 // registerProviderTools loads existing connections and registers
 // provider-specific MCP tools for connections that already have credentials stored.
-func (r *Router) registerProviderTools(ctx context.Context, h *mcp.Handler, mgr *connection.Manager, googleConns map[connection.ConnectionID]googletools.Deps, monzoConns map[connection.ConnectionID]monzotools.Deps) {
+// DEPRECATED: This function bridges old connections to the new credential system.
+// It will be removed once all connections are migrated to credential sets.
+func (r *Router) registerProviderTools(ctx context.Context, h *mcp.Handler, mgr *connection.Manager, credMgr *credential.Manager, googleDepsMap map[credential.CredentialSetID]googletools.Deps, monzoDepsMap map[credential.CredentialSetID]monzotools.Deps) {
 	conns, err := mgr.List(ctx)
 	if err != nil {
 		slog.Error("failed to list connections for tool registration", "err", err)
@@ -235,58 +240,108 @@ func (r *Router) registerProviderTools(ctx context.Context, h *mcp.Handler, mgr 
 			continue
 		}
 
-		r.registerToolsForProvider(h, conn.ID, mgr, p, googleConns, monzoConns)
+		// Bridge: migrate the connection's tokens into a credential set so
+		// the new tool handlers can find them.
+		setID := credential.NewCredentialSetID(string(conn.ProviderID), conn.Label)
+		migrateConnectionToCredentialSet(ctx, conn, creds, p, credMgr, setID)
+
+		r.registerToolsForProvider(h, setID, credMgr, p, googleDepsMap, monzoDepsMap)
 	}
 }
 
-// registerToolsForProvider adds a connection to the provider's tool set
-// and re-registers tools with the updated connection list.
-func (r *Router) registerToolsForProvider(h *mcp.Handler, connID connection.ConnectionID, mgr *connection.Manager, p *provider.Provider, googleConns map[connection.ConnectionID]googletools.Deps, monzoConns map[connection.ConnectionID]monzotools.Deps) {
+// migrateConnectionToCredentialSet bridges an old connection into the new
+// credential system by creating a credential set and copying the tokens.
+func migrateConnectionToCredentialSet(ctx context.Context, conn connection.Connection, creds *connection.Credentials, p *provider.Provider, credMgr *credential.Manager, setID credential.CredentialSetID) {
+	existing, err := credMgr.Get(ctx, setID)
+	if err != nil {
+		slog.Warn("failed to check existing credential set", "set", setID, "err", err)
+		return
+	}
+	if existing == nil {
+		if _, err := credMgr.Add(ctx, string(conn.ProviderID), conn.Label, conn.Channel); err != nil {
+			slog.Warn("failed to create credential set from connection", "connection", conn.ID, "err", err)
+			return
+		}
+	}
+
+	// Copy OAuth client credentials from provider config.
+	if p.OAuth2 != nil {
+		if err := credMgr.SetField(ctx, setID, "client_id", p.OAuth2.ClientID); err != nil {
+			slog.Warn("failed to set client_id from provider", "set", setID, "err", err)
+		}
+		if err := credMgr.SetField(ctx, setID, "client_secret", p.OAuth2.ClientSecret); err != nil {
+			slog.Warn("failed to set client_secret from provider", "set", setID, "err", err)
+		}
+	}
+
+	// Copy OAuth tokens.
+	tokens := &credential.OAuthTokens{
+		AccessToken:  creds.AccessToken,
+		RefreshToken: creds.RefreshToken,
+		ExpiresAt:    creds.ExpiresAt,
+	}
+	if err := credMgr.SetOAuthTokens(ctx, setID, tokens); err != nil {
+		slog.Warn("failed to copy oauth tokens to credential set", "set", setID, "err", err)
+	}
+}
+
+// registerToolsForProvider adds a credential set to the provider's tool set
+// and re-registers tools with the updated deps map.
+func (r *Router) registerToolsForProvider(h *mcp.Handler, setID credential.CredentialSetID, credMgr *credential.Manager, p *provider.Provider, googleDepsMap map[credential.CredentialSetID]googletools.Deps, monzoDepsMap map[credential.CredentialSetID]monzotools.Deps) {
+	var oauthCfg *oauth.OAuth2Config
+	if p.OAuth2 != nil {
+		oauthCfg = &oauth.OAuth2Config{
+			AuthURL:      p.OAuth2.AuthURL,
+			TokenURL:     p.OAuth2.TokenURL,
+			ClientID:     p.OAuth2.ClientID,
+			ClientSecret: p.OAuth2.ClientSecret,
+			Scopes:       p.OAuth2.Scopes,
+			ExtraParams:  p.OAuth2.ExtraParams,
+		}
+	}
+	deps := providerutil.Deps{
+		CredSetID:   setID,
+		Manager:     credMgr,
+		OAuthConfig: oauthCfg,
+	}
+
 	switch p.ID {
 	case provider.GoogleProviderID:
-		googleConns[connID] = googletools.Deps{
-			ConnID:   connID,
-			Manager:  mgr,
-			Provider: p,
-		}
-		googletools.RegisterTools(h, googleConns)
-		slog.Debug("registered google workspace tools", "connection", connID, "total_connections", len(googleConns))
+		googleDepsMap[setID] = deps
+		googletools.RegisterTools(h, googleDepsMap)
+		slog.Debug("registered google workspace tools", "credential_set", setID, "total_sets", len(googleDepsMap))
 	case provider.MonzoProviderID:
-		monzoConns[connID] = monzotools.Deps{
-			ConnID:   connID,
-			Manager:  mgr,
-			Provider: p,
-		}
-		monzotools.RegisterTools(h, monzoConns)
-		slog.Debug("registered monzo tools", "connection", connID, "total_connections", len(monzoConns))
+		monzoDepsMap[setID] = deps
+		monzotools.RegisterTools(h, monzoDepsMap)
+		slog.Debug("registered monzo tools", "credential_set", setID, "total_sets", len(monzoDepsMap))
+	default:
+		slog.Warn("unsupported provider for tool registration", "provider", p.ID)
 	}
 }
 
-// unregisterToolsForProvider removes a connection from the provider's tool set.
-// If no connections remain, the tools are removed entirely.
-func (r *Router) unregisterToolsForProvider(h *mcp.Handler, connID connection.ConnectionID, googleConns map[connection.ConnectionID]googletools.Deps, monzoConns map[connection.ConnectionID]monzotools.Deps) {
-	// Try Google first.
-	if _, ok := googleConns[connID]; ok {
-		delete(googleConns, connID)
-		if len(googleConns) == 0 {
+// unregisterToolsForProvider removes a credential set from the provider's tool set.
+// If no sets remain, the tools are removed entirely.
+func (r *Router) unregisterToolsForProvider(h *mcp.Handler, setID credential.CredentialSetID, googleDepsMap map[credential.CredentialSetID]googletools.Deps, monzoDepsMap map[credential.CredentialSetID]monzotools.Deps) {
+	if _, ok := googleDepsMap[setID]; ok {
+		delete(googleDepsMap, setID)
+		if len(googleDepsMap) == 0 {
 			googletools.UnregisterTools(h)
-			slog.Info("unregistered google workspace tools (no connections remain)")
+			slog.Info("unregistered google workspace tools (no credential sets remain)")
 		} else {
-			googletools.RegisterTools(h, googleConns)
-			slog.Info("updated google workspace tools after disconnect", "removed", connID, "remaining", len(googleConns))
+			googletools.RegisterTools(h, googleDepsMap)
+			slog.Info("updated google workspace tools after disconnect", "removed", setID, "remaining", len(googleDepsMap))
 		}
 		return
 	}
 
-	// Try Monzo.
-	if _, ok := monzoConns[connID]; ok {
-		delete(monzoConns, connID)
-		if len(monzoConns) == 0 {
+	if _, ok := monzoDepsMap[setID]; ok {
+		delete(monzoDepsMap, setID)
+		if len(monzoDepsMap) == 0 {
 			monzotools.UnregisterTools(h)
-			slog.Info("unregistered monzo tools (no connections remain)")
+			slog.Info("unregistered monzo tools (no credential sets remain)")
 		} else {
-			monzotools.RegisterTools(h, monzoConns)
-			slog.Info("updated monzo tools after disconnect", "removed", connID, "remaining", len(monzoConns))
+			monzotools.RegisterTools(h, monzoDepsMap)
+			slog.Info("updated monzo tools after disconnect", "removed", setID, "remaining", len(monzoDepsMap))
 		}
 		return
 	}

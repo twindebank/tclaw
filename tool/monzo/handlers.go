@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strconv"
 
-	"tclaw/connection"
+	"tclaw/credential"
 	"tclaw/libraries/credentialerror"
 	"tclaw/mcp"
 )
@@ -73,10 +73,10 @@ func setCredentialsHandler(deps SetCredentialsDeps) mcp.ToolHandler {
 }
 
 type connectionArgs struct {
-	Connection string `json:"connection"`
+	CredentialSet string `json:"credential_set"`
 }
 
-func listAccountsHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler {
+func listAccountsHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 		var p struct {
 			connectionArgs
@@ -85,7 +85,7 @@ func listAccountsHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandl
 		if err := json.Unmarshal(args, &p); err != nil {
 			return nil, fmt.Errorf("parse args: %w", err)
 		}
-		deps, err := resolveDeps(connMap, p.Connection)
+		deps, err := resolveDeps(depsMap, p.CredentialSet)
 		if err != nil {
 			return nil, err
 		}
@@ -99,7 +99,7 @@ func listAccountsHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandl
 	}
 }
 
-func getBalanceHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler {
+func getBalanceHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 		var p struct {
 			connectionArgs
@@ -111,7 +111,7 @@ func getBalanceHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler
 		if p.AccountID == "" {
 			return nil, fmt.Errorf("account_id is required")
 		}
-		deps, err := resolveDeps(connMap, p.Connection)
+		deps, err := resolveDeps(depsMap, p.CredentialSet)
 		if err != nil {
 			return nil, err
 		}
@@ -121,7 +121,7 @@ func getBalanceHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler
 	}
 }
 
-func listPotsHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler {
+func listPotsHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 		var p struct {
 			connectionArgs
@@ -133,7 +133,7 @@ func listPotsHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler {
 		if p.AccountID == "" {
 			return nil, fmt.Errorf("account_id is required")
 		}
-		deps, err := resolveDeps(connMap, p.Connection)
+		deps, err := resolveDeps(depsMap, p.CredentialSet)
 		if err != nil {
 			return nil, err
 		}
@@ -143,7 +143,7 @@ func listPotsHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler {
 	}
 }
 
-func listTransactionsHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler {
+func listTransactionsHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 		var p struct {
 			connectionArgs
@@ -158,7 +158,7 @@ func listTransactionsHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolH
 		if p.AccountID == "" {
 			return nil, fmt.Errorf("account_id is required")
 		}
-		deps, err := resolveDeps(connMap, p.Connection)
+		deps, err := resolveDeps(depsMap, p.CredentialSet)
 		if err != nil {
 			return nil, err
 		}
@@ -184,7 +184,7 @@ func listTransactionsHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolH
 	}
 }
 
-func getTransactionHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler {
+func getTransactionHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 		var p struct {
 			connectionArgs
@@ -196,7 +196,7 @@ func getTransactionHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHan
 		if p.TransactionID == "" {
 			return nil, fmt.Errorf("transaction_id is required")
 		}
-		deps, err := resolveDeps(connMap, p.Connection)
+		deps, err := resolveDeps(depsMap, p.CredentialSet)
 		if err != nil {
 			return nil, err
 		}

@@ -5,26 +5,26 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"tclaw/connection"
+	"tclaw/credential"
 	"tclaw/gws"
 	"tclaw/mcp"
 )
 
 type workspaceArgs struct {
-	Connection string `json:"connection"`
-	Command    string `json:"command"`
-	Params     string `json:"params"`
-	Body       string `json:"body"`
+	CredentialSet string `json:"credential_set"`
+	Command       string `json:"command"`
+	Params        string `json:"params"`
+	Body          string `json:"body"`
 }
 
-func workspaceHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler {
+func workspaceHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var a workspaceArgs
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
-		deps, err := resolveDeps(connMap, a.Connection)
+		deps, err := resolveDeps(depsMap, a.CredentialSet)
 		if err != nil {
 			return nil, err
 		}

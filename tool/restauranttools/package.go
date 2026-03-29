@@ -77,3 +77,20 @@ func hasResyCredentials(ctx context.Context, store secret.Store) bool {
 	authToken, _ := store.Get(ctx, ResyAuthTokenStoreKey)
 	return apiKey != "" && authToken != ""
 }
+
+// CredentialSpec implements toolpkg.CredentialProvider.
+func (p *Package) CredentialSpec() toolpkg.CredentialSpec {
+	return toolpkg.CredentialSpec{
+		AuthType: toolpkg.AuthAPIKey,
+		Fields: []toolpkg.CredentialField{
+			{Key: "api_key", Label: "Resy API Key", Description: "Authorization header value from browser dev tools (after 'ResyAPI api_key=').", Required: true, EnvVarPrefix: "RESY_API_KEY"},
+			{Key: "auth_token", Label: "Resy Auth Token", Description: "X-Resy-Auth-Token header value from browser dev tools.", Required: true, EnvVarPrefix: "RESY_AUTH_TOKEN"},
+		},
+	}
+}
+
+// OnCredentialSetChange implements toolpkg.CredentialProvider. Currently a
+// no-op — restaurant tools are still registered via the old Register path.
+func (p *Package) OnCredentialSetChange(handler *mcp.Handler, ctx toolpkg.RegistrationContext, sets []toolpkg.ResolvedCredentialSet) error {
+	return nil
+}
