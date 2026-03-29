@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"tclaw/connection"
+	"tclaw/credential"
 	"tclaw/mcp"
 )
 
@@ -30,13 +30,13 @@ func ToolNames() []string {
 
 // ToolDefs returns the MCP tool definitions for Google Workspace.
 // connIDs lists all active connections — used to build the connection enum.
-func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
+func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 	connEnum := make([]string, len(connIDs))
 	for i, id := range connIDs {
 		connEnum[i] = fmt.Sprintf("%q", id)
 	}
 	enumJSON := "[" + strings.Join(connEnum, ", ") + "]"
-	connDescription := fmt.Sprintf("Connection ID to use. Available: %s", strings.Join(connEnum, ", "))
+	connDescription := fmt.Sprintf("Credential set ID to use. Available: %s", strings.Join(connEnum, ", "))
 
 	return []mcp.ToolDef{
 		{
@@ -56,7 +56,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
-					"connection": {
+					"credential_set": {
 						"type": "string",
 						"description": %q,
 						"enum": %s
@@ -70,7 +70,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 						"description": "Number of messages to return. Defaults to 10, maximum 25. Each message requires a separate API call internally, so keep this low for faster responses."
 					}
 				},
-				"required": ["connection"]
+				"required": ["credential_set"]
 			}`, connDescription, enumJSON)),
 		},
 		{
@@ -84,7 +84,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
-					"connection": {
+					"credential_set": {
 						"type": "string",
 						"description": %q,
 						"enum": %s
@@ -94,7 +94,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 						"description": "The Gmail message ID from google_gmail_list results."
 					}
 				},
-				"required": ["connection", "message_id"]
+				"required": ["credential_set","message_id"]
 			}`, connDescription, enumJSON)),
 		},
 		{
@@ -109,7 +109,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
-					"connection": {
+					"credential_set": {
 						"type": "string",
 						"description": %q,
 						"enum": %s
@@ -147,7 +147,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 						"description": "Gmail thread ID to place the reply in the same conversation thread (from google_gmail_read or google_gmail_list)."
 					}
 				},
-				"required": ["connection", "to", "subject", "body"]
+				"required": ["credential_set","to", "subject", "body"]
 			}`, connDescription, enumJSON)),
 		},
 		{
@@ -163,7 +163,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
-					"connection": {
+					"credential_set": {
 						"type": "string",
 						"description": %q,
 						"enum": %s
@@ -189,7 +189,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 						"description": "Calendar ID. Defaults to 'primary' (the user's main calendar). Use a specific calendar ID for shared or secondary calendars."
 					}
 				},
-				"required": ["connection"]
+				"required": ["credential_set"]
 			}`, connDescription, enumJSON)),
 		},
 		{
@@ -204,7 +204,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
-					"connection": {
+					"credential_set": {
 						"type": "string",
 						"description": %q,
 						"enum": %s
@@ -242,7 +242,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 						"description": "If true, attaches a Google Meet video conference link to the event."
 					}
 				},
-				"required": ["connection", "title", "date"]
+				"required": ["credential_set","title", "date"]
 			}`, connDescription, enumJSON)),
 		},
 		{
@@ -262,7 +262,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
-					"connection": {
+					"credential_set": {
 						"type": "string",
 						"description": %q,
 						"enum": %s
@@ -280,7 +280,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 						"description": "Request body as a JSON string for POST/PATCH/PUT operations. Passed as --json to gws."
 					}
 				},
-				"required": ["connection", "command"]
+				"required": ["credential_set","command"]
 			}`, connDescription, enumJSON)),
 		},
 		{
@@ -291,7 +291,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
-					"connection": {
+					"credential_set": {
 						"type": "string",
 						"description": %q,
 						"enum": %s
@@ -301,7 +301,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 						"description": "The API method in dotted notation, e.g. 'gmail.users.messages.list', 'drive.files.list', 'calendar.events.list'."
 					}
 				},
-				"required": ["connection", "method"]
+				"required": ["credential_set","method"]
 			}`, connDescription, enumJSON)),
 		},
 	}

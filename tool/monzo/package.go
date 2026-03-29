@@ -76,3 +76,29 @@ func getOnCredentialsStored(regCtx toolpkg.RegistrationContext) func() {
 	}
 	return func() {}
 }
+
+// CredentialSpec implements toolpkg.CredentialProvider. Monzo requires OAuth2
+// with user-provided client credentials (not from config).
+func (p *Package) CredentialSpec() toolpkg.CredentialSpec {
+	return toolpkg.CredentialSpec{
+		AuthType: toolpkg.AuthOAuth2,
+		Fields: []toolpkg.CredentialField{
+			{Key: "client_id", Label: "Monzo Client ID", Description: "OAuth client ID from developers.monzo.com.", Required: true},
+			{Key: "client_secret", Label: "Monzo Client Secret", Description: "OAuth client secret from developers.monzo.com.", Required: true},
+		},
+		OAuth: &toolpkg.OAuthSpec{
+			AuthURL:  "https://auth.monzo.com/",
+			TokenURL: "https://api.monzo.com/oauth2/token",
+			Services: []string{"Monzo Banking"},
+		},
+		SupportsMultiple: true,
+	}
+}
+
+// OnCredentialSetChange implements toolpkg.CredentialProvider. Currently a
+// no-op — Monzo tools are still registered via the old provider/connection
+// system + set_credentials tool. This will be wired up when the old provider
+// code is removed.
+func (p *Package) OnCredentialSetChange(handler *mcp.Handler, ctx toolpkg.RegistrationContext, sets []toolpkg.ResolvedCredentialSet) error {
+	return nil
+}

@@ -8,34 +8,34 @@ import (
 	"log/slog"
 	"strings"
 
-	"tclaw/connection"
+	"tclaw/credential"
 	"tclaw/gws"
 	"tclaw/mcp"
 )
 
 type gmailSendArgs struct {
-	Connection string `json:"connection"`
-	To         string `json:"to"`
-	Subject    string `json:"subject"`
-	Body       string `json:"body"`
-	CC         string `json:"cc"`
-	BCC        string `json:"bcc"`
-	InReplyTo  string `json:"in_reply_to"`
-	References string `json:"references"`
-	ThreadID   string `json:"thread_id"`
+	CredentialSet string `json:"credential_set"`
+	To            string `json:"to"`
+	Subject       string `json:"subject"`
+	Body          string `json:"body"`
+	CC            string `json:"cc"`
+	BCC           string `json:"bcc"`
+	InReplyTo     string `json:"in_reply_to"`
+	References    string `json:"references"`
+	ThreadID      string `json:"thread_id"`
 }
 
 // gmailSendHandler returns an MCP handler that sends an email via the Gmail API.
 // It constructs an RFC 2822 message, base64url-encodes it, and delegates to the
 // gws binary for the actual API call — consistent with the other Google tools.
-func gmailSendHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler {
+func gmailSendHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var a gmailSendArgs
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
-		deps, err := resolveDeps(connMap, a.Connection)
+		deps, err := resolveDeps(depsMap, a.CredentialSet)
 		if err != nil {
 			return nil, err
 		}
@@ -50,7 +50,7 @@ func gmailSendHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler 
 			return nil, fmt.Errorf("body is required")
 		}
 
-		slog.Info("gmail send starting", "connection", a.Connection, "to", a.To, "subject", a.Subject)
+		slog.Info("gmail send starting", "connection", a.CredentialSet, "to", a.To, "subject", a.Subject)
 
 		rfc2822 := buildRFC2822Message(a)
 		encoded := base64.URLEncoding.EncodeToString([]byte(rfc2822))
@@ -76,7 +76,7 @@ func gmailSendHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler 
 			return nil, fmt.Errorf("parse response: %w", err)
 		}
 
-		slog.Info("gmail send done", "connection", a.Connection, "id", apiResp.ID, "thread_id", apiResp.ThreadID)
+		slog.Info("gmail send done", "connection", a.CredentialSet, "id", apiResp.ID, "thread_id", apiResp.ThreadID)
 
 		rsp := struct {
 			ID       string `json:"id"`
