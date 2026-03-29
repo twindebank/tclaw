@@ -6,6 +6,19 @@ import (
 	"tclaw/schedule"
 )
 
+const (
+	ToolStatus   = "onboarding_status"
+	ToolSetInfo  = "onboarding_set_info"
+	ToolAdvance  = "onboarding_advance"
+	ToolTipShown = "onboarding_tip_shown"
+	ToolSkip     = "onboarding_skip"
+)
+
+// ToolNames returns all tool name constants in this package.
+func ToolNames() []string {
+	return []string{ToolStatus, ToolSetInfo, ToolAdvance, ToolTipShown, ToolSkip}
+}
+
 // Deps holds dependencies for onboarding tools.
 type Deps struct {
 	Store         *onboarding.Store

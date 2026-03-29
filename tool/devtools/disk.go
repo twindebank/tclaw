@@ -52,9 +52,11 @@ func checkDiskSpace(baseDir string) error {
 	return nil
 }
 
+const ToolDisk = "dev_disk"
+
 func devDiskDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name: "dev_disk",
+		Name: ToolDisk,
 		Description: "Show disk usage for the tclaw data volume. Returns volume-level " +
 			"stats (total, used, available, percent) and a per-directory breakdown of " +
 			"the user's data directory (memory, worktrees, repos, secrets, etc.).",

@@ -13,9 +13,11 @@ import (
 	"tclaw/schedule"
 )
 
+const ToolEdit = "schedule_edit"
+
 func scheduleEditDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "schedule_edit",
+		Name:        ToolEdit,
 		Description: "Edit an existing schedule. Only provided fields are updated — omit fields to leave them unchanged.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

@@ -6,6 +6,11 @@ import (
 	"tclaw/repo"
 )
 
+// ToolNames returns all tool name constants in this package.
+func ToolNames() []string {
+	return []string{ToolAdd, ToolSync, ToolLog, ToolList, ToolRemove}
+}
+
 // Deps holds dependencies for repo exploration tools.
 type Deps struct {
 	Store       *repo.Store

@@ -62,11 +62,11 @@ func RegisterTools(handler *mcp.Handler, connMap map[connection.ConnectionID]Dep
 
 // UnregisterTools removes the Monzo tools from the handler.
 func UnregisterTools(handler *mcp.Handler) {
-	handler.Unregister("monzo_list_accounts")
-	handler.Unregister("monzo_get_balance")
-	handler.Unregister("monzo_list_pots")
-	handler.Unregister("monzo_list_transactions")
-	handler.Unregister("monzo_get_transaction")
+	handler.Unregister(ToolListAccounts)
+	handler.Unregister(ToolGetBalance)
+	handler.Unregister(ToolListPots)
+	handler.Unregister(ToolListTransactions)
+	handler.Unregister(ToolGetTransaction)
 }
 
 // resolveDeps looks up the Deps for a connection ID from the tool args.

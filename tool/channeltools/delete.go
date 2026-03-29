@@ -10,9 +10,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolChannelDelete = "channel_delete"
+
 func channelDeleteDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "channel_delete",
+		Name:        ToolChannelDelete,
 		Description: "Delete a dynamic channel. Cannot delete static channels (from config file). The agent restarts automatically to apply the change.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

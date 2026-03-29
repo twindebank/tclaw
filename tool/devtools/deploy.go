@@ -11,9 +11,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolDeploy = "deploy"
+
 func deployDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name: "deploy",
+		Name: ToolDeploy,
 		Description: `Check deployment status — what's deployed vs what's on main.
 
 Deployments happen automatically via GitHub Actions CI when code is pushed

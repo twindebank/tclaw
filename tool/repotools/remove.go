@@ -9,9 +9,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolRemove = "repo_remove"
+
 func repoRemoveDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "repo_remove",
+		Name:        ToolRemove,
 		Description: "Stop tracking a repo and clean up all cached data (clone directory, store entry).",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

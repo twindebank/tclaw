@@ -10,9 +10,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolChannelIsBusy = "channel_is_busy"
+
 func channelIsBusyDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name: "channel_is_busy",
+		Name: ToolChannelIsBusy,
 		Description: "Check whether a channel is currently busy — either actively processing a turn " +
 			"or in an ongoing conversation (within the idle window). Use this before sending a " +
 			"cross-channel message to decide whether to deliver immediately or defer. " +

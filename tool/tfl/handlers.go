@@ -31,17 +31,17 @@ func persistAPIKey(ctx context.Context, deps Deps, key string) error {
 // based on tool name. Every handler persists the api_key if provided.
 func makeHandler(name string, deps Deps) mcp.ToolHandler {
 	switch name {
-	case "tfl_line_status":
+	case ToolLineStatus:
 		return lineStatusHandler(deps)
-	case "tfl_journey":
+	case ToolJourney:
 		return journeyHandler(deps)
-	case "tfl_arrivals":
+	case ToolArrivals:
 		return arrivalsHandler(deps)
-	case "tfl_stop_search":
+	case ToolStopSearch:
 		return stopSearchHandler(deps)
-	case "tfl_disruptions":
+	case ToolDisruptions:
 		return disruptionsHandler(deps)
-	case "tfl_road_status":
+	case ToolRoadStatus:
 		return roadStatusHandler(deps)
 	default:
 		return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {

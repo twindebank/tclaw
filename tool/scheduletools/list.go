@@ -9,9 +9,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolList = "schedule_list"
+
 func scheduleListDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "schedule_list",
+		Name:        ToolList,
 		Description: "List all scheduled prompts with their ID, cron expression, full prompt text, channel, status, wait_for_free flag, and next/last run times.",
 		InputSchema: json.RawMessage(`{"type": "object", "properties": {}}`),
 	}

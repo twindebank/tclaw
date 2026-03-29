@@ -54,10 +54,7 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 		Group:       p.Group(),
 		GroupInfo:   toolgroup.GroupInfo{Group: p.Group(), Description: "Personal service integrations."},
 		Credentials: toolpkg.CheckCredentialStatus(ctx, secretStore, p.RequiredSecrets()),
-		Tools: []string{
-			"monzo_set_credentials", "monzo_list_accounts", "monzo_get_balance",
-			"monzo_list_pots", "monzo_list_transactions", "monzo_get_transaction",
-		},
+		Tools:       ToolNames(),
 	}, nil
 }
 

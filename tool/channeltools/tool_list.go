@@ -9,9 +9,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolList = "tool_list"
+
 func toolListDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "tool_list",
+		Name:        ToolList,
 		Description: "List all available tool names that can be used in allowed_tools and disallowed_tools when creating or editing channels. Includes Claude Code tools, tclaw MCP tools, and builtin commands.",
 		InputSchema: json.RawMessage(`{"type": "object", "properties": {}}`),
 	}
