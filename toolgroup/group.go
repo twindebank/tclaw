@@ -148,7 +148,6 @@ var groupTools = map[ToolGroup][]claudecli.Tool{
 
 	GroupDevWorkflow: {
 		MCPToolDevAll,
-		MCPToolDeploy,
 	},
 
 	GroupRepoMonitoring: {
