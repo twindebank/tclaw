@@ -11,7 +11,7 @@ import (
 	"tclaw/mcp"
 )
 
-const ToolDeploy = "deploy"
+const ToolDeploy = "dev_deploy_status"
 
 func deployDef() mcp.ToolDef {
 	return mcp.ToolDef{

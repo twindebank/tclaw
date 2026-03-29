@@ -49,7 +49,6 @@ func RemoteMCPToolPatterns(ctx ChannelContext) []claudecli.Tool {
 const (
 	MCPToolAll               claudecli.Tool = "mcp__tclaw__*"
 	MCPToolDevAll            claudecli.Tool = "mcp__tclaw__dev_*"
-	MCPToolDeploy            claudecli.Tool = "mcp__tclaw__deploy"
 	MCPToolScheduleAll       claudecli.Tool = "mcp__tclaw__schedule_*"
 	MCPToolConnectionAll     claudecli.Tool = "mcp__tclaw__connection_*"
 	MCPToolRemoteMCPAll      claudecli.Tool = "mcp__tclaw__remote_mcp_*"
