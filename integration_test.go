@@ -446,8 +446,8 @@ func TestIntegration_MemoryLoaded(t *testing.T) {
 	}
 }
 
-// TestIntegration_DynamicChannelLifecycle tests creating a dynamic channel
-// via the DynamicStore and then connecting to it via the socket.
+// TestIntegration_ChannelLifecycle tests creating a channel via config
+// and connecting to it via socket.
 func TestIntegration_DynamicChannelLifecycle(t *testing.T) {
 	skipIfNoClaude(t)
 
@@ -457,43 +457,20 @@ func TestIntegration_DynamicChannelLifecycle(t *testing.T) {
 		t.Fatalf("create tmp dir: %v", err)
 	}
 	t.Cleanup(func() { os.RemoveAll(tmpDir) })
-	storeDir := filepath.Join(tmpDir, "store")
 	homeDir := filepath.Join(tmpDir, "home")
 	if err := os.MkdirAll(homeDir, 0o700); err != nil {
 		t.Fatalf("create home dir: %v", err)
 	}
 
-	s, err := store.NewFS(storeDir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-
-	// Create a dynamic channel config.
-	ds := channel.NewDynamicStore(s)
-	if err := ds.Add(context.Background(), channel.DynamicChannelConfig{
-		Name:        "phone",
-		Type:        channel.TypeSocket,
-		Description: "Test phone channel",
-		CreatedAt:   time.Now(),
-	}); err != nil {
-		t.Fatalf("add dynamic channel: %v", err)
-	}
-
-	// Build a socket for it (same path derivation as router.buildDynamicChannels).
+	// Build a socket channel directly (same as router.BuildChannels would).
 	userID := user.ID("test-user")
 	socketPath := filepath.Join(tmpDir, string(userID), "phone.sock")
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
 		t.Fatalf("create socket dir: %v", err)
 	}
 
-	sock := channel.NewDynamicSocketServer(socketPath, "phone", "Test phone channel")
+	sock := channel.NewSocketServer(socketPath, "phone", "Test phone channel")
 	chMap := channel.ChannelMap(sock)
-
-	// Verify the Info reports dynamic source.
-	info := sock.Info()
-	if info.Source != channel.SourceDynamic {
-		t.Fatalf("expected Source=dynamic, got %q", info.Source)
-	}
 
 	dcAPIKey, dcSetupToken := agentCredentials(t)
 	dcModel := claudecli.ModelHaiku35

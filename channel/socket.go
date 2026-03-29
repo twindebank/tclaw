@@ -26,7 +26,6 @@ type SocketServer struct {
 	path        string
 	name        string
 	description string
-	source      Source
 
 	mu      sync.Mutex
 	conn    net.Conn   // connection for the current turn's response
@@ -34,12 +33,7 @@ type SocketServer struct {
 }
 
 func NewSocketServer(path, name, description string) *SocketServer {
-	return &SocketServer{path: path, name: name, description: description, source: SourceStatic}
-}
-
-// NewDynamicSocketServer creates a socket server that reports Source: SourceDynamic.
-func NewDynamicSocketServer(path, name, description string) *SocketServer {
-	return &SocketServer{path: path, name: name, description: description, source: SourceDynamic}
+	return &SocketServer{path: path, name: name, description: description}
 }
 
 func (s *SocketServer) Info() Info {
@@ -48,7 +42,6 @@ func (s *SocketServer) Info() Info {
 		Type:        TypeSocket,
 		Name:        s.name,
 		Description: s.description,
-		Source:      s.source,
 	}
 }
 

@@ -15,15 +15,42 @@ import (
 )
 
 // Provisioner implements channel.EphemeralProvisioner for Telegram channels.
-// It creates bots via BotFather and deletes them on teardown. Uses the same
-// MTProto client and handlerState as the telegram_client_* MCP tools.
+// It creates bots via BotFather and deletes them on teardown.
 type Provisioner struct {
 	state *handlerState
+
+	// TelegramUserID is the user's Telegram user ID from top-level config.
+	// Used for auto-start (/start the bot) and platform state (chat ID).
+	TelegramUserID string
 }
 
-// Provision creates a new Telegram bot via BotFather and returns the token
-// and teardown state for the channel.
-func (p *Provisioner) Provision(ctx context.Context, name, purpose string) (*channel.ProvisionResult, error) {
+// IsReady returns true if the channel has a bot token in the secret store.
+func (p *Provisioner) IsReady(ctx context.Context, channelName string) bool {
+	token, err := p.state.deps.SecretStore.Get(ctx, channel.ChannelSecretKey(channelName))
+	if err != nil {
+		return false
+	}
+	return token != ""
+}
+
+// CanAutoProvision returns true if the Telegram Client API credentials are
+// configured, allowing automatic bot creation via BotFather.
+func (p *Provisioner) CanAutoProvision() bool {
+	apiID, err := p.state.deps.SecretStore.Get(context.Background(), APIIDStoreKey)
+	if err != nil || apiID == "" {
+		return false
+	}
+	apiHash, err := p.state.deps.SecretStore.Get(context.Background(), APIHashStoreKey)
+	if err != nil || apiHash == "" {
+		return false
+	}
+	return true
+}
+
+// Provision creates a new Telegram bot via BotFather, auto-starts the
+// conversation with the first allowed user (so the bot can message them),
+// and returns the token and teardown state.
+func (p *Provisioner) Provision(ctx context.Context, params channel.ProvisionParams) (*channel.ProvisionResult, error) {
 	if err := ensureConnected(ctx, p.state); err != nil {
 		return nil, fmt.Errorf("connect to Telegram: %w", err)
 	}
@@ -32,24 +59,42 @@ func (p *Provisioner) Provision(ctx context.Context, name, purpose string) (*cha
 	defer p.state.botFatherMu.Unlock()
 
 	bf := NewBotFather(p.state.client)
-	result, err := bf.CreateBot(ctx, purpose)
+	result, err := bf.CreateBot(ctx, params.Purpose)
 	if err != nil {
 		return nil, fmt.Errorf("create bot via BotFather: %w", err)
 	}
 
+	// Store the token in the secret store so IsReady returns true.
+	if err := p.state.deps.SecretStore.Set(ctx, channel.ChannelSecretKey(params.Name), result.Token); err != nil {
+		return nil, fmt.Errorf("store bot token: %w", err)
+	}
+
+	// Auto-start: send /start as the user so the bot can message them back.
+	var platformState channel.PlatformState
+	if p.TelegramUserID != "" {
+		userID, parseErr := strconv.ParseInt(p.TelegramUserID, 10, 64)
+		if parseErr != nil {
+			slog.Warn("invalid telegram user ID for auto-start", "user_id", p.TelegramUserID, "err", parseErr)
+		} else {
+			if startErr := p.StartBot(ctx, result.Username, userID); startErr != nil {
+				slog.Warn("failed to auto-start bot (user will need to /start manually)", "bot", result.Username, "err", startErr)
+			}
+			// For Telegram DMs, chatID == userID.
+			platformState = channel.NewTelegramPlatformState(userID)
+		}
+	}
+
 	return &channel.ProvisionResult{
-		Token: result.Token,
-		TeardownState: channel.TelegramTeardownState{
-			BotUsername: result.Username,
-		},
+		Token:         result.Token,
+		TeardownState: channel.NewTelegramTeardownState(result.Username),
+		PlatformState: platformState,
 	}, nil
 }
 
 // Teardown deletes a Telegram bot via BotFather using the stored teardown state.
 func (p *Provisioner) Teardown(ctx context.Context, state channel.TeardownState) error {
-	ts, ok := state.(channel.TelegramTeardownState)
-	if !ok {
-		return fmt.Errorf("unexpected teardown state type: %T (expected TelegramTeardownState)", state)
+	if state.Type != channel.PlatformTelegram || state.Telegram == nil {
+		return fmt.Errorf("expected Telegram teardown state, got type %q", state.Type)
 	}
 
 	if err := ensureConnected(ctx, p.state); err != nil {
@@ -60,46 +105,41 @@ func (p *Provisioner) Teardown(ctx context.Context, state channel.TeardownState)
 	defer p.state.botFatherMu.Unlock()
 
 	bf := NewBotFather(p.state.client)
-	if err := bf.DeleteBot(ctx, ts.BotUsername); err != nil {
-		return fmt.Errorf("delete bot @%s via BotFather: %w", ts.BotUsername, err)
+	if err := bf.DeleteBot(ctx, state.Telegram.BotUsername); err != nil {
+		return fmt.Errorf("delete bot @%s via BotFather: %w", state.Telegram.BotUsername, err)
 	}
 
 	return nil
 }
 
-// SendTeardownPrompt sends a confirmation prompt to the channel's Telegram chat
-// asking the user to reply "yes" to confirm teardown. Returns immediately after
-// sending — the router intercepts the reply asynchronously via PendingDone.
+// SendTeardownPrompt sends a confirmation prompt to the channel's Telegram chat.
 func (p *Provisioner) SendTeardownPrompt(ctx context.Context, token string, platformState channel.PlatformState) error {
-	tps, ok := platformState.(channel.TelegramPlatformState)
-	if !ok {
-		return fmt.Errorf("unexpected platform state type: %T (expected TelegramPlatformState)", platformState)
+	if platformState.Type != channel.PlatformTelegram || platformState.Telegram == nil {
+		return fmt.Errorf("expected Telegram platform state, got type %q", platformState.Type)
 	}
-	if tps.ChatID == 0 {
+	if platformState.Telegram.ChatID == 0 {
 		return fmt.Errorf("no chat ID available — cannot send confirmation to user")
 	}
 
 	prompt := "⚠️ <b>This channel is about to be closed.</b>\n\nReply <b>yes</b> to confirm teardown, or anything else to cancel."
-	if _, err := telegramBotSend(token, tps.ChatID, prompt); err != nil {
+	if _, err := telegramBotSend(token, platformState.Telegram.ChatID, prompt); err != nil {
 		return fmt.Errorf("send teardown prompt: %w", err)
 	}
 	return nil
 }
 
-// SendClosingMessage sends a brief acknowledgement after the user confirms channel
-// teardown, before the bot is deleted. Best-effort — the caller should log but
-// not abort teardown if this fails.
+// SendClosingMessage sends a brief acknowledgement after the user confirms
+// channel teardown, before the bot is deleted.
 func (p *Provisioner) SendClosingMessage(ctx context.Context, token string, platformState channel.PlatformState) error {
-	tps, ok := platformState.(channel.TelegramPlatformState)
-	if !ok {
-		return fmt.Errorf("unexpected platform state type: %T (expected TelegramPlatformState)", platformState)
+	if platformState.Type != channel.PlatformTelegram || platformState.Telegram == nil {
+		return fmt.Errorf("expected Telegram platform state, got type %q", platformState.Type)
 	}
-	if tps.ChatID == 0 {
+	if platformState.Telegram.ChatID == 0 {
 		return fmt.Errorf("no chat ID available — cannot send closing message")
 	}
 
 	msg := "✅ Confirmed — closing channel..."
-	if _, err := telegramBotSend(token, tps.ChatID, msg); err != nil {
+	if _, err := telegramBotSend(token, platformState.Telegram.ChatID, msg); err != nil {
 		return fmt.Errorf("send closing message: %w", err)
 	}
 	return nil
@@ -169,9 +209,9 @@ type telegramMessage struct {
 }
 
 // ValidateCreate checks Telegram-specific constraints before provisioning.
-func (p *Provisioner) ValidateCreate(allowedUsers []int64, description string) error {
-	if len(allowedUsers) == 0 {
-		return fmt.Errorf("allowed_users is required for Telegram channels — at least one Telegram user ID must be specified (get your user ID from @userinfobot on Telegram)")
+func (p *Provisioner) ValidateCreate(description string) error {
+	if p.TelegramUserID == "" {
+		return fmt.Errorf("telegram.user_id is required in user config for Telegram channels")
 	}
 	if len([]rune(description)) > MaxBotPurposeRunes {
 		return fmt.Errorf("description too long for Telegram channel: %d characters, max %d (used as bot display name)", len([]rune(description)), MaxBotPurposeRunes)
@@ -179,45 +219,55 @@ func (p *Provisioner) ValidateCreate(allowedUsers []int64, description string) e
 	return nil
 }
 
-// Notify sends an out-of-band message to allowed users via the Telegram Bot API.
-// Returns the number of users successfully notified.
-func (p *Provisioner) Notify(ctx context.Context, token string, allowedUsers []int64, message string) (int, error) {
-	var sent int
-	for _, userID := range allowedUsers {
-		if _, err := telegramBotSend(token, userID, message); err != nil {
-			slog.Warn("failed to notify user", "user_id", userID, "err", err)
-			continue
-		}
-		sent++
+// Notify sends a message to the configured Telegram user via the Bot API.
+func (p *Provisioner) Notify(ctx context.Context, token string, message string) error {
+	if p.TelegramUserID == "" {
+		return fmt.Errorf("no telegram user ID configured")
 	}
-	if sent == 0 && len(allowedUsers) > 0 {
-		return 0, fmt.Errorf("failed to notify any of %d users", len(allowedUsers))
+	userID, err := strconv.ParseInt(p.TelegramUserID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid telegram user ID %q: %w", p.TelegramUserID, err)
 	}
-	return sent, nil
+	if _, err := telegramBotSend(token, userID, message); err != nil {
+		return fmt.Errorf("send notification: %w", err)
+	}
+	return nil
 }
 
 // PlatformResponseInfo returns Telegram-specific fields (bot username and link)
 // for inclusion in tool responses.
 func (p *Provisioner) PlatformResponseInfo(teardownState channel.TeardownState) map[string]any {
-	ts, ok := teardownState.(channel.TelegramTeardownState)
-	if !ok || ts.BotUsername == "" {
+	if teardownState.Type != channel.PlatformTelegram || teardownState.Telegram == nil {
+		return nil
+	}
+	if teardownState.Telegram.BotUsername == "" {
 		return nil
 	}
 	return map[string]any{
-		"platform_username": ts.BotUsername,
-		"platform_link":     "https://t.me/" + ts.BotUsername,
+		"platform_username": teardownState.Telegram.BotUsername,
+		"platform_link":     "https://t.me/" + teardownState.Telegram.BotUsername,
 	}
 }
 
+// ParseAllowedUserIDs converts string user IDs to int64 for Telegram API calls.
+func ParseAllowedUserIDs(users []string) ([]int64, error) {
+	ids := make([]int64, 0, len(users))
+	for _, s := range users {
+		id, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid Telegram user ID %q: %w", s, err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
 // StartBot sends /start to a bot as the authenticated user via MTProto.
-// This initiates the conversation so the bot can message the user back
-// (Telegram blocks bots from messaging users who haven't /started them).
 func (p *Provisioner) StartBot(ctx context.Context, botUsername string, userID int64) error {
 	if err := ensureConnected(ctx, p.state); err != nil {
 		return fmt.Errorf("connect to Telegram: %w", err)
 	}
 
-	// Resolve the bot's username to a peer.
 	resolved, err := p.state.client.API().ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{
 		Username: botUsername,
 	})
@@ -238,7 +288,6 @@ func (p *Provisioner) StartBot(ctx context.Context, botUsername string, userID i
 		AccessHash: u.AccessHash,
 	}
 
-	// Send /start to the bot as the user.
 	_, err = p.state.client.API().MessagesSendMessage(ctx, &tg.MessagesSendMessageRequest{
 		Peer:     peer,
 		Message:  "/start",

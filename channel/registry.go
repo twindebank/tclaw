@@ -1,147 +1,93 @@
 package channel
 
-import (
-	"context"
-	"fmt"
-)
+import "sync"
 
-// RegistryEntry is the unified metadata for any channel, regardless of source.
-// Extends Info with links (which aren't part of the transport-level Info).
+// RegistryEntry is the unified metadata for any channel.
 type RegistryEntry struct {
 	Info
 	Links []Link
 }
 
-// Registry provides a unified read view of all channel metadata (both static
-// config and dynamic user-created channels). Mutations go through
-// DynamicStore() for dynamic channels; static channels are immutable.
+// Registry provides a read view of all channel metadata. Entries are loaded
+// from the config file and refreshed via Reload() after config mutations.
 type Registry struct {
-	static       []RegistryEntry
-	staticByName map[string]RegistryEntry
-	dynamic      *DynamicStore
+	mu      sync.RWMutex
+	entries []RegistryEntry
+	byName  map[string]RegistryEntry
 }
 
-// NewRegistry creates a registry over the given static entries and dynamic store.
-func NewRegistry(staticEntries []RegistryEntry, dynamic *DynamicStore) *Registry {
-	byName := make(map[string]RegistryEntry, len(staticEntries))
-	for _, e := range staticEntries {
-		byName[e.Name] = e
-	}
-	return &Registry{
-		static:       staticEntries,
-		staticByName: byName,
-		dynamic:      dynamic,
+// NewRegistry creates a registry with the given entries.
+func NewRegistry(entries []RegistryEntry) *Registry {
+	r := &Registry{}
+	r.load(entries)
+	return r
+}
+
+// Reload replaces all entries. Called after a config mutation adds, edits,
+// or removes a channel.
+func (r *Registry) Reload(entries []RegistryEntry) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.load(entries)
+}
+
+func (r *Registry) load(entries []RegistryEntry) {
+	r.entries = entries
+	r.byName = make(map[string]RegistryEntry, len(entries))
+	for _, e := range entries {
+		r.byName[e.Name] = e
 	}
 }
 
-// All returns every channel (static + dynamic) as RegistryEntries.
-func (r *Registry) All(ctx context.Context) ([]RegistryEntry, error) {
-	result := make([]RegistryEntry, len(r.static))
-	copy(result, r.static)
-
-	dynamics, err := r.dynamic.List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list dynamic channels: %w", err)
-	}
-	for _, dc := range dynamics {
-		result = append(result, DynamicToEntry(dc))
-	}
-	return result, nil
+// All returns every channel as RegistryEntries.
+func (r *Registry) All() []RegistryEntry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make([]RegistryEntry, len(r.entries))
+	copy(result, r.entries)
+	return result
 }
 
 // ByName returns the entry for a channel by name, or nil if not found.
-func (r *Registry) ByName(ctx context.Context, name string) (*RegistryEntry, error) {
-	if e, ok := r.staticByName[name]; ok {
-		return &e, nil
+func (r *Registry) ByName(name string) *RegistryEntry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if e, ok := r.byName[name]; ok {
+		return &e
 	}
-	dc, err := r.dynamic.Get(ctx, name)
-	if err != nil {
-		return nil, err
-	}
-	if dc == nil {
-		return nil, nil
-	}
-	entry := DynamicToEntry(*dc)
-	return &entry, nil
+	return nil
 }
 
-// IsStatic returns true if the name belongs to a static channel.
-func (r *Registry) IsStatic(name string) bool {
-	_, ok := r.staticByName[name]
+// NameExists returns true if any channel has this name.
+func (r *Registry) NameExists(name string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.byName[name]
 	return ok
 }
 
-// NameExists returns true if any channel (static or dynamic) has this name.
-func (r *Registry) NameExists(ctx context.Context, name string) (bool, error) {
-	if _, ok := r.staticByName[name]; ok {
-		return true, nil
-	}
-	dc, err := r.dynamic.Get(ctx, name)
-	if err != nil {
-		return false, err
-	}
-	return dc != nil, nil
-}
-
-// Links returns the merged outbound link map: source channel name → targets.
-func (r *Registry) Links(ctx context.Context) (map[string][]Link, error) {
+// Links returns the outbound link map: source channel name → targets.
+func (r *Registry) Links() map[string][]Link {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	m := make(map[string][]Link)
-	for _, e := range r.static {
+	for _, e := range r.entries {
 		if len(e.Links) > 0 {
 			m[e.Name] = e.Links
 		}
 	}
-	dynamics, err := r.dynamic.List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list dynamic channels for links: %w", err)
-	}
-	for _, dc := range dynamics {
-		if len(dc.Links) > 0 {
-			m[dc.Name] = dc.Links
-		}
-	}
-	return m, nil
+	return m
 }
 
 // LifecycleChannelNames returns the names of channels with NotifyLifecycle set.
-func (r *Registry) LifecycleChannelNames(ctx context.Context) (map[string]bool, error) {
+func (r *Registry) LifecycleChannelNames() map[string]bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	names := make(map[string]bool)
-	for _, e := range r.static {
+	for _, e := range r.entries {
 		if e.NotifyLifecycle {
 			names[e.Name] = true
 		}
 	}
-	dynamics, err := r.dynamic.List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list dynamic channels for lifecycle: %w", err)
-	}
-	for _, dc := range dynamics {
-		if dc.NotifyLifecycle {
-			names[dc.Name] = true
-		}
-	}
-	return names, nil
-}
-
-// DynamicStore returns the underlying store for mutation operations
-// (Add, Update, Remove). Channel tools use this for CRUD.
-func (r *Registry) DynamicStore() *DynamicStore {
-	return r.dynamic
-}
-
-// DynamicToEntry converts a DynamicChannelConfig to a RegistryEntry.
-func DynamicToEntry(dc DynamicChannelConfig) RegistryEntry {
-	return RegistryEntry{
-		Info: Info{
-			Type:            dc.Type,
-			Name:            dc.Name,
-			Description:     dc.Description,
-			Source:          SourceDynamic,
-			AllowedTools:    dc.AllowedTools,
-			DisallowedTools: dc.DisallowedTools,
-			CreatableGroups: dc.CreatableGroups,
-			NotifyLifecycle: dc.NotifyLifecycle,
-		},
-		Links: dc.Links,
-	}
+	return names
 }

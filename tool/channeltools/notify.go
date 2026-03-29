@@ -14,7 +14,7 @@ const ToolChannelNotify = "channel_notify"
 func channelNotifyDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name: ToolChannelNotify,
-		Description: "Send a notification message directly to a channel's users via the platform. " +
+		Description: "Send a notification message directly to a channel's user via the platform. " +
 			"Useful for making newly created channels visible or sending out-of-band alerts. " +
 			"Only works for channel types that support direct notifications.",
 		InputSchema: json.RawMessage(`{
@@ -26,7 +26,7 @@ func channelNotifyDef() mcp.ToolDef {
 				},
 				"message": {
 					"type": "string",
-					"description": "Message to send to channel users."
+					"description": "Message to send to the channel's user."
 				}
 			},
 			"required": ["channel_name", "message"]
@@ -52,21 +52,14 @@ func channelNotifyHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("message is required")
 		}
 
-		cfg, err := deps.Registry.DynamicStore().Get(ctx, a.ChannelName)
-		if err != nil {
-			return nil, fmt.Errorf("look up channel: %w", err)
-		}
-		if cfg == nil {
+		entry := deps.Registry.ByName(a.ChannelName)
+		if entry == nil {
 			return nil, fmt.Errorf("channel %q not found", a.ChannelName)
 		}
 
-		provisioner, ok := deps.Provisioners[cfg.Type]
+		provisioner, ok := deps.Provisioners[entry.Type]
 		if !ok {
-			return nil, fmt.Errorf("channel %q (type %s) does not support direct notifications", a.ChannelName, cfg.Type)
-		}
-
-		if len(cfg.AllowedUsers) == 0 {
-			return nil, fmt.Errorf("channel %q has no allowed_users to send to", a.ChannelName)
+			return nil, fmt.Errorf("channel %q (type %s) does not support direct notifications", a.ChannelName, entry.Type)
 		}
 
 		token, err := deps.SecretStore.Get(ctx, channel.ChannelSecretKey(a.ChannelName))
@@ -77,15 +70,13 @@ func channelNotifyHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("no token found for channel %q", a.ChannelName)
 		}
 
-		sent, err := provisioner.Notify(ctx, token, cfg.AllowedUsers, a.Message)
-		if err != nil {
-			return nil, fmt.Errorf("notify channel users: %w", err)
+		if err := provisioner.Notify(ctx, token, a.Message); err != nil {
+			return nil, fmt.Errorf("notify channel user: %w", err)
 		}
 
 		return json.Marshal(map[string]any{
 			"status":  "sent",
 			"channel": a.ChannelName,
-			"sent_to": sent,
 		})
 	}
 }

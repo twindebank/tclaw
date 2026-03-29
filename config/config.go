@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"tclaw/channel"
 	"tclaw/claudecli"
@@ -79,7 +80,18 @@ type User struct {
 	DisallowedTools []claudecli.Tool `yaml:"disallowed_tools"`
 	SystemPrompt    string           `yaml:"system_prompt"`
 
+	// Telegram holds the user's Telegram identity. All Telegram channels
+	// for this user inherit these settings.
+	Telegram *UserTelegramConfig `yaml:"telegram,omitempty"`
+
 	Channels []Channel `yaml:"channels"`
+}
+
+// UserTelegramConfig holds user-level Telegram settings.
+type UserTelegramConfig struct {
+	// UserID is the Telegram user ID. All Telegram channels for this user
+	// restrict access to this ID.
+	UserID string `yaml:"user_id"`
 }
 
 // Channel defines a channel attached to a user.
@@ -89,25 +101,25 @@ type Channel struct {
 	Name        string      `yaml:"name"`
 	Description string      `yaml:"description"`
 
-	// TelegramConfig holds config specific to Telegram channels.
-	// Required when Type is "telegram".
-	TelegramConfig *TelegramChannelConfig `yaml:"telegram,omitempty"`
+	// Telegram holds Telegram-specific channel config.
+	// Non-nil when Type is "telegram".
+	Telegram *TelegramChannelConfig `yaml:"telegram,omitempty"`
 
 	// Envs restricts this channel to specific environments.
 	// Empty means the channel is active in all environments.
 	Envs []Env `yaml:"envs,omitempty"`
 
 	// ToolGroups is a list of named tool groups, combined additively.
-	// Mutually exclusive with Role and AllowedTools.
+	// Mutually exclusive with AllowedTools.
 	ToolGroups []toolgroup.ToolGroup `yaml:"tool_groups,omitempty"`
 
 	// AllowedTools overrides the user-level allowed_tools for this channel.
-	// Mutually exclusive with Role and ToolGroups. When set, this replaces
+	// Mutually exclusive with ToolGroups. When set, this replaces
 	// (not merges with) the user-level list.
 	AllowedTools []string `yaml:"allowed_tools,omitempty"`
 
 	// DisallowedTools overrides user-level disallowed_tools for this channel.
-	// Works alongside Role, ToolGroups, and AllowedTools for surgical removal.
+	// Works alongside ToolGroups and AllowedTools for surgical removal.
 	DisallowedTools []string `yaml:"disallowed_tools,omitempty"`
 
 	// CreatableGroups is the set of tool groups this channel can delegate when
@@ -122,11 +134,28 @@ type Channel struct {
 	// the channel_send MCP tool. Only declared links are valid — the agent
 	// cannot send to arbitrary channels.
 	Links []ChannelLink `yaml:"links,omitempty"`
+
+	// Ephemeral marks this channel for automatic cleanup after idle timeout.
+	// When true, the channel is removed from config after EphemeralIdleTimeout
+	// of inactivity.
+	Ephemeral bool `yaml:"ephemeral,omitempty"`
+
+	// EphemeralIdleTimeout is how long an ephemeral channel can sit idle before
+	// auto-cleanup. Parsed as a Go duration string (e.g. "24h", "30m").
+	// Defaults to 24 hours. Only meaningful when Ephemeral is true.
+	EphemeralIdleTimeout string `yaml:"ephemeral_idle_timeout,omitempty"`
+
+	// InitialMessage is delivered to the channel as its first inbound message
+	// once the channel comes online after creation. Cleared after delivery so
+	// it fires exactly once.
+	InitialMessage string `yaml:"initial_message,omitempty"`
+
+	// CreatedAt is the RFC3339 timestamp of when this channel was created by
+	// a tool. Empty for hand-written channels.
+	CreatedAt string `yaml:"created_at,omitempty"`
 }
 
 // ChannelLink is a config alias for channel.Link with YAML tags.
-// The underlying type lives in the channel package so both static config
-// and dynamic channels can use the same type.
 type ChannelLink = channel.Link
 
 // TelegramChannelConfig holds Telegram-specific channel configuration.
@@ -134,11 +163,6 @@ type TelegramChannelConfig struct {
 	// Token is the Telegram bot token from @BotFather.
 	// Supports secret references: ${secret:NAME}.
 	Token string `yaml:"token"`
-
-	// AllowedUsers restricts which Telegram user IDs can interact with this bot.
-	// At least one user ID is required — messages from users not in this list are
-	// silently ignored. Find your user ID by messaging @userinfobot on Telegram.
-	AllowedUsers []int64 `yaml:"allowed_users"`
 }
 
 // Env identifies the runtime environment.
@@ -302,15 +326,26 @@ func validate(cfg *Config) error {
 				}
 			}
 
+			if ch.EphemeralIdleTimeout != "" {
+				if _, err := time.ParseDuration(ch.EphemeralIdleTimeout); err != nil {
+					return fmt.Errorf("user %q channel %q: invalid ephemeral_idle_timeout %q: %w", u.ID, ch.Name, ch.EphemeralIdleTimeout, err)
+				}
+			}
+
+			if ch.CreatedAt != "" {
+				if _, err := time.Parse(time.RFC3339, ch.CreatedAt); err != nil {
+					return fmt.Errorf("user %q channel %q: invalid created_at %q: %w", u.ID, ch.Name, ch.CreatedAt, err)
+				}
+			}
+
 			switch ch.Type {
 			case ChannelTypeSocket, ChannelTypeStdio:
-				// valid
+				// valid — no token or allowed_users needed
 			case ChannelTypeTelegram:
-				if ch.TelegramConfig == nil || ch.TelegramConfig.Token == "" {
-					return fmt.Errorf("user %q channel %q: telegram channel requires telegram.token", u.ID, ch.Name)
-				}
-				if len(ch.TelegramConfig.AllowedUsers) == 0 {
-					return fmt.Errorf("user %q channel %q: telegram channel requires at least one allowed_users entry (get your user ID from @userinfobot on Telegram)", u.ID, ch.Name)
+				// Token may be empty for channels that need provisioning —
+				// the reconciler will provision and populate it.
+				if u.Telegram == nil || u.Telegram.UserID == "" {
+					return fmt.Errorf("user %q channel %q: telegram channels require user-level telegram.user_id", u.ID, ch.Name)
 				}
 			case "":
 				return fmt.Errorf("user %q channel %q: missing type", u.ID, ch.Name)
@@ -375,7 +410,7 @@ func resolveSecrets(cfg *Config) ([]string, error) {
 
 		// Resolve Telegram bot tokens.
 		for j := range cfg.Users[i].Channels {
-			tc := cfg.Users[i].Channels[j].TelegramConfig
+			tc := cfg.Users[i].Channels[j].Telegram
 			if tc == nil || tc.Token == "" {
 				continue
 			}
