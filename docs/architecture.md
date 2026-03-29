@@ -45,13 +45,13 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 | `channel/` | Transport abstraction. `Channel` interface with implementations: Socket, Stdio, Telegram. `FanIn()` multiplexer, `ChannelMap()` helper. `DynamicStore` for runtime channel configs, `ChannelSecretKey()` for deriving secret store keys. `EphemeralProvisioner` interface for platform-specific channel lifecycle (provision, teardown, confirm, notify). `PlatformState` and `TeardownState` discriminated types for platform-specific persistent data. `QueueStore` for persisting messages and interrupted-turn markers across agent restarts. |
 | `config/` | YAML parsing, secret resolution, config validation. |
 
-### Auth & Connections
+### Auth & Credentials
 
 | Package | Responsibility |
 |---------|----------------|
-| `oauth/` | Stateless OAuth 2.0 helpers (`BuildAuthURL`, `ExchangeCode`, `RefreshToken`). `CallbackServer` handles HTTP endpoints for OAuth callbacks, Telegram webhooks, and health checks. |
-| `provider/` | OAuth provider registry. Stateless lookup by provider ID. Currently: Google. |
-| `connection/` | Connection CRUD and credential management. Bridges `store.Store` (connection metadata) and `secret.Store` (encrypted credentials). Also manages remote MCP server configs. Connections and remote MCPs support channel scoping via a `Channel` field. |
+| `oauth/` | Stateless OAuth 2.0 helpers (`BuildAuthURL`, `ExchangeCode`, `RefreshToken`), `OAuth2Config` type, and `CallbackServer` for HTTP endpoints (OAuth callbacks, Telegram webhooks, health checks). |
+| `credential/` | Unified credential storage. `CredentialSet` is a named, optionally channel-scoped collection of secrets for a tool package. `Manager` handles CRUD for credential sets, individual secret fields, and OAuth tokens. Replaces the old `connection/` and `provider/` packages. |
+| `remotemcpstore/` | Remote MCP server storage and auth credential management. Independent from tool credentials. |
 
 ### Tools (MCP)
 
@@ -60,15 +60,15 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 | `mcp/` | JSON-RPC tool registry (`Handler`), HTTP server (`Server`), config file generation (`GenerateConfigFile`). |
 | `mcp/discovery/` | OAuth discovery for remote MCP servers (RFC 7591 dynamic registration). Safe HTTP client that blocks private IPs and requires HTTPS. |
 | `tool/channeltools/` | MCP tools for dynamic channel management (create, list, edit, delete, notify, done) and cross-channel messaging (`channel_send`). Channel tools are platform-agnostic — platform-specific logic is delegated to `EphemeralProvisioner` implementations. `channel_done` uses an async confirmation flow: sends a prompt to the user, the router intercepts the reply. |
-| `tool/connectiontools/` | MCP tools for OAuth connection management (add, remove, list, auth_wait). |
+| `tool/credentialtools/` | MCP tools for unified credential management (`credential_add`, `credential_list`, `credential_remove`, `credential_auth_wait`). Handles both API key collection (via secret forms) and OAuth flows. |
 | `tool/remotemcp/` | MCP tools for remote MCP server management (add, remove, list, auth_wait). |
 | `tool/scheduletools/` | MCP tools for cron schedule management (create, list, edit, delete, pause, resume). |
-| `tool/google/` | Google Workspace tools registered when a Google connection exists. Delegates to `gws` binary. |
-| `tool/monzo/` | Monzo banking tools registered when a Monzo connection exists. Direct HTTP calls to the Monzo API. |
-| `tool/tfl/` | Transport for London tools (line status, journey planning, arrivals, disruptions). Always registered — API key stored per-user in secret store. |
-| `tool/restauranttools/` | Restaurant search and booking tools via provider interface (currently Resy). Always registered — credentials stored per-user in secret store. |
-| `tool/bankingtools/` | Open Banking tools via Enable Banking API (PSD2). Bank account connection, balance and transaction queries across multiple UK banks. Always registered — JWT credentials stored per-user in secret store, bank sessions in state store. |
-| `tool/devtools/` | MCP tools for dev workflow (dev_start, dev_status, dev_end, dev_cancel, deploy, dev_logs, config_get, config_set). Git worktree management, PR creation via `gh`, Fly.io deployment, application log inspection, and tclaw.yaml config read/update. |
+| `tool/google/` | Google Workspace tools registered when a Google credential set has OAuth tokens. Delegates to `gws` binary. Implements `CredentialProvider`. |
+| `tool/monzo/` | Monzo banking tools registered when a Monzo credential set has OAuth tokens. Direct HTTP calls to the Monzo API. Implements `CredentialProvider`. |
+| `tool/tfl/` | Transport for London tools (line status, journey planning, arrivals, disruptions). Always registered — optional API key via credential set. Implements `CredentialProvider`. |
+| `tool/restauranttools/` | Restaurant search and booking tools via Resy. Credentials stored per-user in secret store. Implements `CredentialProvider`. |
+| `tool/bankingtools/` | Open Banking tools via Enable Banking API (PSD2). Credentials stored per-user. Implements `CredentialProvider`. |
+| `tool/devtools/` | MCP tools for dev workflow (dev_start, dev_status, dev_end, dev_cancel, deploy, dev_logs, config_get, config_set). Git worktree management, PR creation via `gh`, Fly.io deployment, application log inspection, and tclaw.yaml config read/update. Implements `CredentialProvider` for optional GitHub/Fly tokens. |
 | `tool/repotools/` | MCP tools for read-only monitoring of external git repos (add, sync, log, list, remove). Shallow clones with last-seen commit tracking. |
 | `tool/onboardingtools/` | MCP tools for new user onboarding (status, set_info, advance, tip_shown, skip). Tracks onboarding progress and manages the daily tips schedule. |
 | `tool/telegramclient/` | MCP tools for Telegram Client API (MTProto) — auth, bot management via BotFather, chat creation, message history, search. Uses `gotd/td` library with session persistence via encrypted secret store. |
@@ -101,13 +101,13 @@ Dependencies flow strictly downward — no circular imports.
 
 ```
 Layer 1:  Pure types (user, claudecli, role, store.Store interface, secret.Store interface)
-Layer 2:  Domain models (connection.Connection, schedule.Schedule, channel.Channel interface)
-Layer 3:  Managers (connection.Manager, schedule.Store, channel.DynamicStore)
+Layer 2:  Domain models (credential.CredentialSet, schedule.Schedule, channel.Channel interface)
+Layer 3:  Managers (credential.Manager, remotemcpstore.Manager, schedule.Store, channel.DynamicStore)
 Layer 4:  Stateless handlers (oauth, mcp.Handler, mcp/discovery)
 Layer 5:  Channel implementations (socket, stdio, telegram, dynamic)
 Layer 6:  Agent loop (agent.Run — spawns CLI, handles auth, manages turns)
 Layer 7:  HTTP server (oauth.CallbackServer — callbacks, webhooks, health)
-Layer 8:  Tool implementations (channeltools, connectiontools, remotemcp, scheduletools, google)
+Layer 8:  Tool implementations (channeltools, credentialtools, remotemcp, scheduletools, google)
 Layer 9:  Configuration (YAML parsing, secret resolution)
 Layer 10: CLI dispatch (cli/ — subcommand routing, deploy/secret commands)
 Layer 11: Orchestration (router, main)
@@ -165,19 +165,21 @@ Agent starts auth flow (per-channel state machine)
     Retry original message
 ```
 
-### OAuth Connection Flow
+### OAuth Credential Flow
 
 ```
-Agent calls connection_add tool
+Agent calls credential_add(package="google", label="work", channel="admin")
     │
     ▼
-MCP handler generates OAuth state, registers pending flow on CallbackServer
+If setup fields missing (client_id/secret) → returns CREDENTIALS_NEEDED
+    → agent triggers secret_form_request for user to fill in
+    → agent calls credential_add again after form submitted
     │
     ▼
-Returns auth URL to agent → agent sends to user
+Setup fields present → starts OAuth flow, returns auth URL
     │
     ▼
-User clicks URL → browser → provider consent
+Agent sends auth URL to user → user clicks → browser → consent
     │
     ▼
 Provider redirects to /oauth/callback?code=X&state=Y
@@ -186,13 +188,13 @@ Provider redirects to /oauth/callback?code=X&state=Y
 CallbackServer validates state, exchanges code for tokens
     │
     ▼
-Stores connection + encrypted credentials
+Stores OAuth tokens in credential set (cred/<pkg>/<label>/_oauth)
     │
     ▼
-Agent calls connection_auth_wait → polls until complete
+Agent calls credential_auth_wait → polls until tokens stored
     │
     ▼
-Provider-specific tools registered (e.g. google_workspace)
+Package's OnCredentialSetChange fires → tools registered
 ```
 
 ### Remote MCP Flow

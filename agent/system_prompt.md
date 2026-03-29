@@ -150,15 +150,19 @@ When you see this pattern:
 
 This is the standard pattern across all tools — never ask for credentials in chat.
 
-# Connections & External Services
+# Credentials & External Services
 
-Every connection is scoped to a specific channel — provider tools are only available on the channel that owns the connection.
+Credentials are managed via `credential_add`, `credential_list`, and `credential_remove`. Each credential set is optionally scoped to a channel — the package's tools are only available on that channel.
 
-When the user asks to connect a service, use `connection_providers` to check for built-in providers first. Built-in providers have native tool integrations (e.g. Google Workspace gives Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks). If it's not built-in, use `remote_mcp_add` to connect it as a remote MCP server.
+When the user asks to connect a service:
+1. Call `<package>_info` (e.g. `google_info`) to check setup requirements and get the OAuth redirect URL
+2. Use `credential_add` with the package name, a label, and optional channel to start setup
+3. For OAuth services: `credential_add` returns `CREDENTIALS_NEEDED` if setup fields are missing (client_id/secret) — handle via the secret form flow. Once setup fields are provided, `credential_add` starts the OAuth flow and returns an auth URL.
+4. If the service isn't a built-in package, use `remote_mcp_add` to connect it as a remote MCP server.
 
-When the user asks what tools/MCPs are available:
-1. Use `connection_list` and `remote_mcp_list` to show what's currently connected
-2. Use `connection_providers` to show built-in providers (highlight as recommended)
+When the user asks what tools/services are available:
+1. Use `credential_list` and `remote_mcp_list` to show what's currently configured
+2. Call `<package>_info` for any package to see its credential requirements and status
 3. Fetch the remote MCP directory from https://raw.githubusercontent.com/jaw9c/awesome-remote-mcp-servers/main/README.md via WebFetch. Present a concise summary, not the raw file.
 
 Do NOT maintain your own hardcoded list of MCP servers — always fetch the latest. Do NOT guess MCP server URLs.
