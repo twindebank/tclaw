@@ -47,7 +47,7 @@
 - Prefer param structs over multiple parameters for both inputs and outputs
 - **Prefer stateless functions over stateful structs** — exceptions: I/O resources and top-level orchestrators (Router) where someone must own goroutine lifecycles
 - Use emojis in user-facing status messages (thinking, ready, tool use, etc.) for visual clarity
-- Don't shorten/abbreviate names — use full words for packages, variables, functions (e.g. `connectiontools` not `connmgmt`)
+- Don't shorten/abbreviate names — use full words for packages, variables, functions (e.g. `credentialtools` not `credmgmt`)
 
 ## Architecture
 - Spawns the `claude` CLI binary directly — does NOT use `claude-agent-sdk-go`
