@@ -8,9 +8,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolCancel = "dev_cancel"
+
 func devCancelDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "dev_cancel",
+		Name:        ToolCancel,
 		Description: "Cancel a dev session: removes the worktree and local branch without pushing or creating a PR. All uncommitted changes are lost.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

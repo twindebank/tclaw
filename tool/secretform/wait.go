@@ -12,7 +12,7 @@ import (
 
 func secretFormWaitDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "secret_form_wait",
+		Name:        ToolWait,
 		Description: "Wait for a pending secret form to be submitted. Call this after sending the form URL to the user. Blocks until the user submits the form (up to 10 minutes).",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

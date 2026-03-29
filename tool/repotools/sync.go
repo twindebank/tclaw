@@ -18,9 +18,11 @@ const (
 	githubTokenKey = "github_token"
 )
 
+const ToolSync = "repo_sync"
+
 func repoSyncDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name: "repo_sync",
+		Name: ToolSync,
 		Description: "Fetch the latest from a tracked repo and report what's new since the last sync. " +
 			"Returns repo_dir — a full git clone where you can browse files with Read/Grep/Glob and run git commands (log, diff, blame, show) directly. " +
 			"Tracks the last-seen commit automatically — each sync reports only new commits since the previous check. " +

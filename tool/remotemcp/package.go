@@ -40,7 +40,7 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 		Group:       p.Group(),
 		GroupInfo:   toolgroup.GroupInfo{Group: p.Group(), Description: "Manage OAuth connections and remote MCP servers."},
 		Credentials: nil,
-		Tools:       []string{"remote_mcp_list", "remote_mcp_add", "remote_mcp_remove", "remote_mcp_auth_wait"},
+		Tools:       ToolNames(),
 	}, nil
 }
 

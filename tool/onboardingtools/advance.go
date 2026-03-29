@@ -14,7 +14,7 @@ import (
 
 func onboardingAdvanceDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "onboarding_advance",
+		Name:        ToolAdvance,
 		Description: "Advance the onboarding phase. Call this when you've completed the current phase and are ready to move to the next one. Transitions: welcome → info_gathering → tips_active → complete.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

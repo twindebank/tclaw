@@ -10,9 +10,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolLog = "dev_log"
+
 func devLogDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "dev_log",
+		Name:        ToolLog,
 		Description: "Show recent commit history on origin/main. Useful for reviewing what's been merged and comparing against the deployed version.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

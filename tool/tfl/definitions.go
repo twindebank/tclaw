@@ -6,9 +6,26 @@ import (
 	"tclaw/mcp"
 )
 
+const (
+	ToolLineStatus  = "tfl_line_status"
+	ToolJourney     = "tfl_journey"
+	ToolArrivals    = "tfl_arrivals"
+	ToolStopSearch  = "tfl_stop_search"
+	ToolDisruptions = "tfl_disruptions"
+	ToolRoadStatus  = "tfl_road_status"
+)
+
+// ToolNames returns all tool name constants in this package.
+func ToolNames() []string {
+	return []string{
+		ToolLineStatus, ToolJourney, ToolArrivals,
+		ToolStopSearch, ToolDisruptions, ToolRoadStatus,
+	}
+}
+
 var toolDefs = []mcp.ToolDef{
 	{
-		Name: "tfl_line_status",
+		Name: ToolLineStatus,
 		Description: "Get the status of TfL lines (tube, overground, elizabeth line, DLR, tram). " +
 			"Without parameters, returns status for all tube lines. " +
 			"Use 'modes' to get status for a specific mode, or 'lines' for specific line names.",
@@ -31,7 +48,7 @@ var toolDefs = []mcp.ToolDef{
 		}`),
 	},
 	{
-		Name: "tfl_journey",
+		Name: ToolJourney,
 		Description: "Plan a journey using TfL. Accepts postcodes, station names, coordinates (lat,lon), or NaPTAN IDs " +
 			"as from/to locations. Returns route options with step-by-step directions, durations, and live departure times. " +
 			"Tip: departure/arrival points in the response include individualStopId — useful for finding the correct " +
@@ -73,7 +90,7 @@ var toolDefs = []mcp.ToolDef{
 		}`),
 	},
 	{
-		Name: "tfl_arrivals",
+		Name: ToolArrivals,
 		Description: "Get live arrivals at a TfL stop or station. Returns the next vehicles/trains with estimated arrival times. " +
 			"Use tfl_stop_search first to find the stop ID if you only have a name.\n\n" +
 			"IMPORTANT: Group stop IDs (e.g. '490G00010561') return empty results — always use individual stop IDs " +
@@ -95,7 +112,7 @@ var toolDefs = []mcp.ToolDef{
 		}`),
 	},
 	{
-		Name: "tfl_stop_search",
+		Name: ToolStopSearch,
 		Description: "Search for TfL stops and stations by name. Returns stop IDs (NaPTAN), names, modes served, and locations. " +
 			"Use this to find the stop_id needed by tfl_arrivals.",
 		InputSchema: json.RawMessage(`{
@@ -118,7 +135,7 @@ var toolDefs = []mcp.ToolDef{
 		}`),
 	},
 	{
-		Name: "tfl_disruptions",
+		Name: ToolDisruptions,
 		Description: "Get current disruptions on TfL lines. Returns affected routes, closure details, and severity. " +
 			"Without parameters, shows disruptions for all tube lines.",
 		InputSchema: json.RawMessage(`{
@@ -140,7 +157,7 @@ var toolDefs = []mcp.ToolDef{
 		}`),
 	},
 	{
-		Name:        "tfl_road_status",
+		Name:        ToolRoadStatus,
 		Description: "Get traffic status for major London roads. Returns current severity, status description, and any active closures or restrictions.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

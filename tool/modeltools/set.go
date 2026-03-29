@@ -10,9 +10,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolSet = "model_set"
+
 func modelSetDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "model_set",
+		Name:        ToolSet,
 		Description: "Set the model for subsequent turns. Use a short name (e.g. 'opus-4.6', 'sonnet-4.6') or full model ID. Use 'auto' to let the CLI choose. Takes effect on the next turn.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

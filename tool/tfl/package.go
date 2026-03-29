@@ -42,7 +42,7 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 		Group:       p.Group(),
 		GroupInfo:   toolgroup.GroupInfo{Group: p.Group(), Description: "Personal service integrations: TfL transport, restaurant reservations, banking, Monzo."},
 		Credentials: toolpkg.CheckCredentialStatus(ctx, secretStore, p.RequiredSecrets()),
-		Tools:       []string{"tfl_line_status", "tfl_journey", "tfl_arrivals", "tfl_stop_search", "tfl_disruptions", "tfl_road_status"},
+		Tools:       ToolNames(),
 	}, nil
 }
 

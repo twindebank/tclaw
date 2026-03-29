@@ -11,9 +11,11 @@ import (
 
 const staleSessionThreshold = 4 * time.Hour
 
+const ToolStatus = "dev_status"
+
 func devStatusDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "dev_status",
+		Name:        ToolStatus,
 		Description: "Show the status of active dev sessions — branch, changed files, commit log. If multiple sessions are active and no session is specified, lists all sessions.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

@@ -12,7 +12,7 @@ import (
 
 func secretFormRequestDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "secret_form_request",
+		Name:        ToolRequest,
 		Description: "Create a secure web form for the user to enter sensitive information (API keys, tokens, credentials). Returns a URL and a verification code. Send BOTH to the user — the code must be entered on the form to prove identity. Values are stored securely and never visible to the agent. Call secret_form_wait after sending the URL.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

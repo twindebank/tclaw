@@ -19,9 +19,11 @@ const (
 	configSecretName = "TCLAW_YAML"
 )
 
+const ToolConfigGet = "config_get"
+
 func configGetDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name: "config_get",
+		Name: ToolConfigGet,
 		Description: `Read the active tclaw.yaml config file.
 
 Returns the full YAML content of the running config. In production this is
@@ -56,9 +58,11 @@ func configGetHandler(deps Deps) mcp.ToolHandler {
 	}
 }
 
+const ToolConfigSet = "config_set"
+
 func configSetDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name: "config_set",
+		Name: ToolConfigSet,
 		Description: `Update the tclaw.yaml config and persist it to the TCLAW_YAML GitHub secret.
 
 Takes the full YAML content as a string. The YAML is validated before writing.

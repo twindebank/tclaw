@@ -12,9 +12,11 @@ import (
 	"tclaw/schedule"
 )
 
+const ToolCreate = "schedule_create"
+
 func scheduleCreateDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name: "schedule_create",
+		Name: ToolCreate,
 		Description: "Create a new scheduled prompt that fires on a cron schedule. The prompt is injected into the target channel as if the user sent it. " +
 			"Accepts 5-field cron (minute hour dom month dow) or shortcuts (@daily, @hourly, @weekly, @every 12h). " +
 			"Examples: '0 9,18 * * *' (9am and 6pm), '0 8 * * 1-5' (weekday mornings), '*/30 * * * *' (every 30 min). " +

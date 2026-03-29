@@ -42,9 +42,11 @@ func RegisterSendTool(handler *mcp.Handler, deps SendDeps) {
 	handler.Register(channelSendDef(), channelSendHandler(deps))
 }
 
+const ToolChannelSend = "channel_send"
+
 func channelSendDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name: "channel_send",
+		Name: ToolChannelSend,
 		Description: "Send a message to another channel. The message arrives on the target channel " +
 			"as if it were a new incoming message, waking the agent if idle. Only channels declared " +
 			"as links in the config are valid targets. Use this when the current channel detects " +

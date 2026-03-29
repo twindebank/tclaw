@@ -13,9 +13,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolPRChecks = "dev_pr_checks"
+
 func devPRChecksDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "dev_pr_checks",
+		Name:        ToolPRChecks,
 		Description: "Show CI check results and current state (open/merged/closed) for a pull request. Always check this before suggesting a merge — if state is \"merged\" the PR is already done.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

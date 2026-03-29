@@ -12,9 +12,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolLogs = "dev_logs"
+
 func devLogsDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "dev_logs",
+		Name:        ToolLogs,
 		Description: "Show recent application logs from the running tclaw instance. Logs are from an in-memory ring buffer (5000 lines) — only the current boot is available. For older logs, use fly logs from the CLI. Logs are filtered to your user only — other users' logs are not visible. Useful for debugging agent behavior, MCP tool calls, auth flows, scheduling, and channel issues.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

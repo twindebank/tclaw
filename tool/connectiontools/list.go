@@ -11,9 +11,11 @@ import (
 	"tclaw/provider"
 )
 
+const ToolConnectionList = "connection_list"
+
 func connectionListDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "connection_list",
+		Name:        ToolConnectionList,
 		Description: "List all connections to external services, showing their provider, label, and whether credentials are configured.",
 		InputSchema: json.RawMessage(`{"type": "object", "properties": {}}`),
 	}

@@ -40,11 +40,7 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 		Group:       p.Group(),
 		GroupInfo:   toolgroup.GroupInfo{Group: p.Group(), Description: "Google Workspace full access."},
 		Credentials: nil,
-		Tools: []string{
-			"google_gmail_list", "google_gmail_read", "google_gmail_send",
-			"google_calendar_list", "google_calendar_create",
-			"google_workspace", "google_workspace_schema",
-		},
+		Tools:       ToolNames(),
 	}, nil
 }
 

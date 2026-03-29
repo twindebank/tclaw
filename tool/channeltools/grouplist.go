@@ -8,9 +8,11 @@ import (
 	"tclaw/toolgroup"
 )
 
+const ToolGroupList = "tool_group_list"
+
 func toolGroupListDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name: "tool_group_list",
+		Name: ToolGroupList,
 		Description: "List all available tool groups with their descriptions and the tools they contain. " +
 			"Use this when creating channels to understand what permissions each group provides, " +
 			"and when deciding which creatable_groups to set.",
