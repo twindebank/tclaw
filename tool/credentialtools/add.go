@@ -154,10 +154,15 @@ func handleOAuthCredentialAdd(ctx context.Context, deps Deps, spec toolpkg.Crede
 	}
 
 	if !allFieldsPresent {
-		// Need setup fields first — return CREDENTIALS_NEEDED.
+		// Include the redirect URL in the description so the agent can tell
+		// the user what to set in their developer portal.
+		description := fmt.Sprintf("Credential set %s created. OAuth client credentials are needed before the authorization flow can start. After providing them, call credential_add again with the same package and label.", set.ID)
+		if deps.Callback != nil {
+			description += fmt.Sprintf("\n\nThe OAuth redirect URI to configure in the developer portal is: %s", deps.Callback.CallbackURL())
+		}
 		return nil, credentialerror.New(
 			set.Package+" OAuth Setup",
-			fmt.Sprintf("Credential set %s created. OAuth client credentials are needed before the authorization flow can start. After providing them, call credential_add again with the same package and label.", set.ID),
+			description,
 			missingFields...,
 		)
 	}
@@ -206,6 +211,7 @@ func handleOAuthCredentialAdd(ctx context.Context, deps Deps, spec toolpkg.Crede
 		"credential_set_id": set.ID,
 		"status":            "pending_auth",
 		"auth_url":          authURL,
+		"redirect_url":      deps.Callback.CallbackURL(),
 		"message":           fmt.Sprintf("Send this authorization URL to the user. Then IMMEDIATELY call credential_auth_wait with credential_set_id=%q — do NOT end the turn without calling it.", set.ID),
 	}
 	return json.Marshal(result)

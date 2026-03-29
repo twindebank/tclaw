@@ -102,6 +102,11 @@ type PackageInfo struct {
 	GroupInfo   toolgroup.GroupInfo `json:"group_info"`
 	Credentials []CredentialStatus  `json:"credentials"`
 	Tools       []string            `json:"tools"`
+
+	// RedirectURL is the OAuth callback URL to configure in the provider's
+	// developer portal before creating OAuth credentials. Only set for
+	// packages that require OAuth.
+	RedirectURL string `json:"redirect_url,omitempty"`
 }
 
 // RegistrationContext carries shared dependencies from the router to each
@@ -153,13 +158,23 @@ func InfoToolDef(pkg Package) mcp.ToolDef {
 }
 
 // InfoToolHandler returns the MCP handler for the standard <name>_info tool.
-// It calls pkg.Info() and returns the result as JSON.
-func InfoToolHandler(pkg Package, secretStore secret.Store) mcp.ToolHandler {
+// It calls pkg.Info() and returns the result as JSON. For CredentialProvider
+// packages with OAuth, it includes the redirect URL so the agent can tell the
+// user what to configure in their developer portal.
+func InfoToolHandler(pkg Package, secretStore secret.Store, callbackURL string) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 		info, err := pkg.Info(ctx, secretStore)
 		if err != nil {
 			return nil, err
 		}
+
+		// Add redirect URL for OAuth packages.
+		if cp, ok := pkg.(CredentialProvider); ok && callbackURL != "" {
+			if cp.CredentialSpec().NeedsOAuth() {
+				info.RedirectURL = callbackURL
+			}
+		}
+
 		return json.Marshal(info)
 	}
 }

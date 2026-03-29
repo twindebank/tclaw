@@ -2,25 +2,80 @@ package router
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
+	"tclaw/config"
 	"tclaw/credential"
 	"tclaw/mcp"
 	"tclaw/tool/credentialtools"
 	"tclaw/tool/toolpkg"
 )
 
+// seedConfigCredentials creates credential sets and writes secrets from the
+// config file's credentials section. Runs every startup — idempotent because
+// it overwrites existing field values with the config values.
+func seedConfigCredentials(ctx context.Context, credMgr *credential.Manager, cfg config.CredentialsConfig) {
+	for pkg, entries := range cfg {
+		for _, entry := range entries {
+			label := entry.Label
+			if label == "" {
+				label = "default"
+			}
+
+			setID := credential.NewCredentialSetID(pkg, label)
+
+			// Ensure the credential set exists.
+			existing, err := credMgr.Get(ctx, setID)
+			if err != nil {
+				slog.Error("config seed: failed to check credential set", "set", setID, "err", err)
+				continue
+			}
+			if existing == nil {
+				if _, err := credMgr.Add(ctx, pkg, label, entry.Channel); err != nil {
+					slog.Error("config seed: failed to create credential set", "set", setID, "err", err)
+					continue
+				}
+			}
+
+			// Write each secret field.
+			for key, val := range entry.Secrets {
+				if val == "" {
+					continue
+				}
+				if err := credMgr.SetField(ctx, setID, key, val); err != nil {
+					slog.Error("config seed: failed to set field", "set", setID, "field", key, "err", err)
+				}
+			}
+		}
+	}
+}
+
+// buildConfigSecretsMap converts config credentials into a flat map for the
+// legacy connection migration. Maps package name → field → value using the
+// first entry's secrets for each package (legacy connections only had one
+// set of client credentials per provider).
+func buildConfigSecretsMap(cfg config.CredentialsConfig) map[string]map[string]string {
+	result := make(map[string]map[string]string, len(cfg))
+	for pkg, entries := range cfg {
+		if len(entries) == 0 {
+			continue
+		}
+		// Use the first entry's secrets for migration — legacy connections
+		// didn't support multiple credential sets per provider.
+		result[pkg] = entries[0].Secrets
+	}
+	return result
+}
+
 // registerCredentialSystem sets up the unified credential management for all
-// tool packages that implement CredentialProvider. This is the generic
-// replacement for the per-provider wiring in providers.go.
+// tool packages that implement CredentialProvider.
 //
 // It:
 //  1. Seeds credentials from env vars into the credential store
 //  2. Registers the credential management MCP tools (credential_add, etc.)
 //  3. Loads existing credential sets and calls OnCredentialSetChange for each
 //     CredentialProvider package so they can register their tools
-//
-// Returns the credential manager for use by other router functions.
 func registerCredentialSystem(
 	ctx context.Context,
 	handler *mcp.Handler,
@@ -65,7 +120,6 @@ func notifyCredentialChange(
 	regCtx toolpkg.RegistrationContext,
 	packageName string,
 ) {
-	// Find the CredentialProvider.
 	var cp toolpkg.CredentialProvider
 	for _, p := range registry.CredentialProviders() {
 		if p.Name() == packageName {
@@ -86,7 +140,6 @@ func notifyCredentialChange(
 		return
 	}
 
-	// Resolve readiness for each set.
 	var resolved []toolpkg.ResolvedCredentialSet
 	for _, s := range sets {
 		ready, readyErr := credMgr.IsReady(ctx, s.ID, spec.RequiredFieldKeys(), spec.NeedsOAuth())
@@ -102,4 +155,10 @@ func notifyCredentialChange(
 	if err := cp.OnCredentialSetChange(handler, regCtx, resolved); err != nil {
 		slog.Error("OnCredentialSetChange failed", "package", packageName, "err", err)
 	}
+}
+
+// credentialFieldStoreKey builds the secret store key for a credential field.
+// Exported so other router code can compute keys consistently.
+func credentialFieldStoreKey(id credential.CredentialSetID, field string) string {
+	return fmt.Sprintf("cred/%s/%s", id, field)
 }

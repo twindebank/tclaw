@@ -27,13 +27,6 @@ type legacyCredentials struct {
 	Extra        map[string]string `json:"extra,omitempty"`
 }
 
-// OAuthClientCredentials holds OAuth client_id/secret to seed during migration.
-// Keyed by provider ID (e.g. "google").
-type OAuthClientCredentials struct {
-	ClientID     string
-	ClientSecret string
-}
-
 // MigrateFromConnections is a one-time migration that reads legacy connections
 // from the state store and copies their OAuth tokens into credential sets. This
 // allows the old connection/provider system to be removed.
@@ -41,9 +34,9 @@ type OAuthClientCredentials struct {
 // It's idempotent — if a credential set already exists with OAuth tokens, the
 // connection is skipped. Run this at startup before registerCredentialSystem.
 //
-// oauthClients maps provider ID → client credentials from config, so the
-// migration can seed client_id/client_secret into the credential set fields.
-func MigrateFromConnections(ctx context.Context, stateStore store.Store, secretStore secret.Store, credMgr *Manager, oauthClients map[string]OAuthClientCredentials) error {
+// configSecrets maps package name → field name → value, providing config-level
+// secrets (e.g. client_id/client_secret) to seed alongside the migrated tokens.
+func MigrateFromConnections(ctx context.Context, stateStore store.Store, secretStore secret.Store, credMgr *Manager, configSecrets map[string]map[string]string) error {
 	// Read legacy connections.
 	data, err := stateStore.Get(ctx, "connections")
 	if err != nil {
@@ -114,16 +107,13 @@ func MigrateFromConnections(ctx context.Context, stateStore store.Store, secretS
 			}
 		}
 
-		// Seed OAuth client credentials from config.
-		if client, ok := oauthClients[conn.ProviderID]; ok {
-			if client.ClientID != "" {
-				if err := credMgr.SetField(ctx, setID, "client_id", client.ClientID); err != nil {
-					slog.Warn("migration: failed to set client_id", "set", setID, "err", err)
-				}
-			}
-			if client.ClientSecret != "" {
-				if err := credMgr.SetField(ctx, setID, "client_secret", client.ClientSecret); err != nil {
-					slog.Warn("migration: failed to set client_secret", "set", setID, "err", err)
+		// Seed config-level secrets (e.g. client_id, client_secret).
+		if secrets, ok := configSecrets[conn.ProviderID]; ok {
+			for key, val := range secrets {
+				if val != "" {
+					if err := credMgr.SetField(ctx, setID, key, val); err != nil {
+						slog.Warn("migration: failed to set field from config", "set", setID, "field", key, "err", err)
+					}
 				}
 			}
 		}

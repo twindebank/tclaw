@@ -17,7 +17,7 @@
 local:
   base_dir: /tmp/tclaw
 
-  # providers:
+  # credentials:
   #   # Google Workspace (Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks)
   #   google:
   #     client_id: ${secret:GOOGLE_CLIENT_ID}
