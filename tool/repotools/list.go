@@ -9,9 +9,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolList = "repo_list"
+
 func repoListDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "repo_list",
+		Name:        ToolList,
 		Description: "List all tracked repos and their status (last synced, branch, worktree path).",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

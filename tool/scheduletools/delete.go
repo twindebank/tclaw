@@ -9,9 +9,11 @@ import (
 	"tclaw/schedule"
 )
 
+const ToolDelete = "schedule_delete"
+
 func scheduleDeleteDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "schedule_delete",
+		Name:        ToolDelete,
 		Description: "Delete a schedule permanently.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

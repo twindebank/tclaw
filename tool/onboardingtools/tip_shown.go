@@ -14,7 +14,7 @@ import (
 
 func onboardingTipShownDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "onboarding_tip_shown",
+		Name:        ToolTipShown,
 		Description: "Record that an onboarding tip was delivered to the user. Call this after you've presented a tip so it won't be repeated. If this was the last tip, the tips schedule is automatically cleaned up and onboarding completes.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

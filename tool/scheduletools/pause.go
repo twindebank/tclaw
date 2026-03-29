@@ -9,9 +9,11 @@ import (
 	"tclaw/schedule"
 )
 
+const ToolPause = "schedule_pause"
+
 func schedulePauseDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "schedule_pause",
+		Name:        ToolPause,
 		Description: "Pause an active schedule. It will stop firing until resumed.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

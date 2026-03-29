@@ -41,9 +41,11 @@ func RegisterSendWhenFreeTool(handler *mcp.Handler, deps SendWhenFreeDeps) {
 	handler.Register(channelSendWhenFreeDef(), channelSendWhenFreeHandler(deps))
 }
 
+const ToolChannelSendWhenFree = "channel_send_when_free"
+
 func channelSendWhenFreeDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name: "channel_send_when_free",
+		Name: ToolChannelSendWhenFree,
 		Description: "Send a message to another channel, waiting until it's free if currently busy. " +
 			"If the target channel is free, delivers immediately. If busy, the message is queued " +
 			"durably (survives restarts) and delivered automatically when the target becomes free. " +

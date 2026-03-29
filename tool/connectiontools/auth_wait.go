@@ -12,9 +12,11 @@ import (
 
 const authWaitTimeout = 5 * time.Minute
 
+const ToolConnectionAuthWait = "connection_auth_wait"
+
 func connectionAuthWaitDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "connection_auth_wait",
+		Name:        ToolConnectionAuthWait,
 		Description: "Wait for a pending OAuth authorization to complete. Call this after sending the auth URL to the user. Blocks until the user finishes authorizing (up to 5 minutes) or checks if credentials are already stored.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

@@ -6,11 +6,30 @@ import (
 	"tclaw/mcp"
 )
 
+const (
+	ToolSetCredentials  = "banking_set_credentials"
+	ToolListBanks       = "banking_list_banks"
+	ToolConnect         = "banking_connect"
+	ToolAuthWait        = "banking_auth_wait"
+	ToolListAccounts    = "banking_list_accounts"
+	ToolGetBalance      = "banking_get_balance"
+	ToolGetTransactions = "banking_get_transactions"
+)
+
+// ToolNames returns all tool name constants in this package.
+func ToolNames() []string {
+	return []string{
+		ToolSetCredentials, ToolListBanks, ToolConnect,
+		ToolAuthWait, ToolListAccounts, ToolGetBalance,
+		ToolGetTransactions,
+	}
+}
+
 // infoToolDefs are always registered — they let the agent learn about the
 // provider and set up credentials.
 var infoToolDefs = []mcp.ToolDef{
 	{
-		Name: "banking_set_credentials",
+		Name: ToolSetCredentials,
 		Description: "Set up Enable Banking credentials (application ID and RSA private key). " +
 			"Call with no parameters to trigger the secure credential collection flow " +
 			"(returns CREDENTIALS_NEEDED if not yet stored). Call with application_id and " +
@@ -36,7 +55,7 @@ var infoToolDefs = []mcp.ToolDef{
 // operationalToolDefs are only registered when credentials are configured.
 var operationalToolDefs = []mcp.ToolDef{
 	{
-		Name: "banking_list_banks",
+		Name: ToolListBanks,
 		Description: "List available banks that support Open Banking connections. " +
 			"Returns bank names and ASPSP IDs needed for banking_connect.",
 		InputSchema: json.RawMessage(`{
@@ -51,7 +70,7 @@ var operationalToolDefs = []mcp.ToolDef{
 		}`),
 	},
 	{
-		Name: "banking_connect",
+		Name: ToolConnect,
 		Description: "Start bank authorization. Returns an authorization URL the user must visit " +
 			"to log into their bank. After sending the URL to the user, call banking_auth_wait " +
 			"to wait for completion.",
@@ -72,7 +91,7 @@ var operationalToolDefs = []mcp.ToolDef{
 		}`),
 	},
 	{
-		Name: "banking_auth_wait",
+		Name: ToolAuthWait,
 		Description: "Wait for a pending bank authorization to complete (up to 5 minutes). " +
 			"Call this immediately after sending the banking_connect auth URL to the user.",
 		InputSchema: json.RawMessage(`{
@@ -87,7 +106,7 @@ var operationalToolDefs = []mcp.ToolDef{
 		}`),
 	},
 	{
-		Name: "banking_list_accounts",
+		Name: ToolListAccounts,
 		Description: "List all connected bank accounts across all banks. Shows account names, " +
 			"IBANs, and which bank they belong to. Also flags expired sessions that need re-authorization.",
 		InputSchema: json.RawMessage(`{
@@ -96,7 +115,7 @@ var operationalToolDefs = []mcp.ToolDef{
 		}`),
 	},
 	{
-		Name: "banking_get_balance",
+		Name: ToolGetBalance,
 		Description: "Get the current balance for a specific bank account. " +
 			"Use the account UID from banking_list_accounts.",
 		InputSchema: json.RawMessage(`{
@@ -111,7 +130,7 @@ var operationalToolDefs = []mcp.ToolDef{
 		}`),
 	},
 	{
-		Name: "banking_get_transactions",
+		Name: ToolGetTransactions,
 		Description: "Get transaction history for a specific bank account. " +
 			"Supports date range filtering. Use the account UID from banking_list_accounts.",
 		InputSchema: json.RawMessage(`{

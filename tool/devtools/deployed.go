@@ -14,9 +14,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolDeployed = "dev_deployed"
+
 func devDeployedDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "dev_deployed",
+		Name:        ToolDeployed,
 		Description: "Show what's currently deployed — the deployed commit hash, the latest origin/main commit, and whether a deploy is needed.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

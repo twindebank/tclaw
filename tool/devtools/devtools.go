@@ -16,6 +16,15 @@ const (
 	flyTokenKey = "fly_api_token"
 )
 
+// ToolNames returns all tool name constants in this package.
+func ToolNames() []string {
+	return []string{
+		ToolStart, ToolStatus, ToolPR, ToolEnd, ToolCancel,
+		ToolDeploy, ToolDeployed, ToolLog, ToolLogs, ToolBrowse,
+		ToolPRChecks, ToolConfigGet, ToolConfigSet, ToolDisk,
+	}
+}
+
 // Deps holds dependencies for dev workflow tools.
 type Deps struct {
 	Store       *dev.Store

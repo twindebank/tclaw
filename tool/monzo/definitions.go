@@ -9,10 +9,27 @@ import (
 	"tclaw/mcp"
 )
 
+const (
+	ToolSetCredentials   = "monzo_set_credentials"
+	ToolListAccounts     = "monzo_list_accounts"
+	ToolGetBalance       = "monzo_get_balance"
+	ToolListPots         = "monzo_list_pots"
+	ToolListTransactions = "monzo_list_transactions"
+	ToolGetTransaction   = "monzo_get_transaction"
+)
+
+// ToolNames returns all tool name constants in this package.
+func ToolNames() []string {
+	return []string{
+		ToolSetCredentials, ToolListAccounts, ToolGetBalance,
+		ToolListPots, ToolListTransactions, ToolGetTransaction,
+	}
+}
+
 // setCredentialsDef is always registered so the agent can discover Monzo and
 // set up the OAuth client credentials at runtime.
 var setCredentialsDef = mcp.ToolDef{
-	Name: "monzo_set_credentials",
+	Name: ToolSetCredentials,
 	Description: "Set up Monzo API OAuth client credentials. Call with no parameters to trigger " +
 		"the secure credential collection flow (returns CREDENTIALS_NEEDED if not yet stored). " +
 		"Call with client_id and client_secret to store them directly.\n\n" +
@@ -48,7 +65,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 
 	return []mcp.ToolDef{
 		{
-			Name: "monzo_list_accounts",
+			Name: ToolListAccounts,
 			Description: "List Monzo bank accounts. Returns account IDs, types (uk_retail, uk_retail_joint, uk_monzo_flex), " +
 				"descriptions, and creation dates. Use the account ID from results in other Monzo tools.",
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
@@ -69,7 +86,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 			}`, connDescription, enumJSON)),
 		},
 		{
-			Name: "monzo_get_balance",
+			Name: ToolGetBalance,
 			Description: "Get the balance for a Monzo account. Returns balance (current), total_balance (including pots), " +
 				"currency, and spend_today. All amounts are in minor units (pence for GBP).",
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
@@ -89,7 +106,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 			}`, connDescription, enumJSON)),
 		},
 		{
-			Name: "monzo_list_pots",
+			Name: ToolListPots,
 			Description: "List Monzo pots (savings goals) for an account. Returns pot IDs, names, balances, " +
 				"currency, and whether each pot is deleted or locked. Amounts in minor units (pence for GBP).",
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
@@ -109,7 +126,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 			}`, connDescription, enumJSON)),
 		},
 		{
-			Name: "monzo_list_transactions",
+			Name: ToolListTransactions,
 			Description: "List recent transactions for a Monzo account. Returns transaction IDs, amounts, descriptions, " +
 				"merchant info, categories, and timestamps. Amounts in minor units (pence for GBP — negative = debit, positive = credit). " +
 				"Note: after 5 minutes post-authentication, only the last 90 days of transactions are accessible. " +
@@ -143,7 +160,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 			}`, connDescription, enumJSON)),
 		},
 		{
-			Name: "monzo_get_transaction",
+			Name: ToolGetTransaction,
 			Description: "Get details of a single Monzo transaction, including expanded merchant information " +
 				"(name, address, logo, category, online status). Amounts in minor units (pence for GBP).",
 			InputSchema: json.RawMessage(fmt.Sprintf(`{

@@ -8,9 +8,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolRemoteMCPRemove = "remote_mcp_remove"
+
 func remoteMCPRemoveDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "remote_mcp_remove",
+		Name:        ToolRemoteMCPRemove,
 		Description: "Disconnect a remote MCP server and delete its stored credentials.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

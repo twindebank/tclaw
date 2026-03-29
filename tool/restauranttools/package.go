@@ -49,10 +49,7 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 		Group:       p.Group(),
 		GroupInfo:   toolgroup.GroupInfo{Group: p.Group(), Description: "Personal service integrations."},
 		Credentials: toolpkg.CheckCredentialStatus(ctx, secretStore, p.RequiredSecrets()),
-		Tools: []string{
-			"restaurant_set_credentials", "restaurant_search", "restaurant_availability",
-			"restaurant_book", "restaurant_cancel", "restaurant_list_bookings",
-		},
+		Tools:       ToolNames(),
 	}, nil
 }
 

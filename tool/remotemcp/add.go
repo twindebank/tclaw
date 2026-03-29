@@ -20,9 +20,11 @@ const (
 
 var mcpNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
+const ToolRemoteMCPAdd = "remote_mcp_add"
+
 func remoteMCPAddDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "remote_mcp_add",
+		Name:        ToolRemoteMCPAdd,
 		Description: "Connect a remote MCP server by URL. Discovers OAuth requirements automatically. If OAuth is needed, returns an authorization URL the user must visit. After auth completes, the remote MCP's tools will be available on the next message turn.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
