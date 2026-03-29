@@ -20,7 +20,6 @@ import (
 	"tclaw/channel"
 	"tclaw/claudecli"
 	"tclaw/config"
-	"tclaw/connection"
 	"tclaw/credential"
 	"tclaw/dev"
 	"tclaw/libraries/logbuffer"
@@ -29,16 +28,13 @@ import (
 	"tclaw/mcp"
 	"tclaw/oauth"
 	"tclaw/onboarding"
-	"tclaw/provider"
+	"tclaw/remotemcpstore"
 	"tclaw/repo"
 	"tclaw/schedule"
 	"tclaw/tool/bankingtools"
 	"tclaw/tool/channeltools"
-	"tclaw/tool/connectiontools"
 	"tclaw/tool/devtools"
-	googletools "tclaw/tool/google"
 	"tclaw/tool/modeltools"
-	monzotools "tclaw/tool/monzo"
 	"tclaw/tool/onboardingtools"
 	"tclaw/tool/remotemcp"
 	"tclaw/tool/repotools"
@@ -59,9 +55,12 @@ type Router struct {
 	users     map[user.ID]*managedUser
 	baseDir   string // root for per-user data (home dirs, stores)
 	env       config.Env
-	registry  *provider.Registry
 	callback  *oauth.CallbackServer // nil if OAuth is not configured
 	publicURL string                // externally-reachable base URL, enables Telegram webhooks
+
+	// configCredentials holds pre-configured credential entries from tclaw.yaml.
+	// Seeded into credential sets at startup.
+	configCredentials config.CredentialsConfig
 
 	// configPath is the path to the active tclaw.yaml config file. The deploy
 	// tool copies it into the git checkout so remote builds include the real
@@ -117,17 +116,17 @@ type managedUser struct {
 // Zone 4 (mcp-config/): MCP config files, mounted read-only so the CLI can read --mcp-config.
 //
 // callback may be nil if OAuth is not configured.
-func New(baseDir string, env config.Env, registry *provider.Registry, callback *oauth.CallbackServer, publicURL string, logBuffer *logbuffer.Buffer, configPath string) *Router {
+func New(baseDir string, env config.Env, configCredentials config.CredentialsConfig, callback *oauth.CallbackServer, publicURL string, logBuffer *logbuffer.Buffer, configPath string) *Router {
 	return &Router{
-		users:      make(map[user.ID]*managedUser),
-		mcpServers: make(map[user.ID]*mcp.Server),
-		baseDir:    baseDir,
-		env:        env,
-		registry:   registry,
-		callback:   callback,
-		publicURL:  publicURL,
-		logBuffer:  logBuffer,
-		configPath: configPath,
+		users:             make(map[user.ID]*managedUser),
+		mcpServers:        make(map[user.ID]*mcp.Server),
+		baseDir:           baseDir,
+		env:               env,
+		configCredentials: configCredentials,
+		callback:          callback,
+		publicURL:         publicURL,
+		logBuffer:         logBuffer,
+		configPath:        configPath,
 	}
 }
 
@@ -187,68 +186,20 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	memoryDir := dirs.Memory
 	mcpConfigDir := dirs.MCPConfig
 
-	// Set up connection manager (for remote MCPs) and credential manager.
-	connMgr := connection.NewManager(s, secretStore)
+	// Set up remote MCP manager and credential manager.
+	remoteMCPMgr := remotemcpstore.NewManager(s, secretStore)
 	credMgr := credential.NewManager(s, secretStore)
 	mcpHandler := mcp.NewHandler()
 
-	// One-time migration: copy legacy connection OAuth tokens into the
-	// new credential system. Idempotent — skips connections that are
-	// already migrated. After all connections are migrated, the old
-	// connectiontools and connection/provider packages can be removed.
-	oauthClients := make(map[string]credential.OAuthClientCredentials)
-	for _, pid := range r.registry.List() {
-		p := r.registry.Get(pid)
-		if p != nil && p.OAuth2 != nil {
-			oauthClients[string(pid)] = credential.OAuthClientCredentials{
-				ClientID:     p.OAuth2.ClientID,
-				ClientSecret: p.OAuth2.ClientSecret,
-			}
-		}
-	}
-	if err := credential.MigrateFromConnections(ctx, s, secretStore, credMgr, oauthClients); err != nil {
+	// Seed config-level credentials into credential sets.
+	seedConfigCredentials(ctx, credMgr, r.configCredentials)
+
+	// One-time migration: copy legacy connection OAuth tokens into credential
+	// sets. Idempotent — skips already-migrated connections.
+	configSecrets := buildConfigSecretsMap(r.configCredentials)
+	if err := credential.MigrateFromConnections(ctx, s, secretStore, credMgr, configSecrets); err != nil {
 		slog.Error("failed to migrate connections to credential sets", "user", mu.cfg.ID, "err", err)
 	}
-
-	// Track active credential sets for provider tools.
-	googleDepsMap := make(map[credential.CredentialSetID]googletools.Deps)
-	monzoDepsMap := make(map[credential.CredentialSetID]monzotools.Deps)
-
-	// Register legacy connection tools (kept for backward compat with
-	// existing connections).
-	connectiontools.RegisterTools(mcpHandler, connectiontools.Deps{
-		Manager:  connMgr,
-		CredMgr:  credMgr,
-		Registry: r.registry,
-		Callback: r.callback,
-		Handler:  mcpHandler,
-		OnProviderConnect: func(connID connection.ConnectionID, mgr *connection.Manager, p *provider.Provider) {
-			// Bridge: connection ID format is "<provider>/<label>" which maps
-			// directly to credential set ID format "<package>/<label>".
-			setID := credential.CredentialSetID(connID)
-			creds, err := mgr.GetCredentials(ctx, connID)
-			if err == nil && creds != nil {
-				conn, _ := mgr.Get(ctx, connID)
-				if conn != nil {
-					migrateConnectionToCredentialSet(ctx, *conn, creds, p, credMgr, setID)
-				}
-			}
-			r.registerToolsForProvider(mcpHandler, setID, credMgr, p, googleDepsMap, monzoDepsMap)
-		},
-		OnProviderDisconnect: func(connID connection.ConnectionID) {
-			// Try to find and remove from both maps — the connection ID format
-			// is "<provider>/<label>" which happens to match credential set ID format.
-			setID := credential.CredentialSetID(connID)
-			r.unregisterToolsForProvider(mcpHandler, setID, googleDepsMap, monzoDepsMap)
-		},
-	})
-	if r.callback != nil {
-		connectiontools.RegisterAuthWaitTool(mcpHandler, connMgr)
-	}
-
-	// Register provider-specific tools for existing connections, bridging
-	// them into the new credential system.
-	r.registerProviderTools(ctx, mcpHandler, connMgr, credMgr, googleDepsMap, monzoDepsMap)
 
 	mcpServer := mcp.NewServer(mcpHandler)
 	mcpToken := mcpServer.Token()
@@ -272,7 +223,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// buildRemoteMCPEntries loads remote MCPs and their auth tokens from
 	// the connection manager and returns config entries for the MCP config file.
 	buildRemoteMCPEntries := func(ctx context.Context) []mcp.RemoteMCPEntry {
-		mcps, listErr := connMgr.ListRemoteMCPs(ctx)
+		mcps, listErr := remoteMCPMgr.ListRemoteMCPs(ctx)
 		if listErr != nil {
 			slog.Error("failed to list remote mcps for config", "err", listErr)
 			return nil
@@ -280,7 +231,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		var entries []mcp.RemoteMCPEntry
 		for _, m := range mcps {
 			entry := mcp.RemoteMCPEntry{Name: m.Name, URL: m.URL}
-			auth, authErr := connMgr.GetRemoteMCPAuth(ctx, m.Name)
+			auth, authErr := remoteMCPMgr.GetRemoteMCPAuth(ctx, m.Name)
 			if authErr != nil {
 				slog.Warn("failed to load remote mcp auth", "name", m.Name, "err", authErr)
 			}
@@ -306,7 +257,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 	// Register remote MCP management tools.
 	remoteMCPDeps := remotemcp.Deps{
-		Manager:       connMgr,
+		Manager:       remoteMCPMgr,
 		Callback:      r.callback,
 		ConfigUpdater: configUpdater,
 	}
@@ -465,43 +416,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		SecretStore: secretStore,
 		UserDir:     userDir,
 	})
-
-	// Monzo set_credentials tool: always visible so the agent can discover Monzo
-	// and set up credentials at runtime. When credentials are stored, the Monzo
-	// provider is registered dynamically so connection_add can start the OAuth flow.
-	var monzoRedirectURL string
-	if r.callback != nil {
-		monzoRedirectURL = r.callback.CallbackURL()
-	}
-	monzotools.RegisterSetCredentialsTool(mcpHandler, monzotools.SetCredentialsDeps{
-		SecretStore: secretStore,
-		RedirectURL: monzoRedirectURL,
-		OnCredentialsStored: func() {
-			clientID, err := secretStore.Get(ctx, monzotools.ClientIDStoreKey)
-			if err != nil {
-				slog.Error("failed to read Monzo client ID after credentials stored", "err", err)
-				return
-			}
-			clientSecret, err := secretStore.Get(ctx, monzotools.ClientSecretStoreKey)
-			if err != nil {
-				slog.Error("failed to read Monzo client secret after credentials stored", "err", err)
-				return
-			}
-			if clientID == "" || clientSecret == "" {
-				slog.Error("Monzo credentials empty after store — client_id or client_secret missing")
-				return
-			}
-			r.registry.Register(provider.NewMonzoProvider(clientID, clientSecret))
-			slog.Info("registered Monzo provider after credentials stored")
-		},
-	})
-	// If Monzo credentials already exist in the secret store (from a previous
-	// session's set_credentials or secret form), register the provider so
-	// connection_add works without re-running monzo_set_credentials.
-	if monzoClientID, monzoClientSecret, ok := loadMonzoCredentials(ctx, secretStore); ok {
-		r.registry.Register(provider.NewMonzoProvider(monzoClientID, monzoClientSecret))
-		slog.Info("registered Monzo provider from existing credentials at startup")
-	}
 
 	// TfL tools work without an API key (rate-limited) — always registered.
 	tfltools.RegisterTools(mcpHandler, tfltools.Deps{
@@ -859,10 +773,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 		// Build per-channel tool overrides from config (static), store (dynamic),
 		// and tool groups. Groups are resolved with channel context (connections, remote MCPs).
-		channelToolOverrides := buildChannelToolOverrides(allChMap, registry, dynamicCtx, mu.cfg, connMgr, credMgr)
+		channelToolOverrides := buildChannelToolOverrides(allChMap, registry, dynamicCtx, mu.cfg, remoteMCPMgr, credMgr)
 
 		// Generate per-channel MCP config files for channels with scoped remote MCPs.
-		mcpConfigPaths := buildMCPConfigPaths(dynamicCtx, allChMap, connMgr, mcpConfigDir, mcpAddr, mcpToken)
+		mcpConfigPaths := buildMCPConfigPaths(dynamicCtx, allChMap, remoteMCPMgr, mcpConfigDir, mcpAddr, mcpToken)
 
 		// channelChangeNotify is closed when a channel change fires,
 		// telling the agent to finish its current turn then exit.
@@ -1160,23 +1074,4 @@ func hasBankingCredentials(ctx context.Context, s secret.Store) bool {
 		return false
 	}
 	return appID != "" && privKey != ""
-}
-
-// loadMonzoCredentials reads Monzo OAuth credentials from the secret store.
-// Returns the client ID, client secret, and true if both are present.
-func loadMonzoCredentials(ctx context.Context, s secret.Store) (string, string, bool) {
-	clientID, err := s.Get(ctx, monzotools.ClientIDStoreKey)
-	if err != nil {
-		slog.Warn("failed to check Monzo client ID", "err", err)
-		return "", "", false
-	}
-	clientSecret, err := s.Get(ctx, monzotools.ClientSecretStoreKey)
-	if err != nil {
-		slog.Warn("failed to check Monzo client secret", "err", err)
-		return "", "", false
-	}
-	if clientID == "" || clientSecret == "" {
-		return "", "", false
-	}
-	return clientID, clientSecret, true
 }
