@@ -55,11 +55,14 @@ func channelDeleteHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("delete channel: %w", err)
 		}
 
-		// Clean up any associated secrets (e.g. bot token). Non-fatal since the
-		// channel config is already removed — an orphaned secret is less harmful
-		// than telling the agent the delete failed.
+		// Clean up any associated secrets (e.g. bot token). Best-effort since
+		// the channel config is already removed — an orphaned secret is less
+		// harmful than telling the agent the delete failed. Include a warning
+		// in the response so the error is visible.
+		var secretWarning string
 		if err := deps.SecretStore.Delete(ctx, channel.ChannelSecretKey(a.Name)); err != nil {
 			slog.Warn("failed to clean up channel secret after delete", "channel", a.Name, "err", err)
+			secretWarning = fmt.Sprintf(" Warning: failed to clean up channel secret: %v", err)
 		}
 
 		if deps.OnChannelChange != nil {
@@ -68,7 +71,7 @@ func channelDeleteHandler(deps Deps) mcp.ToolHandler {
 
 		result := map[string]any{
 			"name":    a.Name,
-			"message": fmt.Sprintf("Channel %q deleted. The agent will restart automatically to apply the change.", a.Name),
+			"message": fmt.Sprintf("Channel %q deleted. The agent will restart automatically to apply the change.%s", a.Name, secretWarning),
 		}
 		return json.Marshal(result)
 	}

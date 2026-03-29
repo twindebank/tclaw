@@ -325,19 +325,9 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 	idle := newIdleTimer()
 	defer idle.Stop()
 
-	// Per-channel auth flow state so channels don't interfere with each other.
-	authFlows := make(map[channel.ChannelID]*pendingAuth)
-
-	// Per-channel reset flow state.
-	resetFlows := make(map[channel.ChannelID]*pendingReset)
-
-	// Per-channel tool approval state for when the model tries denied tools.
-	toolApprovals := make(map[channel.ChannelID]*pendingToolApproval)
-
-	// oauthNotify wakes the main loop when a background OAuth goroutine
-	// finishes. It carries the channel ID that completed auth so we can
-	// inject a synthetic message and let the state machine process it.
-	oauthNotify := make(chan channel.ChannelID, 4)
+	// FlowManager tracks all per-channel interactive flows (auth, reset,
+	// tool approval) in one place with explicit typed states.
+	fm := NewFlowManager()
 
 	for {
 		// restoreOverride reverts temporary tool expansions after a tool
@@ -364,10 +354,10 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				}
 				msg = m
 				idle.Reset()
-			case chID := <-oauthNotify:
+			case chID := <-fm.OAuthNotify:
 				// OAuth goroutine finished. Only inject a synthetic message if
 				// the auth flow still exists — it may have been cancelled by "stop".
-				if _, ok := authFlows[chID]; !ok {
+				if !fm.HasFlow(chID, FlowAuth) {
 					continue
 				}
 				msg = channel.TaggedMessage{ChannelID: chID}
@@ -390,12 +380,8 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				sendDenied(ctx, opts, msg.ChannelID)
 				continue
 			}
-			// Stop also cancels any pending auth/reset flow for this channel.
-			if flow, ok := authFlows[msg.ChannelID]; ok {
-				flow.cleanup()
-				delete(authFlows, msg.ChannelID)
-			}
-			delete(resetFlows, msg.ChannelID)
+			// Stop also cancels any pending flow for this channel.
+			fm.Cancel(msg.ChannelID)
 			continue
 		}
 
@@ -421,10 +407,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		// Reset command: show the multi-option reset menu.
 		// Always allowed — allowedResetLevels guarantees at least Session.
 		if isResetCommand(msg.Text) {
-			if flow, ok := authFlows[msg.ChannelID]; ok {
-				flow.cleanup()
-				delete(authFlows, msg.ChannelID)
-			}
+			fm.Cancel(msg.ChannelID)
 			ch, ok := opts.channels()[msg.ChannelID]
 			if ok {
 				levels := allowedResetLevels(opts, msg.ChannelID)
@@ -435,97 +418,21 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 					slog.Error("failed to close turn after reset menu", "err", err)
 				}
 			}
-			resetFlows[msg.ChannelID] = &pendingReset{state: resetChoosing}
+			fm.StartReset(msg.ChannelID)
 			continue
 		}
 
-		// Handle reset flow responses (per-channel).
-		if flow, ok := resetFlows[msg.ChannelID]; ok {
+		// Handle active reset flow.
+		if f := fm.Active(msg.ChannelID); f != nil && f.Kind == FlowReset {
 			ch, chOK := opts.channels()[msg.ChannelID]
 			if !chOK {
-				delete(resetFlows, msg.ChannelID)
+				fm.Complete(msg.ChannelID)
 				continue
 			}
-
-			switch flow.state {
-			case resetChoosing:
-				levels := allowedResetLevels(opts, msg.ChannelID)
-				choice := strings.TrimSpace(strings.ToLower(msg.Text))
-				chosen := resolveResetChoice(choice, levels)
-
-				switch chosen {
-				case ResetSession:
-					old := sessions[msg.ChannelID]
-					delete(sessions, msg.ChannelID)
-					if opts.OnSessionUpdate != nil {
-						opts.OnSessionUpdate(msg.ChannelID, "")
-					}
-					slog.Info("session reset", "channel", msg.ChannelID, "old_session", old)
-					if _, err := ch.Send(ctx, "🗑️ Session cleared — next message starts a fresh conversation."); err != nil {
-						slog.Error("failed to send reset confirmation", "err", err)
-					}
-					delete(resetFlows, msg.ChannelID)
-
-				case ResetMemories, ResetProject, ResetAll:
-					flow.level = chosen
-					flow.state = resetConfirming
-					if _, err := ch.Send(ctx, resetConfirmPrompt(chosen, ch.Markup())); err != nil {
-						slog.Error("failed to send reset confirm prompt", "err", err)
-					}
-
-				case resetCancel:
-					if _, err := ch.Send(ctx, "↩️ Reset cancelled."); err != nil {
-						slog.Error("failed to send reset cancel", "err", err)
-					}
-					delete(resetFlows, msg.ChannelID)
-
-				default:
-					maxN := len(levels) + 1 // +1 for cancel
-					if _, err := ch.Send(ctx, fmt.Sprintf("Please enter a number (1-%d).", maxN)); err != nil {
-						slog.Error("failed to send reset re-prompt", "err", err)
-					}
-				}
-
-			case resetConfirming:
-				if strings.TrimSpace(strings.ToLower(msg.Text)) == "confirm" {
-					slog.Info("reset confirmed", "level", resetLevelName(flow.level), "channel", msg.ChannelID)
-
-					if opts.OnReset != nil {
-						if err := opts.OnReset(flow.level); err != nil {
-							slog.Error("reset failed", "level", resetLevelName(flow.level), "err", err)
-							if _, sendErr := ch.Send(ctx, "❌ Reset failed: "+err.Error()); sendErr != nil {
-								slog.Error("failed to send reset error", "err", sendErr)
-							}
-							delete(resetFlows, msg.ChannelID)
-							if err := ch.Done(ctx); err != nil {
-								slog.Error("failed to close turn after reset error", "err", err)
-							}
-							continue
-						}
-					}
-
-					levelName := resetLevelName(flow.level)
-					if _, err := ch.Send(ctx, "✅ "+bold(ch.Markup(), strings.ToUpper(levelName[:1])+levelName[1:])+" reset complete."); err != nil {
-						slog.Error("failed to send reset confirmation", "err", err)
-					}
-					delete(resetFlows, msg.ChannelID)
-
-					// Project and Everything resets require the agent to restart
-					// so the router can re-seed memory and rebuild state.
-					if flow.level == ResetProject || flow.level == ResetAll {
-						if err := ch.Done(ctx); err != nil {
-							slog.Error("failed to close turn before restart", "err", err)
-						}
-						return ErrResetRequested
-					}
-				} else {
-					if _, err := ch.Send(ctx, "↩️ Reset cancelled."); err != nil {
-						slog.Error("failed to send reset cancel", "err", err)
-					}
-					delete(resetFlows, msg.ChannelID)
-				}
+			result := handleResetFlow(ctx, opts, fm, f.Reset, ch, msg, sessions)
+			if result.RestartAgent != nil {
+				return result.RestartAgent
 			}
-
 			if err := ch.Done(ctx); err != nil {
 				slog.Error("failed to close turn after reset step", "err", err)
 			}
@@ -541,10 +448,9 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			ch, ok := opts.channels()[msg.ChannelID]
 			if ok {
 				if _, err := ch.Send(ctx, authPrompt(ch.Markup())); err != nil {
-					// Channel is dead — don't register the flow.
 					slog.Error("failed to send auth prompt", "err", err)
 				} else {
-					authFlows[msg.ChannelID] = &pendingAuth{state: authChoosing}
+					fm.StartAuth(msg.ChannelID, channel.TaggedMessage{})
 				}
 				if err := ch.Done(ctx); err != nil {
 					slog.Error("failed to close turn after login prompt", "err", err)
@@ -567,148 +473,19 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			continue
 		}
 
-		// Handle auth flow responses (per-channel).
-		if flow, ok := authFlows[msg.ChannelID]; ok {
+		// Handle active auth flow.
+		if f := fm.Active(msg.ChannelID); f != nil && f.Kind == FlowAuth {
 			ch, chOK := opts.channels()[msg.ChannelID]
 			if !chOK {
-				delete(authFlows, msg.ChannelID)
+				fm.Complete(msg.ChannelID)
 				continue
 			}
-
-			switch flow.state {
-			case authChoosing:
-				choice := strings.TrimSpace(strings.ToLower(msg.Text))
-				switch choice {
-				case "1", "oauth":
-					if !opts.Env.IsLocal() {
-						m := ch.Markup()
-						if _, err := ch.Send(ctx, "❌ OAuth login requires a browser and only works locally.\n"+
-							"Use option "+bold(m, "2")+" to paste an API key instead.\n\n"+authPrompt(m)); err != nil {
-							slog.Error("failed to send non-local oauth error", "err", err)
-						}
-					} else {
-						if _, err := ch.Send(ctx, "⏳ Opening browser for OAuth login..."); err != nil {
-							slog.Error("failed to send oauth starting message", "err", err)
-						}
-						startSetupToken(ctx, opts, flow, msg.ChannelID, oauthNotify)
-					}
-				case "2", "api", "key", "api key", "apikey":
-					flow.state = authAPIKeyEntry
-					if _, err := ch.Send(ctx, apiKeyPrompt(ch.Markup())); err != nil {
-						slog.Error("failed to send api key prompt", "err", err)
-					}
-				case "3", "cancel":
-					delete(authFlows, msg.ChannelID)
-				default:
-					m := ch.Markup()
-					if _, err := ch.Send(ctx, "Please enter "+bold(m, "1")+" (OAuth) or "+bold(m, "2")+" (API key).\n\n"+authPrompt(m)); err != nil {
-						slog.Error("failed to send auth re-prompt", "err", err)
-					}
-				}
-
-			case authOAuthActive:
-				// Check if the background OAuth goroutine has finished.
-				select {
-				case result := <-flow.oauthDone:
-					m := ch.Markup()
-					if result.setupToken != "" {
-						// Always persist locally so the token survives agent restarts.
-						opts.SetupToken = result.setupToken
-						if err := persistSetupToken(ctx, opts, result.setupToken); err != nil {
-							slog.Error("failed to persist setup token", "err", err)
-						}
-
-						if opts.HasProdConfig {
-							// Prod config exists — ask whether to deploy the token.
-							flow.setupToken = result.setupToken
-							flow.state = authDeployConfirm
-							if _, err := ch.Send(ctx, "✅ "+result.loginMessage+"\n\n"+
-								"Deploy setup token to production? Reply "+bold(m, "yes")+" or "+bold(m, "no")+"."); err != nil {
-								slog.Error("failed to send deploy prompt", "err", err)
-							}
-						} else {
-							// No prod config — skip deploy prompt, retry immediately.
-							if _, err := ch.Send(ctx, "✅ "+result.loginMessage); err != nil {
-								slog.Error("failed to send oauth success", "err", err)
-							}
-							retryMsg := flow.originalMsg
-							delete(authFlows, msg.ChannelID)
-							if retryMsg.Text != "" {
-								queue = append([]channel.TaggedMessage{retryMsg}, queue...)
-							}
-						}
-					} else {
-						if _, err := ch.Send(ctx, "❌ "+result.loginMessage); err != nil {
-							slog.Error("failed to send oauth failure", "err", err)
-						}
-						delete(authFlows, msg.ChannelID)
-					}
-				default:
-					// OAuth still running — tell user to wait.
-					if _, err := ch.Send(ctx, "⏳ Still authenticating in browser. Send a message after you're done."); err != nil {
-						slog.Error("failed to send oauth wait message", "err", err)
-					}
-				}
-
-			case authDeployConfirm:
-				answer := strings.TrimSpace(strings.ToLower(msg.Text))
-				m := ch.Markup()
-				slog.Info("deploy confirm received", "answer", answer, "user_id", opts.UserID, "token_len", len(flow.setupToken))
-				switch answer {
-				case "yes", "y":
-					// Token already persisted locally when OAuth completed.
-					if _, sendErr := ch.Send(ctx, "⏳ Deploying to production..."); sendErr != nil {
-						slog.Error("failed to send deploy progress", "err", sendErr)
-					}
-					slog.Info("deploying setup token", "user_id", opts.UserID)
-					if err := deploySetupToken(ctx, opts.UserID, flow.setupToken); err != nil {
-						slog.Error("failed to deploy setup token", "err", err)
-						if _, sendErr := ch.Send(ctx, "❌ Deploy failed: "+err.Error()); sendErr != nil {
-							slog.Error("failed to send deploy error", "err", sendErr)
-						}
-					} else {
-						if _, sendErr := ch.Send(ctx, "✅ Deployed to production."); sendErr != nil {
-							slog.Error("failed to send deploy success", "err", sendErr)
-						}
-					}
-
-					retryMsg := flow.originalMsg
-					delete(authFlows, msg.ChannelID)
-					if retryMsg.Text != "" {
-						queue = append([]channel.TaggedMessage{retryMsg}, queue...)
-					}
-				case "no", "n", "skip":
-					// Token already persisted locally when OAuth completed.
-					if _, sendErr := ch.Send(ctx, "✅ Skipped deploy. Token saved locally."); sendErr != nil {
-						slog.Error("failed to send skip confirmation", "err", sendErr)
-					}
-					retryMsg := flow.originalMsg
-					delete(authFlows, msg.ChannelID)
-					if retryMsg.Text != "" {
-						queue = append([]channel.TaggedMessage{retryMsg}, queue...)
-					}
-				default:
-					if _, err := ch.Send(ctx, "Reply "+bold(m, "yes")+" to deploy or "+bold(m, "no")+" to skip."); err != nil {
-						slog.Error("failed to send deploy re-prompt", "err", err)
-					}
-				}
-
-			case authAPIKeyEntry:
-				success := handleAPIKeyEntry(ctx, opts, ch, msg.Text)
-				if success {
-					opts.APIKey = strings.TrimSpace(msg.Text)
-					retryMsg := flow.originalMsg
-					delete(authFlows, msg.ChannelID)
-					if retryMsg.Text != "" {
-						queue = append([]channel.TaggedMessage{retryMsg}, queue...)
-					}
-				}
+			result := handleAuthFlow(ctx, opts, fm, f.Auth, ch, msg)
+			if len(result.RetryMessages) > 0 {
+				queue = append(result.RetryMessages, queue...)
 			}
-
-			// Don't close the turn while OAuth is running — the goroutine
-			// will deliver the result asynchronously via oauthNotify and we
-			// need the connection alive to send it.
-			if flow.state != authOAuthActive {
+			// Don't close the turn while OAuth is running.
+			if f.Auth == nil || f.Auth.state != authOAuthActive {
 				if err := ch.Done(ctx); err != nil {
 					slog.Error("failed to close turn after auth step", "err", err)
 				}
@@ -716,73 +493,22 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			continue
 		}
 
-		// Handle pending tool approval responses (per-channel).
-		if approval, ok := toolApprovals[msg.ChannelID]; ok {
+		// Handle active tool approval flow.
+		if f := fm.Active(msg.ChannelID); f != nil && f.Kind == FlowToolApproval {
 			ch, chOK := opts.channels()[msg.ChannelID]
 			if !chOK {
-				delete(toolApprovals, msg.ChannelID)
+				fm.Complete(msg.ChannelID)
 				continue
 			}
-
-			answer := strings.TrimSpace(strings.ToLower(msg.Text))
-			switch answer {
-			case "approve", "yes", "y":
-				// Re-run the original message with denied tools temporarily allowed.
-				slog.Info("tool approval granted, retrying",
-					"channel", msg.ChannelID, "tools", approval.deniedTools)
-
-				extraTools := make([]claudecli.Tool, len(approval.deniedTools))
-				for i, t := range approval.deniedTools {
-					extraTools[i] = claudecli.Tool(t)
-				}
-				sessions[msg.ChannelID] = approval.sessionID
-				msg = approval.originalMsg
-				delete(toolApprovals, msg.ChannelID)
-
-				// Temporarily expand the allowed tools for this channel.
-				// When a channel override exists, expand that. When it doesn't,
-				// use the user-level AllowedTools as the base so we don't
-				// accidentally restrict the channel to only the denied tools.
-				originalOverride, hadOverride := opts.ChannelToolOverrides[msg.ChannelID]
-				var base []claudecli.Tool
-				if hadOverride {
-					base = originalOverride.AllowedTools
-				} else {
-					base = opts.AllowedTools
-				}
-				expanded := make([]claudecli.Tool, 0, len(base)+len(extraTools))
-				expanded = append(expanded, base...)
-				expanded = append(expanded, extraTools...)
-
-				override := originalOverride
-				override.AllowedTools = expanded
-				if opts.ChannelToolOverrides == nil {
-					opts.ChannelToolOverrides = make(map[channel.ChannelID]ChannelToolPermissions)
-				}
-				opts.ChannelToolOverrides[msg.ChannelID] = override
-
-				// restoreOverride reverts the temporary expansion after the turn.
-				restoreOverride = func() {
-					if hadOverride {
-						opts.ChannelToolOverrides[msg.ChannelID] = originalOverride
-					} else {
-						delete(opts.ChannelToolOverrides, msg.ChannelID)
-					}
-				}
-				// Fall through to the normal handle() dispatch below.
-			default:
-				// Any other message clears the pending approval and is processed normally.
-				delete(toolApprovals, msg.ChannelID)
-				if answer == "no" || answer == "n" || answer == "cancel" {
-					if _, err := ch.Send(ctx, "↩️ Tool approval cancelled."); err != nil {
-						slog.Error("failed to send approval cancel", "err", err)
-					}
-					if err := ch.Done(ctx); err != nil {
-						slog.Error("failed to close turn after approval cancel", "err", err)
-					}
-					continue
-				}
-				// Non-cancel, non-approval: fall through to handle() with the new message.
+			result := handleToolApprovalFlow(ctx, opts, fm, f.ToolApproval, ch, msg, sessions)
+			if result.RestoreFunc != nil {
+				restoreOverride = result.RestoreFunc
+			}
+			if result.FallThroughMsg != nil {
+				msg = *result.FallThroughMsg
+				// Fall through to handle() below.
+			} else if result.Handled {
+				continue
 			}
 		}
 
@@ -846,39 +572,27 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		for {
 			select {
 			case result := <-handleDone:
-				// Auth failure: start the interactive auth flow instead of
-				// showing a cryptic error. Store the original message to
-				// retry once the user has authenticated.
+				// Auth failure: start the interactive auth flow.
 				if errors.Is(result.err, ErrAuthRequired) {
 					slog.Info("auth required, starting auth flow", "channel", msg.ChannelID)
-					flow := &pendingAuth{
-						state:       authChoosing,
-						originalMsg: msg,
-					}
+					fm.StartAuth(msg.ChannelID, msg)
 					ch, chOK := opts.channels()[msg.ChannelID]
 					if chOK {
 						if _, sendErr := ch.Send(ctx, authPrompt(ch.Markup())); sendErr != nil {
-							// Channel is dead (e.g. socket disconnected) — don't
-							// leave a stale flow that blocks future messages.
 							slog.Error("failed to send auth prompt, discarding flow", "err", sendErr)
+							fm.Cancel(msg.ChannelID)
 							goto done
 						}
 					}
-					authFlows[msg.ChannelID] = flow
 					goto done
 				}
 
-				// Tool denial: the model tried tools not in the channel's allowed
-				// list. Prompt the user to approve and retry.
+				// Tool denial: prompt for approval.
 				var denied *ToolsDeniedError
 				if errors.As(result.err, &denied) {
 					slog.Info("tools denied, prompting for approval",
 						"channel", msg.ChannelID, "tools", denied.Tools)
-					toolApprovals[msg.ChannelID] = &pendingToolApproval{
-						originalMsg: msg,
-						deniedTools: denied.Tools,
-						sessionID:   denied.SessionID,
-					}
+					fm.StartToolApproval(msg.ChannelID, msg, denied.Tools, denied.SessionID)
 					if approvalCh, chOK := opts.channels()[msg.ChannelID]; chOK {
 						m := approvalCh.Markup()
 						toolList := strings.Join(denied.Tools, ", ")

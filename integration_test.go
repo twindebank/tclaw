@@ -11,6 +11,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -131,6 +132,9 @@ func skipIfNoClaude(t *testing.T) {
 // getSetupToken tries to read the Claude setup token from the macOS keychain.
 // Returns empty string if unavailable. This allows integration tests to use
 // OAuth credentials instead of an API key.
+//
+// The go-keyring library stores values as "go-keyring-base64:<base64>" so we
+// need to strip the prefix and decode.
 func getSetupToken(t *testing.T) string {
 	t.Helper()
 	out, err := exec.Command("security", "find-generic-password",
@@ -138,7 +142,19 @@ func getSetupToken(t *testing.T) string {
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	raw := strings.TrimSpace(string(out))
+
+	const prefix = "go-keyring-base64:"
+	if strings.HasPrefix(raw, prefix) {
+		decoded, err := base64.StdEncoding.DecodeString(raw[len(prefix):])
+		if err != nil {
+			t.Logf("failed to decode keychain token: %v", err)
+			return ""
+		}
+		return string(decoded)
+	}
+
+	return raw
 }
 
 // agentCredentials returns the APIKey and SetupToken for integration tests,
@@ -168,11 +184,19 @@ func setupAgent(t *testing.T) *socketClient {
 	sock := channel.NewSocketServer(socketPath, "test", "Integration test channel")
 	chMap := channel.ChannelMap(sock)
 
+	apiKey, setupToken := agentCredentials(t)
+	// OAuth tokens (Pro/Teams) don't have access to Haiku — use Sonnet.
+	model := claudecli.ModelHaiku35
+	if setupToken != "" {
+		model = claudecli.ModelSonnet46
+	}
+
 	opts := agent.Options{
 		PermissionMode: claudecli.PermissionPlan, // read-only, no file writes
-		Model:          claudecli.ModelHaiku35,
+		Model:          model,
 		MaxTurns:       3,
-		APIKey:         os.Getenv("ANTHROPIC_API_KEY"),
+		APIKey:         apiKey,
+		SetupToken:     setupToken,
 		HomeDir:        homeDir,
 		Channels:       chMap,
 		Sessions:       make(map[channel.ChannelID]string),
@@ -256,7 +280,14 @@ func TestIntegration_SessionPersistence(t *testing.T) {
 	skipIfNoClaude(t)
 
 	tmpDir := t.TempDir()
-	socketPath := filepath.Join(tmpDir, "test.sock")
+	// Use a short path for the socket to avoid the 108-char Unix socket limit.
+	// t.TempDir() paths can exceed this on macOS.
+	sockDir, err := os.MkdirTemp("/tmp", "tg")
+	if err != nil {
+		t.Fatalf("create sock dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(sockDir) })
+	socketPath := filepath.Join(sockDir, "t.sock")
 	homeDir := filepath.Join(tmpDir, "home")
 	storeDir := filepath.Join(tmpDir, "store")
 	if err := os.MkdirAll(homeDir, 0o700); err != nil {
@@ -273,11 +304,18 @@ func TestIntegration_SessionPersistence(t *testing.T) {
 
 	var savedSessionID string
 
+	spAPIKey, spSetupToken := agentCredentials(t)
+	spModel := claudecli.ModelHaiku35
+	if spSetupToken != "" {
+		spModel = claudecli.ModelSonnet46
+	}
+
 	opts := agent.Options{
 		PermissionMode: claudecli.PermissionPlan,
-		Model:          claudecli.ModelHaiku35,
+		Model:          spModel,
 		MaxTurns:       3,
-		APIKey:         os.Getenv("ANTHROPIC_API_KEY"),
+		APIKey:         spAPIKey,
+		SetupToken:     spSetupToken,
 		HomeDir:        homeDir,
 		Channels:       chMap,
 		Sessions:       make(map[channel.ChannelID]string),
@@ -361,11 +399,18 @@ func TestIntegration_MemoryLoaded(t *testing.T) {
 	sock := channel.NewSocketServer(socketPath, "test", "Memory test channel")
 	chMap := channel.ChannelMap(sock)
 
+	mlAPIKey, mlSetupToken := agentCredentials(t)
+	mlModel := claudecli.ModelHaiku35
+	if mlSetupToken != "" {
+		mlModel = claudecli.ModelSonnet46
+	}
+
 	opts := agent.Options{
 		PermissionMode: claudecli.PermissionPlan,
-		Model:          claudecli.ModelHaiku35,
+		Model:          mlModel,
 		MaxTurns:       3,
-		APIKey:         os.Getenv("ANTHROPIC_API_KEY"),
+		APIKey:         mlAPIKey,
+		SetupToken:     mlSetupToken,
 		HomeDir:        homeDir,
 		MemoryDir:      memoryDir,
 		Channels:       chMap,
@@ -406,7 +451,12 @@ func TestIntegration_MemoryLoaded(t *testing.T) {
 func TestIntegration_DynamicChannelLifecycle(t *testing.T) {
 	skipIfNoClaude(t)
 
-	tmpDir := t.TempDir()
+	// Use a short base path for sockets to avoid the 108-char Unix socket limit.
+	tmpDir, err := os.MkdirTemp("/tmp", "tg")
+	if err != nil {
+		t.Fatalf("create tmp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
 	storeDir := filepath.Join(tmpDir, "store")
 	homeDir := filepath.Join(tmpDir, "home")
 	if err := os.MkdirAll(homeDir, 0o700); err != nil {
@@ -445,11 +495,18 @@ func TestIntegration_DynamicChannelLifecycle(t *testing.T) {
 		t.Fatalf("expected Source=dynamic, got %q", info.Source)
 	}
 
+	dcAPIKey, dcSetupToken := agentCredentials(t)
+	dcModel := claudecli.ModelHaiku35
+	if dcSetupToken != "" {
+		dcModel = claudecli.ModelSonnet46
+	}
+
 	opts := agent.Options{
 		PermissionMode: claudecli.PermissionPlan,
-		Model:          claudecli.ModelHaiku35,
+		Model:          dcModel,
 		MaxTurns:       3,
-		APIKey:         os.Getenv("ANTHROPIC_API_KEY"),
+		APIKey:         dcAPIKey,
+		SetupToken:     dcSetupToken,
 		HomeDir:        homeDir,
 		Channels:       chMap,
 		Sessions:       make(map[channel.ChannelID]string),

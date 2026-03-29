@@ -315,11 +315,13 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 		}
 
 		// Send an initial greeting so the channel appears active for users.
+		greetingWarning := ""
 		if botToken != "" && len(allowedUsers) > 0 {
 			if provisioner, ok := deps.Provisioners[channelType]; ok {
 				greeting := fmt.Sprintf("👋 Channel <b>%s</b> is now active.\n\n%s", a.Name, a.Description)
 				if _, err := provisioner.Notify(ctx, botToken, allowedUsers, greeting); err != nil {
 					slog.Warn("failed to send channel greeting", "channel", a.Name, "err", err)
+					greetingWarning = fmt.Sprintf(" Note: initial greeting failed to send: %v", err)
 				}
 			}
 		}
@@ -338,9 +340,9 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			"description": cfg.Description,
 		}
 		if hotAdd {
-			result["message"] = fmt.Sprintf("Channel %q created and is now active.", a.Name)
+			result["message"] = fmt.Sprintf("Channel %q created and is now active.%s", a.Name, greetingWarning)
 		} else {
-			result["message"] = fmt.Sprintf("Channel %q created. The agent will restart automatically to activate it.", a.Name)
+			result["message"] = fmt.Sprintf("Channel %q created. The agent will restart automatically to activate it.%s", a.Name, greetingWarning)
 		}
 
 		// Add platform-specific info if a provisioner is available.

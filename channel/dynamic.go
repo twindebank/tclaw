@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"tclaw/libraries/store"
@@ -136,7 +137,10 @@ func ChannelSecretKey(channelName string) string {
 
 // DynamicStore manages CRUD for user-created channel configs.
 // Follows the same JSON-array-in-a-single-key pattern as connection.Manager.
+// All mutating operations are serialized with a mutex to prevent TOCTOU races
+// in the read-modify-write cycle.
 type DynamicStore struct {
+	mu    sync.Mutex
 	store store.Store
 }
 
@@ -147,6 +151,12 @@ func NewDynamicStore(s store.Store) *DynamicStore {
 
 // List returns all dynamic channel configs.
 func (d *DynamicStore) List(ctx context.Context) ([]DynamicChannelConfig, error) {
+	return d.list(ctx)
+}
+
+// list is the internal reader, called by both List (no lock) and the
+// mutating methods (which hold the mutex).
+func (d *DynamicStore) list(ctx context.Context) ([]DynamicChannelConfig, error) {
 	data, err := d.store.Get(ctx, dynamicChannelsStoreKey)
 	if err != nil {
 		return nil, fmt.Errorf("read dynamic channels: %w", err)
@@ -178,7 +188,10 @@ func (d *DynamicStore) Get(ctx context.Context, name string) (*DynamicChannelCon
 
 // Add creates a new dynamic channel config. Returns an error if one with the same name exists.
 func (d *DynamicStore) Add(ctx context.Context, cfg DynamicChannelConfig) error {
-	configs, err := d.List(ctx)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	configs, err := d.list(ctx)
 	if err != nil {
 		return err
 	}
@@ -195,7 +208,10 @@ func (d *DynamicStore) Add(ctx context.Context, cfg DynamicChannelConfig) error 
 
 // Update replaces the config for an existing dynamic channel by name.
 func (d *DynamicStore) Update(ctx context.Context, name string, updateFn func(*DynamicChannelConfig)) error {
-	configs, err := d.List(ctx)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	configs, err := d.list(ctx)
 	if err != nil {
 		return err
 	}
@@ -217,7 +233,10 @@ func (d *DynamicStore) Update(ctx context.Context, name string, updateFn func(*D
 
 // Remove deletes a dynamic channel config by name.
 func (d *DynamicStore) Remove(ctx context.Context, name string) error {
-	configs, err := d.List(ctx)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	configs, err := d.list(ctx)
 	if err != nil {
 		return err
 	}

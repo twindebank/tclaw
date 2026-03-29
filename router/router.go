@@ -164,40 +164,27 @@ func (r *Router) Register(ctx context.Context, cfg user.Config, channels []chann
 // for the next message and restarts the agent — repeating indefinitely
 // until ctx is cancelled.
 func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap map[channel.ChannelID]channel.Channel, staticMsgs <-chan channel.TaggedMessage) {
-	userDir := filepath.Join(r.baseDir, string(mu.cfg.ID))
-	homeDir := filepath.Join(userDir, "home")            // Claude Code's territory (HOME env var)
-	memoryDir := filepath.Join(userDir, "memory")        // agent's sandboxed memory (CWD + --add-dir)
-	stateDir := filepath.Join(userDir, "state")          // tclaw persistent data (not mounted in sandbox)
-	sessionsDir := filepath.Join(userDir, "sessions")    // Claude CLI session IDs per channel
-	secretsDir := filepath.Join(userDir, "secrets")      // encrypted credentials
-	mcpConfigDir := filepath.Join(userDir, "mcp-config") // MCP config files (mounted read-only in sandbox)
+	dirs := NewUserDirs(r.baseDir, string(mu.cfg.ID))
 
-	// Create media dir for Telegram file downloads (inside the sandbox).
-	if err := os.MkdirAll(filepath.Join(memoryDir, "media"), 0o755); err != nil {
+	if err := dirs.EnsureMediaDir(); err != nil {
 		slog.Error("failed to create media dir", "user", mu.cfg.ID, "err", err)
 	}
 
-	// State store for tclaw's own data (connections, remote MCPs, dynamic channels).
-	s, err := store.NewFS(stateDir)
+	stores, err := NewUserStores(dirs, string(mu.cfg.ID))
 	if err != nil {
-		slog.Error("failed to create state store", "user", mu.cfg.ID, "err", err)
+		slog.Error("failed to create stores", "user", mu.cfg.ID, "err", err)
 		return
 	}
 
-	// Separate store for session IDs — these bridge tclaw and Claude Code,
-	// so they live outside both home/ (Claude's territory) and state/ (tclaw's data).
-	sessionStore, err := store.NewFS(sessionsDir)
-	if err != nil {
-		slog.Error("failed to create session store", "user", mu.cfg.ID, "err", err)
-		return
-	}
-
-	// Set up secret store for connection credentials.
-	secretStore, err := secret.Resolve(string(mu.cfg.ID), secretsDir, os.Getenv(secret.MasterKeyEnv))
-	if err != nil {
-		slog.Error("failed to create secret store", "user", mu.cfg.ID, "err", err)
-		return
-	}
+	// Aliases for backward compat within this function — these will be
+	// removed as the remaining inline code is extracted.
+	s := stores.State
+	sessionStore := stores.Session
+	secretStore := stores.Secret
+	userDir := dirs.Base
+	homeDir := dirs.Home
+	memoryDir := dirs.Memory
+	mcpConfigDir := dirs.MCPConfig
 
 	// Set up connection manager and MCP server.
 	connMgr := connection.NewManager(s, secretStore)
@@ -311,112 +298,27 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		slog.Debug("found and scrubbed setup token", "user", mu.cfg.ID, "env_var", setupTokenEnvVar)
 	}
 
-	// Seed GitHub token from Fly secret (e.g. GITHUB_TOKEN_THEO) into the
-	// encrypted secret store. Dev tools read from the store, so this makes
-	// pre-provisioned tokens available without runtime prompting. The user
-	// can still provide a token interactively via dev_start — it overwrites
-	// whatever is in the store.
-	githubTokenEnvVar := agent.GitHubTokenEnvVarName(string(mu.cfg.ID))
-	if githubToken := os.Getenv(githubTokenEnvVar); githubToken != "" {
-		if seedErr := secretStore.Set(ctx, "github_token", githubToken); seedErr != nil {
-			slog.Error("failed to seed github token from env", "user", mu.cfg.ID, "err", seedErr)
-		} else {
-			os.Unsetenv(githubTokenEnvVar)
-			slog.Debug("seeded and scrubbed github token from env", "user", mu.cfg.ID, "env_var", githubTokenEnvVar)
-		}
+	// Seed pre-provisioned secrets from Fly env vars into the encrypted store.
+	// Each entry maps a per-user env var (e.g. GITHUB_TOKEN_THEO) to a store
+	// key (e.g. "github_token"). The env var is unset after seeding.
+	userIDStr := string(mu.cfg.ID)
+	secretSeeds := []SecretSeed{
+		{EnvVarName: SecretSeedEnvVarName("GITHUB_TOKEN", userIDStr), StoreKey: "github_token"},
+		{EnvVarName: SecretSeedEnvVarName("FLY_TOKEN", userIDStr), StoreKey: "fly_api_token"},
+		{EnvVarName: SecretSeedEnvVarName("TFL_API_KEY", userIDStr), StoreKey: tfltools.APIKeyStoreKey},
+		{EnvVarName: SecretSeedEnvVarName("RESY_API_KEY", userIDStr), StoreKey: restauranttools.ResyAPIKeyStoreKey},
+		{EnvVarName: SecretSeedEnvVarName("RESY_AUTH_TOKEN", userIDStr), StoreKey: restauranttools.ResyAuthTokenStoreKey},
+		{EnvVarName: SecretSeedEnvVarName("ENABLEBANKING_APP_ID", userIDStr), StoreKey: bankingtools.ApplicationIDStoreKey},
+		{EnvVarName: SecretSeedEnvVarName("ENABLEBANKING_PRIVATE_KEY", userIDStr), StoreKey: bankingtools.PrivateKeyStoreKey},
+		{EnvVarName: SecretSeedEnvVarName("TELEGRAM_CLIENT_API_ID", userIDStr), StoreKey: telegramclient.APIIDStoreKey},
+		{EnvVarName: SecretSeedEnvVarName("TELEGRAM_CLIENT_API_HASH", userIDStr), StoreKey: telegramclient.APIHashStoreKey},
+	}
+	if err := SeedSecrets(ctx, secretStore, secretSeeds); err != nil {
+		slog.Error("failed to seed secrets from env", "user", mu.cfg.ID, "err", err)
 	}
 
-	// Seed Fly API token from Fly secret (e.g. FLY_TOKEN_THEO) into the
-	// encrypted secret store, same pattern as the GitHub token above.
-	flyTokenEnvVar := agent.FlyTokenEnvVarName(string(mu.cfg.ID))
-	if flyToken := os.Getenv(flyTokenEnvVar); flyToken != "" {
-		if seedErr := secretStore.Set(ctx, "fly_api_token", flyToken); seedErr != nil {
-			slog.Error("failed to seed fly api token from env", "user", mu.cfg.ID, "err", seedErr)
-		} else {
-			os.Unsetenv(flyTokenEnvVar)
-			slog.Debug("seeded and scrubbed fly api token from env", "user", mu.cfg.ID, "env_var", flyTokenEnvVar)
-		}
-	}
-
-	// Seed TfL API key from Fly secret (e.g. TFL_API_KEY_THEO) into the
-	// encrypted secret store, same pattern as the GitHub/Fly tokens above.
-	tflKeyEnvVar := agent.TfLAPIKeyEnvVarName(string(mu.cfg.ID))
-	if tflKey := os.Getenv(tflKeyEnvVar); tflKey != "" {
-		if seedErr := secretStore.Set(ctx, tfltools.APIKeyStoreKey, tflKey); seedErr != nil {
-			slog.Error("failed to seed tfl api key from env", "user", mu.cfg.ID, "err", seedErr)
-		} else {
-			os.Unsetenv(tflKeyEnvVar)
-			slog.Debug("seeded and scrubbed tfl api key from env", "user", mu.cfg.ID, "env_var", tflKeyEnvVar)
-		}
-	}
-
-	// Seed Resy API key from Fly secret (e.g. RESY_API_KEY_THEO) into the
-	// encrypted secret store, same pattern as the TfL key above.
-	resyAPIKeyEnvVar := agent.ResyAPIKeyEnvVarName(string(mu.cfg.ID))
-	if resyAPIKey := os.Getenv(resyAPIKeyEnvVar); resyAPIKey != "" {
-		if seedErr := secretStore.Set(ctx, restauranttools.ResyAPIKeyStoreKey, resyAPIKey); seedErr != nil {
-			slog.Error("failed to seed resy api key from env", "user", mu.cfg.ID, "err", seedErr)
-		} else {
-			os.Unsetenv(resyAPIKeyEnvVar)
-			slog.Debug("seeded and scrubbed resy api key from env", "user", mu.cfg.ID, "env_var", resyAPIKeyEnvVar)
-		}
-	}
-
-	// Seed Resy auth token from Fly secret (e.g. RESY_AUTH_TOKEN_THEO).
-	resyAuthTokenEnvVar := agent.ResyAuthTokenEnvVarName(string(mu.cfg.ID))
-	if resyAuthToken := os.Getenv(resyAuthTokenEnvVar); resyAuthToken != "" {
-		if seedErr := secretStore.Set(ctx, restauranttools.ResyAuthTokenStoreKey, resyAuthToken); seedErr != nil {
-			slog.Error("failed to seed resy auth token from env", "user", mu.cfg.ID, "err", seedErr)
-		} else {
-			os.Unsetenv(resyAuthTokenEnvVar)
-			slog.Debug("seeded and scrubbed resy auth token from env", "user", mu.cfg.ID, "env_var", resyAuthTokenEnvVar)
-		}
-	}
-
-	// Seed Enable Banking app ID from Fly secret (e.g. ENABLEBANKING_APP_ID_THEO).
-	ebAppIDEnvVar := agent.EnableBankingAppIDEnvVarName(string(mu.cfg.ID))
-	if ebAppID := os.Getenv(ebAppIDEnvVar); ebAppID != "" {
-		if seedErr := secretStore.Set(ctx, bankingtools.ApplicationIDStoreKey, ebAppID); seedErr != nil {
-			slog.Error("failed to seed enable banking app id from env", "user", mu.cfg.ID, "err", seedErr)
-		} else {
-			os.Unsetenv(ebAppIDEnvVar)
-			slog.Debug("seeded and scrubbed enable banking app id from env", "user", mu.cfg.ID, "env_var", ebAppIDEnvVar)
-		}
-	}
-
-	// Seed Enable Banking private key from Fly secret (e.g. ENABLEBANKING_PRIVATE_KEY_THEO).
-	ebPrivKeyEnvVar := agent.EnableBankingPrivateKeyEnvVarName(string(mu.cfg.ID))
-	if ebPrivKey := os.Getenv(ebPrivKeyEnvVar); ebPrivKey != "" {
-		if seedErr := secretStore.Set(ctx, bankingtools.PrivateKeyStoreKey, ebPrivKey); seedErr != nil {
-			slog.Error("failed to seed enable banking private key from env", "user", mu.cfg.ID, "err", seedErr)
-		} else {
-			os.Unsetenv(ebPrivKeyEnvVar)
-			slog.Debug("seeded and scrubbed enable banking private key from env", "user", mu.cfg.ID, "env_var", ebPrivKeyEnvVar)
-		}
-	}
-
-	// Seed Telegram Client API credentials from Fly secrets.
-	tgAPIIDEnvVar := agent.TelegramClientAPIIDEnvVarName(string(mu.cfg.ID))
-	if tgAPIID := os.Getenv(tgAPIIDEnvVar); tgAPIID != "" {
-		if seedErr := secretStore.Set(ctx, telegramclient.APIIDStoreKey, tgAPIID); seedErr != nil {
-			slog.Error("failed to seed telegram client api id from env", "user", mu.cfg.ID, "err", seedErr)
-		} else {
-			os.Unsetenv(tgAPIIDEnvVar)
-			slog.Debug("seeded and scrubbed telegram client api id from env", "user", mu.cfg.ID, "env_var", tgAPIIDEnvVar)
-		}
-	}
-	tgAPIHashEnvVar := agent.TelegramClientAPIHashEnvVarName(string(mu.cfg.ID))
-	if tgAPIHash := os.Getenv(tgAPIHashEnvVar); tgAPIHash != "" {
-		if seedErr := secretStore.Set(ctx, telegramclient.APIHashStoreKey, tgAPIHash); seedErr != nil {
-			slog.Error("failed to seed telegram client api hash from env", "user", mu.cfg.ID, "err", seedErr)
-		} else {
-			os.Unsetenv(tgAPIHashEnvVar)
-			slog.Debug("seeded and scrubbed telegram client api hash from env", "user", mu.cfg.ID, "env_var", tgAPIHashEnvVar)
-		}
-	}
-
-	// Create dynamic channel store — the registry wraps it below.
-	dynamicStore := channel.NewDynamicStore(s)
+	dynamicStore := stores.Dynamic
+	queueStore := stores.Queue
 
 	// channelChangeCh signals the main loop to restart the agent when
 	// a channel is created, edited, or deleted via MCP tools.
@@ -495,16 +397,11 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	scheduleStore := schedule.NewStore(s)
 	scheduleMsgs := make(chan channel.TaggedMessage, 8)
 
-	var currentChannels atomic.Pointer[map[channel.ChannelID]channel.Channel]
+	channelSet := NewChannelSet(nil)
 	scheduler := schedule.NewScheduler(schedule.SchedulerParams{
-		Store:  scheduleStore,
-		Output: scheduleMsgs,
-		Channels: func() map[channel.ChannelID]channel.Channel {
-			if p := currentChannels.Load(); p != nil {
-				return *p
-			}
-			return nil
-		},
+		Store:    scheduleStore,
+		Output:   scheduleMsgs,
+		Channels: channelSet.Snapshot,
 		Activity: activityTracker,
 	})
 	go scheduler.Run(ctx)
@@ -640,12 +537,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		}
 		return links
 	}
-	channelsFunc := func() map[channel.ChannelID]channel.Channel {
-		if p := currentChannels.Load(); p != nil {
-			return *p
-		}
-		return nil
-	}
+	channelsFunc := channelSet.Snapshot
 
 	channeltools.RegisterSendTool(mcpHandler, channeltools.SendDeps{
 		Links:         linksFunc,
@@ -653,11 +545,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		Channels:      channelsFunc,
 		ActiveChannel: activeChannelFunc,
 	})
-
-	// Persistent message queue — survives agent restarts so queued user
-	// messages are not silently dropped. Also tracks interrupted turns
-	// so the agent can resume where it left off.
-	queueStore := channel.NewQueueStore(s)
 
 	// Deferred cross-channel delivery — waits until the target is free.
 	// Uses a durable queue in the state store so pending messages survive restarts.
@@ -706,8 +593,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 	// onChannelAdded wires a newly created channel into the running agent without
 	// restarting. It builds the channel transport, starts forwarding messages to
-	// hotAddMsgs, and atomically updates currentChannels so the agent can route
-	// responses back.
+	// hotAddMsgs, and updates the ChannelSet so the agent can route responses back.
 	onChannelAdded = func(channelName string) {
 		ref := hotAddCtxRef.Load()
 		if ref == nil {
@@ -744,26 +630,9 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			}()
 		}
 
-		// Atomically extend currentChannels so the agent's ChannelsFunc and the
-		// bridge's activity tracker can resolve the new channel ID.
-		for {
-			old := currentChannels.Load()
-			var updated map[channel.ChannelID]channel.Channel
-			if old != nil {
-				updated = make(map[channel.ChannelID]channel.Channel, len(*old)+len(newChMap))
-				for id, ch := range *old {
-					updated[id] = ch
-				}
-			} else {
-				updated = make(map[channel.ChannelID]channel.Channel, len(newChMap))
-			}
-			for id, ch := range newChMap {
-				updated[id] = ch
-			}
-			if currentChannels.CompareAndSwap(old, &updated) {
-				break
-			}
-		}
+		// Add the new channel to the live set so the agent's ChannelsFunc
+		// and the bridge's activity tracker can resolve the new channel ID.
+		channelSet.Add(newChMap)
 
 		slog.Info("channel hot-added", "channel", channelName, "user", mu.cfg.ID)
 	}
@@ -838,119 +707,26 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		}
 
 		// Update the channel map so the scheduler can resolve channel names.
-		currentChannels.Store(&allChMap)
+		channelSet.Replace(allChMap)
 		scheduler.Reload()
 
 		// Merge message streams.
 		mergedMsgs := channel.MergeFanIns(dynamicCtx, allStaticMsgs, dynamicMsgs)
 
-		// Build system prompt inside the loop — channel list may change between iterations.
-		var chInfos []agent.ChannelInfo
-		for _, ch := range allChMap {
-			info := ch.Info()
-			chInfos = append(chInfos, agent.ChannelInfo{
-				Name:        info.Name,
-				Type:        string(info.Type),
-				Description: info.Description,
-				Source:      string(info.Source),
-			})
-		}
-
-		// Populate outbound links and compute inbound links by inverting the graph.
-		allLinks, _ := registry.Links(dynamicCtx)
-		for i, chInfo := range chInfos {
-			if links, ok := allLinks[chInfo.Name]; ok {
-				for _, link := range links {
-					chInfos[i].OutboundLinks = append(chInfos[i].OutboundLinks, agent.ChannelLinkInfo{
-						ChannelName: link.Target,
-						Description: link.Description,
-					})
-				}
-			}
-		}
-		for _, chInfo := range chInfos {
-			for _, out := range chInfo.OutboundLinks {
-				for j, target := range chInfos {
-					if target.Name == out.ChannelName {
-						chInfos[j].InboundLinks = append(chInfos[j].InboundLinks, agent.ChannelLinkInfo{
-							ChannelName: chInfo.Name,
-							Description: out.Description,
-						})
-					}
-				}
-			}
-		}
-
-		// Build dev session info for the system prompt and AddDirs for sandbox access.
-		var devSessionInfos []agent.DevSessionInfo
-		// Always mount the worktrees parent dir so new worktrees created mid-session
-		// (via dev_start) are visible in the sandbox on the very next turn — bwrap
-		// can only bind paths that exist at invocation time, so the parent must be
-		// present before any child dirs are bound.
+		// Build system prompt and add-dirs for this iteration.
+		promptResult := BuildIterationPrompt(dynamicCtx, PromptParams{
+			Channels:   allChMap,
+			Registry:   registry,
+			DevStore:   devStore,
+			UserDir:    userDir,
+			UserID:     mu.cfg.ID,
+			BasePrompt: mu.cfg.SystemPrompt,
+			Onboarding: onboardingStore,
+		})
+		systemPrompt := promptResult.SystemPrompt
+		addDirs := promptResult.AddDirs
 		worktreesDir := filepath.Join(userDir, "worktrees")
-		if mkErr := os.MkdirAll(worktreesDir, 0o755); mkErr != nil {
-			slog.Warn("failed to create worktrees dir", "err", mkErr, "user", mu.cfg.ID)
-		}
-		// Mount repos dir so read-only checkouts from repo_sync are accessible.
 		reposDir := filepath.Join(userDir, "repos")
-		if mkErr := os.MkdirAll(reposDir, 0o755); mkErr != nil {
-			slog.Warn("failed to create repos dir", "err", mkErr, "user", mu.cfg.ID)
-		}
-		addDirs := []string{worktreesDir, reposDir}
-		devSessions, devErr := devStore.ListSessions(ctx)
-		if devErr != nil {
-			slog.Error("failed to list dev sessions", "err", devErr)
-		}
-		for _, sess := range devSessions {
-			devSessionInfos = append(devSessionInfos, agent.DevSessionInfo{
-				Branch:      sess.Branch,
-				WorktreeDir: sess.WorktreeDir,
-				Age:         time.Since(sess.CreatedAt).Truncate(time.Minute).String(),
-				Stale:       time.Since(sess.CreatedAt) > 4*time.Hour,
-			})
-			addDirs = append(addDirs, sess.WorktreeDir)
-		}
-
-		// Build onboarding info for the system prompt. Initialize state on first
-		// encounter — this is idempotent, like seedUserMemory.
-		var onboardingInfo *agent.OnboardingInfo
-		obState, _, obErr := onboardingStore.Initialize(ctx)
-		if obErr != nil {
-			slog.Error("failed to initialize onboarding", "user", mu.cfg.ID, "err", obErr)
-		}
-		if obState != nil && obState.Phase != onboarding.PhaseComplete {
-			var missing []string
-			for _, f := range onboarding.AllInfoFields {
-				if !obState.InfoGathered[f] {
-					missing = append(missing, f)
-				}
-			}
-			nextArea := onboarding.NextArea(obState.TipsShown)
-			var nextAreaID string
-			if nextArea != nil {
-				nextAreaID = nextArea.ID
-			}
-			remaining := onboarding.UnshownAreas(obState.TipsShown)
-			var remainingAreas []agent.OnboardingFeatureArea
-			for _, area := range remaining {
-				remainingAreas = append(remainingAreas, agent.OnboardingFeatureArea{
-					ID:          area.ID,
-					Name:        area.Name,
-					Description: area.Description,
-				})
-			}
-			onboardingInfo = &agent.OnboardingInfo{
-				Phase:          string(obState.Phase),
-				InfoGathered:   obState.InfoGathered,
-				InfoMissing:    missing,
-				TipsShown:      len(obState.TipsShown),
-				TipsTotal:      len(onboarding.FeatureAreas),
-				NextTip:        nextAreaID,
-				RemainingAreas: remainingAreas,
-			}
-		}
-
-		systemPrompt := agent.BuildSystemPrompt(chInfos, devSessionInfos, mu.cfg.SystemPrompt, onboardingInfo)
 
 		// Wait for a message or shutdown.
 		var firstMsg channel.TaggedMessage
@@ -1023,12 +799,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 					// Record message arrival for activity tracking before
 					// forwarding to the agent, so IsBusy returns true
 					// as soon as the message enters the pipeline.
-					// Use currentChannels (atomic) rather than the snapshot
-					// allChMap so hot-added channels are visible here too.
-					if chMap := currentChannels.Load(); chMap != nil {
-						if ch, ok := (*chMap)[msg.ChannelID]; ok {
-							activityTracker.MessageReceived(ch.Info().Name)
-						}
+					// Use channelSet (live) rather than the snapshot allChMap
+					// so hot-added channels are visible here too.
+					if ch := channelSet.Lookup(msg.ChannelID); ch != nil {
+						activityTracker.MessageReceived(ch.Info().Name)
 					}
 					// Intercept messages that are responses to a pending channel_done
 					// confirmation. If the channel has PendingDone set (from a prior
@@ -1123,7 +897,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			SecretStore:     secretStore,
 			ChannelChangeCh: channelChangeNotify,
 			OnReset: func(level agent.ResetLevel) error {
-				return resetUser(level, memoryDir, homeDir, sessionsDir, stateDir, secretsDir, mcpConfigDir)
+				return resetUser(level, dirs.Memory, dirs.Home, dirs.Sessions, dirs.State, dirs.Secrets, dirs.MCPConfig)
 			},
 			Env:           r.env,
 			UserID:        string(mu.cfg.ID),
