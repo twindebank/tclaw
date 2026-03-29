@@ -71,3 +71,20 @@ func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationCont
 
 	return nil
 }
+
+// CredentialSpec implements toolpkg.CredentialProvider.
+func (p *Package) CredentialSpec() toolpkg.CredentialSpec {
+	return toolpkg.CredentialSpec{
+		AuthType: toolpkg.AuthAPIKey,
+		Fields: []toolpkg.CredentialField{
+			{Key: "api_id", Label: "Telegram API ID", Description: "API ID from my.telegram.org.", Required: true, EnvVarPrefix: "TELEGRAM_CLIENT_API_ID"},
+			{Key: "api_hash", Label: "Telegram API Hash", Description: "API hash from my.telegram.org.", Required: true, EnvVarPrefix: "TELEGRAM_CLIENT_API_HASH"},
+		},
+	}
+}
+
+// OnCredentialSetChange implements toolpkg.CredentialProvider. Currently a
+// no-op — telegram client tools are still registered via the old Register path.
+func (p *Package) OnCredentialSetChange(handler *mcp.Handler, ctx toolpkg.RegistrationContext, sets []toolpkg.ResolvedCredentialSet) error {
+	return nil
+}

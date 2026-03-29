@@ -9,6 +9,7 @@ import (
 	"tclaw/claudecli"
 	"tclaw/config"
 	"tclaw/connection"
+	"tclaw/credential"
 	"tclaw/mcp"
 	"tclaw/toolgroup"
 	"tclaw/user"
@@ -34,6 +35,7 @@ func buildChannelToolOverrides(
 	ctx context.Context,
 	userCfg user.Config,
 	connMgr *connection.Manager,
+	credMgr *credential.Manager,
 ) map[channel.ChannelID]agent.ChannelToolPermissions {
 	overrides := make(map[channel.ChannelID]agent.ChannelToolPermissions)
 
@@ -59,10 +61,10 @@ func buildChannelToolOverrides(
 			src.DisallowedTools = toolsToStrings(userCfg.DisallowedTools)
 		}
 
-		// Add dynamic provider and remote MCP tool patterns.
-		channelCtx := buildChannelContext(ctx, connMgr, name)
+		// Add dynamic credential and remote MCP tool patterns.
+		channelCtx := buildChannelContext(ctx, connMgr, credMgr, name)
 		var extraTools []claudecli.Tool
-		extraTools = append(extraTools, toolgroup.ProviderToolPatterns(channelCtx)...)
+		extraTools = append(extraTools, toolgroup.CredentialToolPatterns(channelCtx)...)
 		extraTools = append(extraTools, toolgroup.RemoteMCPToolPatterns(channelCtx)...)
 
 		allowed := toTools(src.AllowedTools)
@@ -84,19 +86,19 @@ func buildChannelToolOverrides(
 // buildChannelContext constructs the ChannelContext for role resolution by
 // looking up which provider connections and remote MCPs are scoped to this
 // channel.
-func buildChannelContext(ctx context.Context, connMgr *connection.Manager, channelName string) toolgroup.ChannelContext {
+func buildChannelContext(ctx context.Context, connMgr *connection.Manager, credMgr *credential.Manager, channelName string) toolgroup.ChannelContext {
 	var channelCtx toolgroup.ChannelContext
 
-	conns, err := connMgr.ListByChannel(ctx, channelName)
+	// Credential-based tool packages.
+	credSets, err := credMgr.ListByChannel(ctx, channelName)
 	if err != nil {
-		slog.Error("failed to list connections for channel context", "channel", channelName, "err", err)
+		slog.Error("failed to list credential sets for channel context", "channel", channelName, "err", err)
 	} else {
 		seen := make(map[string]bool)
-		for _, c := range conns {
-			pid := string(c.ProviderID)
-			if !seen[pid] {
-				channelCtx.ProviderIDs = append(channelCtx.ProviderIDs, pid)
-				seen[pid] = true
+		for _, s := range credSets {
+			if !seen[s.Package] {
+				channelCtx.PackageNames = append(channelCtx.PackageNames, s.Package)
+				seen[s.Package] = true
 			}
 		}
 	}

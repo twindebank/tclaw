@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"time"
 
-	"tclaw/connection"
+	"tclaw/credential"
 	"tclaw/libraries/secret"
 	"tclaw/mcp"
 	"tclaw/tool/providerutil"
@@ -25,7 +25,7 @@ const (
 	ClientSecretStoreKey = "monzo_client_secret"
 )
 
-// Deps holds dependencies for a single Monzo connection.
+// Deps holds dependencies for a single Monzo credential set.
 type Deps = providerutil.Deps
 
 // SetCredentialsDeps holds dependencies for the monzo_set_credentials tool.
@@ -45,19 +45,19 @@ func RegisterSetCredentialsTool(handler *mcp.Handler, deps SetCredentialsDeps) {
 }
 
 // RegisterTools registers (or re-registers) the Monzo tools with handlers
-// that resolve the connection dynamically from connMap.
-func RegisterTools(handler *mcp.Handler, connMap map[connection.ConnectionID]Deps) {
-	connIDs := make([]connection.ConnectionID, 0, len(connMap))
-	for id := range connMap {
-		connIDs = append(connIDs, id)
+// that resolve the credential set dynamically from depsMap.
+func RegisterTools(handler *mcp.Handler, depsMap map[credential.CredentialSetID]Deps) {
+	setIDs := make([]credential.CredentialSetID, 0, len(depsMap))
+	for id := range depsMap {
+		setIDs = append(setIDs, id)
 	}
 
-	defs := ToolDefs(connIDs)
-	handler.Register(defs[0], listAccountsHandler(connMap))
-	handler.Register(defs[1], getBalanceHandler(connMap))
-	handler.Register(defs[2], listPotsHandler(connMap))
-	handler.Register(defs[3], listTransactionsHandler(connMap))
-	handler.Register(defs[4], getTransactionHandler(connMap))
+	defs := ToolDefs(setIDs)
+	handler.Register(defs[0], listAccountsHandler(depsMap))
+	handler.Register(defs[1], getBalanceHandler(depsMap))
+	handler.Register(defs[2], listPotsHandler(depsMap))
+	handler.Register(defs[3], listTransactionsHandler(depsMap))
+	handler.Register(defs[4], getTransactionHandler(depsMap))
 }
 
 // UnregisterTools removes the Monzo tools from the handler.
@@ -69,12 +69,12 @@ func UnregisterTools(handler *mcp.Handler) {
 	handler.Unregister(ToolGetTransaction)
 }
 
-// resolveDeps looks up the Deps for a connection ID from the tool args.
-func resolveDeps(connMap map[connection.ConnectionID]Deps, connIDStr string) (Deps, error) {
-	return providerutil.ResolveDeps(connMap, connIDStr)
+// resolveDeps looks up the Deps for a credential set ID from the tool args.
+func resolveDeps(depsMap map[credential.CredentialSetID]Deps, idStr string) (Deps, error) {
+	return providerutil.ResolveDeps(depsMap, idStr)
 }
 
-// accessToken gets a valid access token for the connection, refreshing if needed.
+// accessToken gets a valid access token for the credential set, refreshing if needed.
 func accessToken(ctx context.Context, deps Deps) (string, error) {
 	return providerutil.AccessToken(ctx, deps)
 }

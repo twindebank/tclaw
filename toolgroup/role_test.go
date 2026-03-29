@@ -51,35 +51,29 @@ func TestToolGroups(t *testing.T) {
 	})
 }
 
-func TestProviderToolPatterns(t *testing.T) {
-	t.Run("google provider adds google tool pattern", func(t *testing.T) {
-		ctx := ChannelContext{ProviderIDs: []string{"google"}}
-		tools := ProviderToolPatterns(ctx)
+func TestCredentialToolPatterns(t *testing.T) {
+	t.Run("google package adds google tool pattern", func(t *testing.T) {
+		ctx := ChannelContext{PackageNames: []string{"google"}}
+		tools := CredentialToolPatterns(ctx)
 		require.Contains(t, tools, MCPToolGoogleAll)
 	})
 
-	t.Run("monzo provider adds monzo tool pattern", func(t *testing.T) {
-		ctx := ChannelContext{ProviderIDs: []string{"monzo"}}
-		tools := ProviderToolPatterns(ctx)
+	t.Run("monzo package adds monzo tool pattern", func(t *testing.T) {
+		ctx := ChannelContext{PackageNames: []string{"monzo"}}
+		tools := CredentialToolPatterns(ctx)
 		require.Contains(t, tools, MCPToolMonzoAll)
 	})
 
-	t.Run("multiple providers add all patterns", func(t *testing.T) {
-		ctx := ChannelContext{ProviderIDs: []string{"google", "monzo"}}
-		tools := ProviderToolPatterns(ctx)
+	t.Run("multiple packages add all patterns", func(t *testing.T) {
+		ctx := ChannelContext{PackageNames: []string{"google", "monzo"}}
+		tools := CredentialToolPatterns(ctx)
 		require.Contains(t, tools, MCPToolGoogleAll)
 		require.Contains(t, tools, MCPToolMonzoAll)
 	})
 
-	t.Run("unknown provider adds nothing", func(t *testing.T) {
-		ctx := ChannelContext{ProviderIDs: []string{"unknown"}}
-		tools := ProviderToolPatterns(ctx)
-		require.Empty(t, tools)
-	})
-
-	t.Run("empty providers adds no patterns", func(t *testing.T) {
+	t.Run("empty packages adds no patterns", func(t *testing.T) {
 		ctx := ChannelContext{}
-		tools := ProviderToolPatterns(ctx)
+		tools := CredentialToolPatterns(ctx)
 		require.Empty(t, tools)
 	})
 }

@@ -5,24 +5,24 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"tclaw/connection"
+	"tclaw/credential"
 	"tclaw/gws"
 	"tclaw/mcp"
 )
 
 type schemaArgs struct {
-	Connection string `json:"connection"`
-	Method     string `json:"method"`
+	CredentialSet string `json:"credential_set"`
+	Method        string `json:"method"`
 }
 
-func schemaHandler(connMap map[connection.ConnectionID]Deps) mcp.ToolHandler {
+func schemaHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var a schemaArgs
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
-		deps, err := resolveDeps(connMap, a.Connection)
+		deps, err := resolveDeps(depsMap, a.CredentialSet)
 		if err != nil {
 			return nil, err
 		}
