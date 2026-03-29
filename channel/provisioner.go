@@ -7,15 +7,24 @@ import "context"
 // own provisioner implementation. The provisioner is called by channel_create
 // (when no explicit token is provided) and channel_done/auto-cleanup.
 type EphemeralProvisioner interface {
+	// IsReady returns true if the channel has everything it needs to run
+	// (e.g. token in secret store, credentials configured). The reconciler
+	// calls this to decide whether to provision or mark as needs_setup.
+	IsReady(ctx context.Context, channelName string) bool
+
+	// CanAutoProvision returns true if this provisioner can create platform
+	// resources without user interaction (e.g. Telegram Client API is configured).
+	CanAutoProvision() bool
+
 	// ValidateCreate checks platform-specific constraints before provisioning.
-	// Called by channel_create with the user-provided args so each platform can
-	// enforce its own requirements (e.g. Telegram needs at least one allowed user).
-	ValidateCreate(allowedUsers []int64, description string) error
+	ValidateCreate(description string) error
 
 	// Provision creates the platform-specific resources for a channel
-	// (e.g. mints a Telegram bot via BotFather). Returns the connection
-	// credential (e.g. bot token) and teardown state to persist.
-	Provision(ctx context.Context, name, purpose string) (*ProvisionResult, error)
+	// (e.g. mints a Telegram bot via BotFather) and initiates any
+	// platform-specific conversation setup (e.g. sending /start so the
+	// bot can message users). Returns the connection credential and
+	// teardown state to persist.
+	Provision(ctx context.Context, params ProvisionParams) (*ProvisionResult, error)
 
 	// Teardown cleans up platform-specific resources using the persisted
 	// teardown state (e.g. deletes a Telegram bot). Returns an error if
@@ -25,35 +34,33 @@ type EphemeralProvisioner interface {
 
 	// SendTeardownPrompt sends a confirmation prompt to the channel's user asking
 	// them to confirm teardown by replying "yes". Returns immediately after
-	// sending — does NOT wait for the user's response. The router intercepts the
-	// reply asynchronously via the PendingDone flag on the channel config.
+	// sending — does NOT wait for the user's response.
 	SendTeardownPrompt(ctx context.Context, token string, platformState PlatformState) error
 
-	// SendClosingMessage sends a brief acknowledgement to the channel immediately
-	// after the user confirms teardown ("yes"). Called before platform teardown so
-	// the bot can still send messages. Best-effort — callers should log errors but
-	// not abort teardown if this fails.
+	// SendClosingMessage sends a brief acknowledgement after the user confirms
+	// teardown, before the bot is deleted. Best-effort.
 	SendClosingMessage(ctx context.Context, token string, platformState PlatformState) error
 
-	// Notify sends an out-of-band message to channel users via the platform.
-	// Returns number of users notified. Used by channel_notify tool.
-	Notify(ctx context.Context, token string, allowedUsers []int64, message string) (int, error)
+	// Notify sends an out-of-band message to the channel's user via the
+	// platform. The provisioner uses its own configuration to determine
+	// who to notify.
+	Notify(ctx context.Context, token string, message string) error
 
 	// PlatformResponseInfo returns platform-specific fields to include in tool
-	// responses (e.g. {"platform_link": "https://t.me/bot", "platform_username": "bot"}).
-	// Returns nil if there's no extra info to include.
+	// responses (e.g. bot username and link). Returns nil if no extra info.
 	PlatformResponseInfo(teardownState TeardownState) map[string]any
+}
+
+// ProvisionParams is the input to EphemeralProvisioner.Provision.
+type ProvisionParams struct {
+	Name    string
+	Purpose string
 }
 
 // ProvisionResult is returned by EphemeralProvisioner.Provision.
 type ProvisionResult struct {
-	// Token is the connection credential (bot token, webhook URL, etc.).
-	Token string
-
-	// TeardownState holds platform-specific state for later cleanup.
+	Token         string
 	TeardownState TeardownState
-
-	// AllowedUsers are platform-specific user IDs to restrict access
-	// (e.g. Telegram user IDs). May be nil if not applicable.
-	AllowedUsers []int64
+	PlatformState PlatformState
+	AllowedUsers  []string
 }

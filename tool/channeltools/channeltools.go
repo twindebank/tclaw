@@ -5,18 +5,22 @@ import (
 	"tclaw/config"
 	"tclaw/libraries/secret"
 	"tclaw/mcp"
+	"tclaw/reconciler"
+	"tclaw/user"
 )
 
 // Deps holds dependencies for channel management tools.
 type Deps struct {
-	Registry *channel.Registry
-	Env      config.Env
+	Registry     *channel.Registry
+	ConfigWriter *config.Writer
+	RuntimeState *channel.RuntimeStateStore
+	UserID       user.ID
+	Env          config.Env
 
 	SecretStore secret.Store
 
 	// ConfigPath is the path to the active tclaw.yaml. Included in error
-	// messages when the agent tries to edit a static channel, so it knows
-	// exactly which file to modify.
+	// messages so the user knows which file to check.
 	ConfigPath string
 
 	// OnChannelAdded is called after a new channel is created with the channel's
@@ -34,13 +38,15 @@ type Deps struct {
 	// ActivityTracker tracks per-channel processing state for channel_is_busy.
 	ActivityTracker *channel.ActivityTracker
 
-	// Provisioners maps channel types to their EphemeralProvisioner. Used by
-	// channel_create (when no explicit token is provided) and channel_done
-	// (for platform-specific cleanup). May be nil if no provisioners are configured.
+	// Provisioners maps channel types to their EphemeralProvisioner.
 	Provisioners map[channel.ChannelType]channel.EphemeralProvisioner
 
+	// ReconcileParams provides dependencies for synchronous reconciliation
+	// after config mutations. Channel tools call the reconciler to provision
+	// channels immediately so the agent gets feedback on success/failure.
+	ReconcileParams reconciler.ReconcileParams
+
 	// ActiveChannel returns the name of the channel currently being processed.
-	// Used by channel_create to look up the creating channel's creatable_roles.
 	ActiveChannel func() string
 }
 

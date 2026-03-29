@@ -1,33 +1,50 @@
 package channel
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestPlatformState_RoundTrip(t *testing.T) {
+func TestPlatformState_JSONRoundTrip(t *testing.T) {
 	t.Run("telegram", func(t *testing.T) {
-		original := TelegramPlatformState{ChatID: 999999999}
-		raw, err := MarshalPlatformState(original)
-		require.NoError(t, err)
-		require.NotNil(t, raw)
+		original := NewTelegramPlatformState(999999999)
 
-		restored, err := UnmarshalPlatformState(raw)
+		data, err := json.Marshal(original)
 		require.NoError(t, err)
 
-		tps, ok := restored.(TelegramPlatformState)
-		require.True(t, ok)
-		require.Equal(t, int64(999999999), tps.ChatID)
+		var restored PlatformState
+		require.NoError(t, json.Unmarshal(data, &restored))
+
+		require.Equal(t, PlatformTelegram, restored.Type)
+		require.NotNil(t, restored.Telegram)
+		require.Equal(t, int64(999999999), restored.Telegram.ChatID)
 	})
 
-	t.Run("nil state", func(t *testing.T) {
-		raw, err := MarshalPlatformState(nil)
-		require.NoError(t, err)
-		require.Nil(t, raw)
+	t.Run("zero value", func(t *testing.T) {
+		var ps PlatformState
+		require.False(t, ps.HasPlatformState())
+	})
+}
 
-		restored, err := UnmarshalPlatformState(nil)
+func TestTeardownState_JSONRoundTrip(t *testing.T) {
+	t.Run("telegram", func(t *testing.T) {
+		original := NewTelegramTeardownState("tclaw_bot")
+
+		data, err := json.Marshal(original)
 		require.NoError(t, err)
-		require.Nil(t, restored)
+
+		var restored TeardownState
+		require.NoError(t, json.Unmarshal(data, &restored))
+
+		require.Equal(t, PlatformTelegram, restored.Type)
+		require.NotNil(t, restored.Telegram)
+		require.Equal(t, "tclaw_bot", restored.Telegram.BotUsername)
+	})
+
+	t.Run("zero value", func(t *testing.T) {
+		var ts TeardownState
+		require.False(t, ts.HasTeardownState())
 	})
 }

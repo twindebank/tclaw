@@ -234,6 +234,7 @@ func gitRun(t *testing.T, dir string, args ...string) {
 ## Function Design
 - **Prefer returning new values over mutating inputs** — makes data flow clearer
 - **Prefer param structs over multiple parameters** — keeps signatures clean and extensible
+- **Never put context.Context in param structs** — always pass it as the first function parameter, separate from the struct
 - **Helper functions go at the bottom of files** — after the main logic
 - **Search for existing patterns first** — look for similar implementations before writing new code
 
@@ -271,7 +272,7 @@ The registry auto-generates a `<name>_info` tool for every package. Packages don
 - **State machines must use explicit typed states** — not implicit map membership. Use enums for states, explicit `Start`/`Cancel`/`Complete` transitions, and a typed result struct for outcomes.
 - **Prefer single source of truth** over overlapping tracking mechanisms. One `ChannelSet` instead of three separate maps tracking the same data.
 - **Avoid forward-declared closures** — define functions before referencing them. If a closure needs to be passed to a constructor before it's defined, extract it into a method or use a callback interface.
-- **Serialize read-modify-write cycles** — use a mutex when updating store-backed state to prevent TOCTOU races (see `DynamicStore`).
+- **Serialize read-modify-write cycles** — use a mutex when updating store-backed state to prevent TOCTOU races (see `RuntimeStateStore`, `config.Writer`).
 - **Prefer explicit over implicit** — pass dependencies explicitly in params, not via closures capturing ambient state. Avoid default/inferred arguments.
 
 ## Channel Types
@@ -279,14 +280,16 @@ The registry auto-generates a `<name>_info` tool for every package. Packages don
 Adding a new channel type requires:
 
 1. Implement the `Channel` interface (e.g. `channel/slack.go`)
-2. Implement `EphemeralProvisioner` if the channel supports ephemeral lifecycle
-3. Define platform state and teardown state types, register them:
+2. Add platform state fields to `PlatformState` and `TeardownState` structs in `channel/platform_state.go`:
    ```go
-   func init() {
-       channel.RegisterPlatformState("slack", func() channel.PlatformState { return &SlackPlatformState{} })
-       channel.RegisterTeardownState("slack", func() channel.TeardownState { return &SlackTeardownState{} })
+   type PlatformState struct {
+       Type     PlatformType            `json:"type"`
+       Telegram *TelegramPlatformState  `json:"telegram,omitempty"`
+       Slack    *SlackPlatformState     `json:"slack,omitempty"` // add this
    }
    ```
-4. Add the provisioner to the `provisioners` map in router.go
-
-No switch statements need updating — the registries handle deserialization automatically.
+3. Add a constructor: `NewSlackPlatformState(...)` / `NewSlackTeardownState(...)`
+4. Implement `EphemeralProvisioner` if the channel supports provisioned lifecycle
+5. Add a `ChannelBuilder` in `router/` (e.g. `builder_slack.go`) and register it in `router.New()`
+6. Add the platform type constant: `PlatformSlack PlatformType = "slack"`
+7. Add `TelegramChannelConfig`-equivalent for the new platform in `config/config.go`

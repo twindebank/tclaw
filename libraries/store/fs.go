@@ -31,8 +31,23 @@ func (f *FS) Get(_ context.Context, key string) ([]byte, error) {
 }
 
 func (f *FS) Set(_ context.Context, key string, value []byte) error {
-	if err := os.WriteFile(filepath.Join(f.dir, key), value, 0o600); err != nil {
+	path := filepath.Join(f.dir, key)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create dir for %s: %w", key, err)
+	}
+	if err := os.WriteFile(path, value, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", key, err)
+	}
+	return nil
+}
+
+func (f *FS) Delete(_ context.Context, key string) error {
+	err := os.Remove(filepath.Join(f.dir, key))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("delete %s: %w", key, err)
 	}
 	return nil
 }
