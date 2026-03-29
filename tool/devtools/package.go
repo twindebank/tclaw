@@ -29,7 +29,7 @@ func (p *Package) Description() string {
 func (p *Package) Group() toolgroup.ToolGroup { return toolgroup.GroupDevWorkflow }
 
 func (p *Package) ToolPatterns() []claudecli.Tool {
-	return []claudecli.Tool{"mcp__tclaw__dev_*", "mcp__tclaw__deploy", "mcp__tclaw__config_*"}
+	return []claudecli.Tool{"mcp__tclaw__dev_*", "mcp__tclaw__config_*"}
 }
 
 func (p *Package) RequiredSecrets() []toolpkg.SecretSpec {
