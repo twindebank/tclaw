@@ -44,12 +44,11 @@ func BuildIterationPrompt(ctx context.Context, params PromptParams) IterationPro
 			Name:        info.Name,
 			Type:        string(info.Type),
 			Description: info.Description,
-			Source:      string(info.Source),
 		})
 	}
 
 	// Populate outbound links and compute inbound links by inverting the graph.
-	allLinks, _ := params.Registry.Links(ctx)
+	allLinks := params.Registry.Links()
 	for i, chInfo := range chInfos {
 		if links, ok := allLinks[chInfo.Name]; ok {
 			for _, link := range links {

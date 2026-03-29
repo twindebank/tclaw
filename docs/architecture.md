@@ -39,10 +39,10 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 | Package | Responsibility |
 |---------|----------------|
 | `main.go` | Entry point: dispatches to `cli.Run()` |
-| `cli/` | CLI subcommand dispatch. `serve` (start server), `chat` (TUI client), `secret` (keychain management), `deploy` (Fly.io deployment, secrets, suspend/resume), `oneshot` (single-message test mode). |
-| `router/` | Per-user agent lifecycle management. Owns goroutine lifetimes, directory setup, MCP server creation, tool registration. Builds per-channel tool overrides from `config.Channel` (static) and `DynamicChannelConfig` (dynamic) tool fields. The only stateful orchestrator. |
+| `cli/` | CLI subcommand dispatch. `serve` (start server), `chat` (TUI client), `secret` (keychain management), `deploy` (Fly.io deployment, secrets, suspend/resume), `config` (sync/diff between local and remote), `oneshot` (single-message test mode). |
+| `router/` | Per-user agent lifecycle management. Owns goroutine lifetimes, directory setup, MCP server creation, tool registration. Builds per-channel tool overrides from `config.Channel` tool fields. Contains `ChannelBuilder` implementations for each transport type. The only stateful orchestrator. |
 | `agent/` | Stateless package. `Run(ctx, opts)` reads messages from channels, handles auth flows, spawns CLI subprocess per turn, streams responses back. `ChannelToolOverrides` in `Options` enables per-channel tool permissions. `reset.go` computes `allowedResetLevels()` to build dynamic reset menus filtered by channel. |
-| `channel/` | Transport abstraction. `Channel` interface with implementations: Socket, Stdio, Telegram. `FanIn()` multiplexer, `ChannelMap()` helper. `DynamicStore` for runtime channel configs, `ChannelSecretKey()` for deriving secret store keys. `EphemeralProvisioner` interface for platform-specific channel lifecycle (provision, teardown, confirm, notify). `PlatformState` and `TeardownState` discriminated types for platform-specific persistent data. `QueueStore` for persisting messages and interrupted-turn markers across agent restarts. |
+| `channel/` | Transport abstraction. `Channel` interface with implementations: Socket, Stdio, Telegram. `FanIn()` multiplexer, `ChannelMap()` helper. `RuntimeStateStore` for per-channel runtime state (platform state, teardown state, pending done). `ChannelSecretKey()` for deriving secret store keys. `EphemeralProvisioner` interface for platform-specific channel lifecycle (provision, teardown, confirm, notify). `PlatformState` and `TeardownState` typed discriminator structs for platform-specific persistent data. `QueueStore` for persisting messages and interrupted-turn markers across agent restarts. |
 | `config/` | YAML parsing, secret resolution, config validation. |
 
 ### Auth & Credentials
@@ -59,7 +59,8 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 |---------|----------------|
 | `mcp/` | JSON-RPC tool registry (`Handler`), HTTP server (`Server`), config file generation (`GenerateConfigFile`). |
 | `mcp/discovery/` | OAuth discovery for remote MCP servers (RFC 7591 dynamic registration). Safe HTTP client that blocks private IPs and requires HTTPS. |
-| `tool/channeltools/` | MCP tools for dynamic channel management (create, list, edit, delete, notify, done) and cross-channel messaging (`channel_send`). Channel tools are platform-agnostic — platform-specific logic is delegated to `EphemeralProvisioner` implementations. `channel_done` uses an async confirmation flow: sends a prompt to the user, the router intercepts the reply. |
+| `tool/channeltools/` | MCP tools for channel management (create, list, edit, delete, notify, done) and cross-channel messaging (`channel_send`). Tools mutate `tclaw.yaml` directly via `config.Writer` and trigger the reconciler for provisioning. `channel_done` uses an async confirmation flow: sends a prompt to the user, the router intercepts the reply. |
+| `reconciler/` | Desired-state reconciliation. Compares config channels against runtime state and auto-provisions channels when the provisioner supports it. Returns channel status (ready or needs_setup) so the router knows which channels to build. |
 | `tool/credentialtools/` | MCP tools for unified credential management (`credential_add`, `credential_list`, `credential_remove`, `credential_auth_wait`). Handles both API key collection (via secret forms) and OAuth flows. |
 | `tool/remotemcp/` | MCP tools for remote MCP server management (add, remove, list, auth_wait). |
 | `tool/scheduletools/` | MCP tools for cron schedule management (create, list, edit, delete, pause, resume). |
@@ -102,7 +103,7 @@ Dependencies flow strictly downward — no circular imports.
 ```
 Layer 1:  Pure types (user, claudecli, role, store.Store interface, secret.Store interface)
 Layer 2:  Domain models (credential.CredentialSet, schedule.Schedule, channel.Channel interface)
-Layer 3:  Managers (credential.Manager, remotemcpstore.Manager, schedule.Store, channel.DynamicStore)
+Layer 3:  Managers (credential.Manager, remotemcpstore.Manager, schedule.Store, channel.RuntimeStateStore)
 Layer 4:  Stateless handlers (oauth, mcp.Handler, mcp/discovery)
 Layer 5:  Channel implementations (socket, stdio, telegram, dynamic)
 Layer 6:  Agent loop (agent.Run — spawns CLI, handles auth, manages turns)
@@ -215,58 +216,53 @@ Stores remote MCP config + regenerates mcp-config.json
 Claude CLI picks up new MCP on next turn (reads --mcp-config)
 ```
 
-### Dynamic Channel Lifecycle
+### Channel Lifecycle
+
+All channels are defined in `tclaw.yaml`. Channel tools mutate the config directly via `config.Writer`, then the reconciler provisions platform resources.
 
 ```
-channel_create(type: "telegram", allowed_users: [12345])
+channel_create(type: "telegram", description: "...")
     │
     ▼
 Validate name, type, env (socket blocked in non-local)
     │
     ▼
-provisioner.ValidateCreate(allowedUsers, description) — platform-specific checks
+provisioner.ValidateCreate(description) — platform-specific checks
     │
     ▼
-provisioner.Provision(name, description) — creates platform resources (e.g. Telegram bot)
+config.Writer.AddChannel() — writes channel entry to tclaw.yaml
     │
     ▼
-Store DynamicChannelConfig + PlatformState in user's state
+reconciler.ReconcileOne() — checks IsReady, auto-provisions if possible
     │
     ▼
-Store platform token in secret store (key: "channel/<name>/token")
-    │
-    ▼
-provisioner.Notify() — sends greeting to users
-    │
-    ▼
-OnChannelAdded hot-adds channel (or OnChannelChange restarts agent)
-    buildDynamicChannels() reads config + token from secret store
-    └─► Constructs live channel with platform-appropriate transport
+OnChannelChange → router restarts, reconciler runs, ChannelBuilders build transports
 
 channel_done(channel_name: "mybot", results_sent: "...")
+    │
+    ▼
+RuntimeStateStore: set PendingDone=true, return immediately
     │
     ▼
 provisioner.SendTeardownPrompt() — asks user to reply "yes"
     │
     ▼
-Sets PendingDone=true on channel config, returns immediately
-    │
-    ▼
 Router intercepts next inbound message on this channel:
     "yes" → provisioner.SendClosingMessage() → provisioner.Teardown()
-            → remove config + secret → OnChannelChange (restart)
+            → config.Writer.RemoveChannel() + cleanup runtime state + secret
+            → OnChannelChange (restart)
     anything else → clears PendingDone, forwards message to agent normally
 
 channel_delete(name: "mybot")
     │
     ▼
-Remove DynamicChannelConfig from store
+config.Writer.RemoveChannel() — removes from tclaw.yaml
     │
     ▼
-Delete token from secret store (best-effort)
+Clean up runtime state + secret (best-effort)
     │
     ▼
-OnChannelChange callback signals router → agent restarts automatically
+OnChannelChange → router restarts automatically
 ```
 
 ## Per-User Directory Layout
@@ -490,12 +486,11 @@ On macOS (local dev), sandboxing is skipped — the developer's own machine does
 
 **Socket and stdio channels are blocked in non-local environments.** These transports have no authentication — any process that can reach the socket file can send messages. In production, only authenticated transports (Telegram) are allowed:
 
-- `BuildChannels()` rejects `socket` and `stdio` channel types when `env != "local"`
-- `buildDynamicChannels()` skips socket channels in non-local environments; Telegram dynamic channels work everywhere
+- `ChannelBuilder` implementations (SocketBuilder, StdioBuilder) reject non-local environments
 - The `channel_create` MCP tool returns an error when creating a socket channel in a non-local environment
-- Telegram bot tokens are stored in the encrypted secret store (not in the channel config JSON) and cleaned up on channel deletion
+- Telegram bot tokens are stored in the encrypted secret store and cleaned up on channel deletion
 
-Telegram channels support an `allowed_users` list of Telegram user IDs. When set, messages from users not in the list are silently dropped at the handler level before reaching the agent. This prevents strangers who discover a bot's username from interacting with it. The allowlist is configured in `telegram.allowed_users` (static config) or via the `telegram_config.allowed_users` field in `channel_create`/`channel_edit` (dynamic channels).
+Telegram channels restrict access via the user-level `telegram.user_id` config. Messages from users not matching this ID are silently dropped at the handler level before reaching the agent.
 
 This means production deployments can only communicate via Telegram (which authenticates via bot token + webhook secret). Socket channels are available in local dev where the threat model is the developer's own machine.
 
@@ -508,15 +503,13 @@ The agent interacts with tclaw state (connections, schedules, channels, secrets)
 
 ### Per-Channel Tool Permissions
 
-Tool permissions are resolved per-channel at each turn. Channels can define their own `allowed_tools` and `disallowed_tools` lists, or use a **role** as a named preset (in static config or dynamic channel configs). Roles and explicit tool lists are mutually exclusive — setting a role clears explicit lists and vice versa. Roles are resolved via `role.Resolve()`, which dynamically includes provider tool patterns (e.g. `mcp__tclaw__google_*`) for channel-scoped connections and remote MCP tool patterns for channel-scoped remote MCPs. When a channel has overrides, they **replace** the user-level permissions entirely — no merging.
+Tool permissions are resolved per-channel at each turn. Channels can define their own `allowed_tools` and `disallowed_tools` lists, or use `tool_groups` for named presets. Tool groups and explicit tool lists are mutually exclusive. When a channel has overrides, they **replace** the user-level permissions entirely — no merging.
 
 This gates two layers:
-- **CLI tools** — `resolveToolsForChannel()` picks the channel-level or user-level allowed/disallowed lists (resolving roles to tool lists first), filters out `builtin__*` entries (which the CLI doesn't understand), and passes the result as `--allowedTools`/`--disallowedTools` flags to the subprocess.
-- **Builtin commands** — `isBuiltinAllowed()` checks whether `builtin__*` entries (e.g. `builtin__stop`, `builtin__compact`, `builtin__reset`, `builtin__login`, `builtin__auth`) are present in the channel's resolved tool list. If no `builtin__*` entries exist at all (neither channel nor user level), everything is allowed for backwards compatibility. The reset menu is dynamic — `allowedResetLevels()` only includes levels whose corresponding builtin (e.g. `builtin__reset_session`, `builtin__reset_memories`) is permitted.
+- **CLI tools** — `resolveToolsForChannel()` picks the channel-level or user-level allowed/disallowed lists, filters out `builtin__*` entries (which the CLI doesn't understand), and passes the result as `--allowedTools`/`--disallowedTools` flags to the subprocess.
+- **Builtin commands** — `isBuiltinAllowed()` checks whether `builtin__*` entries (e.g. `builtin__stop`, `builtin__compact`, `builtin__reset`, `builtin__login`, `builtin__auth`) are present in the channel's resolved tool list. If no `builtin__*` entries exist at all (neither channel nor user level), everything is allowed for backwards compatibility.
 
-The router builds the `ChannelToolOverrides` map from two sources:
-- **Static channels** — tool fields (including role) from `config.Channel` entries, matched to live channels by name
-- **Dynamic channels** — tool fields (including role) from `DynamicChannelConfig` in the store, matched to live channels by name
+The router builds the `ChannelToolOverrides` map from `config.Channel` entries in the registry, matched to live channels by name.
 
 ### 4. Secret Boundary
 
@@ -540,9 +533,9 @@ Secret store keys follow a hierarchical naming convention:
 - `telegram_client_phone` — authenticated phone number for MTProto
 - `telegram_client_session` — MTProto session bytes (base64-encoded, extremely sensitive)
 - `conn/<provider>/<id>` — OAuth connection credentials
-- `channel/<name>/token` — dynamic channel secrets (e.g. Telegram bot tokens)
+- `channel/<name>/token` — channel secrets (e.g. Telegram bot tokens)
 
-OAuth tokens are auto-refreshed and never exposed in logs or subprocess environments. Channel secrets are created alongside dynamic channels and cleaned up on deletion. Deploy tokens are passed to `fly secrets set` via stdin (not CLI args) to avoid exposure in process listings.
+OAuth tokens are auto-refreshed and never exposed in logs or subprocess environments. Channel secrets (bot tokens) are stored in the encrypted secret store and cleaned up on channel deletion. Deploy tokens are passed to `fly secrets set` via stdin (not CLI args) to avoid exposure in process listings.
 
 ### Input Validation
 
@@ -551,7 +544,7 @@ OAuth tokens are auto-refreshed and never exposed in logs or subprocess environm
 - **API keys** require the `sk-ant-` prefix and minimum length of 50 characters
 - **OAuth callbacks** use state codes with TTL and per-state rate limiting to prevent brute-force
 - **Remote MCP URLs** are validated against SSRF (HTTPS required, private IP ranges blocked)
-- **Dynamic channels** — names validated (alphanumeric/hyphens/underscores, max 64 chars), type must match allowed set for the environment (socket blocked in non-local), `telegram_config` required for telegram type, uniqueness enforced against both static and dynamic channels
+- **Channel names** validated (alphanumeric/hyphens/underscores, max 64 chars), type must match allowed set for the environment (socket blocked in non-local), uniqueness enforced across all channels
 
 ### What the Subprocess CAN Access
 

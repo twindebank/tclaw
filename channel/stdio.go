@@ -14,10 +14,9 @@ func NewStdio() *Stdio { return &Stdio{} }
 
 func (s *Stdio) Info() Info {
 	return Info{
-		ID:     "stdio",
-		Type:   TypeStdio,
-		Name:   "stdio",
-		Source: SourceStatic,
+		ID:   "stdio",
+		Type: TypeStdio,
+		Name: "stdio",
 	}
 }
 

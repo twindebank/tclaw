@@ -114,11 +114,20 @@ func TestValidate_UnknownChannelType(t *testing.T) {
 	require.Contains(t, err.Error(), "unknown type")
 }
 
-func TestValidate_TelegramWithoutToken(t *testing.T) {
+func TestValidate_TelegramWithoutUserID(t *testing.T) {
 	cfg := validConfig()
 	cfg.Users[0].Channels[0].Type = channel.TypeTelegram
-	cfg.Users[0].Channels[0].TelegramConfig = nil
+	cfg.Users[0].Channels[0].Telegram = &TelegramChannelConfig{Token: "fake-token"}
 	err := validate(cfg)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "telegram channel requires telegram.token")
+	require.Contains(t, err.Error(), "telegram.user_id")
+}
+
+func TestValidate_TelegramValid(t *testing.T) {
+	cfg := validConfig()
+	cfg.Users[0].Telegram = &UserTelegramConfig{UserID: "123456"}
+	cfg.Users[0].Channels[0].Type = channel.TypeTelegram
+	cfg.Users[0].Channels[0].Telegram = &TelegramChannelConfig{Token: "fake-token"}
+	err := validate(cfg)
+	require.NoError(t, err)
 }
