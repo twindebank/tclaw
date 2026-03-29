@@ -33,25 +33,59 @@ Each user gets a fully isolated environment:
 
 ## Channels
 
-Channels are the transport layer between users and the agent. See `channel_create`, `channel_edit`, `channel_list`, `channel_delete` tool descriptions for the runtime management API.
+Channels are the transport layer between users and the agent. All channels are defined in `tclaw.yaml` under each user's `channels` list. There is no distinction between "static" and "dynamic" channels — all channels are equal. The agent can create, edit, and delete channels at runtime via MCP tools (`channel_create`, `channel_edit`, `channel_list`, `channel_delete`), which mutate the config file directly.
 
 ### Channel Types
 
 - **Socket** — unix domain sockets. The TUI chat client (`cmd/chat`) connects here. **Local only** — blocked in non-local environments because sockets have no authentication.
 - **Stdio** — standard input/output for simple pipe-based usage. **Local only**.
-- **Telegram** — Telegram Bot API. Uses long polling locally, webhooks in production. Supports HTML markup for rich text. The only channel type allowed in production. Supports an `allowed_users` list to restrict which Telegram user IDs can interact.
+- **Telegram** — Telegram Bot API. Uses long polling locally, webhooks in production. Supports HTML markup for rich text. The only channel type allowed in production. Access is restricted to the user's Telegram ID (configured at the user level).
 
-### Static vs Dynamic Channels
+### Config as Desired State
 
-**Static channels** are defined in the config file (`tclaw.yaml`). **Dynamic channels** are created at runtime via MCP tools. Dynamic channels persist across agent restarts (stored in the user's state directory). Channel creation hot-adds to the running agent; edits, deletes, and teardowns trigger a restart.
+`tclaw.yaml` is the single source of truth. Channel tools (`channel_create`, `channel_edit`, `channel_delete`, `channel_done`) all write directly to the config file via `config.Writer`, which uses atomic temp-file-plus-rename writes to prevent partial state.
+
+On startup (and after config mutations), the **reconciler** compares desired state (config) against actual state (runtime) and converges them:
+
+- **No provisioner for this type** (socket, stdio): immediately ready.
+- **Provisioner says already ready**: ready.
+- **Not ready, can auto-provision**: provisions platform resources (e.g. creates a Telegram bot), stores runtime state, then ready.
+- **Not ready, can't auto-provision**: marked as `needs_setup` so the agent can guide the user through manual setup.
+
+This means a Telegram channel can be added to config without a bot token — the reconciler will provision the bot automatically if the Telegram Client API credentials are available.
+
+### Config Sync
+
+`tclaw config sync` and `tclaw config diff` manage config between local and remote environments. `diff` shows what would change; `sync` pushes the local config to the remote deployment.
+
+### Runtime State
+
+Platform-specific metadata that doesn't belong in the config file (Telegram chat IDs, bot usernames for teardown) is stored separately in `RuntimeStateStore`. Each channel gets its own runtime state keyed by name. The reconciler populates runtime state during provisioning; it persists across agent restarts.
+
+### Telegram User ID
+
+Telegram identity is configured at the **user level**, not per-channel:
+
+```yaml
+users:
+  - id: myuser
+    telegram:
+      user_id: "123456789"
+    channels:
+      - type: telegram
+        name: admin
+        description: Primary admin channel
+```
+
+All Telegram channels for a user inherit the user-level `telegram.user_id`. Validation enforces that any user with Telegram channels must have this set.
 
 ### Ephemeral Channels
 
-Set `ephemeral: true` on `channel_create` for channels that should auto-delete after an idle timeout (default 24h). Use `channel_done` to tear down manually — it sends a confirmation prompt to the user and only proceeds when the user replies "yes" (async flow via the router). Platform resources (bots, tokens) are cleaned up automatically.
+Set `ephemeral: true` on `channel_create` for channels that should auto-delete after an idle timeout (default 24h). Use `channel_done` to tear down manually — it sends a confirmation prompt to the user and only proceeds when the user replies "yes" (async flow via the router). Platform resources (bots, tokens) are cleaned up automatically, and the channel is removed from config.
 
 ### Platform Abstraction
 
-Channel tools are platform-agnostic — the agent creates channels without needing to know the underlying transport. Platform-specific logic (bot creation, teardown, notifications) is handled by `EphemeralProvisioner` implementations behind the scenes. Each channel stores `PlatformState` (e.g. chat ID for Telegram) and `TeardownState` (e.g. bot username) as discriminated types for transparent serialization.
+Channel tools are platform-agnostic — the agent creates channels without needing to know the underlying transport. Platform-specific logic (bot creation, teardown, notifications) is handled by `EphemeralProvisioner` implementations behind the scenes. Each channel's runtime state holds `PlatformState` (e.g. chat ID for Telegram) and `TeardownState` (e.g. bot username) as typed discriminator structs with a `Type` field and platform-specific pointer fields.
 
 ### Tool Groups
 
@@ -129,7 +163,7 @@ The `cmd/chat` binary is a Bubbletea-based terminal UI that connects via unix so
 
 ## Onboarding
 
-New users are guided through a structured onboarding flow: welcome → info gathering → daily tips → complete. Managed via `onboarding_*` tools. State persisted in the user's state store.
+New users are guided through a structured onboarding flow: welcome -> info gathering -> daily tips -> complete. Managed via `onboarding_*` tools. State persisted in the user's state store.
 
 ## HTTP Server
 

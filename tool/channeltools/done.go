@@ -15,21 +15,15 @@ const ToolChannelDone = "channel_done"
 func channelDoneDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name: ToolChannelDone,
-		Description: "Tear down a dynamic channel — deletes platform resources (e.g. Telegram bot), " +
-			"removes channel config, and removes channel secrets. Works on both ephemeral and " +
-			"non-ephemeral dynamic channels. Fails if platform teardown fails (no half-states). " +
-			"Cannot be used on static channels (from config file).\n\n" +
+		Description: "Tear down a channel — deletes platform resources (e.g. Telegram bot), " +
+			"removes channel from config, and cleans up secrets. " +
+			"Fails if platform teardown fails (no half-states).\n\n" +
 			"IMPORTANT: This tool uses an async confirmation flow. For channels with a user chat " +
 			"(e.g. Telegram), it sends a confirmation prompt and returns immediately with status " +
-			"\"awaiting_confirmation\". The teardown completes when the user replies \"yes\" as " +
-			"their next message — the router handles this without another agent turn. Any other " +
-			"reply cancels the teardown. For channels without a user chat, teardown happens " +
-			"immediately.\n\n" +
-			"REQUIRED: Before calling this, you MUST send all results to other channels via channel_send " +
-			"(PR URLs, summaries, findings, etc.). The results_sent field is mandatory — provide a brief " +
-			"summary of what was sent and to which channel(s). If you have outbound links but sent nothing, " +
-			"send results first. If there are genuinely no results to report (e.g. no outbound links, or " +
-			"task produced nothing noteworthy), explain why in results_sent.",
+			"\"awaiting_confirmation\". The teardown completes when the user replies \"yes\" — " +
+			"the router handles this without another agent turn. Any other reply cancels.\n\n" +
+			"REQUIRED: Before calling this, you MUST send all results to other channels via channel_send. " +
+			"The results_sent field is mandatory.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -39,7 +33,7 @@ func channelDoneDef() mcp.ToolDef {
 				},
 				"results_sent": {
 					"type": "string",
-					"description": "Required. Describe what results were sent via channel_send before teardown (e.g. 'Sent PR #57 URL and summary to admin'). If nothing was sent, explain why (e.g. 'No outbound links configured' or 'Task produced no results')."
+					"description": "Required. Describe what results were sent via channel_send before teardown."
 				}
 			},
 			"required": ["results_sent"]
@@ -60,11 +54,9 @@ func channelDoneHandler(deps Deps) mcp.ToolHandler {
 		}
 
 		if a.ResultsSent == "" {
-			return nil, fmt.Errorf("results_sent is required — describe what was sent via channel_send before teardown, or explain why nothing was sent")
+			return nil, fmt.Errorf("results_sent is required — describe what was sent via channel_send before teardown")
 		}
 
-		// If no channel name specified, infer from the active channel (the one
-		// currently being processed — i.e. the channel the agent is running on).
 		if a.ChannelName == "" {
 			if deps.ActiveChannel != nil {
 				a.ChannelName = deps.ActiveChannel()
@@ -74,28 +66,27 @@ func channelDoneHandler(deps Deps) mcp.ToolHandler {
 			}
 		}
 
-		// Validate the channel exists and is dynamic.
-		if deps.Registry.IsStatic(a.ChannelName) {
-			return nil, fmt.Errorf("channel %q is a static channel (from config file) and cannot be torn down via channel_done — edit the config file instead", a.ChannelName)
-		}
-
-		cfg, err := deps.Registry.DynamicStore().Get(ctx, a.ChannelName)
-		if err != nil {
-			return nil, fmt.Errorf("read channel config: %w", err)
-		}
-		if cfg == nil {
+		if !deps.Registry.NameExists(a.ChannelName) {
 			return nil, fmt.Errorf("channel %q not found", a.ChannelName)
 		}
 
-		// For channels with a platform chat (e.g. Telegram), send a confirmation
-		// prompt and return immediately. The router intercepts the user's reply on
-		// the next inbound message — "yes" triggers teardown, anything else cancels.
-		// This avoids a deadlock where the tool blocks waiting for a reply that can
-		// only arrive after the current tool call returns.
-		if cfg.PlatformState != nil {
-			provisioner, ok := deps.Provisioners[cfg.Type]
+		entry := deps.Registry.ByName(a.ChannelName)
+		if entry == nil {
+			return nil, fmt.Errorf("channel %q not found", a.ChannelName)
+		}
+
+		runtimeState, err := deps.RuntimeState.Get(ctx, a.ChannelName)
+		if err != nil {
+			return nil, fmt.Errorf("read runtime state: %w", err)
+		}
+
+		// For channels with platform state (e.g. Telegram chat ID), send a
+		// confirmation prompt and return immediately. The router intercepts the
+		// user's reply asynchronously via PendingDone.
+		if runtimeState.PlatformState.HasPlatformState() {
+			provisioner, ok := deps.Provisioners[entry.Type]
 			if !ok {
-				return nil, fmt.Errorf("no provisioner for channel type %q — cannot send teardown confirmation", cfg.Type)
+				return nil, fmt.Errorf("no provisioner for channel type %q — cannot send teardown confirmation", entry.Type)
 			}
 
 			token, tokenErr := deps.SecretStore.Get(ctx, channel.ChannelSecretKey(a.ChannelName))
@@ -103,14 +94,12 @@ func channelDoneHandler(deps Deps) mcp.ToolHandler {
 				return nil, fmt.Errorf("read channel token for confirmation: %w", tokenErr)
 			}
 
-			if promptErr := provisioner.SendTeardownPrompt(ctx, token, cfg.PlatformState); promptErr != nil {
+			if promptErr := provisioner.SendTeardownPrompt(ctx, token, runtimeState.PlatformState); promptErr != nil {
 				return nil, fmt.Errorf("send teardown prompt for channel %q: %w", a.ChannelName, promptErr)
 			}
 
-			// Persist the pending state so the router knows to intercept the next
-			// message on this channel as a confirmation response.
-			if updateErr := deps.Registry.DynamicStore().Update(ctx, a.ChannelName, func(c *channel.DynamicChannelConfig) {
-				c.PendingDone = true
+			if updateErr := deps.RuntimeState.Update(ctx, a.ChannelName, func(rs *channel.RuntimeState) {
+				rs.PendingDone = true
 			}); updateErr != nil {
 				return nil, fmt.Errorf("set pending_done for channel %q: %w", a.ChannelName, updateErr)
 			}
@@ -123,32 +112,32 @@ func channelDoneHandler(deps Deps) mcp.ToolHandler {
 			})
 		}
 
-		// No platform chat — tear down immediately (no interactive confirmation possible).
-		if cfg.TeardownState != nil {
-			provisioner, ok := deps.Provisioners[cfg.Type]
+		// No platform chat — tear down immediately.
+		if runtimeState.TeardownState.HasTeardownState() {
+			provisioner, ok := deps.Provisioners[entry.Type]
 			if !ok {
 				slog.Error("no provisioner for channel type, skipping platform teardown",
-					"channel", a.ChannelName, "type", cfg.Type)
+					"channel", a.ChannelName, "type", entry.Type)
 			} else {
-				if teardownErr := provisioner.Teardown(ctx, cfg.TeardownState); teardownErr != nil {
-					// Do NOT delete the channel config — would orphan platform resources.
+				if teardownErr := provisioner.Teardown(ctx, runtimeState.TeardownState); teardownErr != nil {
 					return nil, fmt.Errorf("platform teardown failed for channel %q (channel NOT deleted — retry or clean up manually): %w", a.ChannelName, teardownErr)
 				}
 			}
 		}
 
-		// Delete channel config.
-		if err := deps.Registry.DynamicStore().Remove(ctx, a.ChannelName); err != nil {
-			return nil, fmt.Errorf("delete channel config: %w", err)
+		// Remove from config.
+		if err := deps.ConfigWriter.RemoveChannel(deps.UserID, a.ChannelName); err != nil {
+			return nil, fmt.Errorf("delete channel from config: %w", err)
 		}
 
-		// Delete channel secret (best-effort — log but don't fail).
+		// Clean up runtime state and secret (best-effort).
+		if err := deps.RuntimeState.Delete(ctx, a.ChannelName); err != nil {
+			slog.Error("failed to delete runtime state during teardown", "channel", a.ChannelName, "err", err)
+		}
 		if err := deps.SecretStore.Delete(ctx, channel.ChannelSecretKey(a.ChannelName)); err != nil {
-			slog.Error("failed to delete channel secret during teardown",
-				"channel", a.ChannelName, "err", err)
+			slog.Error("failed to delete channel secret during teardown", "channel", a.ChannelName, "err", err)
 		}
 
-		// Trigger agent restart to pick up the removal.
 		if deps.OnChannelChange != nil {
 			deps.OnChannelChange()
 		}
@@ -157,7 +146,7 @@ func channelDoneHandler(deps Deps) mcp.ToolHandler {
 			"status":       "deleted",
 			"channel":      a.ChannelName,
 			"results_sent": a.ResultsSent,
-			"message":      fmt.Sprintf("Channel %q has been torn down. Platform resources cleaned up.", a.ChannelName),
+			"message":      fmt.Sprintf("Channel %q has been torn down.", a.ChannelName),
 		})
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"tclaw/agent"
 	"tclaw/config"
 	"tclaw/libraries/logbuffer"
+	"tclaw/libraries/secret"
 	"tclaw/libraries/store"
 	"tclaw/oauth"
 	"tclaw/router"
@@ -101,7 +102,19 @@ func runServe() {
 			slog.Error("failed to create state store for channels", "user", u.ID, "err", err)
 			os.Exit(1)
 		}
-		channels, err := r.BuildChannels(u.ID, u.Channels, cfg.Env, stateStore)
+		secretStore, err := secret.Resolve(string(u.ID), filepath.Join(cfg.BaseDir, string(u.ID), "secrets"), os.Getenv(secret.MasterKeyEnv))
+		if err != nil {
+			slog.Error("failed to create secret store for channels", "user", u.ID, "err", err)
+			os.Exit(1)
+		}
+		channels, err := r.BuildChannels(ctx, router.BuildChannelsParams{
+			UserID:      u.ID,
+			UserCfg:     u,
+			Channels:    u.Channels,
+			Env:         cfg.Env,
+			StateStore:  stateStore,
+			SecretStore: secretStore,
+		})
 		if err != nil {
 			slog.Error("failed to build channels", "user", u.ID, "err", err)
 			os.Exit(1)

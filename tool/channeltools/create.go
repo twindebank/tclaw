@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"tclaw/channel"
+	"tclaw/config"
 	"tclaw/mcp"
+	"tclaw/reconciler"
 	"tclaw/toolgroup"
 )
 
@@ -25,22 +27,22 @@ const ToolChannelCreate = "channel_create"
 func channelCreateDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name: ToolChannelCreate,
-		Description: "Create a new dynamic channel. Supported types: 'socket' (local only) and 'telegram'. " +
-			"For platforms that support auto-provisioning, channel resources are created automatically. " +
-			"Set ephemeral: true for channels that should auto-delete after idle timeout (default 24h). " +
-			"Use initial_message to deliver a kick-off task to the new channel on first boot — " +
-			"this is the preferred way to start ephemeral channels since the agent restarts before " +
-			"any channel_send could be delivered. The agent restarts automatically to activate the new channel.",
+		Description: "Create a new channel by adding it to config. " +
+			"If the platform supports auto-provisioning (e.g. Telegram with Client API), " +
+			"the channel is provisioned automatically on restart. Otherwise, the agent " +
+			"will guide the user through manual setup.\n\n" +
+			"Set ephemeral: true for channels that should auto-delete after idle timeout. " +
+			"Use initial_message to deliver a kick-off task to the new channel on first boot.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"name": {
 					"type": "string",
-					"description": "Short name for the channel (e.g. 'phone', 'email-check-20260323'). Used in routing and must be unique."
+					"description": "Short name for the channel (e.g. 'phone', 'email-check-20260323'). Must be unique."
 				},
 				"description": {
 					"type": "string",
-					"description": "Describes the device or context. Helps the agent tailor responses. For Telegram channels, used as the bot display name — must be 56 characters or fewer."
+					"description": "Describes the channel's purpose. For Telegram, used as the bot display name (max 56 chars)."
 				},
 				"type": {
 					"type": "string",
@@ -49,21 +51,21 @@ func channelCreateDef() mcp.ToolDef {
 				},
 				"allowed_users": {
 					"type": "array",
-					"items": {"type": "integer"},
+					"items": {"type": "string"},
 					"description": "Platform user IDs for access control. Required for some channel types."
 				},
 				"ephemeral": {
 					"type": "boolean",
-					"description": "If true, the channel auto-deletes after idle timeout. Platform resources (e.g. Telegram bot) are cleaned up automatically. Use channel_done to tear down manually."
+					"description": "If true, the channel auto-deletes after idle timeout."
 				},
 				"ephemeral_idle_timeout_hours": {
 					"type": "integer",
-					"description": "How many hours an ephemeral channel can sit idle before auto-cleanup. Defaults to 24. Only meaningful when ephemeral is true."
+					"description": "Hours before an idle ephemeral channel is cleaned up. Defaults to 24."
 				},
 				"tool_groups": {
 					"type": "array",
 					"items": {"type": "string"},
-					"description": "Tool groups to enable on this channel (e.g. ['core_tools', 'gsuite_read', 'channel_messaging']). Additive — start with nothing, add what you need. Mutually exclusive with allowed_tools. Use tool_group_list to see all available groups with descriptions."
+					"description": "Tool groups to enable. Mutually exclusive with allowed_tools. Use tool_group_list to see available groups."
 				},
 				"allowed_tools": {
 					"type": "array",
@@ -73,28 +75,28 @@ func channelCreateDef() mcp.ToolDef {
 				"disallowed_tools": {
 					"type": "array",
 					"items": {"type": "string"},
-					"description": "Tools explicitly denied on this channel. Works alongside tool_groups or allowed_tools for surgical removal."
+					"description": "Tools explicitly denied on this channel."
 				},
 				"creatable_groups": {
 					"type": "array",
 					"items": {"type": "string"},
-					"description": "Tool groups this channel is allowed to delegate when creating new channels. If empty or omitted, channel_create is blocked. Prevents privilege escalation — a channel can only give created channels groups from this list."
+					"description": "Tool groups this channel can delegate when creating new channels. Prevents privilege escalation."
 				},
 				"links": {
 					"type": "array",
-					"description": "Cross-channel messaging links. For ephemeral channels, make these task-specific — describe exactly when to use each link based on what the job does.",
+					"description": "Cross-channel messaging links.",
 					"items": {
 						"type": "object",
 						"properties": {
 							"target": {"type": "string", "description": "Name of the target channel."},
-							"description": {"type": "string", "description": "When this link should be used. Be specific to the task, not generic."}
+							"description": {"type": "string", "description": "When this link should be used."}
 						},
 						"required": ["target", "description"]
 					}
 				},
 				"initial_message": {
 					"type": "string",
-					"description": "Message delivered to the new channel as its first inbound message once it comes online. Use this to kick off work on ephemeral channels without a separate channel_send call. Fires exactly once — cleared after delivery."
+					"description": "Message delivered to the new channel as its first inbound message. Fires exactly once."
 				}
 			},
 			"required": ["name", "description", "type"]
@@ -106,7 +108,6 @@ type channelCreateArgs struct {
 	Name                      string         `json:"name"`
 	Description               string         `json:"description"`
 	Type                      string         `json:"type"`
-	AllowedUsers              []int64        `json:"allowed_users"`
 	Ephemeral                 bool           `json:"ephemeral"`
 	EphemeralIdleTimeoutHours int            `json:"ephemeral_idle_timeout_hours"`
 	ToolGroups                []string       `json:"tool_groups"`
@@ -117,8 +118,6 @@ type channelCreateArgs struct {
 	InitialMessage            string         `json:"initial_message"`
 }
 
-const defaultEphemeralIdleTimeout = 24 * time.Hour
-
 func channelCreateHandler(deps Deps) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 		var a channelCreateArgs
@@ -126,97 +125,60 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
+		// Validate inputs.
 		if a.Name == "" || len(a.Name) > maxChannelNameLength {
 			return nil, fmt.Errorf("name is required and must be under %d characters", maxChannelNameLength)
 		}
 		if !channelNamePattern.MatchString(a.Name) {
-			return nil, fmt.Errorf("name must be alphanumeric with hyphens/underscores (no spaces or special characters)")
+			return nil, fmt.Errorf("name must be alphanumeric with hyphens/underscores")
 		}
 		if a.Description == "" || len(a.Description) > maxChannelDescriptionLength {
 			return nil, fmt.Errorf("description is required and must be under %d characters", maxChannelDescriptionLength)
 		}
 
-		var channelType channel.ChannelType
-		var teardownState channel.TeardownState
-		var botToken string
-		switch a.Type {
-		case "socket":
+		channelType := channel.ChannelType(a.Type)
+		switch channelType {
+		case channel.TypeSocket:
 			if !deps.Env.IsLocal() {
 				return nil, fmt.Errorf("socket channels are not allowed in %q environment (no authentication)", deps.Env)
 			}
-			channelType = channel.TypeSocket
+		case channel.TypeTelegram:
+			// Platform-specific validation via provisioner.
+			if provisioner, ok := deps.Provisioners[channelType]; ok {
+				if err := provisioner.ValidateCreate(a.Description); err != nil {
+					return nil, err
+				}
+			}
 		default:
-			channelType = channel.ChannelType(a.Type)
-			provisioner, hasProvisioner := deps.Provisioners[channelType]
-			if !hasProvisioner {
-				return nil, fmt.Errorf("unsupported channel type %q (no provisioner configured)", a.Type)
-			}
-
-			if err := provisioner.ValidateCreate(a.AllowedUsers, a.Description); err != nil {
-				return nil, err
-			}
-
-			result, provErr := provisioner.Provision(ctx, a.Name, a.Description)
-			if provErr != nil {
-				return nil, fmt.Errorf("provision channel: %w", provErr)
-			}
-
-			botToken = result.Token
-			teardownState = result.TeardownState
-
-			// Auto-start the bot if the provisioner supports it and users are
-			// specified. Without this, some platforms block the bot from messaging
-			// users who haven't initiated conversation.
-			if ts, ok := teardownState.(channel.TelegramTeardownState); ok && len(a.AllowedUsers) > 0 {
-				type botStarter interface {
-					StartBot(ctx context.Context, botUsername string, userID int64) error
-				}
-				if starter, ok := provisioner.(botStarter); ok {
-					if startErr := starter.StartBot(ctx, ts.BotUsername, a.AllowedUsers[0]); startErr != nil {
-						slog.Warn("failed to auto-start bot (user will need to /start manually)", "bot", ts.BotUsername, "err", startErr)
-					}
-				}
-			}
+			return nil, fmt.Errorf("unsupported channel type %q", a.Type)
 		}
 
 		// Validate tool_groups / allowed_tools mutual exclusion.
-		var toolGroups []toolgroup.ToolGroup
-
 		if len(a.ToolGroups) > 0 && len(a.AllowedTools) > 0 {
 			return nil, fmt.Errorf("tool_groups and allowed_tools are mutually exclusive — set exactly one")
 		}
 
-		if len(a.ToolGroups) > 0 {
-			for _, g := range a.ToolGroups {
-				tg := toolgroup.ToolGroup(g)
-				if !toolgroup.ValidGroup(tg) {
-					return nil, fmt.Errorf("unknown tool group %q", g)
-				}
-				toolGroups = append(toolGroups, tg)
+		var toolGroups []toolgroup.ToolGroup
+		for _, g := range a.ToolGroups {
+			tg := toolgroup.ToolGroup(g)
+			if !toolgroup.ValidGroup(tg) {
+				return nil, fmt.Errorf("unknown tool group %q", g)
 			}
+			toolGroups = append(toolGroups, tg)
 		}
 
-		// Enforce creatable_groups — the creating channel can only assign groups
-		// it's been authorized to delegate. Uses the registry which covers both
-		// static and dynamic channels.
+		// Enforce creatable_groups — creating channel can only delegate authorized groups.
 		if deps.ActiveChannel != nil && len(toolGroups) > 0 {
 			activeChannelName := deps.ActiveChannel()
 			if activeChannelName != "" {
-				activeEntry, entryErr := deps.Registry.ByName(ctx, activeChannelName)
-				if entryErr != nil {
-					slog.Error("failed to look up creating channel for creatable_groups check", "channel", activeChannelName, "err", entryErr)
-				}
-
-				if activeEntry != nil {
+				if activeEntry := deps.Registry.ByName(activeChannelName); activeEntry != nil {
 					creatableSet := make(map[string]bool, len(activeEntry.CreatableGroups))
 					for _, g := range activeEntry.CreatableGroups {
 						creatableSet[g] = true
 					}
-
 					if len(creatableSet) == 0 {
 						return nil, fmt.Errorf("this channel is not authorized to create other channels (creatable_groups is empty)")
 					}
-
 					for _, g := range toolGroups {
 						if !creatableSet[string(g)] {
 							return nil, fmt.Errorf("this channel is not authorized to delegate tool group %q (not in creatable_groups)", g)
@@ -226,23 +188,15 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			}
 		}
 
-		// Validate creatable_groups values.
 		for _, g := range a.CreatableGroups {
 			if !toolgroup.ValidGroup(toolgroup.ToolGroup(g)) {
 				return nil, fmt.Errorf("unknown creatable group %q", g)
 			}
 		}
 
-		// Check uniqueness against all existing channels (static + dynamic).
-		exists, existsErr := deps.Registry.NameExists(ctx, a.Name)
-		if existsErr != nil {
-			return nil, fmt.Errorf("check channel name: %w", existsErr)
-		}
-		if exists {
-			if deps.Registry.IsStatic(a.Name) {
-				return nil, fmt.Errorf("channel name %q is already used by a static channel (from config file)", a.Name)
-			}
-			return nil, fmt.Errorf("dynamic channel %q already exists", a.Name)
+		// Check name uniqueness.
+		if deps.Registry.NameExists(a.Name) {
+			return nil, fmt.Errorf("channel %q already exists", a.Name)
 		}
 
 		// Validate links.
@@ -260,102 +214,85 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			linkTargets[link.Target] = true
 		}
 
-		allowedUsers := a.AllowedUsers
-
-		idleTimeout := defaultEphemeralIdleTimeout
-		if a.EphemeralIdleTimeoutHours > 0 {
-			idleTimeout = time.Duration(a.EphemeralIdleTimeoutHours) * time.Hour
-		}
-
-		// Resolve tool_groups to AllowedTools for the dynamic config.
-		var resolvedAllowed []string
-		if len(toolGroups) > 0 {
-			for _, t := range toolgroup.ResolveGroups(toolGroups) {
-				resolvedAllowed = append(resolvedAllowed, string(t))
+		// Build the idle timeout string for config.
+		var idleTimeoutStr string
+		if a.Ephemeral {
+			timeout := 24 * time.Hour
+			if a.EphemeralIdleTimeoutHours > 0 {
+				timeout = time.Duration(a.EphemeralIdleTimeoutHours) * time.Hour
 			}
-		} else {
-			resolvedAllowed = a.AllowedTools
+			idleTimeoutStr = timeout.String()
 		}
 
-		// Build platform-specific state so the channel can operate before any
-		// inbound user message (e.g. Telegram needs a chat ID to send responses).
-		var platformState channel.PlatformState
-		if channelType == channel.TypeTelegram && len(allowedUsers) > 0 {
-			// For Telegram DMs, chatID == userID.
-			platformState = channel.TelegramPlatformState{ChatID: allowedUsers[0]}
-		}
-
-		cfg := channel.DynamicChannelConfig{
-			Name:                 a.Name,
+		// Build the config channel entry. No provisioning here — the reconciler
+		// handles that on the next startup/reload cycle.
+		ch := config.Channel{
 			Type:                 channelType,
+			Name:                 a.Name,
 			Description:          a.Description,
-			CreatedAt:            time.Now(),
-			AllowedTools:         resolvedAllowed,
+			ToolGroups:           toolGroups,
+			AllowedTools:         a.AllowedTools,
 			DisallowedTools:      a.DisallowedTools,
-			CreatableGroups:      a.CreatableGroups,
-			AllowedUsers:         allowedUsers,
+			CreatableGroups:      creatableGroupsToToolGroups(a.CreatableGroups),
 			Links:                a.Links,
 			Ephemeral:            a.Ephemeral,
-			EphemeralIdleTimeout: idleTimeout,
-			TeardownState:        teardownState,
-			PlatformState:        platformState,
+			EphemeralIdleTimeout: idleTimeoutStr,
 			InitialMessage:       a.InitialMessage,
-		}
-		if err := deps.Registry.DynamicStore().Add(ctx, cfg); err != nil {
-			return nil, fmt.Errorf("create channel: %w", err)
+			CreatedAt:            time.Now().Format(time.RFC3339),
 		}
 
-		// Store the bot token in the encrypted secret store — never in the
-		// channel config or tool call parameters.
-		if botToken != "" {
-			if err := deps.SecretStore.Set(ctx, channel.ChannelSecretKey(a.Name), botToken); err != nil {
-				if rollbackErr := deps.Registry.DynamicStore().Remove(ctx, a.Name); rollbackErr != nil {
-					slog.Warn("failed to roll back channel config after secret store error", "channel", a.Name, "err", rollbackErr)
-				}
-				return nil, fmt.Errorf("store channel secret: %w", err)
-			}
+		if err := deps.ConfigWriter.AddChannel(deps.UserID, ch); err != nil {
+			return nil, fmt.Errorf("add channel to config: %w", err)
 		}
 
-		// Send an initial greeting so the channel appears active for users.
-		greetingWarning := ""
-		if botToken != "" && len(allowedUsers) > 0 {
-			if provisioner, ok := deps.Provisioners[channelType]; ok {
-				greeting := fmt.Sprintf("👋 Channel <b>%s</b> is now active.\n\n%s", a.Name, a.Description)
-				if _, err := provisioner.Notify(ctx, botToken, allowedUsers, greeting); err != nil {
-					slog.Warn("failed to send channel greeting", "channel", a.Name, "err", err)
-					greetingWarning = fmt.Sprintf(" Note: initial greeting failed to send: %v", err)
-				}
-			}
+		// Reconcile synchronously so the agent gets immediate feedback on
+		// whether provisioning succeeded or the channel needs manual setup.
+		rc, reconcileErr := reconciler.ReconcileOne(ctx, ch, deps.ReconcileParams)
+		if reconcileErr != nil {
+			// Config was written but provisioning failed — leave the channel in
+			// config so the user can fix the issue and retry.
+			return nil, fmt.Errorf("channel added to config but provisioning failed: %w", reconcileErr)
 		}
 
-		// Hot-add if the router supports it; fall back to full restart otherwise.
-		if deps.OnChannelAdded != nil {
-			deps.OnChannelAdded(a.Name)
-		} else if deps.OnChannelChange != nil {
+		slog.Info("channel created", "channel", a.Name, "type", a.Type, "status", rc.Status)
+
+		// Signal the router to restart and build the transport.
+		if deps.OnChannelChange != nil {
 			deps.OnChannelChange()
 		}
 
-		hotAdd := deps.OnChannelAdded != nil
 		result := map[string]any{
-			"name":        cfg.Name,
-			"type":        string(cfg.Type),
-			"description": cfg.Description,
-		}
-		if hotAdd {
-			result["message"] = fmt.Sprintf("Channel %q created and is now active.%s", a.Name, greetingWarning)
-		} else {
-			result["message"] = fmt.Sprintf("Channel %q created. The agent will restart automatically to activate it.%s", a.Name, greetingWarning)
+			"name":        a.Name,
+			"type":        a.Type,
+			"description": a.Description,
 		}
 
-		// Add platform-specific info if a provisioner is available.
-		if provisioner, ok := deps.Provisioners[channelType]; ok {
-			if info := provisioner.PlatformResponseInfo(teardownState); info != nil {
-				for k, v := range info {
-					result[k] = v
+		switch rc.Status {
+		case reconciler.ChannelReady:
+			result["status"] = "ready"
+			result["message"] = fmt.Sprintf("Channel %q created and provisioned. The agent will restart to activate it.", a.Name)
+
+			// Include platform-specific info if available.
+			if provisioner, ok := deps.Provisioners[channelType]; ok && rc.RuntimeState != nil {
+				if info := provisioner.PlatformResponseInfo(rc.RuntimeState.TeardownState); info != nil {
+					for k, v := range info {
+						result[k] = v
+					}
 				}
 			}
+		case reconciler.ChannelNeedsSetup:
+			result["status"] = "needs_setup"
+			result["message"] = fmt.Sprintf("Channel %q added to config but needs manual setup — provide a bot token or configure Telegram Client API credentials for auto-provisioning.", a.Name)
 		}
 
 		return json.Marshal(result)
 	}
+}
+
+func creatableGroupsToToolGroups(groups []string) []toolgroup.ToolGroup {
+	result := make([]toolgroup.ToolGroup, len(groups))
+	for i, g := range groups {
+		result[i] = toolgroup.ToolGroup(g)
+	}
+	return result
 }

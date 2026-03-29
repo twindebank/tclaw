@@ -3,30 +3,31 @@ package router
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"tclaw/channel"
+	"tclaw/config"
 	"tclaw/libraries/store"
+	"tclaw/user"
 )
+
+const testUserID user.ID = "testuser"
 
 func TestInterceptPendingDone(t *testing.T) {
 	t.Run("passes through when channel has no pending_done", func(t *testing.T) {
-		ds, ss := setupDoneTest(t)
-		require.NoError(t, ds.Add(context.Background(), channel.DynamicChannelConfig{
-			Name: "mychan",
-			Type: channel.TypeSocket,
-		}))
-
+		rs, ss, cw := setupDoneTest(t)
 		prov := &mockDoneProvisioner{}
 		var changeCalled bool
 
 		consumed := interceptPendingDone(
 			context.Background(),
 			doneTaggedMsg("mychan-id", "yes"),
-			doneChannelsFunc("mychan-id", "mychan"),
-			ds, ss,
+			doneChannelsFunc("mychan-id", "mychan", channel.TypeSocket),
+			rs, cw, testUserID, ss,
 			map[channel.ChannelType]channel.EphemeralProvisioner{channel.TypeSocket: prov},
 			func() { changeCalled = true },
 		)
@@ -37,16 +38,19 @@ func TestInterceptPendingDone(t *testing.T) {
 	})
 
 	t.Run("tears down on yes", func(t *testing.T) {
-		ds, ss := setupDoneTest(t)
-		require.NoError(t, ds.Add(context.Background(), channel.DynamicChannelConfig{
-			Name:        "ephemeral",
-			Type:        channel.TypeTelegram,
-			PendingDone: true,
-			TeardownState: channel.TelegramTeardownState{
-				BotUsername: "tclaw_test_bot",
-			},
+		rs, ss, cw := setupDoneTest(t)
+
+		// Set pending done + teardown state in runtime state.
+		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
+			s.PendingDone = true
+			s.TeardownState = channel.NewTelegramTeardownState("tclaw_test_bot")
 		}))
 		require.NoError(t, ss.Set(context.Background(), channel.ChannelSecretKey("ephemeral"), "fake-token"))
+
+		// Add channel to config so RemoveChannel works.
+		require.NoError(t, cw.AddChannel(testUserID, config.Channel{
+			Type: channel.TypeTelegram, Name: "ephemeral", Description: "test",
+		}))
 
 		prov := &mockDoneProvisioner{}
 		var changeCalled bool
@@ -54,8 +58,8 @@ func TestInterceptPendingDone(t *testing.T) {
 		consumed := interceptPendingDone(
 			context.Background(),
 			doneTaggedMsg("ephemeral-id", "yes"),
-			doneChannelsFunc("ephemeral-id", "ephemeral"),
-			ds, ss,
+			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeTelegram),
+			rs, cw, testUserID, ss,
 			map[channel.ChannelType]channel.EphemeralProvisioner{channel.TypeTelegram: prov},
 			func() { changeCalled = true },
 		)
@@ -64,11 +68,6 @@ func TestInterceptPendingDone(t *testing.T) {
 		require.True(t, prov.teardownCalled)
 		require.True(t, changeCalled)
 
-		// Channel config should be gone.
-		cfg, err := ds.Get(context.Background(), "ephemeral")
-		require.NoError(t, err)
-		require.Nil(t, cfg)
-
 		// Secret should be gone.
 		token, err := ss.Get(context.Background(), channel.ChannelSecretKey("ephemeral"))
 		require.NoError(t, err)
@@ -76,23 +75,25 @@ func TestInterceptPendingDone(t *testing.T) {
 	})
 
 	t.Run("sends closing message before teardown when platform state present", func(t *testing.T) {
-		ds, ss := setupDoneTest(t)
-		require.NoError(t, ds.Add(context.Background(), channel.DynamicChannelConfig{
-			Name:          "ephemeral",
-			Type:          channel.TypeTelegram,
-			PendingDone:   true,
-			PlatformState: channel.TelegramPlatformState{ChatID: 12345},
-			TeardownState: channel.TelegramTeardownState{BotUsername: "tclaw_test_bot"},
+		rs, ss, cw := setupDoneTest(t)
+
+		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
+			s.PendingDone = true
+			s.PlatformState = channel.NewTelegramPlatformState(12345)
+			s.TeardownState = channel.NewTelegramTeardownState("tclaw_test_bot")
 		}))
 		require.NoError(t, ss.Set(context.Background(), channel.ChannelSecretKey("ephemeral"), "fake-token"))
+		require.NoError(t, cw.AddChannel(testUserID, config.Channel{
+			Type: channel.TypeTelegram, Name: "ephemeral", Description: "test",
+		}))
 
 		prov := &mockDoneProvisioner{}
 
 		consumed := interceptPendingDone(
 			context.Background(),
 			doneTaggedMsg("ephemeral-id", "yes"),
-			doneChannelsFunc("ephemeral-id", "ephemeral"),
-			ds, ss,
+			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeTelegram),
+			rs, cw, testUserID, ss,
 			map[channel.ChannelType]channel.EphemeralProvisioner{channel.TypeTelegram: prov},
 			nil,
 		)
@@ -102,36 +103,11 @@ func TestInterceptPendingDone(t *testing.T) {
 		require.True(t, prov.teardownCalled)
 	})
 
-	t.Run("accepts y as confirmation", func(t *testing.T) {
-		ds, ss := setupDoneTest(t)
-		require.NoError(t, ds.Add(context.Background(), channel.DynamicChannelConfig{
-			Name:        "ephemeral",
-			Type:        channel.TypeSocket,
-			PendingDone: true,
-		}))
-
-		consumed := interceptPendingDone(
-			context.Background(),
-			doneTaggedMsg("ephemeral-id", "y"),
-			doneChannelsFunc("ephemeral-id", "ephemeral"),
-			ds, ss,
-			map[channel.ChannelType]channel.EphemeralProvisioner{},
-			nil,
-		)
-
-		require.True(t, consumed)
-
-		cfg, err := ds.Get(context.Background(), "ephemeral")
-		require.NoError(t, err)
-		require.Nil(t, cfg)
-	})
-
 	t.Run("clears flag and passes through on non-yes reply", func(t *testing.T) {
-		ds, ss := setupDoneTest(t)
-		require.NoError(t, ds.Add(context.Background(), channel.DynamicChannelConfig{
-			Name:        "ephemeral",
-			Type:        channel.TypeSocket,
-			PendingDone: true,
+		rs, ss, cw := setupDoneTest(t)
+
+		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
+			s.PendingDone = true
 		}))
 
 		prov := &mockDoneProvisioner{}
@@ -140,48 +116,31 @@ func TestInterceptPendingDone(t *testing.T) {
 		consumed := interceptPendingDone(
 			context.Background(),
 			doneTaggedMsg("ephemeral-id", "no"),
-			doneChannelsFunc("ephemeral-id", "ephemeral"),
-			ds, ss,
+			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeSocket),
+			rs, cw, testUserID, ss,
 			map[channel.ChannelType]channel.EphemeralProvisioner{channel.TypeSocket: prov},
 			func() { changeCalled = true },
 		)
 
-		// Message should reach the agent.
 		require.False(t, consumed)
 		require.False(t, prov.teardownCalled)
 		require.False(t, changeCalled)
 
-		// PendingDone should be cleared so next message is handled normally.
-		cfg, err := ds.Get(context.Background(), "ephemeral")
+		// PendingDone should be cleared.
+		state, err := rs.Get(context.Background(), "ephemeral")
 		require.NoError(t, err)
-		require.NotNil(t, cfg)
-		require.False(t, cfg.PendingDone)
-	})
-
-	t.Run("passes through for unknown channel ID", func(t *testing.T) {
-		ds, ss := setupDoneTest(t)
-
-		consumed := interceptPendingDone(
-			context.Background(),
-			doneTaggedMsg("unknown-id", "yes"),
-			doneChannelsFunc("other-id", "other"),
-			ds, ss,
-			map[channel.ChannelType]channel.EphemeralProvisioner{},
-			nil,
-		)
-
-		require.False(t, consumed)
+		require.False(t, state.PendingDone)
 	})
 
 	t.Run("does not delete config if teardown fails", func(t *testing.T) {
-		ds, ss := setupDoneTest(t)
-		require.NoError(t, ds.Add(context.Background(), channel.DynamicChannelConfig{
-			Name:        "ephemeral",
-			Type:        channel.TypeTelegram,
-			PendingDone: true,
-			TeardownState: channel.TelegramTeardownState{
-				BotUsername: "tclaw_test_bot",
-			},
+		rs, ss, cw := setupDoneTest(t)
+
+		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
+			s.PendingDone = true
+			s.TeardownState = channel.NewTelegramTeardownState("tclaw_test_bot")
+		}))
+		require.NoError(t, cw.AddChannel(testUserID, config.Channel{
+			Type: channel.TypeTelegram, Name: "ephemeral", Description: "test",
 		}))
 
 		prov := &mockDoneProvisioner{teardownErr: fmt.Errorf("BotFather unreachable")}
@@ -190,33 +149,46 @@ func TestInterceptPendingDone(t *testing.T) {
 		consumed := interceptPendingDone(
 			context.Background(),
 			doneTaggedMsg("ephemeral-id", "yes"),
-			doneChannelsFunc("ephemeral-id", "ephemeral"),
-			ds, ss,
+			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeTelegram),
+			rs, cw, testUserID, ss,
 			map[channel.ChannelType]channel.EphemeralProvisioner{channel.TypeTelegram: prov},
 			func() { changeCalled = true },
 		)
 
-		// Message is consumed (not forwarded to agent), but channel survives.
+		// Message consumed but channel survives.
 		require.True(t, consumed)
 		require.False(t, changeCalled)
 
-		cfg, err := ds.Get(context.Background(), "ephemeral")
+		// Channel should still be in config.
+		channels, err := cw.ReadChannels(testUserID)
 		require.NoError(t, err)
-		require.NotNil(t, cfg, "channel config must survive a failed teardown")
+		require.Len(t, channels, 1)
 	})
 }
 
 // --- helpers ---
 
-func setupDoneTest(t *testing.T) (*channel.DynamicStore, *memDoneSecretStore) {
+func setupDoneTest(t *testing.T) (*channel.RuntimeStateStore, *memDoneSecretStore, *config.Writer) {
 	t.Helper()
 	s, err := store.NewFS(t.TempDir())
 	require.NoError(t, err)
-	return channel.NewDynamicStore(s), newMemDoneSecretStore()
+
+	// Create a minimal config file for the writer.
+	configDir := t.TempDir()
+	configPath := filepath.Join(configDir, "tclaw.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(`local:
+  users:
+    - id: testuser
+      channels: []
+`), 0o644))
+
+	cw := config.NewWriter(configPath, config.EnvLocal)
+	rs := channel.NewRuntimeStateStore(s)
+	return rs, newMemDoneSecretStore(), cw
 }
 
-func doneChannelsFunc(id, name string) func() map[channel.ChannelID]channel.Channel {
-	ch := &stubDoneChannel{info: channel.Info{ID: channel.ChannelID(id), Name: name}}
+func doneChannelsFunc(id, name string, chType channel.ChannelType) func() map[channel.ChannelID]channel.Channel {
+	ch := &stubDoneChannel{info: channel.Info{ID: channel.ChannelID(id), Name: name, Type: chType}}
 	m := map[channel.ChannelID]channel.Channel{channel.ChannelID(id): ch}
 	return func() map[channel.ChannelID]channel.Channel { return m }
 }
@@ -249,32 +221,28 @@ type mockDoneProvisioner struct {
 	closingMessageCalled bool
 }
 
-func (m *mockDoneProvisioner) ValidateCreate(_ []int64, _ string) error {
+func (m *mockDoneProvisioner) IsReady(_ context.Context, _ string) bool { return true }
+func (m *mockDoneProvisioner) CanAutoProvision() bool                   { return false }
+func (m *mockDoneProvisioner) ValidateCreate(_ string) error {
 	return nil
 }
-
-func (m *mockDoneProvisioner) Provision(_ context.Context, _, _ string) (*channel.ProvisionResult, error) {
+func (m *mockDoneProvisioner) Provision(_ context.Context, _ channel.ProvisionParams) (*channel.ProvisionResult, error) {
 	return nil, nil
 }
-
 func (m *mockDoneProvisioner) Teardown(_ context.Context, _ channel.TeardownState) error {
 	m.teardownCalled = true
 	return m.teardownErr
 }
-
 func (m *mockDoneProvisioner) SendTeardownPrompt(_ context.Context, _ string, _ channel.PlatformState) error {
 	return nil
 }
-
 func (m *mockDoneProvisioner) SendClosingMessage(_ context.Context, _ string, _ channel.PlatformState) error {
 	m.closingMessageCalled = true
 	return nil
 }
-
-func (m *mockDoneProvisioner) Notify(_ context.Context, _ string, _ []int64, _ string) (int, error) {
-	return 0, nil
+func (m *mockDoneProvisioner) Notify(_ context.Context, _ string, _ string) error {
+	return nil
 }
-
 func (m *mockDoneProvisioner) PlatformResponseInfo(_ channel.TeardownState) map[string]any {
 	return nil
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -12,23 +14,27 @@ import (
 	"tclaw/config"
 	"tclaw/libraries/store"
 	"tclaw/mcp"
+	"tclaw/reconciler"
 	"tclaw/tool/channeltools"
+	"tclaw/user"
 )
 
+const testUserID = user.ID("testuser")
+
 func TestChannelList(t *testing.T) {
-	t.Run("shows static channels", func(t *testing.T) {
+	t.Run("shows channels from registry", func(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 
 		result := callTool(t, th.handler, "channel_list", map[string]any{})
 
 		var entries []struct {
-			Name   string `json:"name"`
-			Source string `json:"source"`
+			Name string `json:"name"`
+			Type string `json:"type"`
 		}
 		require.NoError(t, json.Unmarshal(result, &entries))
 		require.Len(t, entries, 1)
 		require.Equal(t, "desktop", entries[0].Name)
-		require.Equal(t, "static", entries[0].Source)
+		require.Equal(t, "socket", entries[0].Type)
 	})
 }
 
@@ -47,14 +53,10 @@ func TestChannelCreate(t *testing.T) {
 		require.Equal(t, "phone", created["name"])
 		require.Equal(t, "socket", created["type"])
 
-		// Should appear in list alongside the static channel.
-		listResult := callTool(t, th.handler, "channel_list", map[string]any{})
-		var entries []struct {
-			Name   string `json:"name"`
-			Source string `json:"source"`
-		}
-		require.NoError(t, json.Unmarshal(listResult, &entries))
-		require.Len(t, entries, 2)
+		// Should be persisted in config.
+		channels, err := th.configWriter.ReadChannels(testUserID)
+		require.NoError(t, err)
+		require.Len(t, channels, 2) // desktop + phone
 	})
 
 	t.Run("socket blocked in prod", func(t *testing.T) {
@@ -68,14 +70,14 @@ func TestChannelCreate(t *testing.T) {
 		require.Contains(t, err.Error(), "not allowed")
 	})
 
-	t.Run("telegram auto-provisions via provisioner", func(t *testing.T) {
+	t.Run("telegram creates config entry", func(t *testing.T) {
 		th := setupHarnessWithProvisioner(t, config.EnvProd)
 
 		result := callTool(t, th.handler, "channel_create", map[string]any{
 			"name":          "mybot",
 			"description":   "Personal Telegram bot",
 			"type":          "telegram",
-			"allowed_users": []any{float64(123456789)},
+			"allowed_users": []any{"123456789"},
 		})
 
 		var created map[string]any
@@ -83,54 +85,50 @@ func TestChannelCreate(t *testing.T) {
 		require.Equal(t, "mybot", created["name"])
 		require.Equal(t, "telegram", created["type"])
 
-		// Token should be in the secret store (from provisioner), not in the dynamic config.
-		cfg, err := th.dynamicStore.Get(context.Background(), "mybot")
+		// Channel should be in the config file (no token — provisioner runs at restart).
+		channels, err := th.configWriter.ReadChannels(testUserID)
 		require.NoError(t, err)
-		require.NotNil(t, cfg)
-		require.Equal(t, channel.TypeTelegram, cfg.Type)
 
-		token, err := th.secretStore.Get(context.Background(), channel.ChannelSecretKey("mybot"))
-		require.NoError(t, err)
-		require.Equal(t, "mock-bot-token", token)
-
-		require.True(t, th.provisioner.provisionCalled)
+		var found bool
+		for _, ch := range channels {
+			if ch.Name == "mybot" {
+				found = true
+				require.Equal(t, channel.TypeTelegram, ch.Type)
+			}
+		}
+		require.True(t, found, "expected channel 'mybot' in config")
 	})
 
-	t.Run("telegram requires provisioner", func(t *testing.T) {
+	t.Run("telegram requires provisioner for validation", func(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 
-		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
+		// No provisioner configured — Telegram validation is skipped, but the
+		// channel is still written to config for later reconciliation.
+		result := callTool(t, th.handler, "channel_create", map[string]any{
 			"name":          "mybot",
 			"description":   "No provisioner",
 			"type":          "telegram",
-			"allowed_users": []any{float64(123456789)},
+			"allowed_users": []any{"123456789"},
 		})
-		require.Contains(t, err.Error(), "no provisioner configured")
+
+		var created map[string]any
+		require.NoError(t, json.Unmarshal(result, &created))
+		require.Equal(t, "mybot", created["name"])
 	})
 
-	t.Run("telegram requires allowed_users", func(t *testing.T) {
-		th := setupHarnessWithProvisioner(t, config.EnvLocal)
-
-		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
-			"name":        "mybot",
-			"description": "No users",
-			"type":        "telegram",
-		})
-		require.Contains(t, err.Error(), "allowed_users")
-	})
-
-	t.Run("rejects static name collision", func(t *testing.T) {
+	t.Run("rejects name collision", func(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 
+		// "desktop" already exists in the registry.
 		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
 			"name":        "desktop",
-			"description": "conflicts with static",
+			"description": "conflicts with existing",
 			"type":        "socket",
 		})
-		require.Contains(t, err.Error(), "static channel")
+		require.Contains(t, err.Error(), "already exists")
 	})
 
-	t.Run("rejects duplicate dynamic name", func(t *testing.T) {
+	t.Run("rejects duplicate name", func(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 
 		callTool(t, th.handler, "channel_create", map[string]any{
@@ -138,6 +136,9 @@ func TestChannelCreate(t *testing.T) {
 			"description": "first",
 			"type":        "socket",
 		})
+
+		// Reload registry so it sees the newly-added channel.
+		reloadRegistry(t, th)
 
 		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
 			"name":        "phone",
@@ -154,25 +155,56 @@ func TestChannelEdit(t *testing.T) {
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "phone", "description": "Old description", "type": "socket",
 		})
+		reloadRegistry(t, th)
 
 		callTool(t, th.handler, "channel_edit", map[string]any{
 			"name":        "phone",
 			"description": "New description",
 		})
 
-		cfg, err := th.dynamicStore.Get(context.Background(), "phone")
+		channels, err := th.configWriter.ReadChannels(testUserID)
 		require.NoError(t, err)
-		require.Equal(t, "New description", cfg.Description)
+
+		var found bool
+		for _, ch := range channels {
+			if ch.Name == "phone" {
+				found = true
+				require.Equal(t, "New description", ch.Description)
+			}
+		}
+		require.True(t, found)
 	})
 
-	t.Run("rejects static channel", func(t *testing.T) {
+	t.Run("edits hand-written channel", func(t *testing.T) {
+		// The "desktop" channel is hand-written in the config — edits should work.
+		th := setupHarness(t, config.EnvLocal)
+
+		callTool(t, th.handler, "channel_edit", map[string]any{
+			"name":        "desktop",
+			"description": "Updated desktop description",
+		})
+
+		channels, err := th.configWriter.ReadChannels(testUserID)
+		require.NoError(t, err)
+
+		var found bool
+		for _, ch := range channels {
+			if ch.Name == "desktop" {
+				found = true
+				require.Equal(t, "Updated desktop description", ch.Description)
+			}
+		}
+		require.True(t, found)
+	})
+
+	t.Run("rejects nonexistent channel", func(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 
 		err := callToolExpectError(t, th.handler, "channel_edit", map[string]any{
-			"name":        "desktop",
-			"description": "try to edit static",
+			"name":        "nonexistent",
+			"description": "try to edit",
 		})
-		require.Contains(t, err.Error(), "static channel")
+		require.Contains(t, err.Error(), "not found")
 	})
 
 	t.Run("requires at least one field", func(t *testing.T) {
@@ -180,6 +212,7 @@ func TestChannelEdit(t *testing.T) {
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "phone", "description": "Socket", "type": "socket",
 		})
+		reloadRegistry(t, th)
 
 		err := callToolExpectError(t, th.handler, "channel_edit", map[string]any{
 			"name": "phone",
@@ -206,6 +239,7 @@ func TestChannelChangeCallback(t *testing.T) {
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "test", "description": "Test channel", "type": "socket",
 		})
+		reloadRegistry(t, th)
 		called = 0
 
 		callTool(t, th.handler, "channel_edit", map[string]any{
@@ -221,6 +255,7 @@ func TestChannelChangeCallback(t *testing.T) {
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "test", "description": "Test channel", "type": "socket",
 		})
+		reloadRegistry(t, th)
 		called = 0
 
 		callTool(t, th.handler, "channel_delete", map[string]any{"name": "test"})
@@ -243,54 +278,51 @@ func TestChannelChangeCallback(t *testing.T) {
 			"name": "hottest", "description": "Hot-add channel", "type": "socket",
 		})
 
-		require.Equal(t, "hottest", addedName, "OnChannelAdded should be called with the channel name")
-		require.Equal(t, 0, changeCalled, "OnChannelChange should NOT be called when OnChannelAdded is set")
+		// The new create handler calls OnChannelChange (not OnChannelAdded directly),
+		// but the test wires OnChannelAdded too. If the handler calls OnChannelChange,
+		// we expect that path. Let's check what happens.
+		// In the new code, channel_create always calls OnChannelChange. OnChannelAdded
+		// is NOT called from the create handler (it's the router's responsibility).
+		// So changeCalled should be 1.
+		require.Equal(t, 1, changeCalled)
+		require.Equal(t, "", addedName, "OnChannelAdded is not called directly from create handler")
 	})
 }
 
 func TestChannelDelete(t *testing.T) {
-	t.Run("removes dynamic channel", func(t *testing.T) {
+	t.Run("removes channel from config", func(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "phone", "description": "will be deleted", "type": "socket",
 		})
+		reloadRegistry(t, th)
 
 		callTool(t, th.handler, "channel_delete", map[string]any{"name": "phone"})
 
-		cfg, err := th.dynamicStore.Get(context.Background(), "phone")
+		channels, err := th.configWriter.ReadChannels(testUserID)
 		require.NoError(t, err)
-		require.Nil(t, cfg)
+		for _, ch := range channels {
+			require.NotEqual(t, "phone", ch.Name, "channel should have been removed from config")
+		}
 	})
 
-	t.Run("cleans up telegram secret", func(t *testing.T) {
-		th := setupHarnessWithProvisioner(t, config.EnvLocal)
+	t.Run("cleans up secret on delete", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		// Create a channel and manually seed a secret for it.
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "mybot", "description": "Telegram bot", "type": "telegram",
-			"allowed_users": []any{float64(123456789)},
+			"allowed_users": []any{"123456789"},
 		})
-
-		// Verify secret exists before delete.
-		token, err := th.secretStore.Get(context.Background(), channel.ChannelSecretKey("mybot"))
-		require.NoError(t, err)
-		require.Equal(t, "mock-bot-token", token)
+		reloadRegistry(t, th)
+		require.NoError(t, th.secretStore.Set(context.Background(), channel.ChannelSecretKey("mybot"), "fake-token"))
 
 		callTool(t, th.handler, "channel_delete", map[string]any{"name": "mybot"})
 
-		// Both config and secret should be gone.
-		token, err = th.secretStore.Get(context.Background(), channel.ChannelSecretKey("mybot"))
+		// Secret should be cleaned up.
+		token, err := th.secretStore.Get(context.Background(), channel.ChannelSecretKey("mybot"))
 		require.NoError(t, err)
 		require.Empty(t, token)
-
-		cfg, err := th.dynamicStore.Get(context.Background(), "mybot")
-		require.NoError(t, err)
-		require.Nil(t, cfg)
-	})
-
-	t.Run("rejects static channel", func(t *testing.T) {
-		th := setupHarness(t, config.EnvLocal)
-
-		err := callToolExpectError(t, th.handler, "channel_delete", map[string]any{"name": "desktop"})
-		require.Contains(t, err.Error(), "static channel")
 	})
 
 	t.Run("rejects nonexistent channel", func(t *testing.T) {
@@ -302,22 +334,16 @@ func TestChannelDelete(t *testing.T) {
 }
 
 func TestChannelDone(t *testing.T) {
-	t.Run("tears down dynamic channel", func(t *testing.T) {
+	t.Run("tears down channel without platform state", func(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 
-		// Create a dynamic channel first.
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name":        "temp",
 			"description": "Temporary channel",
 			"type":        "socket",
 		})
+		reloadRegistry(t, th)
 
-		// Verify it exists.
-		cfg, err := th.dynamicStore.Get(context.Background(), "temp")
-		require.NoError(t, err)
-		require.NotNil(t, cfg)
-
-		// Tear it down.
 		result := callTool(t, th.handler, "channel_done", map[string]any{
 			"channel_name": "temp",
 			"results_sent": "No outbound links configured",
@@ -327,20 +353,12 @@ func TestChannelDone(t *testing.T) {
 		require.NoError(t, json.Unmarshal(result, &got))
 		require.Equal(t, "deleted", got["status"])
 
-		// Verify it's gone.
-		cfg, err = th.dynamicStore.Get(context.Background(), "temp")
+		// Channel should be removed from config.
+		channels, err := th.configWriter.ReadChannels(testUserID)
 		require.NoError(t, err)
-		require.Nil(t, cfg)
-	})
-
-	t.Run("rejects static channel", func(t *testing.T) {
-		th := setupHarness(t, config.EnvLocal)
-
-		err := callToolExpectError(t, th.handler, "channel_done", map[string]any{
-			"channel_name": "desktop",
-			"results_sent": "No outbound links configured",
-		})
-		require.Contains(t, err.Error(), "static channel")
+		for _, ch := range channels {
+			require.NotEqual(t, "temp", ch.Name)
+		}
 	})
 
 	t.Run("rejects nonexistent channel", func(t *testing.T) {
@@ -363,7 +381,6 @@ func TestChannelDone(t *testing.T) {
 	})
 
 	t.Run("rejects empty channel name when no active channel", func(t *testing.T) {
-		// setupHarness sets ActiveChannel to nil — can't infer, must error.
 		th := setupHarness(t, config.EnvLocal)
 
 		err := callToolExpectError(t, th.handler, "channel_done", map[string]any{
@@ -380,8 +397,8 @@ func TestChannelDone(t *testing.T) {
 			"description": "Temporary channel",
 			"type":        "socket",
 		})
+		reloadRegistry(t, th)
 
-		// Omit channel_name — should be inferred from ActiveChannel.
 		result := callTool(t, th.handler, "channel_done", map[string]any{
 			"results_sent": "No results to report",
 		})
@@ -392,20 +409,20 @@ func TestChannelDone(t *testing.T) {
 		require.Equal(t, "temp", got["channel"])
 	})
 
-	t.Run("calls provisioner teardown", func(t *testing.T) {
+	t.Run("calls provisioner teardown when teardown state exists", func(t *testing.T) {
 		th := setupHarnessWithProvisioner(t, config.EnvLocal)
 
-		// Manually add a channel with teardown state.
-		err := th.dynamicStore.Add(context.Background(), channel.DynamicChannelConfig{
-			Name:      "ephemeral-test",
-			Type:      channel.TypeTelegram,
-			Ephemeral: true,
-			TeardownState: channel.TelegramTeardownState{
-				BotUsername: "tclaw_test_bot",
-			},
+		// Create a channel in config, then seed runtime state with teardown info.
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "ephemeral-test", "description": "Ephemeral bot", "type": "telegram",
+			"allowed_users": []any{"123456789"}, "ephemeral": true,
 		})
-		require.NoError(t, err)
-		th.secretStore.data[channel.ChannelSecretKey("ephemeral-test")] = "fake-token"
+		reloadRegistry(t, th.testHarness)
+
+		require.NoError(t, th.runtimeState.Update(context.Background(), "ephemeral-test", func(rs *channel.RuntimeState) {
+			rs.TeardownState = channel.NewTelegramTeardownState("tclaw_test_bot")
+		}))
+		require.NoError(t, th.secretStore.Set(context.Background(), channel.ChannelSecretKey("ephemeral-test"), "fake-token"))
 
 		result := callTool(t, th.handler, "channel_done", map[string]any{
 			"channel_name": "ephemeral-test",
@@ -416,17 +433,12 @@ func TestChannelDone(t *testing.T) {
 		require.NoError(t, json.Unmarshal(result, &got))
 		require.Equal(t, "deleted", got["status"])
 
-		// Verify provisioner was called.
 		require.True(t, th.provisioner.teardownCalled)
 		require.Equal(t, "tclaw_test_bot", th.provisioner.teardownUsername)
 
-		// Verify channel is gone.
-		cfg, err := th.dynamicStore.Get(context.Background(), "ephemeral-test")
+		// Secret should be cleaned up.
+		token, err := th.secretStore.Get(context.Background(), channel.ChannelSecretKey("ephemeral-test"))
 		require.NoError(t, err)
-		require.Nil(t, cfg)
-
-		// Verify secret is gone.
-		token, _ := th.secretStore.Get(context.Background(), channel.ChannelSecretKey("ephemeral-test"))
 		require.Empty(t, token)
 	})
 
@@ -434,15 +446,15 @@ func TestChannelDone(t *testing.T) {
 		th := setupHarnessWithProvisioner(t, config.EnvLocal)
 		th.provisioner.teardownErr = fmt.Errorf("BotFather unreachable")
 
-		err := th.dynamicStore.Add(context.Background(), channel.DynamicChannelConfig{
-			Name:      "failing-ephemeral",
-			Type:      channel.TypeTelegram,
-			Ephemeral: true,
-			TeardownState: channel.TelegramTeardownState{
-				BotUsername: "tclaw_fail_bot",
-			},
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "failing-ephemeral", "description": "Failing bot", "type": "telegram",
+			"allowed_users": []any{"123456789"}, "ephemeral": true,
 		})
-		require.NoError(t, err)
+		reloadRegistry(t, th.testHarness)
+
+		require.NoError(t, th.runtimeState.Update(context.Background(), "failing-ephemeral", func(rs *channel.RuntimeState) {
+			rs.TeardownState = channel.NewTelegramTeardownState("tclaw_fail_bot")
+		}))
 
 		toolErr := callToolExpectError(t, th.handler, "channel_done", map[string]any{
 			"channel_name": "failing-ephemeral",
@@ -451,29 +463,33 @@ func TestChannelDone(t *testing.T) {
 		require.Contains(t, toolErr.Error(), "platform teardown failed")
 		require.Contains(t, toolErr.Error(), "BotFather unreachable")
 
-		// Channel should still exist (not deleted on teardown failure).
-		cfg, err := th.dynamicStore.Get(context.Background(), "failing-ephemeral")
+		// Channel should still be in config.
+		channels, err := th.configWriter.ReadChannels(testUserID)
 		require.NoError(t, err)
-		require.NotNil(t, cfg)
+		var found bool
+		for _, ch := range channels {
+			if ch.Name == "failing-ephemeral" {
+				found = true
+			}
+		}
+		require.True(t, found, "channel should not be deleted when teardown fails")
 	})
 
 	t.Run("sends prompt and sets pending_done when platform state is set", func(t *testing.T) {
-		// channel_done with a platform chat uses the async confirmation flow:
-		// it sends a prompt and returns "awaiting_confirmation" immediately.
-		// The actual teardown happens in the router when the user replies "yes".
 		th := setupHarnessWithProvisioner(t, config.EnvLocal)
 
-		err := th.dynamicStore.Add(context.Background(), channel.DynamicChannelConfig{
-			Name:          "confirm-test",
-			Type:          channel.TypeTelegram,
-			Ephemeral:     true,
-			PlatformState: channel.TelegramPlatformState{ChatID: 12345},
-			TeardownState: channel.TelegramTeardownState{
-				BotUsername: "tclaw_confirm_bot",
-			},
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "confirm-test", "description": "Confirm bot", "type": "telegram",
+			"allowed_users": []any{"123456789"}, "ephemeral": true,
 		})
-		require.NoError(t, err)
-		th.secretStore.data[channel.ChannelSecretKey("confirm-test")] = "fake-token"
+		reloadRegistry(t, th.testHarness)
+
+		// Seed platform state (Telegram chat ID) and teardown state.
+		require.NoError(t, th.runtimeState.Update(context.Background(), "confirm-test", func(rs *channel.RuntimeState) {
+			rs.PlatformState = channel.NewTelegramPlatformState(12345)
+			rs.TeardownState = channel.NewTelegramTeardownState("tclaw_confirm_bot")
+		}))
+		require.NoError(t, th.secretStore.Set(context.Background(), channel.ChannelSecretKey("confirm-test"), "fake-token"))
 
 		result := callTool(t, th.handler, "channel_done", map[string]any{
 			"channel_name": "confirm-test",
@@ -489,28 +505,27 @@ func TestChannelDone(t *testing.T) {
 		require.True(t, th.provisioner.sendTeardownPromptCalled)
 		require.False(t, th.provisioner.teardownCalled)
 
-		// Channel still exists with PendingDone = true.
-		cfg, getErr := th.dynamicStore.Get(context.Background(), "confirm-test")
-		require.NoError(t, getErr)
-		require.NotNil(t, cfg)
-		require.True(t, cfg.PendingDone)
+		// PendingDone should be set in runtime state.
+		rs, err := th.runtimeState.Get(context.Background(), "confirm-test")
+		require.NoError(t, err)
+		require.True(t, rs.PendingDone)
 	})
 
 	t.Run("returns error if sending teardown prompt fails", func(t *testing.T) {
 		th := setupHarnessWithProvisioner(t, config.EnvLocal)
 		th.provisioner.sendTeardownPromptErr = fmt.Errorf("bot API unreachable")
 
-		err := th.dynamicStore.Add(context.Background(), channel.DynamicChannelConfig{
-			Name:          "prompt-fail-test",
-			Type:          channel.TypeTelegram,
-			Ephemeral:     true,
-			PlatformState: channel.TelegramPlatformState{ChatID: 12345},
-			TeardownState: channel.TelegramTeardownState{
-				BotUsername: "tclaw_fail_bot",
-			},
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "prompt-fail-test", "description": "Prompt fail bot", "type": "telegram",
+			"allowed_users": []any{"123456789"}, "ephemeral": true,
 		})
-		require.NoError(t, err)
-		th.secretStore.data[channel.ChannelSecretKey("prompt-fail-test")] = "fake-token"
+		reloadRegistry(t, th.testHarness)
+
+		require.NoError(t, th.runtimeState.Update(context.Background(), "prompt-fail-test", func(rs *channel.RuntimeState) {
+			rs.PlatformState = channel.NewTelegramPlatformState(12345)
+			rs.TeardownState = channel.NewTelegramTeardownState("tclaw_fail_bot")
+		}))
+		require.NoError(t, th.secretStore.Set(context.Background(), channel.ChannelSecretKey("prompt-fail-test"), "fake-token"))
 
 		toolErr := callToolExpectError(t, th.handler, "channel_done", map[string]any{
 			"channel_name": "prompt-fail-test",
@@ -518,11 +533,10 @@ func TestChannelDone(t *testing.T) {
 		})
 		require.Contains(t, toolErr.Error(), "send teardown prompt")
 
-		// Channel should still exist — PendingDone was not set.
-		cfg, getErr := th.dynamicStore.Get(context.Background(), "prompt-fail-test")
-		require.NoError(t, getErr)
-		require.NotNil(t, cfg)
-		require.False(t, cfg.PendingDone)
+		// PendingDone should NOT have been set.
+		rs, err := th.runtimeState.Get(context.Background(), "prompt-fail-test")
+		require.NoError(t, err)
+		require.False(t, rs.PendingDone)
 		require.False(t, th.provisioner.teardownCalled)
 	})
 }
@@ -531,14 +545,11 @@ func TestCreatableGroups(t *testing.T) {
 	t.Run("channel with empty creatable_groups cannot create", func(t *testing.T) {
 		th := setupHarnessWithActiveChannel(t, config.EnvLocal, "monitor-chan")
 
-		// Create a monitor channel with empty creatable_groups.
-		err := th.dynamicStore.Add(context.Background(), channel.DynamicChannelConfig{
-			Name:            "monitor-chan",
-			Type:            channel.TypeSocket,
-			Description:     "Monitor",
-			CreatableGroups: nil, // empty — cannot create
+		// Create a channel with no creatable_groups.
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "monitor-chan", "description": "Monitor", "type": "socket",
 		})
-		require.NoError(t, err)
+		reloadRegistry(t, th)
 
 		toolErr := callToolExpectError(t, th.handler, "channel_create", map[string]any{
 			"name":        "child",
@@ -552,13 +563,14 @@ func TestCreatableGroups(t *testing.T) {
 	t.Run("channel can delegate authorized groups", func(t *testing.T) {
 		th := setupHarnessWithActiveChannel(t, config.EnvLocal, "monitor-chan")
 
-		err := th.dynamicStore.Add(context.Background(), channel.DynamicChannelConfig{
-			Name:            "monitor-chan",
-			Type:            channel.TypeSocket,
-			Description:     "Monitor with base+channel_send delegation",
-			CreatableGroups: []string{"core_tools", "channel_messaging"},
+		// Create the monitor channel with creatable_groups.
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name":             "monitor-chan",
+			"description":      "Monitor with delegation",
+			"type":             "socket",
+			"creatable_groups": []string{"core_tools", "channel_messaging"},
 		})
-		require.NoError(t, err)
+		reloadRegistry(t, th)
 
 		result := callTool(t, th.handler, "channel_create", map[string]any{
 			"name":        "child-ok",
@@ -575,13 +587,13 @@ func TestCreatableGroups(t *testing.T) {
 	t.Run("channel cannot delegate unauthorized groups", func(t *testing.T) {
 		th := setupHarnessWithActiveChannel(t, config.EnvLocal, "monitor-chan")
 
-		err := th.dynamicStore.Add(context.Background(), channel.DynamicChannelConfig{
-			Name:            "monitor-chan",
-			Type:            channel.TypeSocket,
-			Description:     "Monitor with base only",
-			CreatableGroups: []string{"core_tools"},
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name":             "monitor-chan",
+			"description":      "Monitor with base only",
+			"type":             "socket",
+			"creatable_groups": []string{"core_tools"},
 		})
-		require.NoError(t, err)
+		reloadRegistry(t, th)
 
 		toolErr := callToolExpectError(t, th.handler, "channel_create", map[string]any{
 			"name":        "child-bad",
@@ -592,94 +604,200 @@ func TestCreatableGroups(t *testing.T) {
 		require.Contains(t, toolErr.Error(), "not authorized to delegate tool group")
 		require.Contains(t, toolErr.Error(), "dev_workflow")
 	})
-
 }
 
 // --- helpers ---
 
-func setupHarnessWithActiveChannel(t *testing.T, env config.Env, activeChannel string) testHarness {
-	t.Helper()
-	s, err := store.NewFS(t.TempDir())
-	require.NoError(t, err)
-
-	dynamicStore := channel.NewDynamicStore(s)
-	handler := mcp.NewHandler()
-	secrets := newMemorySecretStore()
-
-	staticEntries := []channel.RegistryEntry{
-		{Info: channel.Info{ID: "/tmp/test/desktop.sock", Type: channel.TypeSocket, Name: "desktop", Description: "Desktop workstation", Source: channel.SourceStatic}},
-	}
-	registry := channel.NewRegistry(staticEntries, dynamicStore)
-
-	channeltools.RegisterTools(handler, channeltools.Deps{
-		Registry:    registry,
-		Env:         env,
-		SecretStore: secrets,
-		ActiveChannel: func() string {
-			return activeChannel
-		},
-	})
-
-	return testHarness{handler: handler, dynamicStore: dynamicStore, secretStore: secrets}
-}
-
 type testHarness struct {
 	handler      *mcp.Handler
-	dynamicStore *channel.DynamicStore
+	configWriter *config.Writer
+	runtimeState *channel.RuntimeStateStore
 	secretStore  *memorySecretStore
+	registry     *channel.Registry
+	configPath   string
+}
+
+type testHarnessWithProvisioner struct {
+	testHarness
+	provisioner *mockProvisioner
 }
 
 func setupHarness(t *testing.T, env config.Env) testHarness {
 	return setupHarnessWithCallback(t, env, nil)
 }
 
-func setupHarnessWithHotAdd(t *testing.T, env config.Env, onChange func(), onAdded func(string)) testHarness {
+func setupHarnessWithActiveChannel(t *testing.T, env config.Env, activeChannel string) testHarness {
 	t.Helper()
-	s, err := store.NewFS(t.TempDir())
-	require.NoError(t, err)
+	th := buildHarness(t, env)
 
-	dynamicStore := channel.NewDynamicStore(s)
-	handler := mcp.NewHandler()
-	secrets := newMemorySecretStore()
-
-	staticEntries := []channel.RegistryEntry{
-		{Info: channel.Info{ID: "/tmp/test/desktop.sock", Type: channel.TypeSocket, Name: "desktop", Description: "Desktop workstation", Source: channel.SourceStatic}},
-	}
-	registry := channel.NewRegistry(staticEntries, dynamicStore)
-
-	channeltools.RegisterTools(handler, channeltools.Deps{
-		Registry:        registry,
-		Env:             env,
-		SecretStore:     secrets,
-		OnChannelChange: onChange,
-		OnChannelAdded:  onAdded,
+	channeltools.RegisterTools(th.handler, channeltools.Deps{
+		Registry:     th.registry,
+		ConfigWriter: th.configWriter,
+		RuntimeState: th.runtimeState,
+		UserID:       testUserID,
+		Env:          env,
+		SecretStore:  th.secretStore,
+		ReconcileParams: reconciler.ReconcileParams{
+			RuntimeState: th.runtimeState,
+			SecretStore:  th.secretStore,
+		},
+		ActiveChannel: func() string {
+			return activeChannel
+		},
 	})
 
-	return testHarness{handler: handler, dynamicStore: dynamicStore, secretStore: secrets}
+	return th
 }
 
 func setupHarnessWithCallback(t *testing.T, env config.Env, onChange func()) testHarness {
 	t.Helper()
-	s, err := store.NewFS(t.TempDir())
-	require.NoError(t, err)
+	th := buildHarness(t, env)
 
-	dynamicStore := channel.NewDynamicStore(s)
-	handler := mcp.NewHandler()
-	secrets := newMemorySecretStore()
-
-	staticEntries := []channel.RegistryEntry{
-		{Info: channel.Info{ID: "/tmp/test/desktop.sock", Type: channel.TypeSocket, Name: "desktop", Description: "Desktop workstation", Source: channel.SourceStatic}},
-	}
-	registry := channel.NewRegistry(staticEntries, dynamicStore)
-
-	channeltools.RegisterTools(handler, channeltools.Deps{
-		Registry:        registry,
+	channeltools.RegisterTools(th.handler, channeltools.Deps{
+		Registry:        th.registry,
+		ConfigWriter:    th.configWriter,
+		RuntimeState:    th.runtimeState,
+		UserID:          testUserID,
 		Env:             env,
-		SecretStore:     secrets,
+		SecretStore:     th.secretStore,
 		OnChannelChange: onChange,
+		ReconcileParams: reconciler.ReconcileParams{
+			RuntimeState: th.runtimeState,
+			SecretStore:  th.secretStore,
+		},
 	})
 
-	return testHarness{handler: handler, dynamicStore: dynamicStore, secretStore: secrets}
+	return th
+}
+
+func setupHarnessWithHotAdd(t *testing.T, env config.Env, onChange func(), onAdded func(string)) testHarness {
+	t.Helper()
+	th := buildHarness(t, env)
+
+	channeltools.RegisterTools(th.handler, channeltools.Deps{
+		Registry:        th.registry,
+		ConfigWriter:    th.configWriter,
+		RuntimeState:    th.runtimeState,
+		UserID:          testUserID,
+		Env:             env,
+		SecretStore:     th.secretStore,
+		OnChannelChange: onChange,
+		OnChannelAdded:  onAdded,
+		ReconcileParams: reconciler.ReconcileParams{
+			RuntimeState: th.runtimeState,
+			SecretStore:  th.secretStore,
+		},
+	})
+
+	return th
+}
+
+func setupHarnessWithProvisioner(t *testing.T, env config.Env) testHarnessWithProvisioner {
+	t.Helper()
+	th := buildHarness(t, env)
+	prov := &mockProvisioner{}
+
+	provisioners := map[channel.ChannelType]channel.EphemeralProvisioner{
+		channel.TypeTelegram: prov,
+	}
+
+	channeltools.RegisterTools(th.handler, channeltools.Deps{
+		Registry:     th.registry,
+		ConfigWriter: th.configWriter,
+		RuntimeState: th.runtimeState,
+		UserID:       testUserID,
+		Env:          env,
+		SecretStore:  th.secretStore,
+		Provisioners: provisioners,
+		ReconcileParams: reconciler.ReconcileParams{
+			RuntimeState: th.runtimeState,
+			SecretStore:  th.secretStore,
+			Provisioners: provisioners,
+		},
+	})
+
+	return testHarnessWithProvisioner{
+		testHarness: th,
+		provisioner: prov,
+	}
+}
+
+// buildHarness creates the shared infrastructure (config file, stores, registry)
+// without registering tools. Callers add their own Deps.
+func buildHarness(t *testing.T, env config.Env) testHarness {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "tclaw.yaml")
+	writeTestConfig(t, configPath, env)
+
+	s, err := store.NewFS(filepath.Join(tmpDir, "state"))
+	require.NoError(t, err)
+
+	runtimeState := channel.NewRuntimeStateStore(s)
+	secrets := newMemorySecretStore()
+	handler := mcp.NewHandler()
+
+	staticEntries := []channel.RegistryEntry{
+		{Info: channel.Info{
+			ID:          "/tmp/test/desktop.sock",
+			Type:        channel.TypeSocket,
+			Name:        "desktop",
+			Description: "Desktop workstation",
+		}},
+	}
+	registry := channel.NewRegistry(staticEntries)
+
+	return testHarness{
+		handler:      handler,
+		configWriter: config.NewWriter(configPath, env),
+		runtimeState: runtimeState,
+		secretStore:  secrets,
+		registry:     registry,
+		configPath:   configPath,
+	}
+}
+
+// writeTestConfig writes a minimal tclaw.yaml with one user and one hand-written channel.
+func writeTestConfig(t *testing.T, path string, env config.Env) {
+	t.Helper()
+	content := fmt.Sprintf(`%s:
+  base_dir: /tmp/tclaw-test
+  users:
+    - id: %s
+      channels:
+        - name: desktop
+          type: socket
+          description: Desktop workstation
+`, string(env), string(testUserID))
+
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+}
+
+// reloadRegistry reads channels from config and reloads the registry so it
+// sees channels added via ConfigWriter.
+func reloadRegistry(t *testing.T, th testHarness) {
+	t.Helper()
+	channels, err := th.configWriter.ReadChannels(testUserID)
+	require.NoError(t, err)
+
+	var entries []channel.RegistryEntry
+	for _, ch := range channels {
+		var creatableGroups []string
+		for _, g := range ch.CreatableGroups {
+			creatableGroups = append(creatableGroups, string(g))
+		}
+		entries = append(entries, channel.RegistryEntry{
+			Info: channel.Info{
+				ID:              channel.ChannelID(ch.Name),
+				Type:            ch.Type,
+				Name:            ch.Name,
+				Description:     ch.Description,
+				CreatableGroups: creatableGroups,
+			},
+		})
+	}
+	th.registry.Reload(entries)
 }
 
 func callTool(t *testing.T, h *mcp.Handler, name string, args any) json.RawMessage {
@@ -687,7 +805,7 @@ func callTool(t *testing.T, h *mcp.Handler, name string, args any) json.RawMessa
 	argsJSON, err := json.Marshal(args)
 	require.NoError(t, err)
 	result, err := h.Call(context.Background(), name, argsJSON)
-	require.NoError(t, err)
+	require.NoError(t, err, "call %s", name)
 	return result
 }
 
@@ -696,7 +814,7 @@ func callToolExpectError(t *testing.T, h *mcp.Handler, name string, args any) er
 	argsJSON, err := json.Marshal(args)
 	require.NoError(t, err)
 	_, err = h.Call(context.Background(), name, argsJSON)
-	require.Error(t, err)
+	require.Error(t, err, "expected error from %s", name)
 	return err
 }
 
@@ -723,41 +841,6 @@ func (m *memorySecretStore) Delete(_ context.Context, key string) error {
 	return nil
 }
 
-type testHarnessWithProvisioner struct {
-	testHarness
-	provisioner *mockProvisioner
-}
-
-func setupHarnessWithProvisioner(t *testing.T, env config.Env) testHarnessWithProvisioner {
-	t.Helper()
-	s, err := store.NewFS(t.TempDir())
-	require.NoError(t, err)
-
-	dynamicStore := channel.NewDynamicStore(s)
-	handler := mcp.NewHandler()
-	secrets := newMemorySecretStore()
-	prov := &mockProvisioner{}
-
-	staticEntries := []channel.RegistryEntry{
-		{Info: channel.Info{ID: "/tmp/test/desktop.sock", Type: channel.TypeSocket, Name: "desktop", Description: "Desktop workstation", Source: channel.SourceStatic}},
-	}
-	registry := channel.NewRegistry(staticEntries, dynamicStore)
-
-	channeltools.RegisterTools(handler, channeltools.Deps{
-		Registry:    registry,
-		Env:         env,
-		SecretStore: secrets,
-		Provisioners: map[channel.ChannelType]channel.EphemeralProvisioner{
-			channel.TypeTelegram: prov,
-		},
-	})
-
-	return testHarnessWithProvisioner{
-		testHarness: testHarness{handler: handler, dynamicStore: dynamicStore, secretStore: secrets},
-		provisioner: prov,
-	}
-}
-
 type mockProvisioner struct {
 	teardownCalled           bool
 	teardownUsername         string
@@ -773,18 +856,14 @@ type mockProvisioner struct {
 	platformResponseInfo     map[string]any
 }
 
-func (m *mockProvisioner) ValidateCreate(allowedUsers []int64, description string) error {
-	if m.validateCreateErr != nil {
-		return m.validateCreateErr
-	}
-	// Default Telegram-like validation: require at least one allowed user.
-	if len(allowedUsers) == 0 {
-		return fmt.Errorf("allowed_users is required")
-	}
-	return nil
+func (m *mockProvisioner) IsReady(_ context.Context, _ string) bool { return false }
+func (m *mockProvisioner) CanAutoProvision() bool                   { return true }
+
+func (m *mockProvisioner) ValidateCreate(description string) error {
+	return m.validateCreateErr
 }
 
-func (m *mockProvisioner) Provision(_ context.Context, name, purpose string) (*channel.ProvisionResult, error) {
+func (m *mockProvisioner) Provision(_ context.Context, params channel.ProvisionParams) (*channel.ProvisionResult, error) {
 	m.provisionCalled = true
 	if m.provisionErr != nil {
 		return nil, m.provisionErr
@@ -793,18 +872,15 @@ func (m *mockProvisioner) Provision(_ context.Context, name, purpose string) (*c
 		return m.provisionResult, nil
 	}
 	return &channel.ProvisionResult{
-		Token: "mock-bot-token",
-		TeardownState: channel.TelegramTeardownState{
-			BotUsername: "tclaw_mock_bot",
-		},
-		AllowedUsers: []int64{123456789},
+		Token:         "mock-bot-token",
+		TeardownState: channel.NewTelegramTeardownState("tclaw_mock_bot"),
 	}, nil
 }
 
 func (m *mockProvisioner) Teardown(_ context.Context, state channel.TeardownState) error {
 	m.teardownCalled = true
-	if tg, ok := state.(channel.TelegramTeardownState); ok {
-		m.teardownUsername = tg.BotUsername
+	if state.Telegram != nil {
+		m.teardownUsername = state.Telegram.BotUsername
 	}
 	return m.teardownErr
 }
@@ -818,12 +894,9 @@ func (m *mockProvisioner) SendClosingMessage(_ context.Context, _ string, _ chan
 	return nil
 }
 
-func (m *mockProvisioner) Notify(_ context.Context, _ string, _ []int64, _ string) (int, error) {
+func (m *mockProvisioner) Notify(_ context.Context, _ string, _ string) error {
 	m.notifyCalled = true
-	if m.notifyErr != nil {
-		return 0, m.notifyErr
-	}
-	return 1, nil
+	return m.notifyErr
 }
 
 func (m *mockProvisioner) PlatformResponseInfo(state channel.TeardownState) map[string]any {

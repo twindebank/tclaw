@@ -15,7 +15,7 @@ const ToolChannelDelete = "channel_delete"
 func channelDeleteDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name:        ToolChannelDelete,
-		Description: "Delete a dynamic channel. Cannot delete static channels (from config file). The agent restarts automatically to apply the change.",
+		Description: "Delete a channel. Removes it from config and cleans up any platform resources. The agent restarts automatically to apply the change.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -40,41 +40,41 @@ func channelDeleteHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
-		// Look up the dynamic channel first — even if a static channel with the
-		// same name exists, we can still delete the dynamic one.
-		cfg, err := deps.Registry.DynamicStore().Get(ctx, a.Name)
-		if err != nil {
-			return nil, fmt.Errorf("look up channel: %w", err)
-		}
-		if cfg == nil {
-			if deps.Registry.IsStatic(a.Name) {
-				return nil, fmt.Errorf("channel %q is a static channel (from config file) and cannot be deleted", a.Name)
-			}
+		if !deps.Registry.NameExists(a.Name) {
 			return nil, fmt.Errorf("channel %q not found", a.Name)
 		}
 
-		if err := deps.Registry.DynamicStore().Remove(ctx, a.Name); err != nil {
-			return nil, fmt.Errorf("delete channel: %w", err)
+		if err := deps.ConfigWriter.RemoveChannel(deps.UserID, a.Name); err != nil {
+			return nil, fmt.Errorf("delete channel from config: %w", err)
 		}
 
-		// Clean up any associated secrets (e.g. bot token). Best-effort since
-		// the channel config is already removed — an orphaned secret is less
-		// harmful than telling the agent the delete failed. Include a warning
-		// in the response so the error is visible.
-		var secretWarning string
+		// Clean up runtime state and secrets. Best-effort since the config
+		// entry is already removed — an orphaned secret is less harmful than
+		// telling the agent the delete failed.
+		var warnings []string
+
+		if err := deps.RuntimeState.Delete(ctx, a.Name); err != nil {
+			slog.Warn("failed to clean up runtime state after delete", "channel", a.Name, "err", err)
+			warnings = append(warnings, fmt.Sprintf("runtime state cleanup: %v", err))
+		}
+
 		if err := deps.SecretStore.Delete(ctx, channel.ChannelSecretKey(a.Name)); err != nil {
 			slog.Warn("failed to clean up channel secret after delete", "channel", a.Name, "err", err)
-			secretWarning = fmt.Sprintf(" Warning: failed to clean up channel secret: %v", err)
+			warnings = append(warnings, fmt.Sprintf("secret cleanup: %v", err))
 		}
 
 		if deps.OnChannelChange != nil {
 			deps.OnChannelChange()
 		}
 
-		result := map[string]any{
-			"name":    a.Name,
-			"message": fmt.Sprintf("Channel %q deleted. The agent will restart automatically to apply the change.%s", a.Name, secretWarning),
+		msg := fmt.Sprintf("Channel %q deleted. The agent will restart automatically.", a.Name)
+		if len(warnings) > 0 {
+			msg += fmt.Sprintf(" Warnings: %v", warnings)
 		}
-		return json.Marshal(result)
+
+		return json.Marshal(map[string]string{
+			"name":    a.Name,
+			"message": msg,
+		})
 	}
 }

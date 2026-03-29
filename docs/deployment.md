@@ -23,7 +23,35 @@ tclaw deploy status      # Check app status
 tclaw deploy logs        # Show recent logs (same as tclaw logs)
 tclaw deploy suspend     # Spin down (scale to 0)
 tclaw deploy resume      # Spin up (scale to 1)
+tclaw config sync        # Sync tclaw.yaml between local and remote
+tclaw config diff        # Show differences between local and remote config
 ```
+
+## Config Sync
+
+`tclaw config sync` keeps the local `tclaw.yaml` and the remote copy on the Fly volume in sync. It handles the common case where the agent creates channels at runtime in production (written to the remote config) while you edit the config locally.
+
+**What it does:**
+
+1. Reads both local `tclaw.yaml` and the remote config via `fly ssh console`
+2. Parses both configs and compares channels per environment/user
+3. Detects expired ephemeral channels on the remote and skips them (based on `created_at` + `ephemeral_idle_timeout`, default 24h)
+4. Flags remote-only channels for manual review (printed to stdout with a note to use `tclaw config diff`)
+5. Pushes the merged config to both local disk and the remote Fly volume
+6. Runs `tclaw deploy secrets` automatically to sync secrets alongside the config
+
+**What it does not do (yet):**
+
+- Auto-merge remote-only channels into the local config. Full YAML merge is complex, so remote-only channels are flagged for review. Use `tclaw config diff` to inspect them, then edit `tclaw.yaml` manually if you want to keep them.
+
+**Typical workflow:**
+
+```
+tclaw config diff        # Preview what's different
+tclaw config sync        # Sync configs + secrets
+```
+
+`tclaw config diff` reads both configs via SSH and runs a unified diff (`diff -u`) with `remote:` and `local:` labels. If the configs are identical it prints a confirmation and exits.
 
 ## First-Time Setup
 1. `brew install flyctl && fly auth login`

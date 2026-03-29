@@ -47,7 +47,7 @@ func GenerateID() ScheduleID {
 }
 
 // Store manages CRUD for scheduled prompts, stored as a JSON array
-// under a single key (same pattern as channel.DynamicStore).
+// under a single key.
 type Store struct {
 	store store.Store
 }

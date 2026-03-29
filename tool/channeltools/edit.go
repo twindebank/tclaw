@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"tclaw/channel"
+	"tclaw/config"
 	"tclaw/mcp"
 )
 
@@ -14,7 +15,7 @@ const ToolChannelEdit = "channel_edit"
 func channelEditDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name:        ToolChannelEdit,
-		Description: "Update a dynamic channel's description, tool permissions, or access control. Cannot modify static channels (from config file). The agent restarts automatically to apply changes.",
+		Description: "Update a channel's description, tool permissions, or access control. The agent restarts automatically to apply changes.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -28,13 +29,13 @@ func channelEditDef() mcp.ToolDef {
 				},
 				"allowed_users": {
 					"type": "array",
-					"items": {"type": "integer"},
+					"items": {"type": "string"},
 					"description": "Platform user IDs for access control. Replaces existing list."
 				},
 				"allowed_tools": {
 					"type": "array",
 					"items": {"type": "string"},
-					"description": "Tools this channel is allowed to use. Replaces any existing allowed_tools for this channel."
+					"description": "Tools this channel is allowed to use. Replaces any existing allowed_tools."
 				},
 				"disallowed_tools": {
 					"type": "array",
@@ -62,7 +63,7 @@ func channelEditDef() mcp.ToolDef {
 type channelEditArgs struct {
 	Name            string          `json:"name"`
 	Description     string          `json:"description"`
-	AllowedUsers    *[]int64        `json:"allowed_users"`
+	AllowedUsers    *[]string       `json:"allowed_users"`
 	AllowedTools    []string        `json:"allowed_tools"`
 	DisallowedTools []string        `json:"disallowed_tools"`
 	Links           *[]channel.Link `json:"links"`
@@ -79,72 +80,12 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("at least one of 'description', 'allowed_users', 'allowed_tools', 'disallowed_tools', or 'links' must be provided")
 		}
 
-		// Reject editing static channels — they are defined in the live config
-		// file (gitignored, not in source control). Return a helpful error with
-		// the exact file path and YAML snippet so the agent can edit it directly
-		// using Read/Edit tools, then deploy to apply the change.
-		if deps.Registry.IsStatic(a.Name) {
-			return nil, fmt.Errorf(
-				"channel %q is a static channel defined in %s.\n\n"+
-					"tclaw.yaml is not in git — edit it directly using the Read/Edit tools at that path, "+
-					"then run deploy to apply the change.\n\n"+
-					"Add a links section under the channel's entry:\n\n"+
-					"    channels:\n"+
-					"      - name: %s\n"+
-					"        links:\n"+
-					"          - target: <target-channel>\n"+
-					"            description: \"When to use this link\"",
-				a.Name, deps.ConfigPath, a.Name,
-			)
+		if !deps.Registry.NameExists(a.Name) {
+			return nil, fmt.Errorf("channel %q not found", a.Name)
 		}
 
-		cfg, err := deps.Registry.DynamicStore().Get(ctx, a.Name)
-		if err != nil {
-			return nil, fmt.Errorf("look up channel: %w", err)
-		}
-		if cfg == nil {
-			return nil, fmt.Errorf("dynamic channel %q not found", a.Name)
-		}
-
-		if a.Description != "" {
-			if err := deps.Registry.DynamicStore().Update(ctx, a.Name, func(c *channel.DynamicChannelConfig) {
-				c.Description = a.Description
-			}); err != nil {
-				return nil, fmt.Errorf("edit channel: %w", err)
-			}
-		}
-
-		if a.AllowedTools != nil || a.DisallowedTools != nil {
-			if err := deps.Registry.DynamicStore().Update(ctx, a.Name, func(c *channel.DynamicChannelConfig) {
-				if a.AllowedTools != nil {
-					c.AllowedTools = a.AllowedTools
-				}
-				if a.DisallowedTools != nil {
-					c.DisallowedTools = a.DisallowedTools
-				}
-			}); err != nil {
-				return nil, fmt.Errorf("edit channel tools: %w", err)
-			}
-		}
-
-		if a.AllowedUsers != nil {
-			if err := deps.Registry.DynamicStore().Update(ctx, a.Name, func(c *channel.DynamicChannelConfig) {
-				c.AllowedUsers = *a.AllowedUsers
-
-				// Update PlatformState if the channel has one and users changed.
-				if len(*a.AllowedUsers) > 0 {
-					if _, ok := c.PlatformState.(channel.TelegramPlatformState); ok {
-						c.PlatformState = channel.TelegramPlatformState{ChatID: (*a.AllowedUsers)[0]}
-					}
-				}
-			}); err != nil {
-				return nil, fmt.Errorf("edit channel allowed_users: %w", err)
-			}
-		}
-
-		// Update links if provided.
+		// Validate links before writing.
 		if a.Links != nil {
-			// Validate links.
 			linkTargets := make(map[string]bool, len(*a.Links))
 			for i, link := range *a.Links {
 				if link.Target == "" || link.Description == "" {
@@ -158,20 +99,33 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 				}
 				linkTargets[link.Target] = true
 			}
-			if err := deps.Registry.DynamicStore().Update(ctx, a.Name, func(c *channel.DynamicChannelConfig) {
-				c.Links = *a.Links
-			}); err != nil {
-				return nil, fmt.Errorf("edit channel links: %w", err)
-			}
 		}
 
+		if err := deps.ConfigWriter.UpdateChannel(deps.UserID, a.Name, func(ch *config.Channel) {
+			if a.Description != "" {
+				ch.Description = a.Description
+			}
+			if a.AllowedTools != nil {
+				ch.AllowedTools = a.AllowedTools
+			}
+			if a.DisallowedTools != nil {
+				ch.DisallowedTools = a.DisallowedTools
+			}
+			if a.Links != nil {
+				ch.Links = *a.Links
+			}
+		}); err != nil {
+			return nil, fmt.Errorf("edit channel: %w", err)
+		}
+
+		// Trigger restart — the reconciler will update runtime state as needed.
 		if deps.OnChannelChange != nil {
 			deps.OnChannelChange()
 		}
 
 		result := map[string]any{
 			"name":    a.Name,
-			"message": fmt.Sprintf("Channel %q updated. The agent will restart automatically to apply changes.", a.Name),
+			"message": fmt.Sprintf("Channel %q updated. The agent will restart automatically.", a.Name),
 		}
 		if a.Description != "" {
 			result["description"] = a.Description

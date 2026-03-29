@@ -42,10 +42,9 @@ func NewOneshot(message string, cancel context.CancelFunc, telegramMode bool) *O
 
 func (o *Oneshot) Info() Info {
 	return Info{
-		ID:     "oneshot",
-		Type:   TypeStdio,
-		Name:   "oneshot",
-		Source: SourceStatic,
+		ID:   "oneshot",
+		Type: TypeStdio,
+		Name: "oneshot",
 	}
 }
 

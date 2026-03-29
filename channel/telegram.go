@@ -67,7 +67,6 @@ type Telegram struct {
 	token       string
 	name        string
 	description string
-	source      Source
 	opts        TelegramOptions
 
 	// allowedUsers restricts which Telegram user IDs can interact with this bot.
@@ -86,14 +85,6 @@ type Telegram struct {
 }
 
 func NewTelegram(token, name, description string, allowedUsers []int64, opts TelegramOptions) *Telegram {
-	return newTelegram(token, name, description, allowedUsers, SourceStatic, opts)
-}
-
-func NewDynamicTelegram(token, name, description string, allowedUsers []int64, opts TelegramOptions) *Telegram {
-	return newTelegram(token, name, description, allowedUsers, SourceDynamic, opts)
-}
-
-func newTelegram(token, name, description string, allowedUsers []int64, source Source, opts TelegramOptions) *Telegram {
 	allowed := make(map[int64]struct{}, len(allowedUsers))
 	for _, uid := range allowedUsers {
 		allowed[uid] = struct{}{}
@@ -103,7 +94,6 @@ func newTelegram(token, name, description string, allowedUsers []int64, source S
 		token:         token,
 		name:          name,
 		description:   description,
-		source:        source,
 		opts:          opts,
 		allowedUsers:  allowed,
 		webhookSecret: generateWebhookSecret(),
@@ -127,7 +117,6 @@ func (t *Telegram) Info() Info {
 		Type:        TypeTelegram,
 		Name:        t.name,
 		Description: t.description,
-		Source:      t.source,
 	}
 }
 

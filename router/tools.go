@@ -44,10 +44,7 @@ func buildChannelToolOverrides(
 
 		// Determine the tool source for this channel via the registry.
 		var src channelToolSource
-		entry, err := registry.ByName(ctx, name)
-		if err != nil {
-			slog.Error("failed to look up channel in registry", "channel", name, "err", err)
-		}
+		entry := registry.ByName(name)
 		if entry != nil {
 			src = channelToolSource{
 				AllowedTools:    entry.AllowedTools,

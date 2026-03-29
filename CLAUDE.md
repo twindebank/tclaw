@@ -18,6 +18,9 @@
 - ~~Channel hot-reload~~ ✅ Done (PR #57) — channel creates hot-add without restart; edits/deletes still restart.
 - ~~Graceful message queuing on restart~~ ✅ Done (PR #59) — persistent QueueStore, messages survive restarts.
 - ~~Agent auto-resume on restart~~ ✅ Done — interrupted marker preserved on shutdown, resume message injected on restart.
+- ~~Config-driven channels~~ ✅ Done — all channels in tclaw.yaml, DynamicStore removed, reconciler for desired-state provisioning, config.Writer for atomic YAML mutation, RuntimeStateStore for transient state, ChannelBuilder interface for platform-agnostic channel building.
+- Channel history store — archive deleted channels (name, type, session ID, dev session, timestamps) so the agent can reference past ephemeral tasks. `channel_history` MCP tool for querying.
+- Channel types in own packages — move socket/stdio/telegram/oneshot into `channel/socketchannel/` etc. with builders co-located. Currently builders are in `router/`.
 - `channel_delete` cleanup — archive the chat (export/preserve history before deleting the bot) and automatically cancel any associated dev sessions. Requires channels to track their dev sessions and dev sessions to be tagged with the originating channel. (Note: `channel_done` now requires user confirmation before teardown.)
 - GitHub PR merged notifications — notify the relevant channel when a PR is merged (e.g. notify admin when a dev PR merges). Could be driven by a webhook, polling, or a scheduled job using `gh pr list --state merged`.
 - Email notifications and auto-categorisation — surface important incoming emails as push notifications on the assistant channel without waiting for the scheduled check. Auto-categorise emails (e.g. receipts, travel, action-required) and apply a skill to handle each category automatically (e.g. log receipts, create calendar events for travel confirmations).
@@ -52,8 +55,10 @@
 ## Architecture
 - Spawns the `claude` CLI binary directly — does NOT use `claude-agent-sdk-go`
 - `agent/` — stateless package. `agent.Run(ctx, opts)` is the entry point. `buildEnv()`/`buildArgs()` are pure functions.
-- `channel/` — channel abstraction. `Channel` interface with `FanIn()` and `ChannelMap()` stateless helpers.
-- `router/` — top-level orchestrator mapping users to agent goroutines. Only stateful struct.
+- `channel/` — channel abstraction. `Channel` interface, `RuntimeStateStore`, `PlatformState`/`TeardownState` typed discriminator structs, `FanIn()` and `ChannelMap()` helpers.
+- `config/` — YAML config loading + `config.Writer` for atomic config mutations. All channels live in `tclaw.yaml`.
+- `reconciler/` — desired-state reconciliation. Compares config channels against runtime state, auto-provisions when possible.
+- `router/` — top-level orchestrator mapping users to agent goroutines. Contains `ChannelBuilder` implementations (SocketBuilder, StdioBuilder, TelegramBuilder). Only stateful struct.
 - Per-user isolation via `HOME` env var on claude subprocess — all CLI state scoped per user
 
 ### Directory model

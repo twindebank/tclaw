@@ -2,8 +2,6 @@ package router
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -28,6 +26,7 @@ import (
 	"tclaw/mcp"
 	"tclaw/oauth"
 	"tclaw/onboarding"
+	"tclaw/reconciler"
 	"tclaw/remotemcpstore"
 	"tclaw/repo"
 	"tclaw/schedule"
@@ -57,6 +56,9 @@ type Router struct {
 	env       config.Env
 	callback  *oauth.CallbackServer // nil if OAuth is not configured
 	publicURL string                // externally-reachable base URL, enables Telegram webhooks
+
+	// builders maps channel types to their ChannelBuilder implementation.
+	builders map[channel.ChannelType]ChannelBuilder
 
 	// configCredentials holds pre-configured credential entries from tclaw.yaml.
 	// Seeded into credential sets at startup.
@@ -118,10 +120,15 @@ type managedUser struct {
 // callback may be nil if OAuth is not configured.
 func New(baseDir string, env config.Env, configCredentials config.CredentialsConfig, callback *oauth.CallbackServer, publicURL string, logBuffer *logbuffer.Buffer, configPath string) *Router {
 	return &Router{
-		users:             make(map[user.ID]*managedUser),
-		mcpServers:        make(map[user.ID]*mcp.Server),
-		baseDir:           baseDir,
-		env:               env,
+		users:      make(map[user.ID]*managedUser),
+		mcpServers: make(map[user.ID]*mcp.Server),
+		baseDir:    baseDir,
+		env:        env,
+		builders: map[channel.ChannelType]ChannelBuilder{
+			channel.TypeSocket:   SocketBuilder{},
+			channel.TypeStdio:    StdioBuilder{},
+			channel.TypeTelegram: TelegramBuilder{},
+		},
 		configCredentials: configCredentials,
 		callback:          callback,
 		publicURL:         publicURL,
@@ -300,31 +307,16 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		slog.Error("failed to seed secrets from env", "user", mu.cfg.ID, "err", err)
 	}
 
-	dynamicStore := stores.Dynamic
 	queueStore := stores.Queue
+	runtimeState := stores.RuntimeState
+	configWriter := config.NewWriter(r.configPath, r.env)
 
 	// channelChangeCh signals the main loop to restart the agent when
 	// a channel is created, edited, or deleted via MCP tools.
 	channelChangeCh := make(chan struct{}, 1)
 
-	// Build the channel registry — unified view of static + dynamic metadata.
-	configByName := make(map[string]config.Channel, len(mu.configChannels))
-	for _, cc := range mu.configChannels {
-		configByName[cc.Name] = cc
-	}
-	var staticEntries []channel.RegistryEntry
-	for _, info := range channel.InfoAll(staticChMap) {
-		entry := channel.RegistryEntry{Info: info}
-		if cc, ok := configByName[info.Name]; ok {
-			entry.Info.AllowedTools = resolveConfigChannelTools(cc)
-			entry.Info.DisallowedTools = cc.DisallowedTools
-			entry.Info.CreatableGroups = toolGroupsToStrings(cc.CreatableGroups)
-			entry.Info.NotifyLifecycle = cc.NotifyLifecycle
-			entry.Links = cc.Links
-		}
-		staticEntries = append(staticEntries, entry)
-	}
-	registry := channel.NewRegistry(staticEntries, dynamicStore)
+	// Build the channel registry from config channels.
+	registry := channel.NewRegistry(buildRegistryEntries(mu.configChannels))
 	mu.registry = registry
 
 	activityTracker := channel.NewActivityTracker()
@@ -363,8 +355,18 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		channel.TypeTelegram: tgProvisioner,
 	}
 
+	reconcileParams := reconciler.ReconcileParams{
+		Channels:     mu.configChannels,
+		SecretStore:  secretStore,
+		RuntimeState: runtimeState,
+		Provisioners: provisioners,
+	}
+
 	channeltools.RegisterTools(mcpHandler, channeltools.Deps{
 		Registry:        registry,
+		ConfigWriter:    configWriter,
+		RuntimeState:    runtimeState,
+		UserID:          mu.cfg.ID,
 		Env:             r.env,
 		SecretStore:     secretStore,
 		ConfigPath:      r.configPath,
@@ -373,6 +375,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		OnChannelChange: onChannelChange,
 		Provisioners:    provisioners,
 		ActiveChannel:   activeChannelFunc,
+		ReconcileParams: reconcileParams,
 	})
 
 	// Set up the scheduler — runs at user lifetime, outlives the agent.
@@ -476,12 +479,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Shared closures for channel_send and channel_send_when_free.
 	// activeChannelFunc was declared earlier (before channeltools registration).
 	linksFunc := func() map[string][]channel.Link {
-		links, linksErr := registry.Links(ctx)
-		if linksErr != nil {
-			slog.Error("failed to get links for cross-channel send", "err", linksErr)
-			return nil
-		}
-		return links
+		return registry.Links()
 	}
 	channelsFunc := channelSet.Snapshot
 
@@ -510,8 +508,8 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 	// Ephemeral channel cleanup goroutine. Runs at user lifetime and
 	// periodically tears down ephemeral channels that have been idle past
-	// their timeout. Reads from the persistent DynamicStore each tick.
-	go cleanupEphemeralChannels(ctx, dynamicStore, activityTracker, secretStore, provisioners, onChannelChange)
+	// their timeout. Reads channel config each tick via the config writer.
+	go cleanupEphemeralChannels(ctx, mu.cfg.ID, configWriter, runtimeState, activityTracker, secretStore, provisioners, onChannelChange)
 
 	// Register secret form tools for collecting sensitive user input via web forms.
 	var secretFormDeps secretform.Deps
@@ -541,46 +539,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// restarting. It builds the channel transport, starts forwarding messages to
 	// hotAddMsgs, and updates the ChannelSet so the agent can route responses back.
 	onChannelAdded = func(channelName string) {
-		ref := hotAddCtxRef.Load()
-		if ref == nil {
-			// No active iteration context — fall back to a full restart.
-			slog.Warn("hot-add: no active context, signalling restart", "channel", channelName)
-			onChannelChange()
-			return
-		}
-		activeCtx := ref.ctx
-
-		newChMap, newMsgs := r.buildSingleDynamicChannel(activeCtx, mu.cfg.ID, dynamicStore, secretStore, s, channelName)
-		if newChMap == nil {
-			// Build failed — fall back to restart so the channel isn't silently lost.
-			slog.Error("hot-add: failed to build channel, signalling restart", "channel", channelName)
-			onChannelChange()
-			return
-		}
-
-		// Inject initial_message for the new channel, if one was set.
-		r.injectInitialMessages(activeCtx, mu.cfg.ID, dynamicStore, newChMap, crossChannelMsgs)
-
-		// Forward the new channel's messages to hotAddMsgs so the running agent
-		// receives them. The goroutine exits when newMsgs closes (i.e. when
-		// activeCtx is cancelled on the next agent restart).
-		if newMsgs != nil {
-			go func() {
-				for msg := range newMsgs {
-					select {
-					case hotAddMsgs <- msg:
-					case <-activeCtx.Done():
-						return
-					}
-				}
-			}()
-		}
-
-		// Add the new channel to the live set so the agent's ChannelsFunc
-		// and the bridge's activity tracker can resolve the new channel ID.
-		channelSet.Add(newChMap)
-
-		slog.Info("channel hot-added", "channel", channelName, "user", mu.cfg.ID)
+		// Channel added to config — trigger a full restart so the reconciler
+		// can provision it and build the transport.
+		slog.Info("channel added, signalling restart", "channel", channelName, "user", mu.cfg.ID)
+		onChannelChange()
 	}
 
 	// Merge schedule and cross-channel messages into the static stream so
@@ -613,28 +575,89 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			mcpConfigPath = p
 		}
 
-		// Build dynamic channels from the store each iteration so
-		// creates/deletes from the previous agent session take effect.
+		// Reload config and reconcile channels each iteration so changes
+		// from the previous agent session (creates/edits/deletes) take effect.
 		dynamicCtx, cancelDynamic := context.WithCancel(ctx)
-		// Publish the new context so onChannelAdded goroutines bind to it.
-		// When cancelDynamic fires at the end of the iteration, any hot-add
-		// goroutines using this context stop automatically.
 		hotAddCtxRef.Store(&ctxHolder{ctx: dynamicCtx})
-		dynamicChMap, dynamicMsgs := r.buildDynamicChannels(dynamicCtx, mu.cfg.ID, dynamicStore, secretStore, s)
 
-		// Inject initial_message for any newly created channels that have one.
-		// Must run after buildDynamicChannels so channel IDs are known, and
-		// before MergeFanIns so the messages are ready to read from mergedMsgs.
-		r.injectInitialMessages(dynamicCtx, mu.cfg.ID, dynamicStore, dynamicChMap, crossChannelMsgs)
+		reloadedCfg, reloadErr := configWriter.ReloadConfig()
+		if reloadErr != nil {
+			slog.Error("failed to reload config, using previous channels", "user", mu.cfg.ID, "err", reloadErr)
+		}
 
-		// Merge static + dynamic into a combined view for this iteration.
-		allChMap := make(map[channel.ChannelID]channel.Channel, len(staticChMap)+len(dynamicChMap))
+		// Use the reloaded config's channels if available.
+		var currentChannels []config.Channel
+		if reloadedCfg != nil {
+			for _, u := range reloadedCfg.Users {
+				if u.ID == mu.cfg.ID {
+					currentChannels = u.Channels
+					break
+				}
+			}
+		}
+		if currentChannels == nil {
+			currentChannels = mu.configChannels
+		}
+
+		// Reconcile: provision channels that need it, identify needs_setup channels.
+		reconciled, reconcileErr := reconciler.Reconcile(dynamicCtx, reconciler.ReconcileParams{
+			Channels:     currentChannels,
+			SecretStore:  secretStore,
+			RuntimeState: runtimeState,
+			Provisioners: provisioners,
+		})
+		if reconcileErr != nil {
+			slog.Error("channel reconciliation failed", "user", mu.cfg.ID, "err", reconcileErr)
+		}
+
+		// Build transports only for ready channels.
+		var readyChannels []config.Channel
+		for _, rc := range reconciled {
+			if rc.Status == reconciler.ChannelReady {
+				readyChannels = append(readyChannels, rc.Config)
+			}
+		}
+
+		// Update registry with all channels (including needs_setup for visibility).
+		registry.Reload(buildRegistryEntries(currentChannels))
+
+		// Build live channel transports from ready channels.
+		// Find the user config for this iteration (need Telegram user ID etc.)
+		var currentUserCfg config.User
+		if reloadedCfg != nil {
+			for _, u := range reloadedCfg.Users {
+				if u.ID == mu.cfg.ID {
+					currentUserCfg = u
+					break
+				}
+			}
+		}
+
+		liveChannels, buildErr := r.BuildChannels(dynamicCtx, BuildChannelsParams{
+			UserID:      mu.cfg.ID,
+			UserCfg:     currentUserCfg,
+			Channels:    readyChannels,
+			Env:         r.env,
+			StateStore:  s,
+			SecretStore: secretStore,
+		})
+		if buildErr != nil {
+			slog.Error("failed to build channels", "user", mu.cfg.ID, "err", buildErr)
+		}
+		allChMap := channel.ChannelMap(liveChannels...)
+		// Also include the initial static channels so existing listeners are reachable.
 		for id, ch := range staticChMap {
-			allChMap[id] = ch
+			if _, exists := allChMap[id]; !exists {
+				allChMap[id] = ch
+			}
 		}
-		for id, ch := range dynamicChMap {
-			allChMap[id] = ch
-		}
+
+		// Inject initial_message for any newly created channels.
+		injectInitialMessages(dynamicCtx, mu.cfg.ID, configWriter, allChMap, crossChannelMsgs)
+
+		// Start listening on channels built this iteration (excludes static
+		// channels which are already listening via staticMsgs).
+		dynamicMsgs := channel.FanIn(dynamicCtx, channel.ChannelMap(liveChannels...))
 
 		// isRestart is true on every iteration after the first — i.e. whenever
 		// the agent has restarted (idle timeout, deploy, channel change, reset).
@@ -753,7 +776,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 					// Intercept messages that are responses to a pending channel_done
 					// confirmation. If the channel has PendingDone set (from a prior
 					// channel_done call), handle it here instead of passing to the agent.
-					if interceptPendingDone(agentCtx, msg, channelsFunc, dynamicStore, secretStore, provisioners, onChannelChange) {
+					if interceptPendingDone(agentCtx, msg, channelsFunc, runtimeState, configWriter, mu.cfg.ID, secretStore, provisioners, onChannelChange) {
 						continue
 					}
 					select {
@@ -977,11 +1000,7 @@ func (r *Router) StopAll() {
 // sendLifecycleNotification sends a message to all channels that have
 // NotifyLifecycle enabled.
 func sendLifecycleNotification(ctx context.Context, channels []channel.Channel, registry *channel.Registry, message string) {
-	notify, err := registry.LifecycleChannelNames(ctx)
-	if err != nil {
-		slog.Error("failed to get lifecycle channels", "err", err)
-		return
-	}
+	notify := registry.LifecycleChannelNames()
 
 	for _, ch := range channels {
 		if !notify[ch.Info().Name] {
@@ -994,50 +1013,50 @@ func sendLifecycleNotification(ctx context.Context, channels []channel.Channel, 
 }
 
 // BuildChannels creates channel instances from config for a given user.
+// Dispatches to registered ChannelBuilder implementations by type.
 // Channels whose Envs list doesn't include env are skipped.
-// System-derived paths (socket paths) are computed from the base directory.
-func (r *Router) BuildChannels(userID user.ID, channelConfigs []config.Channel, env config.Env, stateStore store.Store) ([]channel.Channel, error) {
+type BuildChannelsParams struct {
+	UserID      user.ID
+	UserCfg     config.User
+	Channels    []config.Channel
+	Env         config.Env
+	StateStore  store.Store
+	SecretStore secret.Store
+}
+
+func (r *Router) BuildChannels(ctx context.Context, params BuildChannelsParams) ([]channel.Channel, error) {
 	var channels []channel.Channel
-	for i, chCfg := range channelConfigs {
-		if len(chCfg.Envs) > 0 && !slices.Contains(chCfg.Envs, env) {
-			slog.Info("skipping channel (env mismatch)", "channel", chCfg.Name, "envs", chCfg.Envs, "current", env)
+	for _, chCfg := range params.Channels {
+		if len(chCfg.Envs) > 0 && !slices.Contains(chCfg.Envs, params.Env) {
+			slog.Info("skipping channel (env mismatch)", "channel", chCfg.Name, "envs", chCfg.Envs, "current", params.Env)
 			continue
 		}
 
-		switch chCfg.Type {
-		case config.ChannelTypeSocket:
-			if !env.IsLocal() {
-				// Socket channels have no authentication — only allow in local dev.
-				return nil, fmt.Errorf("channel %d (%s): socket channels are not allowed in %q environment", i, chCfg.Name, env)
-			}
-			socketPath := filepath.Join(r.baseDir, string(userID), chCfg.Name+".sock")
-			channels = append(channels, channel.NewSocketServer(socketPath, chCfg.Name, chCfg.Description))
-		case config.ChannelTypeStdio:
-			if !env.IsLocal() {
-				return nil, fmt.Errorf("channel %d (%s): stdio channels are not allowed in %q environment", i, chCfg.Name, env)
-			}
-			channels = append(channels, channel.NewStdio())
-		case config.ChannelTypeTelegram:
-			var opts channel.TelegramOptions
-			if r.publicURL != "" && r.callback != nil {
-				webhookSecret := make([]byte, 16)
-				if _, err := rand.Read(webhookSecret); err != nil {
-					return nil, fmt.Errorf("generate webhook path for %s: %w", chCfg.Name, err)
-				}
-				webhookPath := "/telegram/" + hex.EncodeToString(webhookSecret)
-				opts.WebhookURL = r.publicURL + webhookPath
-				opts.WebhookPath = webhookPath
-				opts.RegisterHandler = func(pattern string, handler http.Handler) {
-					r.callback.Handle(pattern, handler)
-				}
-			}
-			opts.ChatID = loadChatID(context.Background(), stateStore, chCfg.Name)
-			opts.OnChatID = saveChatIDFunc(stateStore, chCfg.Name)
-			opts.MediaDir = filepath.Join(r.baseDir, string(userID), "memory", "media")
-			channels = append(channels, channel.NewTelegram(chCfg.TelegramConfig.Token, chCfg.Name, chCfg.Description, chCfg.TelegramConfig.AllowedUsers, opts))
-		default:
-			return nil, fmt.Errorf("channel %d: unsupported type %q", i, chCfg.Type)
+		builder, ok := r.builders[chCfg.Type]
+		if !ok {
+			return nil, fmt.Errorf("channel %q: unsupported type %q", chCfg.Name, chCfg.Type)
 		}
+
+		var registerHandler func(string, http.Handler)
+		if r.callback != nil {
+			registerHandler = r.callback.Handle
+		}
+
+		ch, err := builder.Build(ctx, ChannelBuildParams{
+			ChannelCfg:      chCfg,
+			UserCfg:         params.UserCfg,
+			UserID:          params.UserID,
+			Env:             params.Env,
+			BaseDir:         r.baseDir,
+			SecretStore:     params.SecretStore,
+			StateStore:      params.StateStore,
+			PublicURL:       r.publicURL,
+			RegisterHandler: registerHandler,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("channel %q: %w", chCfg.Name, err)
+		}
+		channels = append(channels, ch)
 	}
 	return channels, nil
 }

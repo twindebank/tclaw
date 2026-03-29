@@ -33,20 +33,12 @@ const (
 )
 
 // Source indicates where a channel's configuration came from.
-type Source string
-
-const (
-	SourceStatic  Source = "static"  // from config file, not editable via tools
-	SourceDynamic Source = "dynamic" // user-created via channel management tools
-)
-
 // Info describes a channel's identity and transport type.
 type Info struct {
 	ID          ChannelID
 	Type        ChannelType
 	Name        string // human-readable label
 	Description string // explains the channel's purpose (e.g. "Desktop workstation", "Phone")
-	Source      Source // where this channel's config came from
 
 	// AllowedTools is the resolved set of tools this channel can use.
 	// Populated at creation time from tool_groups, role presets, or explicit lists.

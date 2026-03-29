@@ -42,15 +42,14 @@ func (d UserDirs) EnsureMediaDir() error {
 
 // UserStores groups the per-user persistent stores.
 type UserStores struct {
-	State   store.Store
-	Session store.Store
-	Secret  secret.Store
-	Dynamic *channel.DynamicStore
-	Queue   *channel.QueueStore
+	State        store.Store
+	Session      store.Store
+	Secret       secret.Store
+	RuntimeState *channel.RuntimeStateStore
+	Queue        *channel.QueueStore
 }
 
 // NewUserStores creates all per-user stores from the directory paths.
-// Returns an error if any store fails to initialize.
 func NewUserStores(dirs UserDirs, userID string) (*UserStores, error) {
 	stateStore, err := store.NewFS(dirs.State)
 	if err != nil {
@@ -67,14 +66,14 @@ func NewUserStores(dirs UserDirs, userID string) (*UserStores, error) {
 		return nil, fmt.Errorf("create secret store: %w", err)
 	}
 
-	dynamicStore := channel.NewDynamicStore(stateStore)
+	runtimeState := channel.NewRuntimeStateStore(stateStore)
 	queueStore := channel.NewQueueStore(stateStore)
 
 	return &UserStores{
-		State:   stateStore,
-		Session: sessionStore,
-		Secret:  secretStore,
-		Dynamic: dynamicStore,
-		Queue:   queueStore,
+		State:        stateStore,
+		Session:      sessionStore,
+		Secret:       secretStore,
+		RuntimeState: runtimeState,
+		Queue:        queueStore,
 	}, nil
 }
