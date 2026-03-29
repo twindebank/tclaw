@@ -64,3 +64,19 @@ func (p *Package) Register(handler *mcp.Handler, ctx toolpkg.RegistrationContext
 	})
 	return nil
 }
+
+// CredentialSpec implements toolpkg.CredentialProvider.
+func (p *Package) CredentialSpec() toolpkg.CredentialSpec {
+	return toolpkg.CredentialSpec{
+		AuthType: toolpkg.AuthAPIKey,
+		Fields: []toolpkg.CredentialField{
+			{Key: "github_token", Label: "GitHub Token", Description: "Personal access token for cloning private repositories.", Required: false, EnvVarPrefix: "GITHUB_TOKEN"},
+		},
+	}
+}
+
+// OnCredentialSetChange implements toolpkg.CredentialProvider. Currently a
+// no-op — repo tools are always registered and read secrets at call time.
+func (p *Package) OnCredentialSetChange(handler *mcp.Handler, ctx toolpkg.RegistrationContext, sets []toolpkg.ResolvedCredentialSet) error {
+	return nil
+}

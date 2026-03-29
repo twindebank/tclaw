@@ -84,3 +84,20 @@ func hasBankingCredentials(ctx context.Context, store secret.Store) bool {
 	privKey, _ := store.Get(ctx, PrivateKeyStoreKey)
 	return appID != "" && privKey != ""
 }
+
+// CredentialSpec implements toolpkg.CredentialProvider.
+func (p *Package) CredentialSpec() toolpkg.CredentialSpec {
+	return toolpkg.CredentialSpec{
+		AuthType: toolpkg.AuthAPIKey,
+		Fields: []toolpkg.CredentialField{
+			{Key: "app_id", Label: "Enable Banking App ID", Description: "Application ID from enablebanking.com.", Required: true, EnvVarPrefix: "ENABLEBANKING_APP_ID"},
+			{Key: "private_key", Label: "Enable Banking Private Key", Description: "RSA private key PEM from enablebanking.com.", Required: true, EnvVarPrefix: "ENABLEBANKING_PRIVATE_KEY"},
+		},
+	}
+}
+
+// OnCredentialSetChange implements toolpkg.CredentialProvider. Currently a
+// no-op — banking tools are still registered via the old Register path.
+func (p *Package) OnCredentialSetChange(handler *mcp.Handler, ctx toolpkg.RegistrationContext, sets []toolpkg.ResolvedCredentialSet) error {
+	return nil
+}
