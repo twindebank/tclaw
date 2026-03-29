@@ -8,9 +8,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolList = "model_list"
+
 func modelListDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "model_list",
+		Name:        ToolList,
 		Description: "List all available Claude models with their short names and full identifiers.",
 		InputSchema: json.RawMessage(`{"type": "object", "properties": {}}`),
 	}

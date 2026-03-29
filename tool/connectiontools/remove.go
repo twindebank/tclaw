@@ -9,9 +9,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolConnectionRemove = "connection_remove"
+
 func connectionRemoveDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "connection_remove",
+		Name:        ToolConnectionRemove,
 		Description: "Remove a connection and delete its stored credentials. Use connection_list to see existing connections.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

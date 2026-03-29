@@ -8,9 +8,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolChannelList = "channel_list"
+
 func channelListDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "channel_list",
+		Name:        ToolChannelList,
 		Description: "List all channels (both static from config and dynamic user-created ones). Shows name, type, description, and source.",
 		InputSchema: json.RawMessage(`{"type": "object", "properties": {}}`),
 	}

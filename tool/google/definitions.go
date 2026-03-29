@@ -9,6 +9,25 @@ import (
 	"tclaw/mcp"
 )
 
+const (
+	ToolGmailList       = "google_gmail_list"
+	ToolGmailRead       = "google_gmail_read"
+	ToolGmailSend       = "google_gmail_send"
+	ToolCalendarList    = "google_calendar_list"
+	ToolCalendarCreate  = "google_calendar_create"
+	ToolWorkspace       = "google_workspace"
+	ToolWorkspaceSchema = "google_workspace_schema"
+)
+
+// ToolNames returns all tool name constants in this package.
+func ToolNames() []string {
+	return []string{
+		ToolGmailList, ToolGmailRead, ToolGmailSend,
+		ToolCalendarList, ToolCalendarCreate,
+		ToolWorkspace, ToolWorkspaceSchema,
+	}
+}
+
 // ToolDefs returns the MCP tool definitions for Google Workspace.
 // connIDs lists all active connections — used to build the connection enum.
 func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
@@ -21,7 +40,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 
 	return []mcp.ToolDef{
 		{
-			Name: "google_gmail_list",
+			Name: ToolGmailList,
 			Description: "Search and list Gmail messages with full metadata (subject, from, to, cc, date, snippet, labels, is_unread) in a single call. " +
 				"Use this instead of google_workspace when scanning or searching email — " +
 				"Gmail's list API only returns message IDs, so this tool automatically fetches metadata for each result. " +
@@ -55,7 +74,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 			}`, connDescription, enumJSON)),
 		},
 		{
-			Name: "google_gmail_read",
+			Name: ToolGmailRead,
 			Description: "Read a single Gmail message and return its body as clean plain text. " +
 				"Converts HTML emails (marketing newsletters, booking confirmations, etc.) to readable text — " +
 				"preserves table content (prices, dates, structured data), link text, and block formatting. " +
@@ -79,7 +98,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 			}`, connDescription, enumJSON)),
 		},
 		{
-			Name: "google_gmail_send",
+			Name: ToolGmailSend,
 			Description: "Send an email via Gmail. Handles RFC 2822 message construction and base64url encoding internally — " +
 				"no Bash or external encoding needed. " +
 				"For replies: use google_gmail_read first to get the message_id (use as in_reply_to), references, and thread_id, " +
@@ -132,7 +151,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 			}`, connDescription, enumJSON)),
 		},
 		{
-			Name: "google_calendar_list",
+			Name: ToolCalendarList,
 			Description: "List calendar events with full details (title, time, attendees, location, meeting links). " +
 				"Returns a clean summary for each event — no need to parse raw API responses. " +
 				"Defaults: days_ahead=7 (max 90), max_results=50 (max 250), calendar_id=primary. " +
@@ -174,7 +193,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 			}`, connDescription, enumJSON)),
 		},
 		{
-			Name: "google_calendar_create",
+			Name: ToolCalendarCreate,
 			Description: "Create a calendar event with automatic duplicate detection. " +
 				"Checks for existing events with the same title on the same date before creating — " +
 				"if a duplicate is found, returns the existing event instead of creating a new one. " +
@@ -227,7 +246,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 			}`, connDescription, enumJSON)),
 		},
 		{
-			Name: "google_workspace",
+			Name: ToolWorkspace,
 			Description: "Execute a Google Workspace command. " +
 				"Supports Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks, and more. " +
 				"The 'command' is the gws CLI arguments (e.g. 'gmail users messages list', 'drive files list'). " +
@@ -265,7 +284,7 @@ func ToolDefs(connIDs []connection.ConnectionID) []mcp.ToolDef {
 			}`, connDescription, enumJSON)),
 		},
 		{
-			Name: "google_workspace_schema",
+			Name: ToolWorkspaceSchema,
 			Description: "Look up the schema for a Google Workspace API method. " +
 				"Returns parameter details, request/response schemas, and descriptions. " +
 				"Use dotted notation like 'gmail.users.messages.list' or 'drive.files.list'.",

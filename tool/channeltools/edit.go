@@ -9,9 +9,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolChannelEdit = "channel_edit"
+
 func channelEditDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "channel_edit",
+		Name:        ToolChannelEdit,
 		Description: "Update a dynamic channel's description, tool permissions, or access control. Cannot modify static channels (from config file). The agent restarts automatically to apply changes.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

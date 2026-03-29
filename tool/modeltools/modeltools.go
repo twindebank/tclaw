@@ -8,6 +8,11 @@ import (
 // storeKey is the state store key for the runtime model override.
 const storeKey = "model_override"
 
+// ToolNames returns all tool name constants in this package.
+func ToolNames() []string {
+	return []string{ToolList, ToolGet, ToolSet}
+}
+
 // Deps holds dependencies for model management tools.
 type Deps struct {
 	Store store.Store

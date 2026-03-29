@@ -18,9 +18,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolStart = "dev_start"
+
 func devStartDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "dev_start",
+		Name:        ToolStart,
 		Description: "Start a dev session: clones/fetches the repo, creates a git worktree on a new branch (or checks out an existing one for PR iteration). Returns the worktree path where you can make changes using Bash/Read/Edit/Write. Multiple sessions can be active concurrently. To iterate on an open PR, pass branch=<branch-name> — the branch name is returned by dev_end and shown in PR URLs.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

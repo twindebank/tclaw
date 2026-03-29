@@ -11,9 +11,11 @@ import (
 	"tclaw/provider"
 )
 
+const ToolConnectionAdd = "connection_add"
+
 func connectionAddDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "connection_add",
+		Name:        ToolConnectionAdd,
 		Description: "Add a new connection to an external service. Specify the provider (e.g. 'gmail') and a label (e.g. 'work', 'personal'). For OAuth providers, returns an authorization URL the user must visit. The tool blocks until the user completes authorization (up to 5 minutes).",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

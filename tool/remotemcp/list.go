@@ -9,9 +9,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolRemoteMCPList = "remote_mcp_list"
+
 func remoteMCPListDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "remote_mcp_list",
+		Name:        ToolRemoteMCPList,
 		Description: "List all connected remote MCP servers, showing their name, URL, and auth status.",
 		InputSchema: json.RawMessage(`{"type": "object", "properties": {}}`),
 	}

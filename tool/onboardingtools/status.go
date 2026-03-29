@@ -11,7 +11,7 @@ import (
 
 func onboardingStatusDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "onboarding_status",
+		Name:        ToolStatus,
 		Description: "Get the current onboarding state — phase, info gathered, tips shown, etc. Use this to understand where the user is in the onboarding journey.",
 		InputSchema: json.RawMessage(`{"type": "object", "properties": {}}`),
 	}

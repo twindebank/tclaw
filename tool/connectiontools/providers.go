@@ -8,9 +8,11 @@ import (
 	"tclaw/provider"
 )
 
+const ToolConnectionProviders = "connection_providers"
+
 func connectionProvidersDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "connection_providers",
+		Name:        ToolConnectionProviders,
 		Description: "List available service providers that can be connected (e.g. gmail, linear).",
 		InputSchema: json.RawMessage(`{"type": "object", "properties": {}}`),
 	}

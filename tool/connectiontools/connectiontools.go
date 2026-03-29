@@ -24,6 +24,14 @@ type Deps struct {
 	OnProviderDisconnect func(connID connection.ConnectionID)
 }
 
+// ToolNames returns all tool name constants in this package.
+func ToolNames() []string {
+	return []string{
+		ToolConnectionList, ToolConnectionProviders, ToolConnectionAdd,
+		ToolConnectionRemove, ToolConnectionAuthWait,
+	}
+}
+
 // RegisterTools adds the connection management tools to the MCP handler.
 // These are always available regardless of which providers are connected.
 func RegisterTools(h *mcp.Handler, deps Deps) {

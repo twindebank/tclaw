@@ -9,9 +9,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolChannelNotify = "channel_notify"
+
 func channelNotifyDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name: "channel_notify",
+		Name: ToolChannelNotify,
 		Description: "Send a notification message directly to a channel's users via the platform. " +
 			"Useful for making newly created channels visible or sending out-of-band alerts. " +
 			"Only works for channel types that support direct notifications.",

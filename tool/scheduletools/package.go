@@ -40,7 +40,7 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 		Group:       p.Group(),
 		GroupInfo:   toolgroup.GroupInfo{Group: p.Group(), Description: "Create, edit, delete, pause, and resume cron schedules."},
 		Credentials: nil,
-		Tools:       []string{"schedule_create", "schedule_list", "schedule_edit", "schedule_delete", "schedule_pause", "schedule_resume"},
+		Tools:       ToolNames(),
 	}, nil
 }
 

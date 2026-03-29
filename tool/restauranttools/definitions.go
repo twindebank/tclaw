@@ -6,11 +6,28 @@ import (
 	"tclaw/mcp"
 )
 
+const (
+	ToolSetCredentials = "restaurant_set_credentials"
+	ToolSearch         = "restaurant_search"
+	ToolAvailability   = "restaurant_availability"
+	ToolBook           = "restaurant_book"
+	ToolCancel         = "restaurant_cancel"
+	ToolListBookings   = "restaurant_list_bookings"
+)
+
+// ToolNames returns all tool name constants in this package.
+func ToolNames() []string {
+	return []string{
+		ToolSetCredentials, ToolSearch, ToolAvailability,
+		ToolBook, ToolCancel, ToolListBookings,
+	}
+}
+
 // infoToolDefs are always registered — they let the agent learn about the
 // provider and set up credentials.
 var infoToolDefs = []mcp.ToolDef{
 	{
-		Name: "restaurant_set_credentials",
+		Name: ToolSetCredentials,
 		Description: "Set up credentials for a restaurant booking provider. Call with no parameters " +
 			"to trigger the secure credential collection flow (returns CREDENTIALS_NEEDED if not yet stored). " +
 			"Call with api_key and auth_token to store them directly.\n\n" +
@@ -41,7 +58,7 @@ var infoToolDefs = []mcp.ToolDef{
 // operationalToolDefs are only registered when credentials are configured.
 var operationalToolDefs = []mcp.ToolDef{
 	{
-		Name: "restaurant_search",
+		Name: ToolSearch,
 		Description: "Search for restaurants. Returns venue IDs, names, and availability overview. " +
 			"Use restaurant_availability with a venue_id from the results to see specific time slots.",
 		InputSchema: json.RawMessage(`{
@@ -77,7 +94,7 @@ var operationalToolDefs = []mcp.ToolDef{
 		}`),
 	},
 	{
-		Name: "restaurant_availability",
+		Name: ToolAvailability,
 		Description: "Check available reservation time slots for a specific restaurant. " +
 			"Returns config_ids needed for booking, along with slot times and types (dining room, bar, etc.).",
 		InputSchema: json.RawMessage(`{
@@ -105,7 +122,7 @@ var operationalToolDefs = []mcp.ToolDef{
 		}`),
 	},
 	{
-		Name: "restaurant_book",
+		Name: ToolBook,
 		Description: "Make a restaurant reservation. This creates a REAL booking — always confirm " +
 			"details with the user before calling. Requires a config_id from restaurant_availability. " +
 			"The booking uses a payment method already saved in the user's account on the provider platform.",
@@ -138,7 +155,7 @@ var operationalToolDefs = []mcp.ToolDef{
 		}`),
 	},
 	{
-		Name:        "restaurant_cancel",
+		Name:        ToolCancel,
 		Description: "Cancel an existing restaurant reservation.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
@@ -157,7 +174,7 @@ var operationalToolDefs = []mcp.ToolDef{
 		}`),
 	},
 	{
-		Name:        "restaurant_list_bookings",
+		Name:        ToolListBookings,
 		Description: "List upcoming restaurant reservations for the authenticated user.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

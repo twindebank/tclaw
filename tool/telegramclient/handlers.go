@@ -39,29 +39,29 @@ type handlerState struct {
 
 func makeHandler(name string, state *handlerState) mcp.ToolHandler {
 	switch name {
-	case "telegram_client_setup":
+	case ToolSetup:
 		return setupHandler(state)
-	case "telegram_client_auth":
+	case ToolAuth:
 		return authHandler(state)
-	case "telegram_client_verify":
+	case ToolVerify:
 		return verifyHandler(state)
-	case "telegram_client_2fa":
+	case Tool2FA:
 		return twoFAHandler(state)
-	case "telegram_client_status":
+	case ToolStatus:
 		return statusHandler(state)
 	case "telegram_client_create_bot":
 		return createBotHandler(state)
 	case "telegram_client_delete_bot":
 		return deleteBotHandler(state)
-	case "telegram_client_configure_bot":
+	case ToolConfigureBot:
 		return configureBotHandler(state)
-	case "telegram_client_create_group":
+	case ToolCreateGroup:
 		return createGroupHandler(state)
-	case "telegram_client_list_chats":
+	case ToolListChats:
 		return listChatsHandler(state)
-	case "telegram_client_get_history":
+	case ToolGetHistory:
 		return getHistoryHandler(state)
-	case "telegram_client_search":
+	case ToolSearch:
 		return searchHandler(state)
 	default:
 		return func(_ context.Context, _ json.RawMessage) (json.RawMessage, error) {

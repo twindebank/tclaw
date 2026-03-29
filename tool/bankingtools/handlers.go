@@ -26,19 +26,19 @@ type handlerState struct {
 
 func makeHandler(name string, state *handlerState) mcp.ToolHandler {
 	switch name {
-	case "banking_set_credentials":
+	case ToolSetCredentials:
 		return setCredentialsHandler(state)
-	case "banking_list_banks":
+	case ToolListBanks:
 		return listBanksHandler(state)
-	case "banking_connect":
+	case ToolConnect:
 		return connectHandler(state)
-	case "banking_auth_wait":
+	case ToolAuthWait:
 		return authWaitHandler(state)
-	case "banking_list_accounts":
+	case ToolListAccounts:
 		return listAccountsHandler(state)
-	case "banking_get_balance":
+	case ToolGetBalance:
 		return getBalanceHandler(state)
-	case "banking_get_transactions":
+	case ToolGetTransactions:
 		return getTransactionsHandler(state)
 	default:
 		return func(_ context.Context, _ json.RawMessage) (json.RawMessage, error) {

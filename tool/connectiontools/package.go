@@ -50,7 +50,7 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 		Group:       p.Group(),
 		GroupInfo:   toolgroup.GroupInfo{Group: p.Group(), Description: "Manage OAuth connections to external services."},
 		Credentials: nil,
-		Tools:       []string{"connection_list", "connection_providers", "connection_add", "connection_remove", "connection_auth_wait"},
+		Tools:       ToolNames(),
 	}, nil
 }
 

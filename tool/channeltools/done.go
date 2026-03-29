@@ -10,9 +10,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolChannelDone = "channel_done"
+
 func channelDoneDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name: "channel_done",
+		Name: ToolChannelDone,
 		Description: "Tear down a dynamic channel — deletes platform resources (e.g. Telegram bot), " +
 			"removes channel config, and removes channel secrets. Works on both ephemeral and " +
 			"non-ephemeral dynamic channels. Fails if platform teardown fails (no half-states). " +

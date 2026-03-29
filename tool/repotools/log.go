@@ -8,9 +8,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolLog = "repo_log"
+
 func repoLogDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "repo_log",
+		Name:        ToolLog,
 		Description: "Show commit history for a tracked repo. Optionally include diffstat per commit.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

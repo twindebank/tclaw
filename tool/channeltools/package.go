@@ -61,11 +61,7 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 		Group:       p.Group(),
 		GroupInfo:   toolgroup.GroupInfo{Group: p.Group(), Description: "Full channel lifecycle."},
 		Credentials: nil,
-		Tools: []string{
-			"channel_list", "channel_create", "channel_edit", "channel_delete",
-			"channel_is_busy", "channel_done", "channel_notify",
-			"channel_send", "channel_send_when_free", "tool_list",
-		},
+		Tools:       ToolNames(),
 	}, nil
 }
 

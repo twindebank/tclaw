@@ -20,9 +20,11 @@ const (
 
 var channelNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
+const ToolChannelCreate = "channel_create"
+
 func channelCreateDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name: "channel_create",
+		Name: ToolChannelCreate,
 		Description: "Create a new dynamic channel. Supported types: 'socket' (local only) and 'telegram'. " +
 			"For platforms that support auto-provisioning, channel resources are created automatically. " +
 			"Set ephemeral: true for channels that should auto-delete after idle timeout (default 24h). " +

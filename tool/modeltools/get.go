@@ -9,9 +9,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolGet = "model_get"
+
 func modelGetDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "model_get",
+		Name:        ToolGet,
 		Description: "Get the currently configured model. Returns 'auto' if no override is set (CLI chooses the model).",
 		InputSchema: json.RawMessage(`{"type": "object", "properties": {}}`),
 	}

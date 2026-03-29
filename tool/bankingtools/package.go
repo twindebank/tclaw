@@ -49,11 +49,7 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 		Group:       p.Group(),
 		GroupInfo:   toolgroup.GroupInfo{Group: p.Group(), Description: "Personal service integrations."},
 		Credentials: toolpkg.CheckCredentialStatus(ctx, secretStore, p.RequiredSecrets()),
-		Tools: []string{
-			"banking_set_credentials", "banking_list_banks", "banking_connect",
-			"banking_auth_wait", "banking_list_accounts", "banking_get_balance",
-			"banking_get_transactions",
-		},
+		Tools:       ToolNames(),
 	}, nil
 }
 

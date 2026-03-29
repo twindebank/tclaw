@@ -8,9 +8,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolPR = "dev_pr"
+
 func devPRDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name: "dev_pr",
+		Name: ToolPR,
 		Description: "Commit, push, and open (or update) a PR — keeping the dev session alive for continued iteration. " +
 			"Use this instead of dev_end when you expect to make more changes based on feedback. " +
 			"Calling dev_pr again after making further changes will push additional commits to the same PR. " +

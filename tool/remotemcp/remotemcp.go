@@ -18,6 +18,13 @@ type Deps struct {
 	ConfigUpdater func(ctx context.Context) error
 }
 
+// ToolNames returns all tool name constants in this package.
+func ToolNames() []string {
+	return []string{
+		ToolRemoteMCPList, ToolRemoteMCPAdd, ToolRemoteMCPRemove, ToolRemoteMCPAuthWait,
+	}
+}
+
 // RegisterTools adds the remote MCP management tools to the MCP handler.
 func RegisterTools(h *mcp.Handler, deps Deps) {
 	h.Register(remoteMCPListDef(), remoteMCPListHandler(deps))

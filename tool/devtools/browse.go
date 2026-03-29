@@ -17,9 +17,11 @@ import (
 // read-only main snapshot. Not a real branch — HEAD is detached.
 const mainSnapshotDir = "main-snapshot"
 
+const ToolBrowse = "dev_browse"
+
 func devBrowseDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name: "dev_browse",
+		Name: ToolBrowse,
 		Description: "Fetch latest main and return a READ-ONLY path to browse the source code. " +
 			"Use this to read code, understand the codebase, or check current state WITHOUT starting a dev session. " +
 			"⚠️ READ-ONLY: do NOT write, edit, or commit in this directory. Use dev_start for any changes.",

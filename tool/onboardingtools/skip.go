@@ -14,7 +14,7 @@ import (
 
 func onboardingSkipDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "onboarding_skip",
+		Name:        ToolSkip,
 		Description: "Skip onboarding entirely — marks it as complete immediately. Use when the user says they don't need the guided tour or want to explore on their own.",
 		InputSchema: json.RawMessage(`{"type": "object", "properties": {}}`),
 	}

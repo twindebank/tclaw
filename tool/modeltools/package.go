@@ -34,7 +34,7 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 		Group:       p.Group(),
 		GroupInfo:   toolgroup.GroupInfo{Group: p.Group(), Description: "Bash shell, file operations, web access, and model management."},
 		Credentials: nil,
-		Tools:       []string{"model_list", "model_get", "model_set"},
+		Tools:       ToolNames(),
 	}, nil
 }
 

@@ -47,7 +47,7 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 		Group:       p.Group(),
 		GroupInfo:   toolgroup.GroupInfo{Group: p.Group(), Description: "Monitor external git repositories."},
 		Credentials: toolpkg.CheckCredentialStatus(ctx, secretStore, p.RequiredSecrets()),
-		Tools:       []string{"repo_add", "repo_sync", "repo_log", "repo_list", "repo_remove"},
+		Tools:       ToolNames(),
 	}, nil
 }
 

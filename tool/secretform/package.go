@@ -39,7 +39,7 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 		Group:       p.Group(),
 		GroupInfo:   toolgroup.GroupInfo{Group: p.Group(), Description: "Collect sensitive information via secure web forms."},
 		Credentials: nil,
-		Tools:       []string{"secret_form_request", "secret_form_wait"},
+		Tools:       ToolNames(),
 	}, nil
 }
 

@@ -38,7 +38,7 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 		Group:       p.Group(),
 		GroupInfo:   toolgroup.GroupInfo{Group: p.Group(), Description: "New user onboarding flow: track progress, deliver tips, manage setup phases."},
 		Credentials: nil,
-		Tools:       []string{"onboarding_status", "onboarding_set_info", "onboarding_advance", "onboarding_tip_shown", "onboarding_skip"},
+		Tools:       ToolNames(),
 	}, nil
 }
 

@@ -12,9 +12,11 @@ import (
 	"tclaw/schedule"
 )
 
+const ToolResume = "schedule_resume"
+
 func scheduleResumeDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "schedule_resume",
+		Name:        ToolResume,
 		Description: "Resume a paused schedule. It will start firing again on its cron expression.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

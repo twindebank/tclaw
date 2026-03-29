@@ -52,17 +52,17 @@ func persistInlineCredentials(ctx context.Context, provider Provider, apiKey, au
 
 func makeHandler(name string, providers map[string]Provider, deps Deps) mcp.ToolHandler {
 	switch name {
-	case "restaurant_set_credentials":
+	case ToolSetCredentials:
 		return setCredentialsHandler(providers, deps)
-	case "restaurant_search":
+	case ToolSearch:
 		return searchHandler(providers)
-	case "restaurant_availability":
+	case ToolAvailability:
 		return availabilityHandler(providers)
-	case "restaurant_book":
+	case ToolBook:
 		return bookHandler(providers)
-	case "restaurant_cancel":
+	case ToolCancel:
 		return cancelHandler(providers)
-	case "restaurant_list_bookings":
+	case ToolListBookings:
 		return listBookingsHandler(providers)
 	default:
 		return func(_ context.Context, _ json.RawMessage) (json.RawMessage, error) {

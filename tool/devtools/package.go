@@ -58,11 +58,7 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 		Group:       p.Group(),
 		GroupInfo:   toolgroup.GroupInfo{Group: p.Group(), Description: "Dev workflow: start/end/cancel dev sessions, view status and logs, deploy to production."},
 		Credentials: toolpkg.CheckCredentialStatus(ctx, secretStore, p.RequiredSecrets()),
-		Tools: []string{
-			"dev_start", "dev_status", "dev_pr", "dev_end", "dev_cancel",
-			"deploy", "dev_deployed", "dev_log", "dev_logs", "dev_browse",
-			"dev_pr_checks", "config_get", "config_set", "dev_disk",
-		},
+		Tools:       ToolNames(),
 	}, nil
 }
 

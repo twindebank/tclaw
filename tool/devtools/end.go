@@ -9,9 +9,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolEnd = "dev_end"
+
 func devEndDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "dev_end",
+		Name: ToolEnd,
 		Description: "Tear down a dev session. Commits any uncommitted changes, pushes, and cleans up the worktree. " +
 			"Preferred workflow: use dev_pr to open/update the PR and iterate, then call dev_end when the PR is merged or you're done. " +
 			"dev_end also creates a PR if none exists yet. " +

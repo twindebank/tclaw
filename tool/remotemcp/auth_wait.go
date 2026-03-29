@@ -9,9 +9,11 @@ import (
 	"tclaw/mcp"
 )
 
+const ToolRemoteMCPAuthWait = "remote_mcp_auth_wait"
+
 func remoteMCPAuthWaitDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "remote_mcp_auth_wait",
+		Name:        ToolRemoteMCPAuthWait,
 		Description: "Wait for a pending remote MCP OAuth authorization to complete. Call this after sending the auth URL to the user. Blocks until the user finishes authorizing (up to 5 minutes).",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

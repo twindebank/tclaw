@@ -15,6 +15,9 @@ import (
 )
 
 const (
+	ToolRequest = "secret_form_request"
+	ToolWait    = "secret_form_wait"
+
 	requestTTL = 10 * time.Minute
 
 	// Limits to prevent abuse via malformed tool calls.
@@ -25,6 +28,11 @@ const (
 	maxTitleLen   = 256
 	verifyCodeLen = 6
 )
+
+// ToolNames returns all tool name constants in this package.
+func ToolNames() []string {
+	return []string{ToolRequest, ToolWait}
+}
 
 // keyPattern restricts secret store keys to safe characters: lowercase
 // alphanumeric plus underscores. No slashes, dots, or path separators.

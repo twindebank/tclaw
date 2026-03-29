@@ -5,6 +5,14 @@ import (
 	"tclaw/schedule"
 )
 
+// ToolNames returns all tool name constants in this package.
+func ToolNames() []string {
+	return []string{
+		ToolCreate, ToolList, ToolEdit,
+		ToolDelete, ToolPause, ToolResume,
+	}
+}
+
 // Deps holds dependencies for schedule management tools.
 type Deps struct {
 	Store     *schedule.Store

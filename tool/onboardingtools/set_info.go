@@ -11,7 +11,7 @@ import (
 
 func onboardingSetInfoDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        "onboarding_set_info",
+		Name:        ToolSetInfo,
 		Description: "Record that a piece of user info has been gathered during onboarding. The actual info is stored in the user's CLAUDE.md memory — this just tracks progress. Call this after writing the info to memory.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",

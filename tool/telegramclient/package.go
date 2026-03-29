@@ -54,12 +54,7 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 		Group:       p.Group(),
 		GroupInfo:   toolgroup.GroupInfo{Group: p.Group(), Description: "Telegram Client API (MTProto)."},
 		Credentials: toolpkg.CheckCredentialStatus(ctx, secretStore, p.RequiredSecrets()),
-		Tools: []string{
-			"telegram_client_auth", "telegram_client_verify", "telegram_client_status",
-			"telegram_client_create_bot", "telegram_client_delete_bot",
-			"telegram_client_create_chat", "telegram_client_history",
-			"telegram_client_search",
-		},
+		Tools:       ToolNames(),
 	}, nil
 }
 
