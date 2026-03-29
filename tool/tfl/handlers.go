@@ -16,14 +16,15 @@ type commonArgs struct {
 }
 
 // persistAPIKey stores the API key if provided, making it available for future calls.
-func persistAPIKey(ctx context.Context, deps Deps, key string) {
+// Returns an error if persistence fails — the caller decides whether to surface it.
+func persistAPIKey(ctx context.Context, deps Deps, key string) error {
 	if key == "" {
-		return
+		return nil
 	}
-	// Best-effort — don't fail the tool call if we can't persist.
 	if err := deps.SecretStore.Set(ctx, APIKeyStoreKey, key); err != nil {
-		slog.Warn("failed to persist TfL API key", "err", err)
+		return fmt.Errorf("persist TfL API key: %w", err)
 	}
+	return nil
 }
 
 // makeHandler returns a ToolHandler that dispatches to the correct handler
@@ -59,7 +60,10 @@ func lineStatusHandler(deps Deps) mcp.ToolHandler {
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("parse args: %w", err)
 		}
-		persistAPIKey(ctx, deps, a.APIKey)
+		// Best-effort — log but don't fail the tool call if persistence fails.
+		if err := persistAPIKey(ctx, deps, a.APIKey); err != nil {
+			slog.Warn("failed to persist TfL API key", "err", err)
+		}
 
 		// Specific lines take priority over modes.
 		if a.Lines != "" {
@@ -88,7 +92,10 @@ func journeyHandler(deps Deps) mcp.ToolHandler {
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("parse args: %w", err)
 		}
-		persistAPIKey(ctx, deps, a.APIKey)
+		// Best-effort — log but don't fail the tool call if persistence fails.
+		if err := persistAPIKey(ctx, deps, a.APIKey); err != nil {
+			slog.Warn("failed to persist TfL API key", "err", err)
+		}
 
 		if a.From == "" || a.To == "" {
 			return nil, fmt.Errorf("from and to are required")
@@ -122,7 +129,10 @@ func arrivalsHandler(deps Deps) mcp.ToolHandler {
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("parse args: %w", err)
 		}
-		persistAPIKey(ctx, deps, a.APIKey)
+		// Best-effort — log but don't fail the tool call if persistence fails.
+		if err := persistAPIKey(ctx, deps, a.APIKey); err != nil {
+			slog.Warn("failed to persist TfL API key", "err", err)
+		}
 
 		if a.StopID == "" {
 			return nil, fmt.Errorf("stop_id is required")
@@ -142,7 +152,10 @@ func stopSearchHandler(deps Deps) mcp.ToolHandler {
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("parse args: %w", err)
 		}
-		persistAPIKey(ctx, deps, a.APIKey)
+		// Best-effort — log but don't fail the tool call if persistence fails.
+		if err := persistAPIKey(ctx, deps, a.APIKey); err != nil {
+			slog.Warn("failed to persist TfL API key", "err", err)
+		}
 
 		if a.Query == "" {
 			return nil, fmt.Errorf("query is required")
@@ -167,7 +180,10 @@ func disruptionsHandler(deps Deps) mcp.ToolHandler {
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("parse args: %w", err)
 		}
-		persistAPIKey(ctx, deps, a.APIKey)
+		// Best-effort — log but don't fail the tool call if persistence fails.
+		if err := persistAPIKey(ctx, deps, a.APIKey); err != nil {
+			slog.Warn("failed to persist TfL API key", "err", err)
+		}
 
 		if a.Lines != "" {
 			return apiGet(ctx, deps, "/Line/"+a.Lines+"/Disruption", nil)
@@ -190,7 +206,10 @@ func roadStatusHandler(deps Deps) mcp.ToolHandler {
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("parse args: %w", err)
 		}
-		persistAPIKey(ctx, deps, a.APIKey)
+		// Best-effort — log but don't fail the tool call if persistence fails.
+		if err := persistAPIKey(ctx, deps, a.APIKey); err != nil {
+			slog.Warn("failed to persist TfL API key", "err", err)
+		}
 
 		if a.Roads != "" {
 			return apiGet(ctx, deps, "/Road/"+a.Roads+"/Status", nil)

@@ -137,7 +137,9 @@ func devStartHandler(deps Deps) mcp.ToolHandler {
 		}
 
 		// Configure git user in the worktree so commits work.
-		configureGitUser(worktreeDir)
+		if err := configureGitUser(worktreeDir); err != nil {
+			slog.Warn("failed to configure git user in worktree", "worktree", worktreeDir, "err", err)
+		}
 
 		// Save session.
 		sess := dev.Session{
@@ -184,11 +186,14 @@ func generateBranchName(description string) string {
 }
 
 // configureGitUser sets a default git user for the worktree so commits don't fail.
-func configureGitUser(worktreeDir string) {
+// Returns an error if either config command fails — the caller can surface this
+// so the agent knows git config is incomplete.
+func configureGitUser(worktreeDir string) error {
 	if out, err := exec.Command("git", "-C", worktreeDir, "config", "user.email", "tclaw@localhost").CombinedOutput(); err != nil {
-		slog.Warn("failed to configure git user.email", "worktree", worktreeDir, "err", err, "output", string(out))
+		return fmt.Errorf("configure git user.email: %w (output: %s)", err, string(out))
 	}
 	if out, err := exec.Command("git", "-C", worktreeDir, "config", "user.name", "tclaw").CombinedOutput(); err != nil {
-		slog.Warn("failed to configure git user.name", "worktree", worktreeDir, "err", err, "output", string(out))
+		return fmt.Errorf("configure git user.name: %w (output: %s)", err, string(out))
 	}
+	return nil
 }
