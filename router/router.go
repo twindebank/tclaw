@@ -192,13 +192,9 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	mcpHandler := mcp.NewHandler()
 
 	// Seed config-level credentials into credential sets.
-	seedConfigCredentials(ctx, credMgr, r.configCredentials)
-
-	// One-time migration: copy legacy connection OAuth tokens into credential
-	// sets. Idempotent — skips already-migrated connections.
-	configSecrets := buildConfigSecretsMap(r.configCredentials)
-	if err := credential.MigrateFromConnections(ctx, s, secretStore, credMgr, configSecrets); err != nil {
-		slog.Error("failed to migrate connections to credential sets", "user", mu.cfg.ID, "err", err)
+	if err := seedConfigCredentials(ctx, credMgr, r.configCredentials); err != nil {
+		slog.Error("failed to seed config credentials", "user", mu.cfg.ID, "err", err)
+		return
 	}
 
 	mcpServer := mcp.NewServer(mcpHandler)
