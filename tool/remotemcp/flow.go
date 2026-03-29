@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"tclaw/connection"
 	"tclaw/mcp/discovery"
+	"tclaw/remotemcpstore"
 )
 
 // pendingRemoteMCPFlow handles the OAuth callback for remote MCP servers.
@@ -17,7 +17,7 @@ type pendingRemoteMCPFlow struct {
 	mcpURL        string
 	authMeta      *discovery.AuthMetadata
 	clientReg     *discovery.ClientRegistration
-	manager       *connection.Manager
+	manager       *remotemcpstore.Manager
 	configUpdater func(ctx context.Context) error
 	codeVerifier  string
 	done          chan struct{}

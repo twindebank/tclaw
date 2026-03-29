@@ -34,8 +34,10 @@ type Config struct {
 	// Server configures the HTTP server (health checks, OAuth callbacks, webhooks).
 	Server ServerConfig `yaml:"server"`
 
-	// Providers configures external service providers (Gmail, etc.).
-	Providers ProvidersConfig `yaml:"providers"`
+	// Credentials provides pre-configured OAuth client credentials keyed by
+	// tool package name (e.g. "google", "monzo"). These are seeded into the
+	// credential system at startup so the agent doesn't need to collect them.
+	Credentials CredentialsConfig `yaml:"credentials"`
 
 	Users []User `yaml:"users"`
 }
@@ -52,22 +54,16 @@ type ServerConfig struct {
 	PublicURL string `yaml:"public_url"`
 }
 
-// ProvidersConfig holds per-provider configuration.
-type ProvidersConfig struct {
-	Google *GoogleProviderCredentials `yaml:"google"`
-	Monzo  *MonzoProviderCredentials  `yaml:"monzo"`
-}
+// CredentialsConfig maps tool package names to lists of credential entries.
+// Each key (e.g. "google", "monzo") matches the tool package's Name().
+// Entries are seeded into credential sets at startup.
+type CredentialsConfig map[string][]CredentialEntry
 
-// GoogleProviderCredentials holds OAuth client credentials for Google Workspace.
-type GoogleProviderCredentials struct {
-	ClientID     string `yaml:"client_id"`
-	ClientSecret string `yaml:"client_secret"`
-}
-
-// MonzoProviderCredentials holds OAuth client credentials for Monzo.
-type MonzoProviderCredentials struct {
-	ClientID     string `yaml:"client_id"`
-	ClientSecret string `yaml:"client_secret"`
+// CredentialEntry is a single credential set definition from the config file.
+type CredentialEntry struct {
+	Label   string            `yaml:"label"`
+	Channel string            `yaml:"channel,omitempty"`
+	Secrets map[string]string `yaml:"secrets"`
 }
 
 // User defines per-user agent configuration.
@@ -394,44 +390,20 @@ func resolveSecrets(cfg *Config) ([]string, error) {
 		}
 	}
 
-	// Resolve provider credentials.
-	if cfg.Providers.Google != nil {
-		val, envVar, err := resolveRef(cfg.Providers.Google.ClientID)
-		if err != nil {
-			return nil, fmt.Errorf("providers.google.client_id: %w", err)
-		}
-		cfg.Providers.Google.ClientID = val
-		if envVar != "" {
-			envVars = append(envVars, envVar)
-		}
-
-		val, envVar, err = resolveRef(cfg.Providers.Google.ClientSecret)
-		if err != nil {
-			return nil, fmt.Errorf("providers.google.client_secret: %w", err)
-		}
-		cfg.Providers.Google.ClientSecret = val
-		if envVar != "" {
-			envVars = append(envVars, envVar)
-		}
-	}
-
-	if cfg.Providers.Monzo != nil {
-		val, envVar, err := resolveRef(cfg.Providers.Monzo.ClientID)
-		if err != nil {
-			return nil, fmt.Errorf("providers.monzo.client_id: %w", err)
-		}
-		cfg.Providers.Monzo.ClientID = val
-		if envVar != "" {
-			envVars = append(envVars, envVar)
-		}
-
-		val, envVar, err = resolveRef(cfg.Providers.Monzo.ClientSecret)
-		if err != nil {
-			return nil, fmt.Errorf("providers.monzo.client_secret: %w", err)
-		}
-		cfg.Providers.Monzo.ClientSecret = val
-		if envVar != "" {
-			envVars = append(envVars, envVar)
+	// Resolve credential secret references.
+	for pkg, entries := range cfg.Credentials {
+		for i, entry := range entries {
+			for key, val := range entry.Secrets {
+				resolved, envVar, err := resolveRef(val)
+				if err != nil {
+					return nil, fmt.Errorf("credentials.%s[%d].secrets.%s: %w", pkg, i, key, err)
+				}
+				entry.Secrets[key] = resolved
+				if envVar != "" {
+					envVars = append(envVars, envVar)
+				}
+			}
+			cfg.Credentials[pkg][i] = entry
 		}
 	}
 

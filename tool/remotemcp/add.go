@@ -8,9 +8,9 @@ import (
 	"net/url"
 	"regexp"
 
-	"tclaw/connection"
 	"tclaw/mcp"
 	"tclaw/mcp/discovery"
+	"tclaw/remotemcpstore"
 )
 
 const (
@@ -138,7 +138,7 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 
 		// Store the auth metadata and registration before starting the flow,
 		// so the callback handler can find it.
-		authData := &connection.RemoteMCPAuth{
+		authData := &remotemcpstore.RemoteMCPAuth{
 			AuthServerIssuer:      authMeta.Issuer,
 			AuthorizationEndpoint: authMeta.AuthorizationEndpoint,
 			TokenEndpoint:         authMeta.TokenEndpoint,

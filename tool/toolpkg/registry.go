@@ -42,8 +42,13 @@ func (r *Registry) RegisterAll(handler *mcp.Handler, regCtx RegistrationContext)
 			return fmt.Errorf("register %s: %w", pkg.Name(), err)
 		}
 
-		// Auto-register the standard info tool.
-		handler.Register(InfoToolDef(pkg), InfoToolHandler(pkg, regCtx.SecretStore))
+		// Auto-register the standard info tool. Include callback URL so OAuth
+		// packages can show the redirect URI in their info output.
+		var callbackURL string
+		if regCtx.Callback != nil {
+			callbackURL = regCtx.Callback.CallbackURL()
+		}
+		handler.Register(InfoToolDef(pkg), InfoToolHandler(pkg, regCtx.SecretStore, callbackURL))
 
 		slog.Debug("registered tool package", "name", pkg.Name(), "group", pkg.Group())
 	}

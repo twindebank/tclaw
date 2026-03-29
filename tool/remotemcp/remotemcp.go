@@ -3,14 +3,14 @@ package remotemcp
 import (
 	"context"
 
-	"tclaw/connection"
 	"tclaw/mcp"
 	"tclaw/oauth"
+	"tclaw/remotemcpstore"
 )
 
 // Deps holds dependencies for remote MCP management tools.
 type Deps struct {
-	Manager  *connection.Manager
+	Manager  *remotemcpstore.Manager
 	Callback *oauth.CallbackServer // nil if OAuth callback is not configured
 
 	// ConfigUpdater is called after a remote MCP is added or removed to

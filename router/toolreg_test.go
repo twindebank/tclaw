@@ -9,7 +9,7 @@ import (
 	"tclaw/mcp"
 	"tclaw/tool/bankingtools"
 	"tclaw/tool/channeltools"
-	"tclaw/tool/connectiontools"
+	"tclaw/tool/credentialtools"
 	"tclaw/tool/devtools"
 	googletools "tclaw/tool/google"
 	"tclaw/tool/modeltools"
@@ -117,7 +117,7 @@ func allPackages() []toolpkg.Package {
 		&monzotools.Package{},
 		&telegramclient.Package{},
 		&secretform.Package{},
-		&connectiontools.Package{},
+		&credentialtools.Package{},
 		&remotemcp.Package{},
 		&googletools.Package{},
 		&channeltools.Package{},
