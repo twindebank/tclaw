@@ -42,7 +42,9 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 | `cli/` | CLI subcommand dispatch. `serve` (start server), `chat` (TUI client), `secret` (keychain management), `deploy` (Fly.io deployment, secrets, suspend/resume), `config` (sync/diff between local and remote), `oneshot` (single-message test mode). |
 | `router/` | Per-user agent lifecycle management. Owns goroutine lifetimes, directory setup, MCP server creation, tool registration. Builds per-channel tool overrides from `config.Channel` tool fields. Contains `ChannelBuilder` implementations for each transport type. The only stateful orchestrator. |
 | `agent/` | Stateless package. `Run(ctx, opts)` reads messages from channels, handles auth flows, spawns CLI subprocess per turn, streams responses back. `ChannelToolOverrides` in `Options` enables per-channel tool permissions. `reset.go` computes `allowedResetLevels()` to build dynamic reset menus filtered by channel. |
-| `channel/` | Transport abstraction. `Channel` interface with implementations: Socket, Stdio, Telegram. `FanIn()` multiplexer, `ChannelMap()` helper. `RuntimeStateStore` for per-channel runtime state (platform state, teardown state, pending done). `ChannelSecretKey()` for deriving secret store keys. `EphemeralProvisioner` interface for platform-specific channel lifecycle (provision, teardown, confirm, notify). `PlatformState` and `TeardownState` typed discriminator structs for platform-specific persistent data. `QueueStore` for persisting messages and interrupted-turn markers across agent restarts. |
+| `channel/` | Transport abstraction. `Channel` interface with implementations: Socket, Stdio, Telegram. `FanIn()` multiplexer, `ChannelMap()` helper. `RuntimeStateStore` for per-channel runtime state (platform state, teardown state, pending done). `ChannelSecretKey()` for deriving secret store keys. `EphemeralProvisioner` interface for platform-specific channel lifecycle (provision, teardown, confirm, notify). `PlatformState` and `TeardownState` typed discriminator structs for platform-specific persistent data. `ActivityTracker` tracks per-channel busy state and provides `NotifyIdle()` for event-driven wake. |
+| `queue/` | Unified priority message queue. All message sources (user, schedule, notification, cross-channel) flow through one queue. User/resume messages dequeue immediately; non-user messages wait for idle channels via `ActivityTracker.NotifyIdle()`. Persists to disk so queued messages survive restarts. |
+| `notification/` | Push-based notification system. Tool packages implement the `Notifier` interface to declare notification types and own the watch mechanism (polling, webhook, etc.). `Manager` orchestrates subscriptions, delegates to packages, and routes emitted notifications to channels. `Store` persists subscriptions. |
 | `config/` | YAML parsing, secret resolution, config validation. |
 
 ### Auth & Credentials
@@ -64,7 +66,8 @@ tclaw spawns isolated `claude` CLI subprocesses — one per user — and manages
 | `tool/credentialtools/` | MCP tools for unified credential management (`credential_add`, `credential_list`, `credential_remove`, `credential_auth_wait`). Handles both API key collection (via secret forms) and OAuth flows. |
 | `tool/remotemcp/` | MCP tools for remote MCP server management (add, remove, list, auth_wait). |
 | `tool/scheduletools/` | MCP tools for cron schedule management (create, list, edit, delete, pause, resume). |
-| `tool/google/` | Google Workspace tools registered when a Google credential set has OAuth tokens. Delegates to `gws` binary. Implements `CredentialProvider`. |
+| `tool/notificationtools/` | MCP tools for notification management (notification_types, notification_subscribe, notification_unsubscribe, notification_list). Agent-facing interface to the notification system. |
+| `tool/google/` | Google Workspace tools registered when a Google credential set has OAuth tokens. Delegates to `gws` binary. Implements `CredentialProvider` and `notification.Notifier` (Gmail new-email notifications via `history.list` polling). |
 | `tool/monzo/` | Monzo banking tools registered when a Monzo credential set has OAuth tokens. Direct HTTP calls to the Monzo API. Implements `CredentialProvider`. |
 | `tool/tfl/` | Transport for London tools (line status, journey planning, arrivals, disruptions). Always registered — optional API key via credential set. Implements `CredentialProvider`. |
 | `tool/restauranttools/` | Restaurant search and booking tools via Resy. Credentials stored per-user in secret store. Implements `CredentialProvider`. |
@@ -123,10 +126,11 @@ Messages arrive from three sources, all as `TaggedMessage{ChannelID, Text, Sourc
 - **User input** — channel transports (socket, Telegram) via `FanIn()`, tagged `SourceUser`
 - **Scheduled prompts** — scheduler goroutine via `scheduleMsgs`, tagged `SourceSchedule`
 - **Cross-channel sends** — `channel_send` MCP tool via `crossChannelMsgs`, tagged `SourceChannel`
+- **Notifications** — notification manager via `notificationMsgs`, tagged `SourceNotification`
 
-All sources are merged via `MergeFanIns(ctx, staticMsgs, scheduleMsgs, crossChannelMsgs)` into a single stream.
+All sources are merged via `MergeFanIns(ctx, staticMsgs, scheduleMsgs, crossChannelMsgs, hotAddMsgs, notificationMsgs)` into a single stream.
 
-**Message persistence and auto-resume:** When a message arrives during an active turn, it's queued in memory and persisted to disk via `QueueStore`. If the agent is killed mid-turn (deploy, crash), the `QueueStore` also stores which channel was interrupted. On restart, `RunWithMessages` loads the persisted queue and injects a resume message for the interrupted channel so the agent can continue where it left off. The interrupted marker is only cleared on normal turn completion — context cancellation (deploy/shutdown) preserves it.
+**Unified priority queue:** All messages flow through `queue.Queue` which handles source-based priority and busy-channel awareness. User and resume messages always dequeue immediately. Non-user messages (schedule, notification, cross-channel) wait until the target channel is idle (not processing a turn and past the idle timeout). The queue persists to disk so messages survive restarts. On restart, the queue loads persisted messages and injects a resume message for any interrupted channel.
 
 1. Message arrives on the merged stream
 2. Router's `waitAndStart()` receives the first message and starts the agent

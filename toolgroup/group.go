@@ -37,7 +37,7 @@ func AllGroups() []GroupInfo {
 		{GroupCoreTools, "Bash shell, file operations (read/write/edit/glob/grep), web access (fetch/search), and model management. The foundation most channels need."},
 		{GroupAllBuiltins, "All built-in commands: stop, compact, login, auth, and all reset levels (session/memories/project/everything)."},
 		{GroupSafeBuiltins, "Safe built-in commands only: stop, compact, session reset, memories reset. No project/everything reset or auth commands."},
-		{GroupChannelMessaging, "Send messages to other channels (channel_send, channel_send_when_free), check if channels are busy (channel_is_busy), and tear down the current channel (channel_done). Cannot create new channels."},
+		{GroupChannelMessaging, "Send messages to other channels (channel_send), check if channels are busy (channel_is_busy), and tear down the current channel (channel_done). Cannot create new channels."},
 		{GroupChannelManagement, "Full channel lifecycle: create, delete, edit, list channels, plus everything in channel_messaging. Required for orchestrating ephemeral channels."},
 		{GroupScheduling, "Create, edit, delete, pause, and resume cron schedules."},
 		{GroupDevWorkflow, "Dev workflow: start/end/cancel dev sessions, view status and logs, deploy to production. For channels that do code work."},
@@ -125,7 +125,6 @@ var groupTools = map[ToolGroup][]claudecli.Tool{
 
 	GroupChannelMessaging: {
 		MCPToolChannelSend,
-		MCPToolSendWhenFree,
 		claudecli.Tool("mcp__tclaw__channel_is_busy"),
 		MCPToolChannelDone,
 	},
@@ -139,7 +138,6 @@ var groupTools = map[ToolGroup][]claudecli.Tool{
 		MCPToolChannelDone,
 		claudecli.Tool("mcp__tclaw__channel_is_busy"),
 		MCPToolChannelSend,
-		MCPToolSendWhenFree,
 	},
 
 	GroupScheduling: {

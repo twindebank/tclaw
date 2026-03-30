@@ -67,10 +67,11 @@ type Link struct {
 type MessageSource string
 
 const (
-	SourceUser     MessageSource = "user"     // typed by a human on the channel
-	SourceSchedule MessageSource = "schedule" // fired by a cron schedule
-	SourceChannel  MessageSource = "channel"  // sent from another channel via channel_send
-	SourceResume   MessageSource = "resume"   // auto-injected to continue interrupted work
+	SourceUser         MessageSource = "user"         // typed by a human on the channel
+	SourceSchedule     MessageSource = "schedule"     // fired by a cron schedule
+	SourceChannel      MessageSource = "channel"      // sent from another channel via channel_send
+	SourceResume       MessageSource = "resume"       // auto-injected to continue interrupted work
+	SourceNotification MessageSource = "notification" // pushed by a notification subscription
 )
 
 // MessageSourceInfo carries attribution details for a message.
@@ -82,6 +83,12 @@ type MessageSourceInfo struct {
 
 	// ScheduleName is the schedule's human-readable name (set when Source == SourceSchedule).
 	ScheduleName string `json:"schedule_name,omitempty"`
+
+	// SubscriptionID identifies the notification subscription (set when Source == SourceNotification).
+	SubscriptionID string `json:"subscription_id,omitempty"`
+
+	// SubscriptionLabel is the human-readable label (set when Source == SourceNotification).
+	SubscriptionLabel string `json:"subscription_label,omitempty"`
 }
 
 // TaggedMessage pairs an incoming message with the channel it arrived on

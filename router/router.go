@@ -24,8 +24,10 @@ import (
 	"tclaw/libraries/secret"
 	"tclaw/libraries/store"
 	"tclaw/mcp"
+	"tclaw/notification"
 	"tclaw/oauth"
 	"tclaw/onboarding"
+	"tclaw/queue"
 	"tclaw/reconciler"
 	"tclaw/remotemcpstore"
 	"tclaw/repo"
@@ -34,6 +36,7 @@ import (
 	"tclaw/tool/channeltools"
 	"tclaw/tool/devtools"
 	"tclaw/tool/modeltools"
+	"tclaw/tool/notificationtools"
 	"tclaw/tool/onboardingtools"
 	"tclaw/tool/remotemcp"
 	"tclaw/tool/repotools"
@@ -307,7 +310,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		slog.Error("failed to seed secrets from env", "user", mu.cfg.ID, "err", err)
 	}
 
-	queueStore := stores.Queue
 	runtimeState := stores.RuntimeState
 	configWriter := config.NewWriter(r.configPath, r.env)
 
@@ -329,7 +331,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	})
 
 	// activeChannelName tracks which channel is currently processing a turn.
-	// Needed by channel_send, channel_send_when_free, and channel_create
+	// Needed by channel_send and channel_create
 	// (for creatable_groups enforcement).
 	var activeChannelName atomic.Pointer[string]
 	activeChannelFunc := func() string {
@@ -384,17 +386,42 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	scheduleMsgs := make(chan channel.TaggedMessage, 8)
 
 	channelSet := NewChannelSet(nil)
+
+	// Unified message queue — all sources (user, schedule, notification,
+	// cross-channel) flow through one queue with source-based priority.
+	messageQueue := queue.New(queue.QueueParams{
+		Store:    s,
+		Activity: activityTracker,
+		Channels: channelSet.Snapshot,
+	})
+
 	scheduler := schedule.NewScheduler(schedule.SchedulerParams{
 		Store:    scheduleStore,
 		Output:   scheduleMsgs,
 		Channels: channelSet.Snapshot,
-		Activity: activityTracker,
 	})
 	go scheduler.Run(ctx)
 
 	scheduletools.RegisterTools(mcpHandler, scheduletools.Deps{
 		Store:     scheduleStore,
 		Scheduler: scheduler,
+	})
+
+	// Set up the notification manager — runs at user lifetime, outlives the agent.
+	// Tool packages register as notifiers, the manager persists subscriptions and
+	// routes emitted notifications to the output channel. The unified queue handles
+	// busy-channel awareness and source-based priority.
+	notificationStore := notification.NewStore(s)
+	notificationMsgs := make(chan channel.TaggedMessage, 8)
+	notificationManager := notification.NewManager(notification.ManagerParams{
+		Store:    notificationStore,
+		Output:   notificationMsgs,
+		Channels: channelSet.Snapshot,
+	})
+	go notificationManager.Run(ctx)
+
+	notificationtools.RegisterTools(mcpHandler, notificationtools.Deps{
+		Manager: notificationManager,
 	})
 
 	// Set up dev workflow tools for code changes, PRs, and deployment.
@@ -476,7 +503,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// the tool can validate from_channel server-side.
 	crossChannelMsgs := make(chan channel.TaggedMessage, 8)
 
-	// Shared closures for channel_send and channel_send_when_free.
+	// Shared closures for channel_send.
 	// activeChannelFunc was declared earlier (before channeltools registration).
 	linksFunc := func() map[string][]channel.Link {
 		return registry.Links()
@@ -489,22 +516,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		Channels:      channelsFunc,
 		ActiveChannel: activeChannelFunc,
 	})
-
-	// Deferred cross-channel delivery — waits until the target is free.
-	// Uses a durable queue in the state store so pending messages survive restarts.
-	pendingStore := channel.NewPendingStore(s)
-	channeltools.RegisterSendWhenFreeTool(mcpHandler, channeltools.SendWhenFreeDeps{
-		Links:           linksFunc,
-		Output:          crossChannelMsgs,
-		Channels:        channelsFunc,
-		ActiveChannel:   activeChannelFunc,
-		ActivityTracker: activityTracker,
-		PendingStore:    pendingStore,
-	})
-
-	// Drain goroutine for pending messages. Runs at user lifetime (not agent
-	// lifetime) so pending messages are delivered even across agent restarts.
-	go drainPendingMessages(ctx, pendingStore, activityTracker, crossChannelMsgs, channelsFunc)
 
 	// Ephemeral channel cleanup goroutine. Runs at user lifetime and
 	// periodically tears down ephemeral channels that have been idle past
@@ -545,10 +556,9 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		onChannelChange()
 	}
 
-	// Merge schedule and cross-channel messages into the static stream so
-	// they outlive the agent. hotAddMsgs is included here too — it outlives
-	// agent sessions and collects messages from hot-added channels.
-	allStaticMsgs := channel.MergeFanIns(ctx, staticMsgs, scheduleMsgs, crossChannelMsgs, hotAddMsgs)
+	// Merge schedule, cross-channel, notification, and hot-add messages into
+	// the static stream so they outlive the agent.
+	allStaticMsgs := channel.MergeFanIns(ctx, staticMsgs, scheduleMsgs, crossChannelMsgs, hotAddMsgs, notificationMsgs)
 
 	firstBoot := true
 	for {
@@ -684,13 +694,14 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 		// Build system prompt and add-dirs for this iteration.
 		promptResult := BuildIterationPrompt(dynamicCtx, PromptParams{
-			Channels:   allChMap,
-			Registry:   registry,
-			DevStore:   devStore,
-			UserDir:    userDir,
-			UserID:     mu.cfg.ID,
-			BasePrompt: mu.cfg.SystemPrompt,
-			Onboarding: onboardingStore,
+			Channels:            allChMap,
+			Registry:            registry,
+			DevStore:            devStore,
+			NotificationManager: notificationManager,
+			UserDir:             userDir,
+			UserID:              mu.cfg.ID,
+			BasePrompt:          mu.cfg.SystemPrompt,
+			Onboarding:          onboardingStore,
 		})
 		systemPrompt := promptResult.SystemPrompt
 		addDirs := promptResult.AddDirs
@@ -834,7 +845,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			// are reachable by the agent without restarting.
 			ChannelsFunc: channelsFunc,
 			Sessions:     sessions,
-			QueueStore:   queueStore,
+			Queue:        messageQueue,
 			OnSessionUpdate: func(chID channel.ChannelID, sessionID string) {
 				if saveErr := saveSession(ctx, sessionStore, chID, sessionID); saveErr != nil {
 					slog.Error("failed to save session", "err", saveErr)
@@ -920,7 +931,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		if errors.Is(err, agent.ErrIdleTimeout) {
 			slog.Info("agent restarting", "user", mu.cfg.ID, "reason", "idle_timeout")
 			// Idle timeout means the agent wasn't doing anything — don't resume.
-			if clearErr := queueStore.ClearInterrupted(ctx); clearErr != nil {
+			if clearErr := messageQueue.ClearInterrupted(ctx); clearErr != nil {
 				slog.Error("failed to clear interrupted marker on idle timeout", "err", clearErr)
 			}
 			continue
@@ -928,7 +939,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		if errors.Is(err, agent.ErrResetRequested) {
 			slog.Info("agent restarting", "user", mu.cfg.ID, "reason", "reset")
 			// User explicitly reset — don't resume old work.
-			if clearErr := queueStore.ClearInterrupted(ctx); clearErr != nil {
+			if clearErr := messageQueue.ClearInterrupted(ctx); clearErr != nil {
 				slog.Error("failed to clear interrupted marker on reset", "err", clearErr)
 			}
 			continue

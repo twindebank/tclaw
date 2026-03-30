@@ -10,6 +10,7 @@ import (
 	"tclaw/agent"
 	"tclaw/channel"
 	"tclaw/dev"
+	"tclaw/notification"
 	"tclaw/onboarding"
 	"tclaw/user"
 )
@@ -17,13 +18,14 @@ import (
 // PromptParams holds everything needed to build the system prompt for one
 // agent iteration.
 type PromptParams struct {
-	Channels   map[channel.ChannelID]channel.Channel
-	Registry   *channel.Registry
-	DevStore   *dev.Store
-	UserDir    string
-	UserID     user.ID
-	BasePrompt string
-	Onboarding *onboarding.Store
+	Channels            map[channel.ChannelID]channel.Channel
+	Registry            *channel.Registry
+	DevStore            *dev.Store
+	NotificationManager *notification.Manager
+	UserDir             string
+	UserID              user.ID
+	BasePrompt          string
+	Onboarding          *onboarding.Store
 }
 
 // IterationPromptResult holds the system prompt plus side-effect data
@@ -138,7 +140,25 @@ func BuildIterationPrompt(ctx context.Context, params PromptParams) IterationPro
 		}
 	}
 
-	systemPrompt := agent.BuildSystemPrompt(chInfos, devSessionInfos, params.BasePrompt, onboardingInfo)
+	// Build notification info for the prompt.
+	var notifInfos []agent.NotificationInfo
+	if params.NotificationManager != nil {
+		subs, listErr := params.NotificationManager.List(ctx)
+		if listErr != nil {
+			slog.Error("failed to list notification subscriptions", "err", listErr)
+		}
+		for _, sub := range subs {
+			notifInfos = append(notifInfos, agent.NotificationInfo{
+				PackageName: sub.PackageName,
+				TypeName:    sub.TypeName,
+				Label:       sub.Label,
+				ChannelName: sub.ChannelName,
+				Scope:       string(sub.Scope),
+			})
+		}
+	}
+
+	systemPrompt := agent.BuildSystemPrompt(chInfos, devSessionInfos, notifInfos, params.BasePrompt, onboardingInfo)
 
 	return IterationPromptResult{
 		SystemPrompt: systemPrompt,

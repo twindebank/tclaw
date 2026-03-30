@@ -12,6 +12,7 @@ import (
 	"tclaw/channel"
 	"tclaw/claudecli"
 	"tclaw/config"
+	"tclaw/queue"
 )
 
 // SecretStore provides encrypted persistent storage for secrets.
@@ -230,11 +231,10 @@ type Options struct {
 	// rebuild channels and restart.
 	ChannelChangeCh <-chan struct{}
 
-	// QueueStore persists messages that arrive while a turn is running.
-	// On startup, queued messages are restored before reading new ones.
-	// Also tracks interrupted turns so the agent can resume on restart.
-	// May be nil if persistence is not needed.
-	QueueStore *channel.QueueStore
+	// Queue is the unified priority queue for all message sources.
+	// Handles persistence, source-based priority (user first), and
+	// busy-channel awareness. May be nil if not needed.
+	Queue *queue.Queue
 }
 
 type handleResult struct {
@@ -284,41 +284,28 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		}
 	}
 
-	var queue []channel.TaggedMessage
-
 	// Restore persisted queue and resume state from a previous agent session.
-	if opts.QueueStore != nil {
-		qState, err := opts.QueueStore.Load(ctx)
-		if err != nil {
+	if opts.Queue != nil {
+		if err := opts.Queue.LoadPersisted(ctx); err != nil {
 			slog.Error("failed to load persisted queue", "err", err)
-		} else {
-			// Inject a resume message for the channel that was interrupted mid-turn.
-			if qState.InterruptedChannel != "" {
-				resumeMsg := channel.TaggedMessage{
-					ChannelID:  qState.InterruptedChannel,
-					Text:       "[SYSTEM: You were interrupted mid-turn. Review your conversation history and continue what you were doing. If you were waiting for user input, let the user know you're back.]",
-					SourceInfo: &channel.MessageSourceInfo{Source: channel.SourceResume},
-				}
-				queue = append(queue, resumeMsg)
-				slog.Info("injecting resume message for interrupted channel", "channel", qState.InterruptedChannel)
+		}
+		if interruptedCh := opts.Queue.InterruptedChannel(); interruptedCh != "" {
+			// Inject a resume message so the agent continues where it left off.
+			resumeMsg := channel.TaggedMessage{
+				ChannelID:  interruptedCh,
+				Text:       "[SYSTEM: You were interrupted mid-turn. Review your conversation history and continue what you were doing. If you were waiting for user input, let the user know you're back.]",
+				SourceInfo: &channel.MessageSourceInfo{Source: channel.SourceResume},
 			}
-			for _, qm := range qState.Messages {
-				queue = append(queue, channel.TaggedMessage{
-					ChannelID:  qm.ChannelID,
-					Text:       qm.Text,
-					SourceInfo: qm.SourceInfo,
-				})
+			if pushErr := opts.Queue.Push(ctx, resumeMsg); pushErr != nil {
+				slog.Error("failed to push resume message", "err", pushErr)
 			}
-			if len(qState.Messages) > 0 {
-				slog.Info("restored persisted queued messages", "count", len(qState.Messages))
+			slog.Info("injecting resume message for interrupted channel", "channel", interruptedCh)
+			if clearErr := opts.Queue.ClearInterrupted(ctx); clearErr != nil {
+				slog.Error("failed to clear interrupted marker after load", "err", clearErr)
 			}
-			// Clear persisted state now that it's loaded into memory.
-			if err := opts.QueueStore.Save(ctx, nil); err != nil {
-				slog.Error("failed to clear persisted queue after load", "err", err)
-			}
-			if err := opts.QueueStore.ClearInterrupted(ctx); err != nil {
-				slog.Error("failed to clear interrupted marker after load", "err", err)
-			}
+		}
+		if opts.Queue.Len() > 0 {
+			slog.Info("restored persisted queued messages", "count", opts.Queue.Len())
 		}
 	}
 
@@ -334,12 +321,55 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		// approval retry. Reset each iteration; set by the approval handler.
 		var restoreOverride func()
 
+		// Wait for the next processable message. User/resume messages dequeue
+		// immediately; non-user messages wait until the target channel is idle.
 		var msg channel.TaggedMessage
-		if len(queue) > 0 {
-			msg = queue[0]
-			queue = queue[1:]
-			persistQueue(ctx, opts.QueueStore, queue)
+		if opts.Queue != nil {
+			// Use the priority queue — blocks until a message is processable.
+			// We still need to handle ChannelChangeCh, idle timeout, and OAuth
+			// notifications, so use a cancellable context for the Next() call.
+			type nextResult struct {
+				msg channel.TaggedMessage
+				err error
+			}
+			nextCtx, nextCancel := context.WithCancel(ctx)
+			nextCh := make(chan nextResult, 1)
+			go func() {
+				m, err := opts.Queue.Next(nextCtx, msgs)
+				nextCh <- nextResult{m, err}
+			}()
+
+			select {
+			case <-opts.ChannelChangeCh:
+				nextCancel()
+				return ErrChannelChanged
+			case <-idle.C():
+				nextCancel()
+				slog.Info("agent idle timeout, shutting down", "timeout", agentIdleTimeout)
+				return ErrIdleTimeout
+			case chID := <-fm.OAuthNotify:
+				nextCancel()
+				<-nextCh // wait for goroutine to exit before continuing
+				if !fm.HasFlow(chID, FlowAuth) {
+					continue
+				}
+				msg = channel.TaggedMessage{ChannelID: chID}
+			case result := <-nextCh:
+				nextCancel()
+				if result.err != nil {
+					if errors.Is(result.err, context.Canceled) {
+						return nil
+					}
+					if errors.Is(result.err, queue.ErrInputClosed) {
+						return nil
+					}
+					return result.err
+				}
+				msg = result.msg
+				idle.Reset()
+			}
 		} else {
+			// Fallback without queue (e.g. tests).
 			select {
 			case <-ctx.Done():
 				return nil
@@ -355,8 +385,6 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				msg = m
 				idle.Reset()
 			case chID := <-fm.OAuthNotify:
-				// OAuth goroutine finished. Only inject a synthetic message if
-				// the auth flow still exists — it may have been cancelled by "stop".
 				if !fm.HasFlow(chID, FlowAuth) {
 					continue
 				}
@@ -481,8 +509,12 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				continue
 			}
 			result := handleAuthFlow(ctx, opts, fm, f.Auth, ch, msg)
-			if len(result.RetryMessages) > 0 {
-				queue = append(result.RetryMessages, queue...)
+			for _, retryMsg := range result.RetryMessages {
+				if opts.Queue != nil {
+					if pushErr := opts.Queue.Push(ctx, retryMsg); pushErr != nil {
+						slog.Error("failed to push auth retry message", "err", pushErr)
+					}
+				}
 			}
 			// Don't close the turn while OAuth is running.
 			if f.Auth == nil || f.Auth.state != authOAuthActive {
@@ -522,8 +554,8 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		}
 		// Mark which channel is being processed so we can inject a resume
 		// message if the agent is interrupted before the turn completes.
-		if opts.QueueStore != nil {
-			if err := opts.QueueStore.SetInterrupted(ctx, msg.ChannelID); err != nil {
+		if opts.Queue != nil {
+			if err := opts.Queue.SetInterrupted(ctx, msg.ChannelID); err != nil {
 				slog.Error("failed to set interrupted channel", "err", err)
 			}
 		}
@@ -638,8 +670,11 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 						stopped = true
 					}
 				} else {
-					queue = append(queue, newMsg)
-					persistQueue(ctx, opts.QueueStore, queue)
+					if opts.Queue != nil {
+						if pushErr := opts.Queue.Push(ctx, newMsg); pushErr != nil {
+							slog.Error("failed to push to queue during turn", "err", pushErr)
+						}
+					}
 					// Acknowledge the queued message so the user knows it was received.
 					if queueCh, ok := opts.channels()[newMsg.ChannelID]; ok {
 						ackMsg := "📥 Queued — will process after the current turn finishes."
@@ -673,8 +708,8 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		// Only clear the interrupted marker if the turn completed normally.
 		// If the parent context was cancelled (deploy, shutdown), preserve
 		// the marker so the agent can resume the interrupted turn on restart.
-		if opts.QueueStore != nil && ctx.Err() == nil {
-			if err := opts.QueueStore.ClearInterrupted(ctx); err != nil {
+		if opts.Queue != nil && ctx.Err() == nil {
+			if err := opts.Queue.ClearInterrupted(ctx); err != nil {
 				slog.Error("failed to clear interrupted channel", "err", err)
 			}
 		}
@@ -940,24 +975,4 @@ func buildArgs(opts Options, sessionID string, systemPrompt string, prompt strin
 	// mistaken for CLI options.
 	args = append(args, "--", prompt)
 	return args
-}
-
-// persistQueue saves the in-memory queue to the QueueStore. Best-effort:
-// errors are logged but don't interrupt message processing.
-func persistQueue(ctx context.Context, qs *channel.QueueStore, queue []channel.TaggedMessage) {
-	if qs == nil {
-		return
-	}
-	messages := make([]channel.QueuedMessage, len(queue))
-	for i, m := range queue {
-		messages[i] = channel.QueuedMessage{
-			ChannelID:  m.ChannelID,
-			Text:       m.Text,
-			SourceInfo: m.SourceInfo,
-			QueuedAt:   time.Now(),
-		}
-	}
-	if err := qs.Save(ctx, messages); err != nil {
-		slog.Error("failed to persist queue", "err", err)
-	}
 }

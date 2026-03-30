@@ -165,6 +165,23 @@ The `cmd/chat` binary is a Bubbletea-based terminal UI that connects via unix so
 
 New users are guided through a structured onboarding flow: welcome -> info gathering -> daily tips -> complete. Managed via `onboarding_*` tools. State persisted in the user's state store.
 
+## Notifications
+
+Push-based event system for tool integrations. Tool packages implement the `Notifier` interface to declare notification types and own the watch mechanism (polling, webhook, etc.). The agent has full observability and control.
+
+- **Discoverable** — `notification_types` lists all available notification types across packages
+- **Subscribable** — `notification_subscribe` creates subscriptions with source-based scoping (one-shot, credential, persistent)
+- **Observable** — `notification_list` shows active subscriptions, system prompt includes them
+- **Manageable** — agent can unsubscribe at any time; tool packages can also manage subscriptions programmatically
+
+### Unified Message Queue
+
+All messages (user, schedule, notification, cross-channel) flow through one priority queue (`queue/`). User messages always dequeue first. Non-user messages wait until the target channel is idle (not processing and past the 3-minute conversation cooldown). The queue uses `ActivityTracker.NotifyIdle()` for event-driven wake instead of polling.
+
+### Gmail Notifications
+
+The Google package implements `Notifier` with a `new_email` notification type. Polls Gmail's `history.list` API every 2 minutes for new messages since the last check. The history cursor is persisted in the state store so it survives restarts. Starts off — the agent subscribes via `notification_subscribe`.
+
 ## HTTP Server
 
 - **`/healthz`** — health check (returns 200)

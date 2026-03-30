@@ -19,7 +19,8 @@ func channelIsBusyDef() mcp.ToolDef {
 			"or in an ongoing conversation (within the idle window). Use this before sending a " +
 			"cross-channel message to decide whether to deliver immediately or defer. " +
 			"For scheduled jobs that should wait for a user conversation to finish, use a longer " +
-			"idle_timeout (e.g. 600 for 10 minutes) — or use channel_send_when_free which handles waiting automatically.",
+			"idle_timeout (e.g. 600 for 10 minutes). Non-user messages (schedules, notifications, cross-channel) " +
+			"automatically wait for idle channels via the unified queue.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {

@@ -46,7 +46,6 @@ type UserStores struct {
 	Session      store.Store
 	Secret       secret.Store
 	RuntimeState *channel.RuntimeStateStore
-	Queue        *channel.QueueStore
 }
 
 // NewUserStores creates all per-user stores from the directory paths.
@@ -67,13 +66,11 @@ func NewUserStores(dirs UserDirs, userID string) (*UserStores, error) {
 	}
 
 	runtimeState := channel.NewRuntimeStateStore(stateStore)
-	queueStore := channel.NewQueueStore(stateStore)
 
 	return &UserStores{
 		State:        stateStore,
 		Session:      sessionStore,
 		Secret:       secretStore,
 		RuntimeState: runtimeState,
-		Queue:        queueStore,
 	}, nil
 }

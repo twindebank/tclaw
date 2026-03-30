@@ -23,11 +23,10 @@ const (
 	ExtraKeyProvisioners    = "channel_provisioners"
 	ExtraKeyActiveChannel   = "active_channel"
 
-	// Send/SendWhenFree deps.
+	// Send deps.
 	ExtraKeyLinks         = "channel_links"
 	ExtraKeyCrossChOutput = "cross_channel_output"
 	ExtraKeyChannelsFunc  = "channels_func"
-	ExtraKeyPendingStore  = "pending_store"
 )
 
 // Package implements toolpkg.Package for channel management and messaging tools.
@@ -36,7 +35,7 @@ type Package struct{}
 func (p *Package) Name() string { return "channel" }
 func (p *Package) Description() string {
 	return "Channel lifecycle management (create, edit, delete, list, notify, done), " +
-		"cross-channel messaging (send, send_when_free, is_busy), and tool group listing."
+		"cross-channel messaging (send, is_busy), and tool group listing."
 }
 
 func (p *Package) Group() toolgroup.ToolGroup {
@@ -128,20 +127,6 @@ func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationCont
 			ActiveChannel: activeChannel,
 		})
 
-		var pendingStore *channel.PendingStore
-		if ps, ok := regCtx.Extra[ExtraKeyPendingStore].(*channel.PendingStore); ok {
-			pendingStore = ps
-		}
-		if pendingStore != nil && activityTracker != nil {
-			RegisterSendWhenFreeTool(handler, SendWhenFreeDeps{
-				Links:           linksFunc,
-				Output:          crossChOutput,
-				Channels:        channelsFunc,
-				ActiveChannel:   activeChannel,
-				ActivityTracker: activityTracker,
-				PendingStore:    pendingStore,
-			})
-		}
 	}
 
 	// tool_list registered last so it can see all tools.
