@@ -61,4 +61,5 @@ const (
 	MCPToolSecretFormAll     claudecli.Tool = "mcp__tclaw__secret_form_*"
 	MCPToolTelegramClientAll claudecli.Tool = "mcp__tclaw__telegram_client_*"
 	MCPToolChannelDone       claudecli.Tool = "mcp__tclaw__channel_done"
+	MCPToolNotificationAll   claudecli.Tool = "mcp__tclaw__notification_*"
 )
