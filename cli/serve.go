@@ -24,6 +24,48 @@ import (
 	"tclaw/version"
 )
 
+// volumeConfigPath is where the runtime config lives on the persistent Fly
+// volume. Agent mutations (channel create/edit/delete) write here so they
+// survive redeploys. The image-baked config at /etc/tclaw/tclaw.yaml is
+// only used as a seed on first boot.
+const volumeConfigPath = "/data/tclaw.yaml"
+
+// bootstrapConfig resolves the active config path. In production, the runtime
+// config lives on the persistent volume so agent mutations survive redeploys.
+// On first boot (or after a volume wipe), the seed config baked into the image
+// is copied to the volume.
+func bootstrapConfig(seedPath, env string) string {
+	if env != "prod" {
+		return seedPath
+	}
+
+	if _, err := os.Stat(volumeConfigPath); err == nil {
+		// Volume config exists, use it.
+		slog.Info("using volume config", "path", volumeConfigPath)
+		return volumeConfigPath
+	}
+
+	// First boot: copy seed config to volume.
+	data, err := os.ReadFile(seedPath)
+	if err != nil {
+		slog.Error("failed to read seed config for bootstrap", "seed", seedPath, "err", err)
+		os.Exit(1)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(volumeConfigPath), 0o755); err != nil {
+		slog.Error("failed to create volume config directory", "err", err)
+		os.Exit(1)
+	}
+
+	if err := os.WriteFile(volumeConfigPath, data, 0o644); err != nil {
+		slog.Error("failed to bootstrap volume config from seed", "err", err)
+		os.Exit(1)
+	}
+
+	slog.Info("bootstrapped volume config from seed", "seed", seedPath, "volume", volumeConfigPath)
+	return volumeConfigPath
+}
+
 func runServe() {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	configPath := fs.String("config", "tclaw.yaml", "path to config file")
@@ -46,9 +88,11 @@ func runServe() {
 	// before tclaw. Critical on memory-constrained VMs (256MB Fly.io).
 	agent.ProtectFromOOM()
 
-	cfg, err := config.Load(*configPath, config.Env(*envFlag))
+	activeConfigPath := bootstrapConfig(*configPath, *envFlag)
+
+	cfg, err := config.Load(activeConfigPath, config.Env(*envFlag))
 	if err != nil {
-		slog.Error("failed to load config", "path", *configPath, "err", err)
+		slog.Error("failed to load config", "path", activeConfigPath, "err", err)
 		os.Exit(1)
 	}
 
@@ -93,7 +137,7 @@ func runServe() {
 		fmt.Fprintln(w, version.Commit)
 	}))
 
-	r := router.New(cfg.BaseDir, cfg.Env, cfg.Credentials, callback, cfg.Server.PublicURL, logBuf, *configPath)
+	r := router.New(cfg.BaseDir, cfg.Env, cfg.Credentials, callback, cfg.Server.PublicURL, logBuf, activeConfigPath)
 	defer r.StopAll()
 
 	for _, u := range cfg.Users {

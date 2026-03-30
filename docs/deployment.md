@@ -6,7 +6,7 @@
 - Local deploys also work via `tclaw deploy` (builds locally with Docker)
 - Persistent volume `tclaw_data` at `/data` for per-user state
 - Health check at `/healthz` on port 9876
-- Config baked into image at `/etc/tclaw/tclaw.yaml` (unified multi-env file, `--env prod` selects the prod section)
+- Seed config baked into image at `/etc/tclaw/tclaw.yaml`; copied to persistent volume (`/data/tclaw.yaml`) on first boot. Runtime config lives on the volume so agent mutations survive redeploys.
 - Subprocess sandboxing via bubblewrap (mount namespace isolation per user)
 
 ## Secret Management
@@ -23,35 +23,31 @@ tclaw deploy status      # Check app status
 tclaw deploy logs        # Show recent logs (same as tclaw logs)
 tclaw deploy suspend     # Spin down (scale to 0)
 tclaw deploy resume      # Spin up (scale to 1)
-tclaw config sync        # Sync tclaw.yaml between local and remote
+tclaw config push        # Push local config to remote Fly volume
+tclaw config pull        # Pull remote config to local
 tclaw config diff        # Show differences between local and remote config
 ```
 
-## Config Sync
+## Config Lifecycle
 
-`tclaw config sync` keeps the local `tclaw.yaml` and the remote copy on the Fly volume in sync. It handles the common case where the agent creates channels at runtime in production (written to the remote config) while you edit the config locally.
+The runtime config lives on the persistent Fly volume at `/data/tclaw.yaml`. On first boot (or after a volume wipe), the seed config baked into the image at `/etc/tclaw/tclaw.yaml` is automatically copied to the volume. All agent mutations (channel create/edit/delete) write to the volume copy, so they survive redeploys.
 
-**What it does:**
+The image-baked config comes from the `TCLAW_YAML` GitHub secret, written to `tclaw.yaml` during CI and COPYed into the image at `/etc/tclaw/tclaw.yaml`. This seed is only used when no volume config exists yet.
 
-1. Reads both local `tclaw.yaml` and the remote config via `fly ssh console`
-2. Parses both configs and compares channels per environment/user
-3. Detects expired ephemeral channels on the remote and skips them (based on `created_at` + `ephemeral_idle_timeout`, default 24h)
-4. Flags remote-only channels for manual review (printed to stdout with a note to use `tclaw config diff`)
-5. Pushes the merged config to both local disk and the remote Fly volume
-6. Runs `tclaw deploy secrets` automatically to sync secrets alongside the config
+**Commands:**
 
-**What it does not do (yet):**
-
-- Auto-merge remote-only channels into the local config. Full YAML merge is complex, so remote-only channels are flagged for review. Use `tclaw config diff` to inspect them, then edit `tclaw.yaml` manually if you want to keep them.
+- `tclaw config push` — overwrites the remote volume config with your local `tclaw.yaml`, then syncs secrets. Use `--persist` to also update the `TCLAW_YAML` GitHub secret (disaster recovery for volume wipes).
+- `tclaw config pull` — pulls the remote volume config to your local `tclaw.yaml`. Use this to get agent-created channels back locally.
+- `tclaw config diff` — shows a unified diff between local and remote configs.
 
 **Typical workflow:**
 
 ```
-tclaw config diff        # Preview what's different
-tclaw config sync        # Sync configs + secrets
+tclaw config diff          # Preview what's different
+tclaw config push          # Push local config to remote volume + sync secrets
+tclaw config pull          # Pull agent changes back to local
+tclaw config push --persist  # Push + update GitHub secret for DR
 ```
-
-`tclaw config diff` reads both configs via SSH and runs a unified diff (`diff -u`) with `remote:` and `local:` labels. If the configs are identical it prints a confirmation and exits.
 
 ## First-Time Setup
 1. `brew install flyctl && fly auth login`

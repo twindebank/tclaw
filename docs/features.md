@@ -56,7 +56,7 @@ This means a Telegram channel can be added to config without a bot token — the
 
 ### Config Sync
 
-`tclaw config sync` and `tclaw config diff` manage config between local and remote environments. `diff` shows what would change; `sync` pushes the local config to the remote deployment.
+The runtime config lives on the persistent Fly volume (`/data/tclaw.yaml`) so agent mutations survive redeploys. `tclaw config push` writes local config to the volume, `tclaw config pull` reads it back, and `tclaw config diff` shows differences. Use `push --persist` to also update the GitHub secret for disaster recovery.
 
 ### Runtime State
 

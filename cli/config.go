@@ -10,20 +10,17 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 const configUsage = `Usage: tclaw config <command> [flags]
 
 Commands:
-  sync     Sync tclaw.yaml between local and remote (Fly.io)
+  push     Push local config to remote Fly volume
+  pull     Pull remote config to local
   diff     Show differences between local and remote config
-  push     Push local config to remote (overwrite, no merge)
 
-Flags for sync:
-  --force  Overwrite remote with local config (skip merge)
+Flags for push:
+  --persist  Also update the TCLAW_YAML GitHub secret for disaster recovery
 `
 
 func runConfig() {
@@ -33,12 +30,12 @@ func runConfig() {
 	}
 
 	switch subcommand {
-	case "sync":
-		configSync()
-	case "diff":
-		configDiff()
 	case "push":
 		configPush()
+	case "pull":
+		configPull()
+	case "diff":
+		configDiff()
 	case "--help", "-h", "help", "":
 		fmt.Print(configUsage)
 	default:
@@ -48,14 +45,18 @@ func runConfig() {
 	}
 }
 
-// Config is baked into the image at build time from the TCLAW_YAML GitHub
-// secret. Writes to this path persist in the container's writable layer until
-// the next deploy, which replaces the image.
-const remoteConfigPath = "/etc/tclaw/tclaw.yaml"
+// remoteConfigPath is where the runtime config lives on the persistent Fly
+// volume. Agent mutations (channel create/edit/delete) write here so they
+// survive redeploys. See bootstrapConfig() in serve.go for how the seed
+// config is copied here on first boot.
+const remoteConfigPath = "/data/tclaw.yaml"
 
-func configSync() {
-	fs := flag.NewFlagSet("config sync", flag.ExitOnError)
-	force := fs.Bool("force", false, "Overwrite remote with local config (skip merge)")
+// configPush overwrites the remote config on the Fly volume with the local
+// one. Optionally also updates the TCLAW_YAML GitHub secret so the config
+// survives a volume wipe (disaster recovery).
+func configPush() {
+	fs := flag.NewFlagSet("config push", flag.ExitOnError)
+	persist := fs.Bool("persist", false, "Also update the TCLAW_YAML GitHub secret for disaster recovery")
 	fs.Parse(os.Args[3:])
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -68,7 +69,34 @@ func configSync() {
 		os.Exit(1)
 	}
 
-	fmt.Println("→ reading remote config from fly...")
+	fmt.Println("-> pushing local config to remote volume...")
+	if err := writeRemoteFile(ctx, remoteConfigPath, localData); err != nil {
+		fmt.Fprintf(os.Stderr, "error writing remote config: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("-> syncing secrets...")
+	deploySecrets()
+
+	if *persist {
+		fmt.Println("-> updating TCLAW_YAML GitHub secret...")
+		if err := updateGitHubConfigSecret(ctx, localData); err != nil {
+			fmt.Fprintf(os.Stderr, "error updating GitHub secret: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	fmt.Println("done: config pushed")
+}
+
+// configPull reads the remote config from the Fly volume and writes it to the
+// local tclaw.yaml. Use this to pull agent-created channels back to your local
+// config.
+func configPull() {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	fmt.Println("-> reading remote config from fly volume...")
 	remoteData, err := readRemoteFile(ctx, remoteConfigPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error reading remote config: %v\n", err)
@@ -76,61 +104,24 @@ func configSync() {
 		os.Exit(1)
 	}
 
-	var merged []byte
-	if *force {
-		fmt.Println("→ force mode: using local config as-is")
-		merged = localData
-	} else {
-		merged = mergeConfigs(localData, remoteData)
-	}
-
-	if bytes.Equal(merged, localData) && bytes.Equal(merged, remoteData) {
-		fmt.Println("✓ configs are identical, nothing to sync")
-		return
-	}
-
-	if !bytes.Equal(merged, localData) {
-		fmt.Println("→ updating local config...")
-		if err := os.WriteFile(localPath, merged, 0o644); err != nil {
-			fmt.Fprintf(os.Stderr, "error writing local config: %v\n", err)
-			os.Exit(1)
-		}
-	}
-
-	fmt.Println("→ pushing config to remote...")
-	if err := writeRemoteFile(ctx, remoteConfigPath, merged); err != nil {
-		fmt.Fprintf(os.Stderr, "error writing remote config: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Println("→ syncing secrets...")
-	deploySecrets()
-
-	fmt.Println("✓ config synced")
-}
-
-// configPush overwrites the remote config with the local one. No merge.
-func configPush() {
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
 	localPath := "tclaw.yaml"
 	localData, err := os.ReadFile(localPath)
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		fmt.Fprintf(os.Stderr, "error reading local config: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Println("→ pushing local config to remote (overwrite)...")
-	if err := writeRemoteFile(ctx, remoteConfigPath, localData); err != nil {
-		fmt.Fprintf(os.Stderr, "error writing remote config: %v\n", err)
+	if bytes.Equal(localData, remoteData) {
+		fmt.Println("done: configs are identical, nothing to pull")
+		return
+	}
+
+	if err := os.WriteFile(localPath, remoteData, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "error writing local config: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Println("→ syncing secrets...")
-	deploySecrets()
-
-	fmt.Println("✓ config pushed")
+	fmt.Println("done: config pulled to", localPath)
 }
 
 func configDiff() {
@@ -144,7 +135,7 @@ func configDiff() {
 		os.Exit(1)
 	}
 
-	fmt.Println("→ reading remote config from fly...")
+	fmt.Println("-> reading remote config from fly volume...")
 	remoteData, err := readRemoteFile(ctx, remoteConfigPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error reading remote config: %v\n", err)
@@ -152,7 +143,7 @@ func configDiff() {
 	}
 
 	if bytes.Equal(localData, remoteData) {
-		fmt.Println("✓ configs are identical")
+		fmt.Println("done: configs are identical")
 		return
 	}
 
@@ -191,97 +182,6 @@ func configDiff() {
 	cmd.Run()
 }
 
-// mergeConfigs merges local and remote configs. Expired ephemeral channels
-// on the remote are dropped. Remote-only non-expired channels are flagged
-// for review but not auto-merged (complex YAML merge).
-func mergeConfigs(localData, remoteData []byte) []byte {
-	localCfg, localErr := parseConfigForMerge(localData)
-	remoteCfg, remoteErr := parseConfigForMerge(remoteData)
-
-	if localErr != nil || remoteErr != nil {
-		return localData
-	}
-
-	localChannels := make(map[string]mergeChannel)
-	for env, users := range localCfg {
-		for _, u := range users {
-			for _, ch := range u.Channels {
-				localChannels[env+"/"+u.ID+"/"+ch.Name] = ch
-			}
-		}
-	}
-
-	remoteChannels := make(map[string]mergeChannel)
-	for env, users := range remoteCfg {
-		for _, u := range users {
-			for _, ch := range u.Channels {
-				remoteChannels[env+"/"+u.ID+"/"+ch.Name] = ch
-			}
-		}
-	}
-
-	var expiredCount int
-	for key, ch := range remoteChannels {
-		if _, inLocal := localChannels[key]; inLocal {
-			continue
-		}
-		if ch.Ephemeral && ch.isExpired() {
-			expiredCount++
-			continue
-		}
-		fmt.Printf("  remote-only channel: %s (use 'tclaw config diff' to review)\n", key)
-	}
-
-	if expiredCount > 0 {
-		fmt.Printf("  skipped %d expired ephemeral channels from remote\n", expiredCount)
-	}
-
-	return localData
-}
-
-type mergeChannel struct {
-	Name                 string `yaml:"name"`
-	Ephemeral            bool   `yaml:"ephemeral"`
-	EphemeralIdleTimeout string `yaml:"ephemeral_idle_timeout"`
-	CreatedAt            string `yaml:"created_at"`
-}
-
-func (ch mergeChannel) isExpired() bool {
-	if !ch.Ephemeral || ch.CreatedAt == "" {
-		return false
-	}
-	created, err := time.Parse(time.RFC3339, ch.CreatedAt)
-	if err != nil {
-		return false
-	}
-	timeout := 24 * time.Hour
-	if ch.EphemeralIdleTimeout != "" {
-		if parsed, parseErr := time.ParseDuration(ch.EphemeralIdleTimeout); parseErr == nil {
-			timeout = parsed
-		}
-	}
-	return time.Since(created) > timeout
-}
-
-type mergeUser struct {
-	ID       string         `yaml:"id"`
-	Channels []mergeChannel `yaml:"channels"`
-}
-
-func parseConfigForMerge(data []byte) (map[string][]mergeUser, error) {
-	var raw map[string]struct {
-		Users []mergeUser `yaml:"users"`
-	}
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return nil, err
-	}
-	result := make(map[string][]mergeUser)
-	for env, cfg := range raw {
-		result[env] = cfg.Users
-	}
-	return result, nil
-}
-
 func readRemoteFile(ctx context.Context, path string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "fly", "ssh", "console", "-a", flyApp, "-C", "cat "+path)
 	out, err := cmd.Output()
@@ -298,6 +198,16 @@ func writeRemoteFile(ctx context.Context, path string, data []byte) error {
 	cmd := exec.CommandContext(ctx, "fly", "ssh", "console", "-a", flyApp, "-C",
 		fmt.Sprintf("cat > %s", path))
 	cmd.Stdin = bytes.NewReader(data)
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// updateGitHubConfigSecret updates the TCLAW_YAML GitHub secret so the config
+// survives a volume wipe. Requires the gh CLI to be authenticated.
+func updateGitHubConfigSecret(ctx context.Context, data []byte) error {
+	cmd := exec.CommandContext(ctx, "gh", "secret", "set", "TCLAW_YAML",
+		"--repo", "twindebank/tclaw",
+		"--body", string(data))
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }

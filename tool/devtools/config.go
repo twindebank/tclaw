@@ -14,8 +14,10 @@ import (
 )
 
 const (
-	// configSecretName is the GitHub secret that stores tclaw.yaml across deploys.
-	// CI writes it to /etc/tclaw/tclaw.yaml before building the container image.
+	// configSecretName is the GitHub secret that seeds tclaw.yaml on fresh deploys.
+	// CI writes it to /etc/tclaw/tclaw.yaml in the image; on first boot, it's
+	// copied to the persistent volume at /data/tclaw.yaml where all runtime
+	// mutations happen.
 	configSecretName = "TCLAW_YAML"
 )
 
@@ -27,8 +29,9 @@ func configGetDef() mcp.ToolDef {
 		Description: `Read the active tclaw.yaml config file.
 
 Returns the full YAML content of the running config. In production this is
-/etc/tclaw/tclaw.yaml, baked into the container image from the TCLAW_YAML
-GitHub secret at deploy time.
+/data/tclaw.yaml on the persistent Fly volume (seeded from the image on first
+boot). Agent mutations (channel create/edit/delete) write here and survive
+redeploys.
 
 Use this to inspect current channel config, providers, users, or any other
 settings before making changes with config_set.`,
