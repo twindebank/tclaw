@@ -1,5 +1,10 @@
 # tclaw
 
+## Git Workflow
+- **NEVER use Graphite (`gt`) in this repo** — use plain `git` and `gh` only
+- **SSH key is in 1Password** — if `git push` fails with SSH auth errors, just wait and retry. Don't try workarounds (HTTPS, config changes). The user needs to be present to unlock.
+- **PR creation**: `git push -u origin HEAD` then `gh pr create`
+
 ## MANDATORY: Read Before Writing Any Code
 **EVERY time you write or modify code — including in resumed/continued sessions — you MUST read @docs/go-patterns.md first AND follow every pattern exactly.** No exceptions. This includes tests, one-line fixes, and refactors. Don't rely on memory or assumptions about conventions; read the file and match its patterns precisely. Tests MUST use `t.Run` subtests grouped under one top-level func per method — never split scenarios into separate top-level test functions.
 
