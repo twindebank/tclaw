@@ -49,13 +49,14 @@ func seedConfigCredentials(ctx context.Context, credMgr *credential.Manager, cfg
 }
 
 // registerCredentialSystem sets up the unified credential management for all
-// tool packages that implement CredentialProvider.
+// tool packages in the registry.
 //
 // It:
-//  1. Seeds credentials from env vars into the credential store
-//  2. Registers the credential management MCP tools (credential_add, etc.)
-//  3. Loads existing credential sets and calls OnCredentialSetChange for each
-//     CredentialProvider package so they can register their tools
+//  1. Registers all packages via RegisterAll (info tools + each package's Register method)
+//  2. Seeds credentials from env vars into the credential store
+//  3. Wires up the OnCredentialChange callback for dynamic tool registration
+//  4. Calls OnCredentialSetChange for each CredentialProvider so they register
+//     their tools based on existing credentials at startup
 func registerCredentialSystem(
 	ctx context.Context,
 	handler *mcp.Handler,
@@ -65,23 +66,25 @@ func registerCredentialSystem(
 ) {
 	userID := string(regCtx.UserID)
 
+	// Wire up the change callback so credential_add/remove re-triggers
+	// OnCredentialSetChange for the affected package.
+	regCtx.Extra[credentialtools.ExtraKeyOnCredentialChange] = func(packageName string) {
+		notifyCredentialChange(ctx, handler, registry, credMgr, regCtx, packageName)
+	}
+
+	// Register all packages — info tools and each package's Register method.
+	// For credentialtools this registers credential_add/list/remove. For
+	// Google/Monzo the Register method is a no-op (tools registered via
+	// OnCredentialSetChange below).
+	if err := registry.RegisterAll(handler, regCtx); err != nil {
+		slog.Error("failed to register tool packages", "user", userID, "err", err)
+		return
+	}
+
 	// Seed pre-provisioned credentials from env vars.
 	if err := registry.SeedCredentials(ctx, userID, credMgr); err != nil {
 		slog.Error("failed to seed credentials from env", "user", userID, "err", err)
 	}
-
-	// Build the change callback that re-triggers OnCredentialSetChange for a package.
-	onChange := func(packageName string) {
-		notifyCredentialChange(ctx, handler, registry, credMgr, regCtx, packageName)
-	}
-
-	// Register the generic credential management tools.
-	credentialtools.RegisterTools(handler, credentialtools.Deps{
-		CredentialManager:  credMgr,
-		Registry:           registry,
-		Callback:           regCtx.Callback,
-		OnCredentialChange: onChange,
-	})
 
 	// Call OnCredentialSetChange for all CredentialProvider packages that have
 	// existing credential sets, so they can register their tools at startup.
