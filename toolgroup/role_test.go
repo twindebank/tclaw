@@ -8,7 +8,30 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// seedTestPackageTools simulates what the router does at startup — populates
+// group tools from package declarations so tests see the full picture.
+func seedTestPackageTools() {
+	SetPackageTools(map[ToolGroup][]claudecli.Tool{
+		GroupCoreTools:         {MCPToolModelAll},
+		GroupChannelManagement: {"mcp__tclaw__channel_create", "mcp__tclaw__channel_delete", "mcp__tclaw__channel_edit", "mcp__tclaw__channel_list", "mcp__tclaw__channel_notify", MCPToolChannelDone, "mcp__tclaw__channel_is_busy", MCPToolChannelSend},
+		GroupChannelMessaging:  {MCPToolChannelSend, "mcp__tclaw__channel_is_busy", MCPToolChannelDone, "mcp__tclaw__tool_group_list"},
+		GroupScheduling:        {MCPToolScheduleAll},
+		GroupDevWorkflow:       {MCPToolDevAll},
+		GroupRepoMonitoring:    {MCPToolRepoAll},
+		GroupGSuiteRead:        {"mcp__tclaw__google_gmail_list", "mcp__tclaw__google_gmail_read", "mcp__tclaw__google_workspace", "mcp__tclaw__google_workspace_schema"},
+		GroupGSuiteWrite:       {MCPToolGoogleAll},
+		GroupPersonalServices:  {MCPToolTflAll, MCPToolRestaurantAll, "mcp__tclaw__banking_*", MCPToolMonzoAll},
+		GroupConnections:       {MCPToolCredentialAll, MCPToolRemoteMCPAll},
+		GroupTelegramClient:    {MCPToolTelegramClientAll},
+		GroupNotifications:     {MCPToolNotificationAll},
+		GroupOnboarding:        {MCPToolOnboardingAll},
+		GroupSecretForm:        {MCPToolSecretFormAll},
+	})
+}
+
 func TestToolGroups(t *testing.T) {
+	seedTestPackageTools()
+
 	t.Run("all groups are valid", func(t *testing.T) {
 		for _, info := range AllGroups() {
 			require.True(t, ValidGroup(info.Group), "group %q should be valid", info.Group)

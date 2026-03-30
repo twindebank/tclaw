@@ -2,7 +2,6 @@ package devtools
 
 import (
 	"context"
-	"fmt"
 
 	"tclaw/claudecli"
 	"tclaw/dev"
@@ -11,16 +10,18 @@ import (
 	"tclaw/mcp"
 	"tclaw/tool/toolpkg"
 	"tclaw/toolgroup"
+	"tclaw/user"
 )
 
-// ExtraKeyDevStore is the RegistrationContext.Extra key for *dev.Store.
-const ExtraKeyDevStore = "dev_store"
-
-// ExtraKeyLogBuffer is the RegistrationContext.Extra key for *logbuffer.Buffer.
-const ExtraKeyLogBuffer = "log_buffer"
-
 // Package implements toolpkg.Package for dev workflow tools.
-type Package struct{}
+type Package struct {
+	Store       *dev.Store
+	LogBuffer   *logbuffer.Buffer
+	SecretStore secret.Store
+	UserDir     string
+	UserID      user.ID
+	ConfigPath  string
+}
 
 func (p *Package) Name() string { return "dev" }
 func (p *Package) Description() string {
@@ -28,8 +29,10 @@ func (p *Package) Description() string {
 }
 func (p *Package) Group() toolgroup.ToolGroup { return toolgroup.GroupDevWorkflow }
 
-func (p *Package) ToolPatterns() []claudecli.Tool {
-	return []claudecli.Tool{"mcp__tclaw__dev_*", "mcp__tclaw__config_*"}
+func (p *Package) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
+	return map[toolgroup.ToolGroup][]claudecli.Tool{
+		p.Group(): {"mcp__tclaw__dev_*", "mcp__tclaw__config_*"},
+	}
 }
 
 func (p *Package) RequiredSecrets() []toolpkg.SecretSpec {
@@ -63,23 +66,13 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 }
 
 func (p *Package) Register(handler *mcp.Handler, ctx toolpkg.RegistrationContext) error {
-	devStore, ok := ctx.Extra[ExtraKeyDevStore].(*dev.Store)
-	if !ok || devStore == nil {
-		return fmt.Errorf("devtools: missing %s in RegistrationContext.Extra", ExtraKeyDevStore)
-	}
-
-	var logBuffer *logbuffer.Buffer
-	if lb, ok := ctx.Extra[ExtraKeyLogBuffer]; ok {
-		logBuffer, _ = lb.(*logbuffer.Buffer)
-	}
-
 	RegisterTools(handler, Deps{
-		Store:       devStore,
-		SecretStore: ctx.SecretStore,
-		UserDir:     ctx.UserDir,
-		UserID:      ctx.UserID,
-		LogBuffer:   logBuffer,
-		ConfigPath:  ctx.ConfigPath,
+		Store:       p.Store,
+		SecretStore: p.SecretStore,
+		UserDir:     p.UserDir,
+		UserID:      p.UserID,
+		LogBuffer:   p.LogBuffer,
+		ConfigPath:  p.ConfigPath,
 	})
 	return nil
 }

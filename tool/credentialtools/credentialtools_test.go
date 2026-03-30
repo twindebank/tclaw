@@ -173,11 +173,11 @@ func callToolExpectError(t *testing.T, h *mcp.Handler, name string, args any) er
 // stubAPIPackage is a minimal CredentialProvider for testing API key flows.
 type stubAPIPackage struct{}
 
-func (p *stubAPIPackage) Name() string                          { return "stub_api" }
-func (p *stubAPIPackage) Description() string                   { return "Stub API key package for testing" }
-func (p *stubAPIPackage) Group() toolgroup.ToolGroup            { return "" }
-func (p *stubAPIPackage) ToolPatterns() []claudecli.Tool        { return nil }
-func (p *stubAPIPackage) RequiredSecrets() []toolpkg.SecretSpec { return nil }
+func (p *stubAPIPackage) Name() string                                         { return "stub_api" }
+func (p *stubAPIPackage) Description() string                                  { return "Stub API key package for testing" }
+func (p *stubAPIPackage) Group() toolgroup.ToolGroup                           { return "" }
+func (p *stubAPIPackage) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool { return nil }
+func (p *stubAPIPackage) RequiredSecrets() []toolpkg.SecretSpec                { return nil }
 func (p *stubAPIPackage) Info(_ context.Context, _ secret.Store) (*toolpkg.PackageInfo, error) {
 	return &toolpkg.PackageInfo{Name: "stub_api"}, nil
 }
@@ -199,11 +199,11 @@ func (p *stubAPIPackage) OnCredentialSetChange(_ *mcp.Handler, _ toolpkg.Registr
 // stubOAuthPackage is a minimal CredentialProvider for testing OAuth flows.
 type stubOAuthPackage struct{}
 
-func (p *stubOAuthPackage) Name() string                          { return "stub_oauth" }
-func (p *stubOAuthPackage) Description() string                   { return "Stub OAuth package for testing" }
-func (p *stubOAuthPackage) Group() toolgroup.ToolGroup            { return "" }
-func (p *stubOAuthPackage) ToolPatterns() []claudecli.Tool        { return nil }
-func (p *stubOAuthPackage) RequiredSecrets() []toolpkg.SecretSpec { return nil }
+func (p *stubOAuthPackage) Name() string                                         { return "stub_oauth" }
+func (p *stubOAuthPackage) Description() string                                  { return "Stub OAuth package for testing" }
+func (p *stubOAuthPackage) Group() toolgroup.ToolGroup                           { return "" }
+func (p *stubOAuthPackage) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool { return nil }
+func (p *stubOAuthPackage) RequiredSecrets() []toolpkg.SecretSpec                { return nil }
 func (p *stubOAuthPackage) Info(_ context.Context, _ secret.Store) (*toolpkg.PackageInfo, error) {
 	return &toolpkg.PackageInfo{Name: "stub_oauth"}, nil
 }

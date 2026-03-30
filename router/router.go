@@ -35,21 +35,10 @@ import (
 	"tclaw/repo"
 	"tclaw/schedule"
 	"tclaw/tool/all"
-	"tclaw/tool/bankingtools"
 	"tclaw/tool/channeltools"
-	"tclaw/tool/credentialtools"
-	"tclaw/tool/devtools"
 	"tclaw/tool/modeltools"
-	"tclaw/tool/notificationtools"
-	"tclaw/tool/onboardingtools"
-	"tclaw/tool/remotemcp"
-	"tclaw/tool/repotools"
-	"tclaw/tool/restauranttools"
-	"tclaw/tool/scheduletools"
-	"tclaw/tool/secretform"
-	"tclaw/tool/telegramclient"
-	tfltools "tclaw/tool/tfl"
 	"tclaw/tool/toolpkg"
+	"tclaw/toolgroup"
 	"tclaw/user"
 	"tclaw/version"
 )
@@ -209,25 +198,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		return
 	}
 
-	// Build the tool package registry and wire up the credential system.
-	// all.NewRegistry() returns the full list of packages — the router
-	// doesn't need to know about individual tool packages.
-	toolRegistry := all.NewRegistry()
-	regCtx := toolpkg.RegistrationContext{
-		SecretStore: secretStore,
-		StateStore:  s,
-		Callback:    r.callback,
-		UserDir:     userDir,
-		UserID:      mu.cfg.ID,
-		Env:         string(r.env),
-		ConfigPath:  r.configPath,
-		Extra: map[string]any{
-			credentialtools.ExtraKeyCredentialManager: credMgr,
-			credentialtools.ExtraKeyToolpkgRegistry:   toolRegistry,
-		},
-	}
-	registerCredentialSystem(ctx, mcpHandler, toolRegistry, credMgr, regCtx)
-
 	mcpServer := mcp.NewServer(mcpHandler)
 	mcpToken := mcpServer.Token()
 	// Bind to a random port on localhost.
@@ -282,17 +252,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		return nil
 	}
 
-	// Register remote MCP management tools.
-	remoteMCPDeps := remotemcp.Deps{
-		Manager:       remoteMCPMgr,
-		Callback:      r.callback,
-		ConfigUpdater: configUpdater,
-	}
-	remotemcp.RegisterTools(mcpHandler, remoteMCPDeps)
-	if r.callback != nil {
-		remotemcp.RegisterAuthWaitTool(mcpHandler, remoteMCPDeps)
-	}
-
 	// Generate the MCP config file for --mcp-config (includes existing remote MCPs).
 	remotes := buildRemoteMCPEntries(ctx)
 	mcpConfigPath, err := mcp.GenerateConfigFile(mcpConfigDir, mcpAddr, mcpToken, remotes)
@@ -312,25 +271,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		slog.Debug("found and scrubbed setup token", "user", mu.cfg.ID, "env_var", setupTokenEnvVar)
 	}
 
-	// Seed pre-provisioned secrets from Fly env vars into the encrypted store.
-	// Each entry maps a per-user env var (e.g. GITHUB_TOKEN_THEO) to a store
-	// key (e.g. "github_token"). The env var is unset after seeding.
-	userIDStr := string(mu.cfg.ID)
-	secretSeeds := []SecretSeed{
-		{EnvVarName: SecretSeedEnvVarName("GITHUB_TOKEN", userIDStr), StoreKey: "github_token"},
-		{EnvVarName: SecretSeedEnvVarName("FLY_TOKEN", userIDStr), StoreKey: "fly_api_token"},
-		{EnvVarName: SecretSeedEnvVarName("TFL_API_KEY", userIDStr), StoreKey: tfltools.APIKeyStoreKey},
-		{EnvVarName: SecretSeedEnvVarName("RESY_API_KEY", userIDStr), StoreKey: restauranttools.ResyAPIKeyStoreKey},
-		{EnvVarName: SecretSeedEnvVarName("RESY_AUTH_TOKEN", userIDStr), StoreKey: restauranttools.ResyAuthTokenStoreKey},
-		{EnvVarName: SecretSeedEnvVarName("ENABLEBANKING_APP_ID", userIDStr), StoreKey: bankingtools.ApplicationIDStoreKey},
-		{EnvVarName: SecretSeedEnvVarName("ENABLEBANKING_PRIVATE_KEY", userIDStr), StoreKey: bankingtools.PrivateKeyStoreKey},
-		{EnvVarName: SecretSeedEnvVarName("TELEGRAM_CLIENT_API_ID", userIDStr), StoreKey: telegramclient.APIIDStoreKey},
-		{EnvVarName: SecretSeedEnvVarName("TELEGRAM_CLIENT_API_HASH", userIDStr), StoreKey: telegramclient.APIHashStoreKey},
-	}
-	if err := SeedSecrets(ctx, secretStore, secretSeeds); err != nil {
-		slog.Error("failed to seed secrets from env", "user", mu.cfg.ID, "err", err)
-	}
-
 	runtimeState := stores.RuntimeState
 	configWriter := config.NewWriter(r.configPath, r.env)
 
@@ -343,13 +283,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	mu.registry = registry
 
 	activityTracker := channel.NewActivityTracker()
-
-	// Register Telegram Client API tools early — the returned provisioner
-	// is needed by channeltools.RegisterTools for auto-provisioning.
-	tgProvisioner := telegramclient.RegisterTools(mcpHandler, telegramclient.Deps{
-		SecretStore: secretStore,
-		StateStore:  s,
-	})
 
 	// activeChannelName tracks which channel is currently processing a turn.
 	// Needed by channel_send and channel_create
@@ -368,38 +301,9 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		default:
 		}
 	}
-	// Forward-declared so it can be referenced by channeltools.RegisterTools
+	// Forward-declared so it can be referenced by channeltools during Register()
 	// before the full implementation is defined later alongside hotAddMsgs.
 	var onChannelAdded func(string)
-	// provisioners maps channel types to their EphemeralProvisioner. Defined
-	// once here so it can be used by both channeltools (channel_done/channel_create)
-	// and the bridge goroutine (interceptPendingDone for async teardown confirmation).
-	provisioners := map[channel.ChannelType]channel.EphemeralProvisioner{
-		channel.TypeTelegram: tgProvisioner,
-	}
-
-	reconcileParams := reconciler.ReconcileParams{
-		Channels:     mu.configChannels,
-		SecretStore:  secretStore,
-		RuntimeState: runtimeState,
-		Provisioners: provisioners,
-	}
-
-	channeltools.RegisterTools(mcpHandler, channeltools.Deps{
-		Registry:        registry,
-		ConfigWriter:    configWriter,
-		RuntimeState:    runtimeState,
-		UserID:          mu.cfg.ID,
-		Env:             r.env,
-		SecretStore:     secretStore,
-		ConfigPath:      r.configPath,
-		ActivityTracker: activityTracker,
-		OnChannelAdded:  onChannelAdded,
-		OnChannelChange: onChannelChange,
-		Provisioners:    provisioners,
-		ActiveChannel:   activeChannelFunc,
-		ReconcileParams: reconcileParams,
-	})
 
 	// Set up the scheduler — runs at user lifetime, outlives the agent.
 	// When a schedule fires it injects a message that wakes the agent.
@@ -423,15 +327,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	})
 	go scheduler.Run(ctx)
 
-	scheduletools.RegisterTools(mcpHandler, scheduletools.Deps{
-		Store:     scheduleStore,
-		Scheduler: scheduler,
-	})
-
 	// Set up the notification manager — runs at user lifetime, outlives the agent.
-	// Tool packages register as notifiers, the manager persists subscriptions and
-	// routes emitted notifications to the output channel. The unified queue handles
-	// busy-channel awareness and source-based priority.
 	notificationStore := notification.NewStore(s)
 	notificationMsgs := make(chan channel.TaggedMessage, 8)
 	notificationManager := notification.NewManager(notification.ManagerParams{
@@ -441,121 +337,97 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	})
 	go notificationManager.Run(ctx)
 
-	notificationtools.RegisterTools(mcpHandler, notificationtools.Deps{
-		Manager: notificationManager,
-	})
-
-	// Set up dev workflow tools for code changes, PRs, and deployment.
 	devStore := dev.NewStore(s)
-	devtools.RegisterTools(mcpHandler, devtools.Deps{
-		Store:       devStore,
-		SecretStore: secretStore,
-		UserDir:     userDir,
-		UserID:      mu.cfg.ID,
-		LogBuffer:   r.logBuffer,
-		ConfigPath:  r.configPath,
-	})
-
-	// Set up repo exploration tools for monitoring external repositories.
 	repoStore := repo.NewStore(s)
-	repotools.RegisterTools(mcpHandler, repotools.Deps{
-		Store:       repoStore,
-		SecretStore: secretStore,
-		UserDir:     userDir,
-	})
-
-	// TfL tools work without an API key (rate-limited) — always registered.
-	tfltools.RegisterTools(mcpHandler, tfltools.Deps{
-		SecretStore: secretStore,
-	})
-
-	// Restaurant tools: info/setup tool always visible, operational tools
-	// only when credentials are configured.
-	restaurantDeps := restauranttools.Deps{
-		SecretStore: secretStore,
-		OnCredentialsStored: func() {
-			restauranttools.RegisterTools(mcpHandler, restauranttools.Deps{SecretStore: secretStore})
-			slog.Info("registered restaurant operational tools after credentials stored")
-		},
-	}
-	restauranttools.RegisterInfoTools(mcpHandler, restaurantDeps)
-	if hasRestyCredentials(ctx, secretStore) {
-		restauranttools.RegisterTools(mcpHandler, restaurantDeps)
-	}
-
-	// Banking tools: info/setup tool always visible, operational tools
-	// only when credentials are configured.
-	bankingDeps := bankingtools.Deps{
-		SecretStore: secretStore,
-		StateStore:  s,
-		Callback:    r.callback,
-		OnCredentialsStored: func() {
-			bankingtools.RegisterTools(mcpHandler, bankingtools.Deps{
-				SecretStore: secretStore,
-				StateStore:  s,
-				Callback:    r.callback,
-			})
-			slog.Info("registered banking operational tools after credentials stored")
-		},
-	}
-	bankingtools.RegisterInfoTools(mcpHandler, bankingDeps)
-	if hasBankingCredentials(ctx, secretStore) {
-		bankingtools.RegisterTools(mcpHandler, bankingDeps)
-	}
-
-	// Telegram Client API tools were registered earlier (before channeltools)
-	// so the provisioner is available for channel_create auto-provisioning.
-
-	// Set up onboarding state tracking and tools.
 	onboardingStore := onboarding.NewStore(s)
-	onboardingtools.RegisterTools(mcpHandler, onboardingtools.Deps{
-		Store:         onboardingStore,
-		ScheduleStore: scheduleStore,
-		Scheduler:     scheduler,
-	})
-
-	modeltools.RegisterTools(mcpHandler, modeltools.Deps{
-		Store: s,
-	})
 
 	// Set up cross-channel messaging — lets channels send messages to
-	// each other via declared config links. The activeChannelName atomic
-	// is set by the agent's OnTurnStart callback before each handle() so
-	// the tool can validate from_channel server-side.
+	// each other via declared config links.
 	crossChannelMsgs := make(chan channel.TaggedMessage, 8)
-
-	// Shared closures for channel_send.
-	// activeChannelFunc was declared earlier (before channeltools registration).
 	linksFunc := func() map[string][]channel.Link {
 		return registry.Links()
 	}
 	channelsFunc := channelSet.Snapshot
 
-	channeltools.RegisterSendTool(mcpHandler, channeltools.SendDeps{
-		Links:         linksFunc,
-		Output:        crossChannelMsgs,
-		Channels:      channelsFunc,
-		ActiveChannel: activeChannelFunc,
+	// Build the secret form deps — base URL and handler registration come
+	// from the callback server when available.
+	var secretFormBaseURL string
+	var secretFormRegisterHandler func(string, http.Handler)
+	if r.callback != nil {
+		secretFormBaseURL = r.callback.BaseURL()
+		secretFormRegisterHandler = func(pattern string, handler http.Handler) {
+			r.callback.Handle(pattern, handler)
+		}
+	}
+
+	// Build the tool package registry with all deps populated on each package.
+	toolRegistry, tgClientPkg := all.NewRegistry(all.Params{
+		SecretStore:         secretStore,
+		StateStore:          s,
+		Callback:            r.callback,
+		UserDir:             userDir,
+		UserID:              mu.cfg.ID,
+		Env:                 r.env,
+		ConfigPath:          r.configPath,
+		CredentialManager:   credMgr,
+		ChannelRegistry:     registry,
+		RuntimeState:        runtimeState,
+		OnChannelAdded:      onChannelAdded,
+		OnChannelChange:     onChannelChange,
+		ActivityTracker:     activityTracker,
+		ActiveChannel:       activeChannelFunc,
+		Links:               linksFunc,
+		CrossChOutput:       chan<- channel.TaggedMessage(crossChannelMsgs),
+		ChannelsFunc:        channelsFunc,
+		ScheduleStore:       scheduleStore,
+		Scheduler:           scheduler,
+		NotificationManager: notificationManager,
+		DevStore:            devStore,
+		LogBuffer:           r.logBuffer,
+		RepoStore:           repoStore,
+		RemoteMCPManager:    remoteMCPMgr,
+		ConfigUpdater:       configUpdater,
+		BaseURL:             secretFormBaseURL,
+		RegisterHandler:     secretFormRegisterHandler,
+		OnboardingStore:     onboardingStore,
+		ModelStore:          s,
 	})
+
+	regCtx := toolpkg.RegistrationContext{
+		SecretStore:       secretStore,
+		Callback:          r.callback,
+		CredentialManager: credMgr,
+		Registry:          toolRegistry,
+	}
+
+	// Seed pre-provisioned secrets from env vars. Packages declare their own
+	// secrets via RequiredSecrets() — the registry iterates all of them.
+	if err := toolRegistry.SeedAllSecrets(ctx, string(mu.cfg.ID), secretStore); err != nil {
+		slog.Error("failed to seed secrets from env", "user", mu.cfg.ID, "err", err)
+	}
+
+	// Register all tool packages via the registry. This calls Register() on
+	// each package and auto-generates info tools.
+	registerCredentialSystem(ctx, mcpHandler, toolRegistry, credMgr, regCtx, string(mu.cfg.ID))
+
+	// Populate group tools from packages so channels can resolve tool groups.
+	toolgroup.SetPackageTools(toolRegistry.BuildGroupTools())
+
+	// The telegram provisioner is set on the telegramclient.Package struct
+	// by its Register() method. Read it to build the provisioners map used
+	// by ephemeral channel cleanup.
+	provisioners := map[channel.ChannelType]channel.EphemeralProvisioner{}
+	if tgClientPkg.Provisioner != nil {
+		provisioners[channel.TypeTelegram] = tgClientPkg.Provisioner
+	}
+
+	// Register tool_list last so it can see all MCP tools from every package.
+	channeltools.RegisterToolListTool(mcpHandler)
 
 	// Ephemeral channel cleanup goroutine. Runs at user lifetime and
 	// periodically tears down ephemeral channels that have been idle past
 	// their timeout. Reads channel config each tick via the config writer.
 	go cleanupEphemeralChannels(ctx, mu.cfg.ID, configWriter, runtimeState, activityTracker, secretStore, provisioners, onChannelChange)
-
-	// Register secret form tools for collecting sensitive user input via web forms.
-	var secretFormDeps secretform.Deps
-	secretFormDeps.SecretStore = secretStore
-	if r.callback != nil {
-		secretFormDeps.BaseURL = r.callback.BaseURL()
-		secretFormDeps.RegisterHandler = func(pattern string, handler http.Handler) {
-			r.callback.Handle(pattern, handler)
-		}
-	}
-	secretform.RegisterTools(mcpHandler, secretFormDeps)
-
-	// Register tool_list last so it can see all MCP tools from every package.
-	channeltools.RegisterToolListTool(mcpHandler)
 
 	// hotAddMsgs carries messages from channels added mid-session via hot-reload.
 	// Lives at user lifetime (like scheduleMsgs) so it outlives agent sessions.
@@ -1086,34 +958,4 @@ func (r *Router) BuildChannels(ctx context.Context, params BuildChannelsParams) 
 		channels = append(channels, ch)
 	}
 	return channels, nil
-}
-
-// hasRestyCredentials checks if Resy API credentials are stored.
-func hasRestyCredentials(ctx context.Context, s secret.Store) bool {
-	key, err := s.Get(ctx, restauranttools.ResyAPIKeyStoreKey)
-	if err != nil {
-		slog.Warn("failed to check Resy API key", "err", err)
-		return false
-	}
-	token, err := s.Get(ctx, restauranttools.ResyAuthTokenStoreKey)
-	if err != nil {
-		slog.Warn("failed to check Resy auth token", "err", err)
-		return false
-	}
-	return key != "" && token != ""
-}
-
-// hasBankingCredentials checks if Enable Banking credentials are stored.
-func hasBankingCredentials(ctx context.Context, s secret.Store) bool {
-	appID, err := s.Get(ctx, bankingtools.ApplicationIDStoreKey)
-	if err != nil {
-		slog.Warn("failed to check Enable Banking app ID", "err", err)
-		return false
-	}
-	privKey, err := s.Get(ctx, bankingtools.PrivateKeyStoreKey)
-	if err != nil {
-		slog.Warn("failed to check Enable Banking private key", "err", err)
-		return false
-	}
-	return appID != "" && privKey != ""
 }

@@ -3,20 +3,24 @@ package telegramclient
 import (
 	"context"
 
+	"tclaw/channel"
 	"tclaw/claudecli"
 	"tclaw/libraries/secret"
+	"tclaw/libraries/store"
 	"tclaw/mcp"
 	"tclaw/tool/toolpkg"
 	"tclaw/toolgroup"
 )
 
-// ExtraKeyProvisioner is the RegistrationContext.Extra key where the
-// Provisioner is stored after registration, so the router can pass it
-// to channeltools for auto-provisioning.
-const ExtraKeyProvisioner = "telegram_client_provisioner"
-
 // Package implements toolpkg.Package for Telegram Client API tools.
-type Package struct{}
+type Package struct {
+	SecretStore secret.Store
+	StateStore  store.Store
+
+	// Provisioner is set by Register and read by the router to pass to
+	// channeltools for auto-provisioning.
+	Provisioner channel.EphemeralProvisioner
+}
 
 func (p *Package) Name() string { return "telegram_client" }
 func (p *Package) Description() string {
@@ -24,8 +28,10 @@ func (p *Package) Description() string {
 }
 func (p *Package) Group() toolgroup.ToolGroup { return toolgroup.GroupTelegramClient }
 
-func (p *Package) ToolPatterns() []claudecli.Tool {
-	return []claudecli.Tool{"mcp__tclaw__telegram_client_*"}
+func (p *Package) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
+	return map[toolgroup.ToolGroup][]claudecli.Tool{
+		p.Group(): {"mcp__tclaw__telegram_client_*"},
+	}
 }
 
 func (p *Package) RequiredSecrets() []toolpkg.SecretSpec {
@@ -60,14 +66,12 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 
 func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationContext) error {
 	provisioner := RegisterTools(handler, Deps{
-		SecretStore: regCtx.SecretStore,
-		StateStore:  regCtx.StateStore,
+		SecretStore: p.SecretStore,
+		StateStore:  p.StateStore,
 	})
 
-	// Store the provisioner in Extra so the router can pass it to channeltools.
-	if regCtx.Extra != nil {
-		regCtx.Extra[ExtraKeyProvisioner] = provisioner
-	}
+	// Store the provisioner on the struct so the router can read it.
+	p.Provisioner = provisioner
 
 	return nil
 }
