@@ -55,7 +55,7 @@ func ToolNames() []string {
 	return []string{
 		ToolChannelList, ToolChannelCreate, ToolChannelEdit, ToolChannelDelete,
 		ToolChannelIsBusy, ToolChannelDone, ToolChannelNotify,
-		ToolChannelSend, ToolChannelSendWhenFree, ToolList, ToolGroupList,
+		ToolChannelSend, ToolList, ToolGroupList,
 	}
 }
 

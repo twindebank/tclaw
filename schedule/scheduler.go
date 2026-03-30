@@ -15,10 +15,6 @@ type SchedulerParams struct {
 	Store    *Store
 	Output   chan<- channel.TaggedMessage
 	Channels func() map[channel.ChannelID]channel.Channel
-
-	// Activity is used to check channel busy state for wait_for_free schedules.
-	// May be nil if busy-checking is not needed.
-	Activity *channel.ActivityTracker
 }
 
 // Scheduler runs a timer loop that fires scheduled prompts into a message channel.
@@ -28,7 +24,6 @@ type Scheduler struct {
 	output   chan<- channel.TaggedMessage
 	reload   chan struct{}
 	channels func() map[channel.ChannelID]channel.Channel
-	activity *channel.ActivityTracker
 }
 
 // NewScheduler creates a scheduler from the given params.
@@ -38,7 +33,6 @@ func NewScheduler(p SchedulerParams) *Scheduler {
 		output:   p.Output,
 		reload:   make(chan struct{}, 1),
 		channels: p.Channels,
-		activity: p.Activity,
 	}
 }
 
@@ -140,13 +134,6 @@ func (s *Scheduler) fireReadySchedules(ctx context.Context) {
 		if !ok {
 			slog.Warn("scheduler: cannot resolve channel for schedule, skipping",
 				"schedule", sched.ID, "channel_name", sched.ChannelName)
-			continue
-		}
-
-		// If wait_for_free is set, defer firing until the channel is idle.
-		if sched.WaitForFree && s.activity != nil && s.activity.IsBusy(sched.ChannelName) {
-			slog.Info("scheduler: channel busy, deferring wait_for_free schedule",
-				"schedule", sched.ID, "channel", sched.ChannelName)
 			continue
 		}
 

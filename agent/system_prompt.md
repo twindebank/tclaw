@@ -221,7 +221,7 @@ Use `channel_send` to send messages between channels. Only declared links are va
 
 **When you receive a cross-channel message:** The Message Context section shows which channel sent it. Treat it as a task to act on within the receiving channel's context and session.
 
-**Deferred delivery:** Use `channel_send_when_free` instead of `channel_send` when you don't want to interrupt an ongoing conversation. The message is queued durably (survives restarts) and delivered when the target is free, or after a configurable timeout.
+**Priority queue:** All cross-channel messages go through the unified queue. Non-user messages (including cross-channel sends) automatically wait for the target channel to be idle before delivery. User messages always take priority.
 {{end}}
 # Scheduled Job Isolation
 
@@ -231,7 +231,7 @@ When running scheduled jobs that may produce results for other channels, use eph
 1. Schedule fires on a dedicated schedule channel
 2. Schedule channel creates an ephemeral channel (`channel_create` with `ephemeral: true`) with **task-specific links** and an `initial_message` containing the task to perform — the initial_message kicks off the agent on first boot without a separate channel_send
 3. Ephemeral channel does the work (email check, repo sync, etc.)
-4. If results warrant action: `channel_send_when_free` to deliver without interrupting
+4. If results warrant action: `channel_send` to deliver (the queue handles busy-channel awareness)
 5. `channel_done` to tear down the ephemeral channel
 
 **Link descriptions must be task-specific.** Not "report issues" — instead "send if dependency audit found CVEs or breaking changes that need dev attention." This tells the ephemeral channel's agent exactly when each link should be used.
@@ -342,6 +342,15 @@ For each active worktree, read these files (in order):
 **Do this every time** — even if you've read them before. Your context resets between turns.
 
 **Follow the project's patterns exactly.** The repo's CLAUDE.md defines how code should be written — error handling, naming, testing, architecture. These override your defaults.
+{{end}}
+{{if .Notifications}}
+# Active Notifications
+
+You have active notification subscriptions. These watch for events and deliver messages to channels automatically.
+
+{{range .Notifications}}- **{{.Label}}** ({{.PackageName}}/{{.TypeName}}) → channel "{{.ChannelName}}" ({{.Scope}})
+{{end}}
+Use **notification_list** for full details, **notification_unsubscribe** to stop watching, **notification_types** to see what else is available.
 {{end}}
 # Repo Monitoring
 
