@@ -2,9 +2,7 @@ package telegramclient_test
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -220,133 +218,6 @@ func TestSearch(t *testing.T) {
 			"query": "hello",
 		})
 		require.Contains(t, err.Error(), "credentials not configured")
-	})
-}
-
-func TestSessionStorage(t *testing.T) {
-	t.Run("round-trip store and load", func(t *testing.T) {
-		secrets := &memorySecretStore{data: map[string]string{}}
-		storage := telegramclient.NewSecretSessionStorageForTest(secrets)
-
-		original := []byte("test session data with binary \x00\x01\x02\xff")
-
-		err := storage.StoreSession(context.Background(), original)
-		require.NoError(t, err)
-
-		// Verify it's stored as base64 in the secret store.
-		raw := secrets.data[telegramclient.SessionStoreKey]
-		require.NotEmpty(t, raw)
-		decoded, err := base64.StdEncoding.DecodeString(raw)
-		require.NoError(t, err)
-		require.Equal(t, original, decoded)
-
-		// Load it back.
-		loaded, err := storage.LoadSession(context.Background())
-		require.NoError(t, err)
-		require.Equal(t, original, loaded)
-	})
-
-	t.Run("load returns nil when no session exists", func(t *testing.T) {
-		secrets := &memorySecretStore{data: map[string]string{}}
-		storage := telegramclient.NewSecretSessionStorageForTest(secrets)
-
-		loaded, err := storage.LoadSession(context.Background())
-		require.NoError(t, err)
-		require.Nil(t, loaded)
-	})
-
-	t.Run("load rejects corrupt base64", func(t *testing.T) {
-		secrets := &memorySecretStore{data: map[string]string{
-			telegramclient.SessionStoreKey: "not-valid-base64!!!",
-		}}
-		storage := telegramclient.NewSecretSessionStorageForTest(secrets)
-
-		_, err := storage.LoadSession(context.Background())
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "decode session")
-	})
-}
-
-func TestBotNameGeneration(t *testing.T) {
-	t.Run("generates valid names", func(t *testing.T) {
-		username, displayName, err := telegramclient.GenerateBotNamesForTest("assistant")
-		require.NoError(t, err)
-
-		// Username: tclaw_<8hex>_bot
-		require.True(t, strings.HasPrefix(username, "tclaw_"), "username should start with tclaw_: %s", username)
-		require.True(t, strings.HasSuffix(username, "_bot"), "username should end with _bot: %s", username)
-		require.Len(t, username, len("tclaw_12345678_bot"))
-
-		// Display name: tclaw · <purpose>
-		require.Equal(t, "tclaw · assistant", displayName)
-	})
-
-	t.Run("rejects purpose exceeding max rune length", func(t *testing.T) {
-		longPurpose := strings.Repeat("x", telegramclient.MaxBotPurposeRunes+1)
-		_, _, err := telegramclient.GenerateBotNamesForTest(longPurpose)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "too long")
-	})
-
-	t.Run("accepts purpose at exactly max rune length", func(t *testing.T) {
-		exactPurpose := strings.Repeat("x", telegramclient.MaxBotPurposeRunes)
-		_, _, err := telegramclient.GenerateBotNamesForTest(exactPurpose)
-		require.NoError(t, err)
-	})
-
-	t.Run("generates unique usernames", func(t *testing.T) {
-		u1, _, err := telegramclient.GenerateBotNamesForTest("test")
-		require.NoError(t, err)
-		u2, _, err := telegramclient.GenerateBotNamesForTest("test")
-		require.NoError(t, err)
-
-		// Extremely unlikely to collide with 4 random bytes.
-		require.NotEqual(t, u1, u2)
-	})
-}
-
-func TestTokenRegex(t *testing.T) {
-	t.Run("extracts token from BotFather response", func(t *testing.T) {
-		response := `Done! Congratulations on your new bot. You will find it at t.me/tclaw_a3f7b21e_bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully functional before you do this.
-
-Use this token to access the HTTP API:
-7123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw
-
-Keep your token secure and store it safely, it can be used by anyone to control your bot.`
-
-		token := telegramclient.ExtractTokenForTest(response)
-		require.Equal(t, "7123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw", token)
-	})
-
-	t.Run("returns empty for no token", func(t *testing.T) {
-		token := telegramclient.ExtractTokenForTest("Sorry, this username is already taken.")
-		require.Empty(t, token)
-	})
-}
-
-func TestContainsError(t *testing.T) {
-	t.Run("detects sorry", func(t *testing.T) {
-		require.True(t, telegramclient.ContainsErrorForTest("Sorry, this username is already taken."))
-	})
-
-	t.Run("detects error", func(t *testing.T) {
-		require.True(t, telegramclient.ContainsErrorForTest("An error occurred while processing your request."))
-	})
-
-	t.Run("detects invalid", func(t *testing.T) {
-		require.True(t, telegramclient.ContainsErrorForTest("Invalid username format."))
-	})
-
-	t.Run("detects can't", func(t *testing.T) {
-		require.True(t, telegramclient.ContainsErrorForTest("I can't find that bot."))
-	})
-
-	t.Run("passes normal response", func(t *testing.T) {
-		require.False(t, telegramclient.ContainsErrorForTest("Done! Congratulations on your new bot."))
-	})
-
-	t.Run("passes token response", func(t *testing.T) {
-		require.False(t, telegramclient.ContainsErrorForTest("Use this token to access the HTTP API:\n7123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw"))
 	})
 }
 

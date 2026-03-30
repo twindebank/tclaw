@@ -1,4 +1,4 @@
-package telegramclient
+package telegram
 
 import (
 	"context"
@@ -16,10 +16,10 @@ type secretSessionStorage struct {
 	key   string
 }
 
-func newSecretSessionStorage(store secret.Store) *secretSessionStorage {
+func newSecretSessionStorage(store secret.Store, key string) *secretSessionStorage {
 	return &secretSessionStorage{
 		store: store,
-		key:   SessionStoreKey,
+		key:   key,
 	}
 }
 
