@@ -14,13 +14,23 @@ var systemPromptRaw string
 var systemPromptTmpl = template.Must(template.New("system_prompt").Parse(systemPromptRaw))
 
 type systemPromptData struct {
-	Date        string
-	Time        string
-	Channels    []ChannelInfo
-	HasLinks    bool
-	DevSessions []DevSessionInfo
-	UserPrompt  string
-	Onboarding  *OnboardingInfo
+	Date          string
+	Time          string
+	Channels      []ChannelInfo
+	HasLinks      bool
+	DevSessions   []DevSessionInfo
+	Notifications []NotificationInfo
+	UserPrompt    string
+	Onboarding    *OnboardingInfo
+}
+
+// NotificationInfo describes an active notification subscription for the system prompt.
+type NotificationInfo struct {
+	PackageName string
+	TypeName    string
+	Label       string
+	ChannelName string
+	Scope       string
 }
 
 // OnboardingInfo describes the current onboarding state for the system prompt.
@@ -79,7 +89,7 @@ type DevSessionInfo struct {
 
 // BuildSystemPrompt executes the system_prompt.md template with runtime
 // state and user config. The result is passed to --append-system-prompt.
-func BuildSystemPrompt(channels []ChannelInfo, devSessions []DevSessionInfo, userPrompt string, onboarding *OnboardingInfo) string {
+func BuildSystemPrompt(channels []ChannelInfo, devSessions []DevSessionInfo, notifications []NotificationInfo, userPrompt string, onboarding *OnboardingInfo) string {
 	hasLinks := false
 	for _, ch := range channels {
 		if len(ch.OutboundLinks) > 0 || len(ch.InboundLinks) > 0 {
@@ -89,13 +99,14 @@ func BuildSystemPrompt(channels []ChannelInfo, devSessions []DevSessionInfo, use
 	}
 
 	data := systemPromptData{
-		Date:        time.Now().Format("Monday, January 2, 2006"),
-		Time:        time.Now().Format("15:04 MST"),
-		Channels:    channels,
-		HasLinks:    hasLinks,
-		DevSessions: devSessions,
-		UserPrompt:  userPrompt,
-		Onboarding:  onboarding,
+		Date:          time.Now().Format("Monday, January 2, 2006"),
+		Time:          time.Now().Format("15:04 MST"),
+		Channels:      channels,
+		HasLinks:      hasLinks,
+		DevSessions:   devSessions,
+		Notifications: notifications,
+		UserPrompt:    userPrompt,
+		Onboarding:    onboarding,
 	}
 
 	var buf bytes.Buffer
