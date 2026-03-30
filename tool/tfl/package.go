@@ -12,7 +12,9 @@ import (
 
 // Package implements toolpkg.Package and toolpkg.CredentialProvider for
 // Transport for London tools.
-type Package struct{}
+type Package struct {
+	SecretStore secret.Store
+}
 
 func (p *Package) Name() string { return "tfl" }
 func (p *Package) Description() string {
@@ -20,8 +22,10 @@ func (p *Package) Description() string {
 }
 func (p *Package) Group() toolgroup.ToolGroup { return toolgroup.GroupPersonalServices }
 
-func (p *Package) ToolPatterns() []claudecli.Tool {
-	return []claudecli.Tool{"mcp__tclaw__tfl_*"}
+func (p *Package) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
+	return map[toolgroup.ToolGroup][]claudecli.Tool{
+		p.Group(): {"mcp__tclaw__tfl_*"},
+	}
 }
 
 func (p *Package) RequiredSecrets() []toolpkg.SecretSpec {
@@ -48,7 +52,7 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 }
 
 func (p *Package) Register(handler *mcp.Handler, ctx toolpkg.RegistrationContext) error {
-	deps := Deps{SecretStore: ctx.SecretStore}
+	deps := Deps{SecretStore: p.SecretStore}
 	RegisterTools(handler, deps)
 	return nil
 }

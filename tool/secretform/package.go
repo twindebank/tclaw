@@ -11,14 +11,12 @@ import (
 	"tclaw/toolgroup"
 )
 
-// ExtraKeyBaseURL is the RegistrationContext.Extra key for the public base URL.
-const ExtraKeyBaseURL = "secret_form_base_url"
-
-// ExtraKeyRegisterHandler is the RegistrationContext.Extra key for the HTTP handler registration callback.
-const ExtraKeyRegisterHandler = "secret_form_register_handler"
-
 // Package implements toolpkg.Package for secret form tools.
-type Package struct{}
+type Package struct {
+	SecretStore     secret.Store
+	BaseURL         string
+	RegisterHandler func(string, http.Handler)
+}
 
 func (p *Package) Name() string { return "secret_form" }
 func (p *Package) Description() string {
@@ -26,8 +24,10 @@ func (p *Package) Description() string {
 }
 func (p *Package) Group() toolgroup.ToolGroup { return toolgroup.GroupSecretForm }
 
-func (p *Package) ToolPatterns() []claudecli.Tool {
-	return []claudecli.Tool{"mcp__tclaw__secret_form_*"}
+func (p *Package) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
+	return map[toolgroup.ToolGroup][]claudecli.Tool{
+		p.Group(): {"mcp__tclaw__secret_form_*"},
+	}
 }
 
 func (p *Package) RequiredSecrets() []toolpkg.SecretSpec { return nil }
@@ -45,14 +45,9 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 
 func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationContext) error {
 	deps := Deps{
-		SecretStore: regCtx.SecretStore,
-	}
-
-	if baseURL, ok := regCtx.Extra[ExtraKeyBaseURL].(string); ok {
-		deps.BaseURL = baseURL
-	}
-	if regHandler, ok := regCtx.Extra[ExtraKeyRegisterHandler].(func(string, http.Handler)); ok {
-		deps.RegisterHandler = regHandler
+		SecretStore:     p.SecretStore,
+		BaseURL:         p.BaseURL,
+		RegisterHandler: p.RegisterHandler,
 	}
 
 	RegisterTools(handler, deps)

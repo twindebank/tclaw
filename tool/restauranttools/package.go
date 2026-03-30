@@ -11,7 +11,9 @@ import (
 )
 
 // Package implements toolpkg.Package for restaurant booking tools.
-type Package struct{}
+type Package struct {
+	SecretStore secret.Store
+}
 
 func (p *Package) Name() string { return "restaurant" }
 func (p *Package) Description() string {
@@ -19,8 +21,10 @@ func (p *Package) Description() string {
 }
 func (p *Package) Group() toolgroup.ToolGroup { return toolgroup.GroupPersonalServices }
 
-func (p *Package) ToolPatterns() []claudecli.Tool {
-	return []claudecli.Tool{"mcp__tclaw__restaurant_*"}
+func (p *Package) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
+	return map[toolgroup.ToolGroup][]claudecli.Tool{
+		p.Group(): {"mcp__tclaw__restaurant_*"},
+	}
 }
 
 func (p *Package) RequiredSecrets() []toolpkg.SecretSpec {
@@ -55,9 +59,9 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 
 func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationContext) error {
 	deps := Deps{
-		SecretStore: regCtx.SecretStore,
+		SecretStore: p.SecretStore,
 		OnCredentialsStored: func() {
-			RegisterTools(handler, Deps{SecretStore: regCtx.SecretStore})
+			RegisterTools(handler, Deps{SecretStore: p.SecretStore})
 		},
 	}
 
@@ -65,7 +69,7 @@ func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationCont
 	RegisterInfoTools(handler, deps)
 
 	// Register operational tools if credentials already configured.
-	if hasResyCredentials(context.Background(), regCtx.SecretStore) {
+	if hasResyCredentials(context.Background(), p.SecretStore) {
 		RegisterTools(handler, deps)
 	}
 

@@ -22,7 +22,6 @@ import (
 	"tclaw/libraries/store"
 	"tclaw/mcp"
 	"tclaw/tool/all"
-	"tclaw/tool/credentialtools"
 	"tclaw/tool/toolpkg"
 	"tclaw/user"
 )
@@ -99,22 +98,26 @@ func runOneshot() {
 	credMgr := credential.NewManager(stateStore, secretStore)
 	mcpHandler := mcp.NewHandler()
 
-	toolRegistry := all.NewRegistry()
+	toolRegistry, _ := all.NewRegistry(all.Params{
+		SecretStore:       secretStore,
+		StateStore:        stateStore,
+		UserDir:           userDir,
+		UserID:            user.ID(userCfg.ID),
+		Env:               config.Env(*envFlag),
+		ConfigPath:        *configPath,
+		CredentialManager: credMgr,
+		ModelStore:        stateStore,
+	})
+
 	regCtx := toolpkg.RegistrationContext{
-		SecretStore: secretStore,
-		StateStore:  stateStore,
-		UserDir:     userDir,
-		UserID:      user.ID(userCfg.ID),
-		Env:         *envFlag,
-		ConfigPath:  *configPath,
-		Extra: map[string]any{
-			credentialtools.ExtraKeyCredentialManager: credMgr,
-			credentialtools.ExtraKeyToolpkgRegistry:   toolRegistry,
-		},
+		SecretStore:        secretStore,
+		Callback:           nil,
+		CredentialManager:  credMgr,
+		Registry:           toolRegistry,
+		OnCredentialChange: func(packageName string) {},
 	}
 
-	// Wire up the credential system callback and register all packages.
-	regCtx.Extra[credentialtools.ExtraKeyOnCredentialChange] = func(packageName string) {}
+	// Register all packages.
 	if regErr := toolRegistry.RegisterAll(mcpHandler, regCtx); regErr != nil {
 		slog.Error("failed to register tool packages", "err", regErr)
 		os.Exit(1)

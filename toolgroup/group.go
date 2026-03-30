@@ -100,14 +100,16 @@ var cliToolsAll = []claudecli.Tool{
 	claudecli.ToolEnterWorktree, claudecli.ToolListMcpResources, claudecli.ToolReadMcpResource,
 }
 
-// groupTools maps each tool group to its constituent tools.
+// groupTools maps each tool group to its constituent tools. Static entries
+// (CLI tools, builtins) are defined here. MCP tool patterns are added at
+// startup by SetPackageTools() from the tool package registry — packages
+// declare their own group membership via GroupTools().
 var groupTools = map[ToolGroup][]claudecli.Tool{
 	GroupCoreTools: {
 		claudecli.ToolBash,
 		claudecli.ToolRead, claudecli.ToolEdit, claudecli.ToolWrite,
 		claudecli.ToolGlob, claudecli.ToolGrep,
 		claudecli.ToolWebFetch, claudecli.ToolWebSearch,
-		MCPToolModelAll,
 	},
 
 	GroupAllBuiltins: {
@@ -124,75 +126,14 @@ var groupTools = map[ToolGroup][]claudecli.Tool{
 		claudecli.BuiltinResetSession,
 		claudecli.BuiltinResetMemories,
 	},
+}
 
-	GroupChannelMessaging: {
-		MCPToolChannelSend,
-		claudecli.Tool("mcp__tclaw__channel_is_busy"),
-		MCPToolChannelDone,
-		// Read-only — lets channels discover available tool groups without
-		// needing the full channel_management group.
-		claudecli.Tool("mcp__tclaw__tool_group_list"),
-	},
-
-	GroupChannelManagement: {
-		claudecli.Tool("mcp__tclaw__channel_create"),
-		claudecli.Tool("mcp__tclaw__channel_delete"),
-		claudecli.Tool("mcp__tclaw__channel_edit"),
-		claudecli.Tool("mcp__tclaw__channel_list"),
-		claudecli.Tool("mcp__tclaw__channel_notify"),
-		MCPToolChannelDone,
-		claudecli.Tool("mcp__tclaw__channel_is_busy"),
-		MCPToolChannelSend,
-	},
-
-	GroupScheduling: {
-		MCPToolScheduleAll,
-	},
-
-	GroupDevWorkflow: {
-		MCPToolDevAll,
-	},
-
-	GroupRepoMonitoring: {
-		MCPToolRepoAll,
-	},
-
-	GroupGSuiteRead: {
-		claudecli.Tool("mcp__tclaw__google_gmail_list"),
-		claudecli.Tool("mcp__tclaw__google_gmail_read"),
-		claudecli.Tool("mcp__tclaw__google_workspace"),
-		claudecli.Tool("mcp__tclaw__google_workspace_schema"),
-	},
-
-	GroupGSuiteWrite: {
-		MCPToolGoogleAll,
-	},
-
-	GroupPersonalServices: {
-		MCPToolTflAll,
-		MCPToolRestaurantAll,
-		claudecli.Tool("mcp__tclaw__banking_*"),
-		MCPToolMonzoAll,
-	},
-
-	GroupConnections: {
-		MCPToolCredentialAll,
-		MCPToolRemoteMCPAll,
-	},
-
-	GroupTelegramClient: {
-		MCPToolTelegramClientAll,
-	},
-
-	GroupNotifications: {
-		MCPToolNotificationAll,
-	},
-
-	GroupOnboarding: {
-		MCPToolOnboardingAll,
-	},
-
-	GroupSecretForm: {
-		MCPToolSecretFormAll,
-	},
+// SetPackageTools merges package-declared tools into the group map. Called
+// once at startup after the tool package registry is built. Packages declare
+// their group contributions via GroupTools() — this function collects them
+// all so ResolveGroups() returns the full picture.
+func SetPackageTools(packageTools map[ToolGroup][]claudecli.Tool) {
+	for group, tools := range packageTools {
+		groupTools[group] = append(groupTools[group], tools...)
+	}
 }
