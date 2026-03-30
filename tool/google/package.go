@@ -2,6 +2,7 @@ package google
 
 import (
 	"context"
+	"fmt"
 
 	"tclaw/claudecli"
 	"tclaw/credential"
@@ -9,9 +10,14 @@ import (
 	"tclaw/libraries/store"
 	"tclaw/mcp"
 	"tclaw/notification"
+	"tclaw/tool/providerutil"
 	"tclaw/tool/toolpkg"
 	"tclaw/toolgroup"
 )
+
+// ExtraKeyCredentialManager is the RegistrationContext.Extra key for *credential.Manager.
+// Shared with credentialtools — both packages read from the same key.
+const ExtraKeyCredentialManager = "credential_manager"
 
 // Package implements toolpkg.Package and toolpkg.CredentialProvider for
 // Google Workspace tools.
@@ -87,11 +93,28 @@ func (p *Package) CredentialSpec() toolpkg.CredentialSpec {
 	}
 }
 
-// OnCredentialSetChange implements toolpkg.CredentialProvider. Currently a
-// no-op — Google tools are still registered via the old provider/connection
-// system. This will be wired up when the router's provider-specific code is
-// removed.
-func (p *Package) OnCredentialSetChange(handler *mcp.Handler, ctx toolpkg.RegistrationContext, sets []toolpkg.ResolvedCredentialSet) error {
+// OnCredentialSetChange implements toolpkg.CredentialProvider. Registers or
+// unregisters Google Workspace tools based on which credential sets have OAuth
+// tokens ready.
+func (p *Package) OnCredentialSetChange(handler *mcp.Handler, regCtx toolpkg.RegistrationContext, sets []toolpkg.ResolvedCredentialSet) error {
+	credMgr, ok := regCtx.Extra[ExtraKeyCredentialManager].(*credential.Manager)
+	if !ok || credMgr == nil {
+		return fmt.Errorf("google: missing credential manager in RegistrationContext.Extra")
+	}
+
+	spec := p.CredentialSpec()
+	resolved := toResolvedSets(sets)
+	depsMap, err := providerutil.BuildDepsMap(context.Background(), credMgr, toOAuthSpec(spec.OAuth), resolved)
+	if err != nil {
+		return fmt.Errorf("google: build deps: %w", err)
+	}
+
+	if len(depsMap) == 0 {
+		UnregisterTools(handler)
+		return nil
+	}
+
+	RegisterTools(handler, depsMap)
 	return nil
 }
 
@@ -100,4 +123,23 @@ func (p *Package) OnCredentialSetChange(handler *mcp.Handler, ctx toolpkg.Regist
 // The state store persists the Gmail history cursor across restarts.
 func NewNotifier(depsMap func() map[credential.CredentialSetID]Deps, state store.Store) notification.Notifier {
 	return newNotifier(depsMap, state)
+}
+
+// toResolvedSets converts toolpkg.ResolvedCredentialSet to providerutil.ResolvedSet.
+func toResolvedSets(sets []toolpkg.ResolvedCredentialSet) []providerutil.ResolvedSet {
+	result := make([]providerutil.ResolvedSet, len(sets))
+	for i, s := range sets {
+		result[i] = providerutil.ResolvedSet{ID: s.ID, Ready: s.Ready}
+	}
+	return result
+}
+
+// toOAuthSpec converts a toolpkg.OAuthSpec to providerutil.OAuthSpec.
+func toOAuthSpec(spec *toolpkg.OAuthSpec) providerutil.OAuthSpec {
+	return providerutil.OAuthSpec{
+		AuthURL:     spec.AuthURL,
+		TokenURL:    spec.TokenURL,
+		Scopes:      spec.Scopes,
+		ExtraParams: spec.ExtraParams,
+	}
 }

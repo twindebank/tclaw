@@ -32,8 +32,10 @@ import (
 	"tclaw/remotemcpstore"
 	"tclaw/repo"
 	"tclaw/schedule"
+	"tclaw/tool/all"
 	"tclaw/tool/bankingtools"
 	"tclaw/tool/channeltools"
+	"tclaw/tool/credentialtools"
 	"tclaw/tool/devtools"
 	"tclaw/tool/modeltools"
 	"tclaw/tool/notificationtools"
@@ -45,6 +47,7 @@ import (
 	"tclaw/tool/secretform"
 	"tclaw/tool/telegramclient"
 	tfltools "tclaw/tool/tfl"
+	"tclaw/tool/toolpkg"
 	"tclaw/user"
 	"tclaw/version"
 )
@@ -206,6 +209,25 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		slog.Error("failed to seed config credentials", "user", mu.cfg.ID, "err", err)
 		return
 	}
+
+	// Build the tool package registry and wire up the credential system.
+	// all.NewRegistry() returns the full list of packages — the router
+	// doesn't need to know about individual tool packages.
+	toolRegistry := all.NewRegistry()
+	regCtx := toolpkg.RegistrationContext{
+		SecretStore: secretStore,
+		StateStore:  s,
+		Callback:    r.callback,
+		UserDir:     userDir,
+		UserID:      mu.cfg.ID,
+		Env:         string(r.env),
+		ConfigPath:  r.configPath,
+		Extra: map[string]any{
+			credentialtools.ExtraKeyCredentialManager: credMgr,
+			credentialtools.ExtraKeyToolpkgRegistry:   toolRegistry,
+		},
+	}
+	registerCredentialSystem(ctx, mcpHandler, toolRegistry, credMgr, regCtx)
 
 	mcpServer := mcp.NewServer(mcpHandler)
 	mcpToken := mcpServer.Token()
