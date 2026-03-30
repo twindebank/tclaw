@@ -48,7 +48,6 @@ const (
 	MCPToolAll               claudecli.Tool = "mcp__tclaw__*"
 	MCPToolDevAll            claudecli.Tool = "mcp__tclaw__dev_*"
 	MCPToolScheduleAll       claudecli.Tool = "mcp__tclaw__schedule_*"
-	MCPToolConnectionAll     claudecli.Tool = "mcp__tclaw__connection_*"
 	MCPToolCredentialAll     claudecli.Tool = "mcp__tclaw__credential_*"
 	MCPToolRemoteMCPAll      claudecli.Tool = "mcp__tclaw__remote_mcp_*"
 	MCPToolGoogleAll         claudecli.Tool = "mcp__tclaw__google_*"

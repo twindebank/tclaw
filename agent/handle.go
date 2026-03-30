@@ -328,9 +328,18 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 
 	allowed, disallowed := resolveToolsForChannel(opts, msg.ChannelID)
 	mcpConfigPath := resolveMCPConfigPath(opts, msg.ChannelID)
+	// Log tool counts and whether the channel override was found.
+	_, hasOverride := opts.ChannelToolOverrides[msg.ChannelID]
+	var mcpCount int
+	if opts.MCPToolNames != nil {
+		mcpCount = len(opts.MCPToolNames())
+	}
+	slog.Debug("resolved channel tools", "channel", msg.ChannelID,
+		"has_override", hasOverride, "allowed_count", len(allowed),
+		"disallowed_count", len(disallowed), "mcp_tool_count", mcpCount)
 	if opts.Debug {
-		slog.Debug("resolved channel tools", "channel", msg.ChannelID,
-			"allowed", allowed, "disallowed", disallowed, "mcp_config", mcpConfigPath)
+		slog.Debug("resolved channel tools detail", "channel", msg.ChannelID,
+			"allowed", allowed, "disallowed", disallowed)
 	}
 	args := buildArgs(opts, sessionID, systemPrompt, msg.Text, allowed, disallowed, mcpConfigPath)
 	cmd := exec.CommandContext(ctx, "claude", args...)
