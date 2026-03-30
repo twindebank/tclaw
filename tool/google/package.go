@@ -4,8 +4,10 @@ import (
 	"context"
 
 	"tclaw/claudecli"
+	"tclaw/credential"
 	"tclaw/libraries/secret"
 	"tclaw/mcp"
+	"tclaw/notification"
 	"tclaw/tool/toolpkg"
 	"tclaw/toolgroup"
 )
@@ -90,4 +92,11 @@ func (p *Package) CredentialSpec() toolpkg.CredentialSpec {
 // removed.
 func (p *Package) OnCredentialSetChange(handler *mcp.Handler, ctx toolpkg.RegistrationContext, sets []toolpkg.ResolvedCredentialSet) error {
 	return nil
+}
+
+// NewNotifier creates a notification.Notifier for Gmail notifications.
+// The depsMap function is called on each poll to get fresh credentials
+// (handles token refresh and credential set changes).
+func NewNotifier(depsMap func() map[credential.CredentialSetID]Deps) notification.Notifier {
+	return newNotifier(depsMap)
 }

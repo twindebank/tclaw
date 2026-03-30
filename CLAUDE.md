@@ -1,7 +1,7 @@
 # tclaw
 
 ## MANDATORY: Read Before Writing Any Code
-**EVERY time you write or modify code — including in resumed/continued sessions — you MUST read @docs/go-patterns.md first.** No exceptions. This includes tests, one-line fixes, and refactors. Don't rely on memory or assumptions about conventions; read the file.
+**EVERY time you write or modify code — including in resumed/continued sessions — you MUST read @docs/go-patterns.md first AND follow every pattern exactly.** No exceptions. This includes tests, one-line fixes, and refactors. Don't rely on memory or assumptions about conventions; read the file and match its patterns precisely. Tests MUST use `t.Run` subtests grouped under one top-level func per method — never split scenarios into separate top-level test functions.
 
 
 ## TODO
