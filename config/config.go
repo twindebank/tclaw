@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"tclaw/channel"
@@ -21,6 +22,13 @@ import (
 // channelNamePattern restricts channel names to safe characters only.
 // Prevents path traversal when names are used in filesystem paths or URL routes.
 var channelNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+
+// resolvedSecretCache stores secrets resolved during initial Load so that
+// ReloadConfig can re-resolve them after env vars have been scrubbed.
+var (
+	resolvedSecretCacheMu sync.RWMutex
+	resolvedSecretCache   = make(map[string]string)
+)
 
 // Config is the top-level configuration.
 type Config struct {
@@ -457,9 +465,17 @@ func resolveRef(s string) (string, string, error) {
 	return resolveSecret(name)
 }
 
-// resolveSecret tries the OS keychain first, then falls back to env var.
-// Returns the resolved value and the env var name if one was used.
+// resolveSecret tries the in-memory cache first (populated on initial load),
+// then the OS keychain, then falls back to env var. Resolved values are cached
+// so config reloads succeed after env vars have been scrubbed.
 func resolveSecret(name string) (string, string, error) {
+	resolvedSecretCacheMu.RLock()
+	cached, ok := resolvedSecretCache[name]
+	resolvedSecretCacheMu.RUnlock()
+	if ok {
+		return cached, "", nil
+	}
+
 	if secret.KeychainAvailable() {
 		ks := secret.NewKeychainStore("_config")
 		val, err := ks.Get(context.Background(), name)
@@ -468,6 +484,7 @@ func resolveSecret(name string) (string, string, error) {
 		}
 		if val != "" {
 			slog.Debug("resolved secret from keychain", "name", name)
+			cacheResolvedSecret(name, val)
 			return val, "", nil
 		}
 	}
@@ -476,10 +493,17 @@ func resolveSecret(name string) (string, string, error) {
 	val := os.Getenv(name)
 	if val != "" {
 		slog.Debug("resolved secret from env var", "name", name)
+		cacheResolvedSecret(name, val)
 		return val, name, nil
 	}
 
 	return "", "", fmt.Errorf("secret %q not found in keychain or env var", name)
+}
+
+func cacheResolvedSecret(name, value string) {
+	resolvedSecretCacheMu.Lock()
+	resolvedSecretCache[name] = value
+	resolvedSecretCacheMu.Unlock()
 }
 
 // ToUserConfig converts a config User to a user.Config (without system-derived fields).
