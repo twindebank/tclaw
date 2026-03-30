@@ -61,10 +61,11 @@
 ## Architecture
 - Spawns the `claude` CLI binary directly — does NOT use `claude-agent-sdk-go`
 - `agent/` — stateless package. `agent.Run(ctx, opts)` is the entry point. `buildEnv()`/`buildArgs()` are pure functions.
-- `channel/` — channel abstraction. `Channel` interface, `RuntimeStateStore`, `PlatformState`/`TeardownState` typed discriminator structs, `FanIn()` and `ChannelMap()` helpers.
+- `channel/` — channel abstraction. Core `Channel` interface, `RuntimeStateStore`, `PlatformState`/`TeardownState` (extensible via `json.RawMessage`), `FanIn()` and `ChannelMap()` helpers. Channel types live in sub-packages (`socketchannel/`, `stdiochannel/`, `telegramchannel/`) with a registry at `channel/all/`.
+- `channel/channelpkg/` — `ChannelPackage` interface and `Registry` for channel type registration (mirrors `tool/toolpkg/`).
 - `config/` — YAML config loading + `config.Writer` for atomic config mutations. All channels live in `tclaw.yaml`.
 - `reconciler/` — desired-state reconciliation. Compares config channels against runtime state, auto-provisions when possible.
-- `router/` — top-level orchestrator mapping users to agent goroutines. Contains `ChannelBuilder` implementations (SocketBuilder, StdioBuilder, TelegramBuilder). Only stateful struct.
+- `router/` — top-level orchestrator mapping users to agent goroutines. Uses `channelpkg.Registry` for channel building. Only stateful struct.
 - Per-user isolation via `HOME` env var on claude subprocess — all CLI state scoped per user
 
 ### Directory model

@@ -1,4 +1,4 @@
-package channel
+package socketchannel
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"tclaw/channel"
 	"tclaw/libraries/id"
 )
 
@@ -18,11 +19,11 @@ import (
 // connection. Anything larger is truncated to prevent memory exhaustion.
 const maxMessageSize = 64 * 1024 // 64 KiB
 
-// SocketServer listens on a unix socket. Each connection is one turn:
+// Server listens on a unix socket. Each connection is one turn:
 // the client sends a message, we process it, write the response, close.
 // Connections are paired with their messages so responses go to the
 // right client even when later messages queue behind an active turn.
-type SocketServer struct {
+type Server struct {
 	path        string
 	name        string
 	description string
@@ -32,20 +33,20 @@ type SocketServer struct {
 	pending []net.Conn // queued connections waiting for their turn
 }
 
-func NewSocketServer(path, name, description string) *SocketServer {
-	return &SocketServer{path: path, name: name, description: description}
+func NewServer(path, name, description string) *Server {
+	return &Server{path: path, name: name, description: description}
 }
 
-func (s *SocketServer) Info() Info {
-	return Info{
-		ID:          ChannelID(s.path),
-		Type:        TypeSocket,
+func (s *Server) Info() channel.Info {
+	return channel.Info{
+		ID:          channel.ChannelID(s.path),
+		Type:        channel.TypeSocket,
 		Name:        s.name,
 		Description: s.description,
 	}
 }
 
-func (s *SocketServer) Messages(ctx context.Context) <-chan string {
+func (s *Server) Messages(ctx context.Context) <-chan string {
 	out := make(chan string)
 	go func() {
 		defer close(out)
@@ -130,10 +131,10 @@ func (s *SocketServer) Messages(ctx context.Context) <-chan string {
 	return out
 }
 
-func (s *SocketServer) Send(_ context.Context, text string) (MessageID, error) {
+func (s *Server) Send(_ context.Context, text string) (channel.MessageID, error) {
 	s.mu.Lock()
 	conn := s.conn
-	msgID := MessageID(id.Generate("message"))
+	msgID := channel.MessageID(id.Generate("message"))
 	s.mu.Unlock()
 
 	if conn == nil {
@@ -142,7 +143,7 @@ func (s *SocketServer) Send(_ context.Context, text string) (MessageID, error) {
 	return msgID, s.writeWireMsg(conn, wireMsg{Op: "send", ID: string(msgID), Text: text})
 }
 
-func (s *SocketServer) Edit(_ context.Context, msgID MessageID, text string) error {
+func (s *Server) Edit(_ context.Context, msgID channel.MessageID, text string) error {
 	s.mu.Lock()
 	conn := s.conn
 	s.mu.Unlock()
@@ -160,7 +161,7 @@ type wireMsg struct {
 	Text string `json:"text,omitempty"`
 }
 
-func (s *SocketServer) writeWireMsg(conn net.Conn, msg wireMsg) error {
+func (s *Server) writeWireMsg(conn net.Conn, msg wireMsg) error {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("marshal wire msg: %w", err)
@@ -172,7 +173,7 @@ func (s *SocketServer) writeWireMsg(conn net.Conn, msg wireMsg) error {
 
 // Done closes the current turn's connection and promotes the next
 // pending connection so Send writes to the right client.
-func (s *SocketServer) Done(_ context.Context) error {
+func (s *Server) Done(_ context.Context) error {
 	s.mu.Lock()
 	old := s.conn
 	if len(s.pending) > 0 {
@@ -189,14 +190,14 @@ func (s *SocketServer) Done(_ context.Context) error {
 	return old.Close()
 }
 
-func (s *SocketServer) SplitStatusMessages() bool {
+func (s *Server) SplitStatusMessages() bool {
 	return false
 }
 
-func (s *SocketServer) Markup() Markup {
-	return MarkupMarkdown
+func (s *Server) Markup() channel.Markup {
+	return channel.MarkupMarkdown
 }
 
-func (s *SocketServer) StatusWrap() StatusWrap {
-	return StatusWrap{}
+func (s *Server) StatusWrap() channel.StatusWrap {
+	return channel.StatusWrap{}
 }

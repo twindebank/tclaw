@@ -12,6 +12,7 @@ import (
 	"github.com/gotd/td/tg"
 
 	"tclaw/mcp"
+	tgsdk "tclaw/telegram"
 )
 
 const (
@@ -25,7 +26,7 @@ type handlerState struct {
 	deps Deps
 
 	// client is lazily initialized on the first tool call that needs it.
-	client *Client
+	client *tgsdk.Client
 
 	// botFatherMu serializes BotFather conversations. BotFather is a sequential
 	// chat — interleaving two /newbot flows corrupts both. Any tool that talks
@@ -103,7 +104,7 @@ func ensureConnected(ctx context.Context, s *handlerState) error {
 		s.client.Close()
 	}
 
-	s.client = NewClient(apiID, apiHash, s.deps.SecretStore)
+	s.client = tgsdk.NewClient(apiID, apiHash, s.deps.SecretStore, SessionStoreKey)
 	if err := s.client.Connect(); err != nil {
 		return fmt.Errorf("connect to Telegram: %w", err)
 	}
@@ -368,7 +369,7 @@ func createBotHandler(s *handlerState) mcp.ToolHandler {
 		s.botFatherMu.Lock()
 		defer s.botFatherMu.Unlock()
 
-		bf := NewBotFather(s.client)
+		bf := tgsdk.NewBotFather(s.client)
 		result, err := bf.CreateBot(ctx, a.Purpose)
 		if err != nil {
 			return nil, fmt.Errorf("create bot: %w", err)
@@ -410,7 +411,7 @@ func deleteBotHandler(s *handlerState) mcp.ToolHandler {
 		s.botFatherMu.Lock()
 		defer s.botFatherMu.Unlock()
 
-		bf := NewBotFather(s.client)
+		bf := tgsdk.NewBotFather(s.client)
 		if err := bf.DeleteBot(ctx, a.Username); err != nil {
 			return nil, fmt.Errorf("delete bot: %w", err)
 		}
@@ -445,8 +446,8 @@ func configureBotHandler(s *handlerState) mcp.ToolHandler {
 		s.botFatherMu.Lock()
 		defer s.botFatherMu.Unlock()
 
-		bf := NewBotFather(s.client)
-		if err := bf.ConfigureBot(ctx, ConfigureBotParams{
+		bf := tgsdk.NewBotFather(s.client)
+		if err := bf.ConfigureBot(ctx, tgsdk.ConfigureBotParams{
 			Username:    a.Username,
 			Description: a.Description,
 			About:       a.About,

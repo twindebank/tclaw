@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"tclaw/channel"
+	"tclaw/channel/telegramchannel"
 	"tclaw/config"
 	"tclaw/libraries/store"
 	"tclaw/user"
@@ -43,7 +44,7 @@ func TestInterceptPendingDone(t *testing.T) {
 		// Set pending done + teardown state in runtime state.
 		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
 			s.PendingDone = true
-			s.TeardownState = channel.NewTelegramTeardownState("tclaw_test_bot")
+			s.TeardownState = telegramchannel.NewTeardownState("tclaw_test_bot")
 		}))
 		require.NoError(t, ss.Set(context.Background(), channel.ChannelSecretKey("ephemeral"), "fake-token"))
 
@@ -79,8 +80,8 @@ func TestInterceptPendingDone(t *testing.T) {
 
 		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
 			s.PendingDone = true
-			s.PlatformState = channel.NewTelegramPlatformState(12345)
-			s.TeardownState = channel.NewTelegramTeardownState("tclaw_test_bot")
+			s.PlatformState = telegramchannel.NewPlatformState(12345)
+			s.TeardownState = telegramchannel.NewTeardownState("tclaw_test_bot")
 		}))
 		require.NoError(t, ss.Set(context.Background(), channel.ChannelSecretKey("ephemeral"), "fake-token"))
 		require.NoError(t, cw.AddChannel(testUserID, config.Channel{
@@ -137,7 +138,7 @@ func TestInterceptPendingDone(t *testing.T) {
 
 		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
 			s.PendingDone = true
-			s.TeardownState = channel.NewTelegramTeardownState("tclaw_test_bot")
+			s.TeardownState = telegramchannel.NewTeardownState("tclaw_test_bot")
 		}))
 		require.NoError(t, cw.AddChannel(testUserID, config.Channel{
 			Type: channel.TypeTelegram, Name: "ephemeral", Description: "test",
