@@ -328,33 +328,10 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 
 	allowed, disallowed := resolveToolsForChannel(opts, msg.ChannelID)
 	mcpConfigPath := resolveMCPConfigPath(opts, msg.ChannelID)
-	// Log tool counts and a sample of MCP-prefixed allowed tools for debugging.
-	_, hasOverride := opts.ChannelToolOverrides[msg.ChannelID]
-	var mcpCount int
-	if opts.MCPToolNames != nil {
-		mcpCount = len(opts.MCPToolNames())
+	if opts.Debug {
+		slog.Debug("resolved channel tools", "channel", msg.ChannelID,
+			"allowed", allowed, "disallowed", disallowed, "mcp_config", mcpConfigPath)
 	}
-	var mcpAllowed []string
-	for _, t := range allowed {
-		if strings.HasPrefix(string(t), "mcp__") {
-			mcpAllowed = append(mcpAllowed, string(t))
-		}
-	}
-	var mcpRegistered []string
-	if opts.MCPToolNames != nil {
-		for _, name := range opts.MCPToolNames() {
-			qualified := "mcp__tclaw__" + name
-			if strings.Contains(name, "google") || strings.Contains(name, "credential") {
-				mcpRegistered = append(mcpRegistered, qualified)
-			}
-		}
-	}
-	slog.Info("resolved channel tools", "channel", msg.ChannelID,
-		"has_override", hasOverride, "allowed_count", len(allowed),
-		"mcp_allowed_count", len(mcpAllowed), "mcp_tool_count", mcpCount,
-		"mcp_config", mcpConfigPath,
-		"google_credential_registered", mcpRegistered,
-		"google_credential_allowed", filterPrefix(mcpAllowed, "mcp__tclaw__google_", "mcp__tclaw__credential_"))
 	args := buildArgs(opts, sessionID, systemPrompt, msg.Text, allowed, disallowed, mcpConfigPath)
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	// Send SIGTERM on context cancel instead of the default SIGKILL, giving
@@ -855,19 +832,4 @@ func shortModelName(model string) string {
 		model = model[:idx]
 	}
 	return claudecli.Model(model).ShortName()
-}
-
-// filterPrefix returns strings that start with any of the given prefixes.
-// Temporary helper for debug logging.
-func filterPrefix(ss []string, prefixes ...string) []string {
-	var out []string
-	for _, s := range ss {
-		for _, p := range prefixes {
-			if strings.HasPrefix(s, p) {
-				out = append(out, s)
-				break
-			}
-		}
-	}
-	return out
 }

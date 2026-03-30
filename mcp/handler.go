@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 )
 
 // ToolHandler processes a tools/call request and returns the result content.
@@ -32,7 +34,15 @@ func NewHandler() *Handler {
 }
 
 // Register adds a tool. Overwrites any existing tool with the same name.
+// Panics if the InputSchema is not valid JSON — catch schema bugs at startup,
+// not when the CLI calls tools/list at runtime.
 func (h *Handler) Register(def ToolDef, handler ToolHandler) {
+	if len(def.InputSchema) > 0 && !json.Valid(def.InputSchema) {
+		panic(fmt.Sprintf("mcp.Register: tool %q has invalid InputSchema JSON: %s", def.Name, string(def.InputSchema)))
+	}
+	if def.Name == "" {
+		slog.Warn("mcp.Register: tool with empty name")
+	}
 	h.tools[def.Name] = &toolEntry{def: def, handler: handler}
 }
 

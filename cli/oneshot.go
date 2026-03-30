@@ -16,7 +16,14 @@ import (
 	"tclaw/channel"
 	"tclaw/claudecli"
 	"tclaw/config"
+	"tclaw/credential"
 	"tclaw/libraries/secret"
+	"tclaw/libraries/store"
+	"tclaw/mcp"
+	"tclaw/tool/all"
+	"tclaw/tool/credentialtools"
+	"tclaw/tool/toolpkg"
+	"tclaw/user"
 )
 
 func runOneshot() {
@@ -81,6 +88,52 @@ func runOneshot() {
 		os.Exit(1)
 	}
 
+	// Set up MCP server with tool registry so oneshot has the same tools as serve.
+	stateDir := filepath.Join(userDir, "state")
+	stateStore, err := store.NewFS(stateDir)
+	if err != nil {
+		slog.Error("failed to create state store", "err", err)
+		os.Exit(1)
+	}
+	credMgr := credential.NewManager(stateStore, secretStore)
+	mcpHandler := mcp.NewHandler()
+
+	toolRegistry := all.NewRegistry()
+	regCtx := toolpkg.RegistrationContext{
+		SecretStore: secretStore,
+		StateStore:  stateStore,
+		UserDir:     userDir,
+		UserID:      user.ID(userCfg.ID),
+		Env:         *envFlag,
+		ConfigPath:  *configPath,
+		Extra: map[string]any{
+			credentialtools.ExtraKeyCredentialManager: credMgr,
+			credentialtools.ExtraKeyToolpkgRegistry:   toolRegistry,
+		},
+	}
+
+	// Wire up the credential system callback and register all packages.
+	regCtx.Extra[credentialtools.ExtraKeyOnCredentialChange] = func(packageName string) {}
+	if regErr := toolRegistry.RegisterAll(mcpHandler, regCtx); regErr != nil {
+		slog.Error("failed to register tool packages", "err", regErr)
+		os.Exit(1)
+	}
+
+	mcpServer := mcp.NewServer(mcpHandler)
+	mcpAddr, err := mcpServer.Start("127.0.0.1:0")
+	if err != nil {
+		slog.Error("failed to start mcp server", "err", err)
+		os.Exit(1)
+	}
+	defer mcpServer.Stop(context.Background())
+
+	mcpConfigDir := filepath.Join(userDir, "mcp-config")
+	mcpConfigPath, err := mcp.GenerateConfigFile(mcpConfigDir, mcpAddr, mcpServer.Token(), nil)
+	if err != nil {
+		slog.Error("failed to generate mcp config", "err", err)
+		os.Exit(1)
+	}
+
 	// Read per-user setup token from env (same as serve).
 	setupTokenEnvVar := agent.SetupTokenEnvVarName(string(userCfg.ID))
 	setupToken := os.Getenv(setupTokenEnvVar)
@@ -119,7 +172,16 @@ func runOneshot() {
 		MemoryDir:      memoryDir,
 		Channels:       chMap,
 		Sessions:       make(map[channel.ChannelID]string),
-		AllowedTools:   []claudecli.Tool{claudecli.ToolRead, claudecli.ToolBash},
+		AllowedTools:   []claudecli.Tool{claudecli.ToolRead, claudecli.ToolBash, "mcp__tclaw__*"},
+		MCPToolNames: func() []string {
+			tools := mcpHandler.ListTools()
+			names := make([]string, len(tools))
+			for i, td := range tools {
+				names[i] = td.Name
+			}
+			return names
+		},
+		MCPConfigPaths: map[channel.ChannelID]string{"oneshot": mcpConfigPath},
 		SystemPrompt:   systemPrompt,
 		SecretStore:    secretStore,
 		Env:            cfg.Env,
