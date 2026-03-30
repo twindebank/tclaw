@@ -327,29 +327,35 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		if opts.Queue != nil {
 			// Use the priority queue — blocks until a message is processable.
 			// We still need to handle ChannelChangeCh, idle timeout, and OAuth
-			// notifications, so wrap in a select with Queue.Next in a goroutine.
+			// notifications, so use a cancellable context for the Next() call.
 			type nextResult struct {
 				msg channel.TaggedMessage
 				err error
 			}
+			nextCtx, nextCancel := context.WithCancel(ctx)
 			nextCh := make(chan nextResult, 1)
 			go func() {
-				m, err := opts.Queue.Next(ctx, msgs)
+				m, err := opts.Queue.Next(nextCtx, msgs)
 				nextCh <- nextResult{m, err}
 			}()
 
 			select {
 			case <-opts.ChannelChangeCh:
+				nextCancel()
 				return ErrChannelChanged
 			case <-idle.C():
+				nextCancel()
 				slog.Info("agent idle timeout, shutting down", "timeout", agentIdleTimeout)
 				return ErrIdleTimeout
 			case chID := <-fm.OAuthNotify:
+				nextCancel()
+				<-nextCh // wait for goroutine to exit before continuing
 				if !fm.HasFlow(chID, FlowAuth) {
 					continue
 				}
 				msg = channel.TaggedMessage{ChannelID: chID}
 			case result := <-nextCh:
+				nextCancel()
 				if result.err != nil {
 					if errors.Is(result.err, context.Canceled) {
 						return nil

@@ -16,14 +16,15 @@
 - Token exhausted state — when Claude API limit is hit, record reset time in channel state. Scheduled jobs should be deferred until reset time (not silently dropped). On reset, prompt user whether to run deferred schedules or skip them. Normal inbound messages should be queued and replayed (or flagged as unactioned) when the limit resets so nothing is silently lost.
 - Channel busy/free check — `channel_is_busy` tool: returns whether a channel has an active agent turn or recent conversation activity (with configurable timeout). Enables scheduled tasks to check before sending cross-channel messages, and to queue/defer if busy rather than interrupting.
 - ~~Channel hot-reload~~ ✅ Done (PR #57) — channel creates hot-add without restart; edits/deletes still restart.
-- ~~Graceful message queuing on restart~~ ✅ Done (PR #59) — persistent QueueStore, messages survive restarts.
+- ~~Graceful message queuing on restart~~ ✅ Done (PR #59) — persistent queue, messages survive restarts. Unified into `queue/` package (PR #74) with source-based priority.
 - ~~Agent auto-resume on restart~~ ✅ Done — interrupted marker preserved on shutdown, resume message injected on restart.
 - ~~Config-driven channels~~ ✅ Done — all channels in tclaw.yaml, DynamicStore removed, reconciler for desired-state provisioning, config.Writer for atomic YAML mutation, RuntimeStateStore for transient state, ChannelBuilder interface for platform-agnostic channel building.
 - Channel history store — archive deleted channels (name, type, session ID, dev session, timestamps) so the agent can reference past ephemeral tasks. `channel_history` MCP tool for querying.
 - Channel types in own packages — move socket/stdio/telegram/oneshot into `channel/socketchannel/` etc. with builders co-located. Currently builders are in `router/`.
 - `channel_delete` cleanup — archive the chat (export/preserve history before deleting the bot) and automatically cancel any associated dev sessions. Requires channels to track their dev sessions and dev sessions to be tagged with the originating channel. (Note: `channel_done` now requires user confirmation before teardown.)
-- GitHub PR merged notifications — notify the relevant channel when a PR is merged (e.g. notify admin when a dev PR merges). Could be driven by a webhook, polling, or a scheduled job using `gh pr list --state merged`.
-- Email notifications and auto-categorisation — surface important incoming emails as push notifications on the assistant channel without waiting for the scheduled check. Auto-categorise emails (e.g. receipts, travel, action-required) and apply a skill to handle each category automatically (e.g. log receipts, create calendar events for travel confirmations).
+- ~~Notification system~~ ✅ Done (PR #74) — push-based notifications with Notifier interface, unified priority queue, Gmail history.list polling, MCP tools (subscribe/unsubscribe/list/types).
+- GitHub PR merged notifications — notify the relevant channel when a PR is merged. Now possible via the notification system — devtools implements `Notifier` with a webhook watcher.
+- Email auto-categorisation — auto-categorise emails (e.g. receipts, travel, action-required) and apply a skill to handle each category automatically. Gmail notifications are already in place; categorisation is the next step.
 - Ephemeral channel system prompt enrichment — when a channel is created as ephemeral, inject context into its system prompt: the `initial_message` (so the agent knows its task from the start, not just from the first inbound message), and a note that it is a purpose-scoped ephemeral channel (so it stays focused and knows to call `channel_done` when done).
 
 ### Maintenance

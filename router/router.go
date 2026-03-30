@@ -331,7 +331,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	})
 
 	// activeChannelName tracks which channel is currently processing a turn.
-	// Needed by channel_send, channel_send_when_free, and channel_create
+	// Needed by channel_send and channel_create
 	// (for creatable_groups enforcement).
 	var activeChannelName atomic.Pointer[string]
 	activeChannelFunc := func() string {
@@ -503,7 +503,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// the tool can validate from_channel server-side.
 	crossChannelMsgs := make(chan channel.TaggedMessage, 8)
 
-	// Shared closures for channel_send and channel_send_when_free.
+	// Shared closures for channel_send.
 	// activeChannelFunc was declared earlier (before channeltools registration).
 	linksFunc := func() map[string][]channel.Link {
 		return registry.Links()
@@ -511,15 +511,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	channelsFunc := channelSet.Snapshot
 
 	channeltools.RegisterSendTool(mcpHandler, channeltools.SendDeps{
-		Links:         linksFunc,
-		Output:        crossChannelMsgs,
-		Channels:      channelsFunc,
-		ActiveChannel: activeChannelFunc,
-	})
-
-	// Deferred cross-channel delivery — the unified queue handles busy-check
-	// and priority, so this tool just injects into the output channel.
-	channeltools.RegisterSendWhenFreeTool(mcpHandler, channeltools.SendWhenFreeDeps{
 		Links:         linksFunc,
 		Output:        crossChannelMsgs,
 		Channels:      channelsFunc,
