@@ -16,8 +16,10 @@ package toolpkg
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 
 	"tclaw/claudecli"
+	"tclaw/credential"
 	"tclaw/libraries/secret"
 	"tclaw/libraries/store"
 	"tclaw/mcp"
@@ -103,6 +105,10 @@ type PackageInfo struct {
 	Credentials []CredentialStatus  `json:"credentials"`
 	Tools       []string            `json:"tools"`
 
+	// CredentialSets shows the status of each credential set for CredentialProvider packages.
+	// Populated by InfoToolHandler, not by the package's Info() method.
+	CredentialSets []CredentialSetStatus `json:"credential_sets,omitempty"`
+
 	// RedirectURL is the OAuth callback URL to configure in the provider's
 	// developer portal before creating OAuth credentials. Only set for
 	// packages that require OAuth.
@@ -159,22 +165,55 @@ func InfoToolDef(pkg Package) mcp.ToolDef {
 
 // InfoToolHandler returns the MCP handler for the standard <name>_info tool.
 // It calls pkg.Info() and returns the result as JSON. For CredentialProvider
-// packages with OAuth, it includes the redirect URL so the agent can tell the
-// user what to configure in their developer portal.
-func InfoToolHandler(pkg Package, secretStore secret.Store, callbackURL string) mcp.ToolHandler {
+// packages, it augments the info with credential set status and (for OAuth)
+// the redirect URL.
+func InfoToolHandler(pkg Package, regCtx RegistrationContext) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
-		info, err := pkg.Info(ctx, secretStore)
+		info, err := pkg.Info(ctx, regCtx.SecretStore)
 		if err != nil {
 			return nil, err
 		}
 
-		// Add redirect URL for OAuth packages.
-		if cp, ok := pkg.(CredentialProvider); ok && callbackURL != "" {
-			if cp.CredentialSpec().NeedsOAuth() {
-				info.RedirectURL = callbackURL
+		// For CredentialProvider packages, add credential set status and OAuth redirect URL.
+		if cp, ok := pkg.(CredentialProvider); ok {
+			spec := cp.CredentialSpec()
+			if spec.NeedsOAuth() && regCtx.Callback != nil {
+				info.RedirectURL = regCtx.Callback.CallbackURL()
+			}
+
+			// Show credential set status if a credential manager is available.
+			if credMgr, ok := regCtx.Extra[credentialManagerExtraKey].(*credential.Manager); ok && credMgr != nil {
+				sets, listErr := credMgr.ListByPackage(ctx, pkg.Name())
+				if listErr != nil {
+					slog.Warn("info tool: failed to list credential sets", "package", pkg.Name(), "err", listErr)
+				} else {
+					info.CredentialSets = make([]CredentialSetStatus, 0, len(sets))
+					for _, s := range sets {
+						ready, readyErr := credMgr.IsReady(ctx, s.ID, spec.RequiredFieldKeys(), spec.NeedsOAuth())
+						if readyErr != nil {
+							slog.Warn("info tool: failed to check readiness", "set", s.ID, "err", readyErr)
+						}
+						info.CredentialSets = append(info.CredentialSets, CredentialSetStatus{
+							ID:      s.ID,
+							Channel: s.Channel,
+							Ready:   ready,
+						})
+					}
+				}
 			}
 		}
 
 		return json.Marshal(info)
 	}
+}
+
+// credentialManagerExtraKey is the RegistrationContext.Extra key for *credential.Manager.
+// Must match credentialtools.ExtraKeyCredentialManager.
+const credentialManagerExtraKey = "credential_manager"
+
+// CredentialSetStatus reports the status of a single credential set in the info tool output.
+type CredentialSetStatus struct {
+	ID      credential.CredentialSetID `json:"id"`
+	Channel string                     `json:"channel,omitempty"`
+	Ready   bool                       `json:"ready"`
 }
