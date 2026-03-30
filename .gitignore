@@ -3,6 +3,7 @@ tclaw.yaml
 /bin/
 tmp/
 .idea/
+.claude/worktrees/
 
 # Compiled binaries
 /tclaw
