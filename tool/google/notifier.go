@@ -10,6 +10,7 @@ import (
 
 	"tclaw/credential"
 	"tclaw/gws"
+	"tclaw/libraries/store"
 	"tclaw/notification"
 )
 
@@ -26,24 +27,50 @@ type gmailPollConfig struct {
 	CredentialSetID string        `json:"credential_set_id"`
 	Interval        time.Duration `json:"interval"`
 
-	// HistoryID is the Gmail history cursor. On each poll we ask for changes
-	// since this ID, then advance it. Persisted so we resume from the right
-	// point after a reboot.
+	// HistoryID is the Gmail history cursor at subscribe time. The live cursor
+	// is persisted separately in the state store so it stays current across polls.
 	HistoryID string `json:"history_id,omitempty"`
 }
 
 // notifier implements notification.Notifier for the Google package.
 type notifier struct {
 	depsMap func() map[credential.CredentialSetID]Deps
+	state   store.Store
 
 	mu      sync.Mutex
 	cancels map[notification.SubscriptionID]context.CancelFunc
 }
 
-func newNotifier(depsMap func() map[credential.CredentialSetID]Deps) *notifier {
+func newNotifier(depsMap func() map[credential.CredentialSetID]Deps, state store.Store) *notifier {
 	return &notifier{
 		depsMap: depsMap,
+		state:   state,
 		cancels: make(map[notification.SubscriptionID]context.CancelFunc),
+	}
+}
+
+// cursorKey returns the store key for a subscription's history cursor.
+func cursorKey(id notification.SubscriptionID) string {
+	return "gmail_cursor/" + string(id)
+}
+
+func (n *notifier) saveCursor(ctx context.Context, id notification.SubscriptionID, historyID string) {
+	if err := n.state.Set(ctx, cursorKey(id), []byte(historyID)); err != nil {
+		slog.Error("gmail notifier: failed to persist cursor", "subscription", id, "error", err)
+	}
+}
+
+func (n *notifier) loadCursor(ctx context.Context, id notification.SubscriptionID) string {
+	data, err := n.state.Get(ctx, cursorKey(id))
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+	return string(data)
+}
+
+func (n *notifier) deleteCursor(ctx context.Context, id notification.SubscriptionID) {
+	if err := n.state.Delete(ctx, cursorKey(id)); err != nil {
+		slog.Warn("gmail notifier: failed to delete cursor", "subscription", id, "error", err)
 	}
 }
 
@@ -94,6 +121,11 @@ func (n *notifier) Subscribe(ctx context.Context, params notification.SubscribeP
 		CreatedAt:       time.Now(),
 	}
 
+	// Persist initial cursor if we got one.
+	if config.HistoryID != "" {
+		n.saveCursor(ctx, sub.ID, config.HistoryID)
+	}
+
 	cancel := n.startPolling(ctx, sub.ID, config, emitter)
 
 	return &notification.SubscribeResult{
@@ -121,6 +153,8 @@ func (n *notifier) Cancel(id notification.SubscriptionID) {
 	if ok {
 		cancel()
 	}
+
+	n.deleteCursor(context.Background(), id)
 }
 
 func (n *notifier) startPolling(ctx context.Context, id notification.SubscriptionID, config gmailPollConfig, emitter notification.Emitter) notification.CancelFunc {
@@ -141,8 +175,12 @@ func (n *notifier) startPolling(ctx context.Context, id notification.Subscriptio
 }
 
 func (n *notifier) pollLoop(ctx context.Context, id notification.SubscriptionID, config gmailPollConfig, emitter notification.Emitter) {
-	// If we don't have a history ID yet (seed failed during subscribe),
-	// try to get one before starting the poll loop.
+	// Load persisted cursor — more recent than the config snapshot.
+	if persisted := n.loadCursor(ctx, id); persisted != "" {
+		config.HistoryID = persisted
+	}
+
+	// If we still don't have a history ID, try to seed.
 	if config.HistoryID == "" {
 		historyID, err := n.fetchCurrentHistoryID(ctx, config.CredentialSetID)
 		if err != nil {
@@ -150,6 +188,7 @@ func (n *notifier) pollLoop(ctx context.Context, id notification.SubscriptionID,
 				"subscription", id, "error", err)
 		} else {
 			config.HistoryID = historyID
+			n.saveCursor(ctx, id, historyID)
 			slog.Info("gmail notifier: seeded history ID", "subscription", id, "history_id", historyID)
 		}
 	}
@@ -168,17 +207,16 @@ func (n *notifier) pollLoop(ctx context.Context, id notification.SubscriptionID,
 }
 
 // poll checks for new messages since the last history ID using Gmail's
-// history.list API. Much more efficient than listing all unread messages —
-// only returns changes since our cursor.
+// history.list API.
 func (n *notifier) poll(ctx context.Context, id notification.SubscriptionID, config *gmailPollConfig, emitter notification.Emitter) {
 	if config.HistoryID == "" {
-		// Still don't have a history ID — try to seed.
 		historyID, err := n.fetchCurrentHistoryID(ctx, config.CredentialSetID)
 		if err != nil {
 			slog.Error("gmail notifier: cannot fetch history ID", "subscription", id, "error", err)
 			return
 		}
 		config.HistoryID = historyID
+		n.saveCursor(ctx, id, historyID)
 		slog.Info("gmail notifier: seeded history ID on poll", "subscription", id, "history_id", historyID)
 		return
 	}
@@ -191,13 +229,13 @@ func (n *notifier) poll(ctx context.Context, id notification.SubscriptionID, con
 
 	if newHistoryID != "" {
 		config.HistoryID = newHistoryID
+		n.saveCursor(ctx, id, newHistoryID)
 	}
 
 	if len(newMessageIDs) == 0 {
 		return
 	}
 
-	// Fetch metadata for the new messages.
 	summaries := n.fetchMetadata(ctx, config.CredentialSetID, newMessageIDs)
 	if len(summaries) == 0 {
 		return
@@ -212,8 +250,6 @@ func (n *notifier) poll(ctx context.Context, id notification.SubscriptionID, con
 	}
 }
 
-// fetchCurrentHistoryID gets the current history ID from the user's Gmail
-// profile. Used to seed the cursor on first subscribe.
 func (n *notifier) fetchCurrentHistoryID(ctx context.Context, credSetID string) (string, error) {
 	depsMap := n.depsMap()
 	deps, err := resolveDeps(depsMap, credSetID)
@@ -242,8 +278,6 @@ func (n *notifier) fetchCurrentHistoryID(ctx context.Context, credSetID string) 
 	return profile.HistoryID, nil
 }
 
-// fetchHistory calls Gmail's history.list to get messages added since startHistoryID.
-// Returns the new message IDs and the latest history ID to use as the next cursor.
 func (n *notifier) fetchHistory(ctx context.Context, credSetID, startHistoryID string) ([]string, string, error) {
 	depsMap := n.depsMap()
 	deps, err := resolveDeps(depsMap, credSetID)

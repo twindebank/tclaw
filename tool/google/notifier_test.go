@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"tclaw/credential"
+	"tclaw/libraries/store"
 	"tclaw/notification"
 )
 
@@ -16,7 +17,7 @@ func emptyDepsMap() map[credential.CredentialSetID]Deps { return nil }
 
 func TestNotifier_NotificationTypes(t *testing.T) {
 	t.Run("declares new_email with correct scopes", func(t *testing.T) {
-		n := newNotifier(emptyDepsMap)
+		n, _ := setupNotifier(t)
 		types := n.NotificationTypes()
 
 		require.Len(t, types, 1)
@@ -28,7 +29,7 @@ func TestNotifier_NotificationTypes(t *testing.T) {
 
 func TestNotifier_Subscribe(t *testing.T) {
 	t.Run("builds subscription with correct fields", func(t *testing.T) {
-		n := newNotifier(emptyDepsMap)
+		n, _ := setupNotifier(t)
 
 		result, err := n.Subscribe(context.Background(), notification.SubscribeParams{
 			TypeName:        TypeNewEmail,
@@ -55,7 +56,7 @@ func TestNotifier_Subscribe(t *testing.T) {
 	})
 
 	t.Run("rejects unknown notification type", func(t *testing.T) {
-		n := newNotifier(emptyDepsMap)
+		n, _ := setupNotifier(t)
 		_, err := n.Subscribe(context.Background(), notification.SubscribeParams{
 			TypeName: "nonexistent",
 		}, &noopEmitter{})
@@ -65,25 +66,34 @@ func TestNotifier_Subscribe(t *testing.T) {
 }
 
 func TestNotifier_Cancel(t *testing.T) {
-	t.Run("is idempotent", func(t *testing.T) {
-		n := newNotifier(emptyDepsMap)
+	t.Run("is idempotent and cleans up cursor", func(t *testing.T) {
+		n, s := setupNotifier(t)
+		ctx := context.Background()
 
-		result, err := n.Subscribe(context.Background(), notification.SubscribeParams{
+		result, err := n.Subscribe(ctx, notification.SubscribeParams{
 			TypeName:    TypeNewEmail,
 			ChannelName: "main",
 			Scope:       notification.ScopePersistent,
 		}, &noopEmitter{})
 		require.NoError(t, err)
 
+		// Simulate a persisted cursor.
+		require.NoError(t, s.Set(ctx, cursorKey(result.Subscription.ID), []byte("99999")))
+
 		result.Cancel()
 		result.Cancel()
 		n.Cancel(result.Subscription.ID)
+
+		// Cursor should be cleaned up.
+		data, err := s.Get(ctx, cursorKey(result.Subscription.ID))
+		require.NoError(t, err)
+		require.Empty(t, data)
 	})
 }
 
 func TestNotifier_Resubscribe(t *testing.T) {
 	t.Run("restarts from persisted config", func(t *testing.T) {
-		n := newNotifier(emptyDepsMap)
+		n, _ := setupNotifier(t)
 
 		result, err := n.Subscribe(context.Background(), notification.SubscribeParams{
 			TypeName:        TypeNewEmail,
@@ -101,13 +111,14 @@ func TestNotifier_Resubscribe(t *testing.T) {
 		cancel()
 	})
 
-	t.Run("preserves history ID from persisted config", func(t *testing.T) {
-		n := newNotifier(emptyDepsMap)
+	t.Run("loads persisted cursor over config cursor", func(t *testing.T) {
+		n, s := setupNotifier(t)
+		ctx := context.Background()
 
 		config := gmailPollConfig{
 			CredentialSetID: "google/work",
 			Interval:        defaultPollInterval,
-			HistoryID:       "12345",
+			HistoryID:       "old_cursor",
 		}
 		configJSON, err := json.Marshal(config)
 		require.NoError(t, err)
@@ -122,10 +133,35 @@ func TestNotifier_Resubscribe(t *testing.T) {
 			CredentialSetID: "google/work",
 		}
 
-		cancel, err := n.Resubscribe(context.Background(), sub, &noopEmitter{})
+		// Simulate a cursor persisted by a previous poll (more recent than config).
+		require.NoError(t, s.Set(ctx, cursorKey(sub.ID), []byte("newer_cursor")))
+
+		cancel, err := n.Resubscribe(ctx, sub, &noopEmitter{})
 		require.NoError(t, err)
 		require.NotNil(t, cancel)
 		cancel()
+
+		// Verify the persisted cursor was loaded (not the config one).
+		require.Equal(t, "newer_cursor", n.loadCursor(ctx, sub.ID))
+	})
+}
+
+func TestNotifier_CursorPersistence(t *testing.T) {
+	t.Run("save and load round-trip", func(t *testing.T) {
+		n, _ := setupNotifier(t)
+		ctx := context.Background()
+		id := notification.GenerateID()
+
+		n.saveCursor(ctx, id, "12345")
+		require.Equal(t, "12345", n.loadCursor(ctx, id))
+
+		n.saveCursor(ctx, id, "67890")
+		require.Equal(t, "67890", n.loadCursor(ctx, id))
+	})
+
+	t.Run("load returns empty for missing key", func(t *testing.T) {
+		n, _ := setupNotifier(t)
+		require.Equal(t, "", n.loadCursor(context.Background(), "notif_nonexistent"))
 	})
 }
 
@@ -153,6 +189,13 @@ func TestFormatNewEmailNotification(t *testing.T) {
 }
 
 // --- helpers ---
+
+func setupNotifier(t *testing.T) (*notifier, store.Store) {
+	t.Helper()
+	s, err := store.NewFS(t.TempDir())
+	require.NoError(t, err)
+	return newNotifier(emptyDepsMap, s), s
+}
 
 type noopEmitter struct {
 	mu       sync.Mutex
