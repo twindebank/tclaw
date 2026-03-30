@@ -37,7 +37,7 @@ func scheduleEditDef() mcp.ToolDef {
 				"channel_name": {
 					"type": "string",
 					"description": "New target channel name (optional)."
-				},
+				}
 			},
 			"required": ["id"]
 		}`),

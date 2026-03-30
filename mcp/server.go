@@ -299,6 +299,12 @@ func (s *Server) handleToolsList(req jsonRPCRequest) *jsonRPCResponse {
 	result := toolsListResult{Tools: tools}
 	data, err := json.Marshal(result)
 	if err != nil {
+		// Find which tool has the bad schema so the error is actionable.
+		for _, t := range tools {
+			if !json.Valid(t.InputSchema) {
+				slog.Error("tool has invalid InputSchema JSON", "tool", t.Name, "schema", string(t.InputSchema))
+			}
+		}
 		return &jsonRPCResponse{
 			JSONRPC: "2.0",
 			ID:      req.ID,
