@@ -21,7 +21,8 @@ Commands:
   install            Install tclaw and tclaw-chat to $GOPATH/bin
   tidy               Run go mod tidy across all modules
   oneshot            Send a single message and print the response
-  config sync        Sync tclaw.yaml between local and remote (Fly.io)
+  config push        Push local config to remote Fly volume
+  config pull        Pull remote config to local
   config diff        Show differences between local and remote config
   deploy             Build and deploy to Fly.io
   deploy secrets     Push keychain secrets to Fly.io
