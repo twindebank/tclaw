@@ -48,7 +48,10 @@ func runConfig() {
 	}
 }
 
-const remoteConfigPath = "/data/tclaw/tclaw.yaml"
+// Config is baked into the image at build time from the TCLAW_YAML GitHub
+// secret. Writes to this path persist in the container's writable layer until
+// the next deploy, which replaces the image.
+const remoteConfigPath = "/etc/tclaw/tclaw.yaml"
 
 func configSync() {
 	fs := flag.NewFlagSet("config sync", flag.ExitOnError)
