@@ -171,7 +171,7 @@ var groupTools = map[ToolGroup][]claudecli.Tool{
 	},
 
 	GroupConnections: {
-		MCPToolConnectionAll,
+		MCPToolCredentialAll,
 		MCPToolRemoteMCPAll,
 	},
 
