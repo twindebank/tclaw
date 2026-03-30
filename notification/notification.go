@@ -16,9 +16,6 @@ import (
 	"tclaw/libraries/id"
 )
 
-// ExtraKeyManager is the key used to pass the Manager via RegistrationContext.Extra.
-const ExtraKeyManager = "notification_manager"
-
 // SubscriptionID uniquely identifies a notification subscription.
 type SubscriptionID string
 

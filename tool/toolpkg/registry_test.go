@@ -22,7 +22,6 @@ func TestRegistry_RegisterAll(t *testing.T) {
 
 		err := reg.RegisterAll(handler, toolpkg.RegistrationContext{
 			SecretStore: &memorySecretStore{data: make(map[string]string)},
-			UserID:      "testuser",
 		})
 		require.NoError(t, err)
 
@@ -50,7 +49,6 @@ func TestRegistry_RegisterAll(t *testing.T) {
 
 		err := reg.RegisterAll(handler, toolpkg.RegistrationContext{
 			SecretStore: secrets,
-			UserID:      "testuser",
 		})
 		require.NoError(t, err)
 
@@ -163,8 +161,13 @@ func (s *stubPackage) Description() string                   { return "Stub " + 
 func (s *stubPackage) Group() toolgroup.ToolGroup            { return s.group }
 func (s *stubPackage) RequiredSecrets() []toolpkg.SecretSpec { return s.secrets }
 
-func (s *stubPackage) ToolPatterns() []claudecli.Tool {
-	return []claudecli.Tool{claudecli.Tool("mcp__tclaw__" + s.name + "_*")}
+func (s *stubPackage) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
+	if s.group == "" {
+		return nil
+	}
+	return map[toolgroup.ToolGroup][]claudecli.Tool{
+		s.group: {claudecli.Tool("mcp__tclaw__" + s.name + "_*")},
+	}
 }
 
 func (s *stubPackage) Info(ctx context.Context, store secret.Store) (*toolpkg.PackageInfo, error) {

@@ -7,10 +7,10 @@
 // To add a new tool package:
 //  1. Create a new directory under tool/ (e.g. tool/mytools/)
 //  2. Implement the Package interface
-//  3. Add the package to the registry in router.go
+//  3. Add the package to the registry in tool/all/all.go
 //
 // That's it — the registry handles secret seeding, info tool registration,
-// and toolgroup wiring.
+// and toolgroup wiring (via GroupTools).
 package toolpkg
 
 import (
@@ -21,11 +21,9 @@ import (
 	"tclaw/claudecli"
 	"tclaw/credential"
 	"tclaw/libraries/secret"
-	"tclaw/libraries/store"
 	"tclaw/mcp"
 	"tclaw/oauth"
 	"tclaw/toolgroup"
-	"tclaw/user"
 )
 
 // Package is the standard interface every tool package implements.
@@ -41,9 +39,12 @@ type Package interface {
 	// Group returns the toolgroup this package belongs to.
 	Group() toolgroup.ToolGroup
 
-	// ToolPatterns returns the Claude CLI tool patterns this package registers
-	// (e.g. "mcp__tclaw__tfl_*"). Used to build the toolgroup -> tools map.
-	ToolPatterns() []claudecli.Tool
+	// GroupTools returns which tool groups this package contributes to and
+	// which tool patterns belong in each group. Most packages return a single
+	// entry mapping their group to their patterns. Packages that span multiple
+	// groups (e.g. channeltools contributes to both channel_management and
+	// channel_messaging) return multiple entries.
+	GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool
 
 	// RequiredSecrets declares what secrets this package needs. Used for
 	// automatic seeding from environment variables and for the info tool's
@@ -115,21 +116,15 @@ type PackageInfo struct {
 	RedirectURL string `json:"redirect_url,omitempty"`
 }
 
-// RegistrationContext carries shared dependencies from the router to each
-// package's Register method. Packages take what they need and ignore the rest.
+// RegistrationContext carries shared infrastructure from the router to the
+// registry. Used by info tools, credential system, and secret seeding.
+// Package-specific deps go on the Package struct, not here.
 type RegistrationContext struct {
-	SecretStore secret.Store
-	StateStore  store.Store
-	Callback    *oauth.CallbackServer
-	UserDir     string
-	UserID      user.ID
-	Env         string
-	ConfigPath  string
-
-	// Extra holds package-specific dependencies that don't fit the common
-	// fields. Packages that need special deps (e.g. channeltools needs a
-	// channel registry) put them here as typed values.
-	Extra map[string]any
+	SecretStore        secret.Store
+	Callback           *oauth.CallbackServer
+	CredentialManager  *credential.Manager
+	Registry           *Registry
+	OnCredentialChange func(packageName string)
 }
 
 // CheckCredentialStatus checks the secret store for each SecretSpec and returns
@@ -182,7 +177,7 @@ func InfoToolHandler(pkg Package, regCtx RegistrationContext) mcp.ToolHandler {
 			}
 
 			// Show credential set status if a credential manager is available.
-			if credMgr, ok := regCtx.Extra[credentialManagerExtraKey].(*credential.Manager); ok && credMgr != nil {
+			if credMgr := regCtx.CredentialManager; credMgr != nil {
 				sets, listErr := credMgr.ListByPackage(ctx, pkg.Name())
 				if listErr != nil {
 					slog.Warn("info tool: failed to list credential sets", "package", pkg.Name(), "err", listErr)
@@ -206,10 +201,6 @@ func InfoToolHandler(pkg Package, regCtx RegistrationContext) mcp.ToolHandler {
 		return json.Marshal(info)
 	}
 }
-
-// credentialManagerExtraKey is the RegistrationContext.Extra key for *credential.Manager.
-// Must match credentialtools.ExtraKeyCredentialManager.
-const credentialManagerExtraKey = "credential_manager"
 
 // CredentialSetStatus reports the status of a single credential set in the info tool output.
 type CredentialSetStatus struct {

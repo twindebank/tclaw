@@ -8,7 +8,6 @@ import (
 	"tclaw/config"
 	"tclaw/credential"
 	"tclaw/mcp"
-	"tclaw/tool/credentialtools"
 	"tclaw/tool/toolpkg"
 )
 
@@ -63,12 +62,11 @@ func registerCredentialSystem(
 	registry *toolpkg.Registry,
 	credMgr *credential.Manager,
 	regCtx toolpkg.RegistrationContext,
+	userID string,
 ) {
-	userID := string(regCtx.UserID)
-
 	// Wire up the change callback so credential_add/remove re-triggers
 	// OnCredentialSetChange for the affected package.
-	regCtx.Extra[credentialtools.ExtraKeyOnCredentialChange] = func(packageName string) {
+	regCtx.OnCredentialChange = func(packageName string) {
 		notifyCredentialChange(ctx, handler, registry, credMgr, regCtx, packageName)
 	}
 

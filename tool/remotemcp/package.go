@@ -2,24 +2,22 @@ package remotemcp
 
 import (
 	"context"
-	"fmt"
 
 	"tclaw/claudecli"
 	"tclaw/libraries/secret"
 	"tclaw/mcp"
+	"tclaw/oauth"
 	"tclaw/remotemcpstore"
 	"tclaw/tool/toolpkg"
 	"tclaw/toolgroup"
 )
 
-// ExtraKeyRemoteMCPManager is the RegistrationContext.Extra key for *remotemcpstore.Manager.
-const ExtraKeyRemoteMCPManager = "remote_mcp_manager"
-
-// ExtraKeyConfigUpdater is the RegistrationContext.Extra key for the config updater callback.
-const ExtraKeyConfigUpdater = "remote_mcp_config_updater"
-
 // Package implements toolpkg.Package for remote MCP server management tools.
-type Package struct{}
+type Package struct {
+	Manager       *remotemcpstore.Manager
+	Callback      *oauth.CallbackServer
+	ConfigUpdater func(context.Context) error
+}
 
 func (p *Package) Name() string { return "remote_mcp" }
 func (p *Package) Description() string {
@@ -27,8 +25,10 @@ func (p *Package) Description() string {
 }
 func (p *Package) Group() toolgroup.ToolGroup { return toolgroup.GroupConnections }
 
-func (p *Package) ToolPatterns() []claudecli.Tool {
-	return []claudecli.Tool{"mcp__tclaw__remote_mcp_*"}
+func (p *Package) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
+	return map[toolgroup.ToolGroup][]claudecli.Tool{
+		p.Group(): {"mcp__tclaw__remote_mcp_*"},
+	}
 }
 
 func (p *Package) RequiredSecrets() []toolpkg.SecretSpec { return nil }
@@ -45,24 +45,14 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 }
 
 func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationContext) error {
-	connMgr, ok := regCtx.Extra[ExtraKeyRemoteMCPManager].(*remotemcpstore.Manager)
-	if !ok || connMgr == nil {
-		return fmt.Errorf("remotemcp: missing %s in Extra", ExtraKeyRemoteMCPManager)
-	}
-
-	var configUpdater func(context.Context) error
-	if fn, ok := regCtx.Extra[ExtraKeyConfigUpdater].(func(context.Context) error); ok {
-		configUpdater = fn
-	}
-
 	deps := Deps{
-		Manager:       connMgr,
-		Callback:      regCtx.Callback,
-		ConfigUpdater: configUpdater,
+		Manager:       p.Manager,
+		Callback:      p.Callback,
+		ConfigUpdater: p.ConfigUpdater,
 	}
 
 	RegisterTools(handler, deps)
-	if regCtx.Callback != nil {
+	if p.Callback != nil {
 		RegisterAuthWaitTool(handler, deps)
 	}
 

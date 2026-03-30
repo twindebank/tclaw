@@ -12,15 +12,37 @@ import (
 
 	"tclaw/channel"
 	"tclaw/channel/telegramchannel"
+	"tclaw/claudecli"
 	"tclaw/config"
 	"tclaw/libraries/store"
 	"tclaw/mcp"
 	"tclaw/reconciler"
 	"tclaw/tool/channeltools"
+	"tclaw/toolgroup"
 	"tclaw/user"
 )
 
 const testUserID = user.ID("testuser")
+
+func TestMain(m *testing.M) {
+	// Seed package-contributed tool groups so ValidGroup works in tests.
+	toolgroup.SetPackageTools(map[toolgroup.ToolGroup][]claudecli.Tool{
+		toolgroup.GroupChannelManagement: {"mcp__tclaw__channel_*"},
+		toolgroup.GroupChannelMessaging:  {"mcp__tclaw__channel_send", "mcp__tclaw__channel_done"},
+		toolgroup.GroupScheduling:        {"mcp__tclaw__schedule_*"},
+		toolgroup.GroupDevWorkflow:       {"mcp__tclaw__dev_*"},
+		toolgroup.GroupRepoMonitoring:    {"mcp__tclaw__repo_*"},
+		toolgroup.GroupPersonalServices:  {"mcp__tclaw__tfl_*"},
+		toolgroup.GroupConnections:       {"mcp__tclaw__credential_*"},
+		toolgroup.GroupNotifications:     {"mcp__tclaw__notification_*"},
+		toolgroup.GroupOnboarding:        {"mcp__tclaw__onboarding_*"},
+		toolgroup.GroupSecretForm:        {"mcp__tclaw__secret_form_*"},
+		toolgroup.GroupGSuiteWrite:       {"mcp__tclaw__google_*"},
+		toolgroup.GroupGSuiteRead:        {"mcp__tclaw__google_gmail_*"},
+		toolgroup.GroupTelegramClient:    {"mcp__tclaw__telegram_client_*"},
+	})
+	os.Exit(m.Run())
+}
 
 func TestChannelList(t *testing.T) {
 	t.Run("shows channels from registry", func(t *testing.T) {

@@ -5,13 +5,16 @@ import (
 
 	"tclaw/claudecli"
 	"tclaw/libraries/secret"
+	"tclaw/libraries/store"
 	"tclaw/mcp"
 	"tclaw/tool/toolpkg"
 	"tclaw/toolgroup"
 )
 
 // Package implements toolpkg.Package for model management tools.
-type Package struct{}
+type Package struct {
+	Store store.Store
+}
 
 func (p *Package) Name() string { return "model" }
 func (p *Package) Description() string {
@@ -19,8 +22,10 @@ func (p *Package) Description() string {
 }
 func (p *Package) Group() toolgroup.ToolGroup { return toolgroup.GroupCoreTools }
 
-func (p *Package) ToolPatterns() []claudecli.Tool {
-	return []claudecli.Tool{"mcp__tclaw__model_*"}
+func (p *Package) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
+	return map[toolgroup.ToolGroup][]claudecli.Tool{
+		p.Group(): {"mcp__tclaw__model_*"},
+	}
 }
 
 func (p *Package) RequiredSecrets() []toolpkg.SecretSpec {
@@ -39,7 +44,7 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 }
 
 func (p *Package) Register(handler *mcp.Handler, ctx toolpkg.RegistrationContext) error {
-	deps := Deps{Store: ctx.StateStore}
+	deps := Deps{Store: p.Store}
 	RegisterTools(handler, deps)
 	return nil
 }

@@ -2,7 +2,6 @@ package scheduletools
 
 import (
 	"context"
-	"fmt"
 
 	"tclaw/claudecli"
 	"tclaw/libraries/secret"
@@ -12,14 +11,11 @@ import (
 	"tclaw/toolgroup"
 )
 
-// ExtraKeyScheduleStore is the RegistrationContext.Extra key for *schedule.Store.
-const ExtraKeyScheduleStore = "schedule_store"
-
-// ExtraKeyScheduler is the RegistrationContext.Extra key for *schedule.Scheduler.
-const ExtraKeyScheduler = "scheduler"
-
 // Package implements toolpkg.Package for cron schedule management tools.
-type Package struct{}
+type Package struct {
+	Store     *schedule.Store
+	Scheduler *schedule.Scheduler
+}
 
 func (p *Package) Name() string { return "schedule" }
 func (p *Package) Description() string {
@@ -27,8 +23,10 @@ func (p *Package) Description() string {
 }
 func (p *Package) Group() toolgroup.ToolGroup { return toolgroup.GroupScheduling }
 
-func (p *Package) ToolPatterns() []claudecli.Tool {
-	return []claudecli.Tool{"mcp__tclaw__schedule_*"}
+func (p *Package) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
+	return map[toolgroup.ToolGroup][]claudecli.Tool{
+		p.Group(): {"mcp__tclaw__schedule_*"},
+	}
 }
 
 func (p *Package) RequiredSecrets() []toolpkg.SecretSpec { return nil }
@@ -45,18 +43,9 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 }
 
 func (p *Package) Register(handler *mcp.Handler, ctx toolpkg.RegistrationContext) error {
-	schedStore, ok := ctx.Extra[ExtraKeyScheduleStore].(*schedule.Store)
-	if !ok || schedStore == nil {
-		return fmt.Errorf("scheduletools: missing %s in RegistrationContext.Extra", ExtraKeyScheduleStore)
-	}
-	scheduler, ok := ctx.Extra[ExtraKeyScheduler].(*schedule.Scheduler)
-	if !ok || scheduler == nil {
-		return fmt.Errorf("scheduletools: missing %s in RegistrationContext.Extra", ExtraKeyScheduler)
-	}
-
 	RegisterTools(handler, Deps{
-		Store:     schedStore,
-		Scheduler: scheduler,
+		Store:     p.Store,
+		Scheduler: p.Scheduler,
 	})
 	return nil
 }

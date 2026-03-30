@@ -2,35 +2,37 @@ package channeltools
 
 import (
 	"context"
-	"fmt"
 
 	"tclaw/channel"
 	"tclaw/claudecli"
 	"tclaw/config"
 	"tclaw/libraries/secret"
 	"tclaw/mcp"
+	"tclaw/reconciler"
 	"tclaw/tool/toolpkg"
 	"tclaw/toolgroup"
-)
-
-// Extra keys for RegistrationContext.Extra.
-const (
-	ExtraKeyRegistry        = "channel_registry"
-	ExtraKeyEnv             = "channel_env"
-	ExtraKeyOnChannelAdded  = "on_channel_added"
-	ExtraKeyOnChannelChange = "on_channel_change"
-	ExtraKeyActivityTracker = "activity_tracker"
-	ExtraKeyProvisioners    = "channel_provisioners"
-	ExtraKeyActiveChannel   = "active_channel"
-
-	// Send deps.
-	ExtraKeyLinks         = "channel_links"
-	ExtraKeyCrossChOutput = "cross_channel_output"
-	ExtraKeyChannelsFunc  = "channels_func"
+	"tclaw/user"
 )
 
 // Package implements toolpkg.Package for channel management and messaging tools.
-type Package struct{}
+type Package struct {
+	Registry        *channel.Registry
+	RuntimeState    *channel.RuntimeStateStore
+	Env             config.Env
+	SecretStore     secret.Store
+	ConfigPath      string
+	UserID          user.ID
+	OnChannelAdded  func(string)
+	OnChannelChange func()
+	ActivityTracker *channel.ActivityTracker
+	Provisioners    map[channel.ChannelType]channel.EphemeralProvisioner
+	ActiveChannel   func() string
+
+	// Send deps.
+	Links    func() map[string][]channel.Link
+	Output   chan<- channel.TaggedMessage
+	Channels func() map[channel.ChannelID]channel.Channel
+}
 
 func (p *Package) Name() string { return "channel" }
 func (p *Package) Description() string {
@@ -44,10 +46,26 @@ func (p *Package) Group() toolgroup.ToolGroup {
 	return toolgroup.GroupChannelManagement
 }
 
-func (p *Package) ToolPatterns() []claudecli.Tool {
-	return []claudecli.Tool{
-		"mcp__tclaw__channel_*",
-		"mcp__tclaw__tool_list",
+func (p *Package) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
+	return map[toolgroup.ToolGroup][]claudecli.Tool{
+		toolgroup.GroupChannelManagement: {
+			"mcp__tclaw__channel_create",
+			"mcp__tclaw__channel_delete",
+			"mcp__tclaw__channel_edit",
+			"mcp__tclaw__channel_list",
+			"mcp__tclaw__channel_notify",
+			"mcp__tclaw__channel_done",
+			"mcp__tclaw__channel_is_busy",
+			"mcp__tclaw__channel_send",
+		},
+		toolgroup.GroupChannelMessaging: {
+			"mcp__tclaw__channel_send",
+			"mcp__tclaw__channel_is_busy",
+			"mcp__tclaw__channel_done",
+			// Read-only — lets channels discover available tool groups without
+			// needing the full channel_management group.
+			"mcp__tclaw__tool_group_list",
+		},
 	}
 }
 
@@ -65,68 +83,37 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 }
 
 func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationContext) error {
-	// Core channel management tools.
-	registry, ok := regCtx.Extra[ExtraKeyRegistry].(*channel.Registry)
-	if !ok || registry == nil {
-		return fmt.Errorf("channeltools: missing %s in Extra", ExtraKeyRegistry)
-	}
-
-	env, _ := regCtx.Extra[ExtraKeyEnv].(config.Env)
-	var onChannelAdded func(string)
-	if fn, ok := regCtx.Extra[ExtraKeyOnChannelAdded].(func(string)); ok {
-		onChannelAdded = fn
-	}
-	var onChannelChange func()
-	if fn, ok := regCtx.Extra[ExtraKeyOnChannelChange].(func()); ok {
-		onChannelChange = fn
-	}
-	var activityTracker *channel.ActivityTracker
-	if at, ok := regCtx.Extra[ExtraKeyActivityTracker].(*channel.ActivityTracker); ok {
-		activityTracker = at
-	}
-	var provisioners map[channel.ChannelType]channel.EphemeralProvisioner
-	if prov, ok := regCtx.Extra[ExtraKeyProvisioners].(map[channel.ChannelType]channel.EphemeralProvisioner); ok {
-		provisioners = prov
-	}
-	var activeChannel func() string
-	if fn, ok := regCtx.Extra[ExtraKeyActiveChannel].(func() string); ok {
-		activeChannel = fn
-	}
+	configWriter := config.NewWriter(p.ConfigPath, p.Env)
 
 	RegisterTools(handler, Deps{
-		Registry:        registry,
-		Env:             env,
-		SecretStore:     regCtx.SecretStore,
-		ConfigPath:      regCtx.ConfigPath,
-		OnChannelAdded:  onChannelAdded,
-		OnChannelChange: onChannelChange,
-		ActivityTracker: activityTracker,
-		Provisioners:    provisioners,
-		ActiveChannel:   activeChannel,
+		Registry:     p.Registry,
+		ConfigWriter: configWriter,
+		RuntimeState: p.RuntimeState,
+		UserID:       p.UserID,
+		Env:          p.Env,
+		SecretStore:  p.SecretStore,
+		ConfigPath:   p.ConfigPath,
+		ReconcileParams: reconciler.ReconcileParams{
+			Channels:     nil, // Populated from config at runtime.
+			SecretStore:  p.SecretStore,
+			RuntimeState: p.RuntimeState,
+			Provisioners: p.Provisioners,
+		},
+		OnChannelAdded:  p.OnChannelAdded,
+		OnChannelChange: p.OnChannelChange,
+		ActivityTracker: p.ActivityTracker,
+		Provisioners:    p.Provisioners,
+		ActiveChannel:   p.ActiveChannel,
 	})
 
 	// Cross-channel send tools.
-	var linksFunc func() map[string][]channel.Link
-	if fn, ok := regCtx.Extra[ExtraKeyLinks].(func() map[string][]channel.Link); ok {
-		linksFunc = fn
-	}
-	var crossChOutput chan<- channel.TaggedMessage
-	if ch, ok := regCtx.Extra[ExtraKeyCrossChOutput].(chan<- channel.TaggedMessage); ok {
-		crossChOutput = ch
-	}
-	var channelsFunc func() map[channel.ChannelID]channel.Channel
-	if fn, ok := regCtx.Extra[ExtraKeyChannelsFunc].(func() map[channel.ChannelID]channel.Channel); ok {
-		channelsFunc = fn
-	}
-
-	if linksFunc != nil && crossChOutput != nil && channelsFunc != nil && activeChannel != nil {
+	if p.Links != nil && p.Output != nil && p.Channels != nil && p.ActiveChannel != nil {
 		RegisterSendTool(handler, SendDeps{
-			Links:         linksFunc,
-			Output:        crossChOutput,
-			Channels:      channelsFunc,
-			ActiveChannel: activeChannel,
+			Links:         p.Links,
+			Output:        p.Output,
+			Channels:      p.Channels,
+			ActiveChannel: p.ActiveChannel,
 		})
-
 	}
 
 	// tool_list registered last so it can see all tools.

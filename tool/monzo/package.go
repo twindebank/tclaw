@@ -5,16 +5,12 @@ import (
 	"fmt"
 
 	"tclaw/claudecli"
-	"tclaw/credential"
 	"tclaw/libraries/secret"
 	"tclaw/mcp"
 	"tclaw/tool/providerutil"
 	"tclaw/tool/toolpkg"
 	"tclaw/toolgroup"
 )
-
-// ExtraKeyCredentialManager is the RegistrationContext.Extra key for *credential.Manager.
-const ExtraKeyCredentialManager = "credential_manager"
 
 // Package implements toolpkg.Package and toolpkg.CredentialProvider for
 // Monzo banking tools. Credentials are managed via the unified credential
@@ -28,8 +24,10 @@ func (p *Package) Description() string {
 }
 func (p *Package) Group() toolgroup.ToolGroup { return toolgroup.GroupPersonalServices }
 
-func (p *Package) ToolPatterns() []claudecli.Tool {
-	return []claudecli.Tool{"mcp__tclaw__monzo_*"}
+func (p *Package) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
+	return map[toolgroup.ToolGroup][]claudecli.Tool{
+		p.Group(): {"mcp__tclaw__monzo_*"},
+	}
 }
 
 func (p *Package) RequiredSecrets() []toolpkg.SecretSpec { return nil }
@@ -70,9 +68,9 @@ func (p *Package) CredentialSpec() toolpkg.CredentialSpec {
 // OnCredentialSetChange implements toolpkg.CredentialProvider. Registers or
 // unregisters Monzo tools based on which credential sets have OAuth tokens.
 func (p *Package) OnCredentialSetChange(handler *mcp.Handler, regCtx toolpkg.RegistrationContext, sets []toolpkg.ResolvedCredentialSet) error {
-	credMgr, ok := regCtx.Extra[ExtraKeyCredentialManager].(*credential.Manager)
-	if !ok || credMgr == nil {
-		return fmt.Errorf("monzo: missing credential manager in RegistrationContext.Extra")
+	credMgr := regCtx.CredentialManager
+	if credMgr == nil {
+		return fmt.Errorf("monzo: missing credential manager in RegistrationContext")
 	}
 
 	spec := p.CredentialSpec()
