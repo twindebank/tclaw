@@ -704,13 +704,14 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 		// Build system prompt and add-dirs for this iteration.
 		promptResult := BuildIterationPrompt(dynamicCtx, PromptParams{
-			Channels:   allChMap,
-			Registry:   registry,
-			DevStore:   devStore,
-			UserDir:    userDir,
-			UserID:     mu.cfg.ID,
-			BasePrompt: mu.cfg.SystemPrompt,
-			Onboarding: onboardingStore,
+			Channels:            allChMap,
+			Registry:            registry,
+			DevStore:            devStore,
+			NotificationManager: notificationManager,
+			UserDir:             userDir,
+			UserID:              mu.cfg.ID,
+			BasePrompt:          mu.cfg.SystemPrompt,
+			Onboarding:          onboardingStore,
 		})
 		systemPrompt := promptResult.SystemPrompt
 		addDirs := promptResult.AddDirs

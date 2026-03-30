@@ -343,6 +343,15 @@ For each active worktree, read these files (in order):
 
 **Follow the project's patterns exactly.** The repo's CLAUDE.md defines how code should be written — error handling, naming, testing, architecture. These override your defaults.
 {{end}}
+{{if .Notifications}}
+# Active Notifications
+
+You have active notification subscriptions. These watch for events and deliver messages to channels automatically.
+
+{{range .Notifications}}- **{{.Label}}** ({{.PackageName}}/{{.TypeName}}) → channel "{{.ChannelName}}" ({{.Scope}})
+{{end}}
+Use **notification_list** for full details, **notification_unsubscribe** to stop watching, **notification_types** to see what else is available.
+{{end}}
 # Repo Monitoring
 
 Use the `repo_*` tools to track external git repositories. The tool descriptions explain the full workflow — `repo_add` → `repo_sync` → browse/explore → `repo_remove`. See `repo_sync` description for periodic monitoring tips.
