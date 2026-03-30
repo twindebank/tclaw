@@ -21,6 +21,7 @@ const (
 	GroupPersonalServices  ToolGroup = "personal_services"
 	GroupConnections       ToolGroup = "connections"
 	GroupTelegramClient    ToolGroup = "telegram_client"
+	GroupNotifications     ToolGroup = "notifications"
 	GroupOnboarding        ToolGroup = "onboarding"
 	GroupSecretForm        ToolGroup = "secret_form"
 )
@@ -47,6 +48,7 @@ func AllGroups() []GroupInfo {
 		{GroupPersonalServices, "Personal service integrations: TfL transport, restaurant reservations, banking (Open Banking), Monzo."},
 		{GroupConnections, "Manage OAuth connections to external services and remote MCP server connections."},
 		{GroupTelegramClient, "Telegram Client API (MTProto): authenticate, configure bots via BotFather, manage chats, read message history."},
+		{GroupNotifications, "Subscribe to and manage push notifications (new emails, PR merges, etc.). Discover available notification types, subscribe channels, and list active subscriptions."},
 		{GroupOnboarding, "New user onboarding flow: track progress, deliver tips, manage setup phases."},
 		{GroupSecretForm, "Collect sensitive information (API keys, tokens, passwords) via secure web forms. Values go directly to encrypted storage, never through chat."},
 	}
@@ -127,6 +129,9 @@ var groupTools = map[ToolGroup][]claudecli.Tool{
 		MCPToolChannelSend,
 		claudecli.Tool("mcp__tclaw__channel_is_busy"),
 		MCPToolChannelDone,
+		// Read-only — lets channels discover available tool groups without
+		// needing the full channel_management group.
+		claudecli.Tool("mcp__tclaw__tool_group_list"),
 	},
 
 	GroupChannelManagement: {
@@ -177,6 +182,10 @@ var groupTools = map[ToolGroup][]claudecli.Tool{
 
 	GroupTelegramClient: {
 		MCPToolTelegramClientAll,
+	},
+
+	GroupNotifications: {
+		MCPToolNotificationAll,
 	},
 
 	GroupOnboarding: {
