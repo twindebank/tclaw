@@ -328,15 +328,22 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 
 	allowed, disallowed := resolveToolsForChannel(opts, msg.ChannelID)
 	mcpConfigPath := resolveMCPConfigPath(opts, msg.ChannelID)
-	// Log tool counts and whether the channel override was found.
+	// Log tool counts and a sample of MCP-prefixed allowed tools for debugging.
 	_, hasOverride := opts.ChannelToolOverrides[msg.ChannelID]
 	var mcpCount int
 	if opts.MCPToolNames != nil {
 		mcpCount = len(opts.MCPToolNames())
 	}
+	var mcpAllowed []string
+	for _, t := range allowed {
+		if strings.HasPrefix(string(t), "mcp__") {
+			mcpAllowed = append(mcpAllowed, string(t))
+		}
+	}
 	slog.Debug("resolved channel tools", "channel", msg.ChannelID,
 		"has_override", hasOverride, "allowed_count", len(allowed),
-		"disallowed_count", len(disallowed), "mcp_tool_count", mcpCount)
+		"mcp_allowed_count", len(mcpAllowed), "mcp_tool_count", mcpCount,
+		"mcp_config", mcpConfigPath)
 	if opts.Debug {
 		slog.Debug("resolved channel tools detail", "channel", msg.ChannelID,
 			"allowed", allowed, "disallowed", disallowed)
