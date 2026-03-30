@@ -2,13 +2,19 @@ package monzo
 
 import (
 	"context"
+	"fmt"
 
 	"tclaw/claudecli"
+	"tclaw/credential"
 	"tclaw/libraries/secret"
 	"tclaw/mcp"
+	"tclaw/tool/providerutil"
 	"tclaw/tool/toolpkg"
 	"tclaw/toolgroup"
 )
+
+// ExtraKeyCredentialManager is the RegistrationContext.Extra key for *credential.Manager.
+const ExtraKeyCredentialManager = "credential_manager"
 
 // Package implements toolpkg.Package and toolpkg.CredentialProvider for
 // Monzo banking tools. Credentials are managed via the unified credential
@@ -63,9 +69,43 @@ func (p *Package) CredentialSpec() toolpkg.CredentialSpec {
 
 // OnCredentialSetChange implements toolpkg.CredentialProvider. Registers or
 // unregisters Monzo tools based on which credential sets have OAuth tokens.
-func (p *Package) OnCredentialSetChange(handler *mcp.Handler, ctx toolpkg.RegistrationContext, sets []toolpkg.ResolvedCredentialSet) error {
-	// TODO: register operational tools for ready credential sets, unregister
-	// when no ready sets remain. For now this is a no-op until the full
-	// OnCredentialSetChange wiring is implemented in the router.
+func (p *Package) OnCredentialSetChange(handler *mcp.Handler, regCtx toolpkg.RegistrationContext, sets []toolpkg.ResolvedCredentialSet) error {
+	credMgr, ok := regCtx.Extra[ExtraKeyCredentialManager].(*credential.Manager)
+	if !ok || credMgr == nil {
+		return fmt.Errorf("monzo: missing credential manager in RegistrationContext.Extra")
+	}
+
+	spec := p.CredentialSpec()
+	resolved := toResolvedSets(sets)
+	depsMap, err := providerutil.BuildDepsMap(context.Background(), credMgr, toOAuthSpec(spec.OAuth), resolved)
+	if err != nil {
+		return fmt.Errorf("monzo: build deps: %w", err)
+	}
+
+	if len(depsMap) == 0 {
+		UnregisterTools(handler)
+		return nil
+	}
+
+	RegisterTools(handler, depsMap)
 	return nil
+}
+
+// toResolvedSets converts toolpkg.ResolvedCredentialSet to providerutil.ResolvedSet.
+func toResolvedSets(sets []toolpkg.ResolvedCredentialSet) []providerutil.ResolvedSet {
+	result := make([]providerutil.ResolvedSet, len(sets))
+	for i, s := range sets {
+		result[i] = providerutil.ResolvedSet{ID: s.ID, Ready: s.Ready}
+	}
+	return result
+}
+
+// toOAuthSpec converts a toolpkg.OAuthSpec to providerutil.OAuthSpec.
+func toOAuthSpec(spec *toolpkg.OAuthSpec) providerutil.OAuthSpec {
+	return providerutil.OAuthSpec{
+		AuthURL:     spec.AuthURL,
+		TokenURL:    spec.TokenURL,
+		Scopes:      spec.Scopes,
+		ExtraParams: spec.ExtraParams,
+	}
 }
