@@ -27,6 +27,7 @@ import (
 	"tclaw/notification"
 	"tclaw/oauth"
 	"tclaw/onboarding"
+	"tclaw/queue"
 	"tclaw/reconciler"
 	"tclaw/remotemcpstore"
 	"tclaw/repo"
@@ -309,7 +310,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		slog.Error("failed to seed secrets from env", "user", mu.cfg.ID, "err", err)
 	}
 
-	queueStore := stores.Queue
 	runtimeState := stores.RuntimeState
 	configWriter := config.NewWriter(r.configPath, r.env)
 
@@ -386,6 +386,15 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	scheduleMsgs := make(chan channel.TaggedMessage, 8)
 
 	channelSet := NewChannelSet(nil)
+
+	// Unified message queue — all sources (user, schedule, notification,
+	// cross-channel) flow through one queue with source-based priority.
+	messageQueue := queue.New(queue.QueueParams{
+		Store:    s,
+		Activity: activityTracker,
+		Channels: channelSet.Snapshot,
+	})
+
 	scheduler := schedule.NewScheduler(schedule.SchedulerParams{
 		Store:    scheduleStore,
 		Output:   scheduleMsgs,
@@ -401,16 +410,14 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 	// Set up the notification manager — runs at user lifetime, outlives the agent.
 	// Tool packages register as notifiers, the manager persists subscriptions and
-	// routes emitted notifications to channels (queueing when busy).
+	// routes emitted notifications to the output channel. The unified queue handles
+	// busy-channel awareness and source-based priority.
 	notificationStore := notification.NewStore(s)
-	notificationPendingStore := notification.NewPendingStore(s)
 	notificationMsgs := make(chan channel.TaggedMessage, 8)
 	notificationManager := notification.NewManager(notification.ManagerParams{
-		Store:        notificationStore,
-		PendingStore: notificationPendingStore,
-		Output:       notificationMsgs,
-		Channels:     channelSet.Snapshot,
-		Activity:     activityTracker,
+		Store:    notificationStore,
+		Output:   notificationMsgs,
+		Channels: channelSet.Snapshot,
 	})
 	go notificationManager.Run(ctx)
 
@@ -855,7 +862,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			// are reachable by the agent without restarting.
 			ChannelsFunc: channelsFunc,
 			Sessions:     sessions,
-			QueueStore:   queueStore,
+			Queue:        messageQueue,
 			OnSessionUpdate: func(chID channel.ChannelID, sessionID string) {
 				if saveErr := saveSession(ctx, sessionStore, chID, sessionID); saveErr != nil {
 					slog.Error("failed to save session", "err", saveErr)
@@ -941,7 +948,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		if errors.Is(err, agent.ErrIdleTimeout) {
 			slog.Info("agent restarting", "user", mu.cfg.ID, "reason", "idle_timeout")
 			// Idle timeout means the agent wasn't doing anything — don't resume.
-			if clearErr := queueStore.ClearInterrupted(ctx); clearErr != nil {
+			if clearErr := messageQueue.ClearInterrupted(ctx); clearErr != nil {
 				slog.Error("failed to clear interrupted marker on idle timeout", "err", clearErr)
 			}
 			continue
@@ -949,7 +956,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		if errors.Is(err, agent.ErrResetRequested) {
 			slog.Info("agent restarting", "user", mu.cfg.ID, "reason", "reset")
 			// User explicitly reset — don't resume old work.
-			if clearErr := queueStore.ClearInterrupted(ctx); clearErr != nil {
+			if clearErr := messageQueue.ClearInterrupted(ctx); clearErr != nil {
 				slog.Error("failed to clear interrupted marker on reset", "err", clearErr)
 			}
 			continue

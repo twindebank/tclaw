@@ -92,34 +92,6 @@ func TestManager_OneShotAutoRemove(t *testing.T) {
 	})
 }
 
-func TestManager_BusyChannelQueuing(t *testing.T) {
-	t.Run("queues when channel is busy and drains when free", func(t *testing.T) {
-		h := setupManager(t)
-		h.activity.TurnStarted("main")
-
-		_, err := h.manager.Subscribe(h.ctx, "test", notification.SubscribeParams{
-			TypeName:    "event",
-			ChannelName: "main",
-			Scope:       notification.ScopePersistent,
-			Label:       "busy test",
-		})
-		require.NoError(t, err)
-
-		// Output should be empty — notification queued.
-		select {
-		case msg := <-h.output:
-			t.Fatalf("expected no message while busy, got: %s", msg.Text)
-		case <-time.After(50 * time.Millisecond):
-		}
-
-		// Verify it's in the pending store.
-		pending, err := h.pendingStore.List(h.ctx)
-		require.NoError(t, err)
-		require.Len(t, pending, 1)
-		require.Equal(t, "event fired", pending[0].Text)
-	})
-}
-
 func TestManager_UnsubscribeByCredentialSet(t *testing.T) {
 	t.Run("removes all subscriptions for the credential set", func(t *testing.T) {
 		h := setupManager(t)
@@ -156,12 +128,10 @@ func TestManager_AvailableTypes(t *testing.T) {
 // --- helpers ---
 
 type managerHarness struct {
-	ctx          context.Context
-	manager      *notification.Manager
-	notifier     *mockNotifier
-	output       chan channel.TaggedMessage
-	activity     *channel.ActivityTracker
-	pendingStore *notification.PendingStore
+	ctx      context.Context
+	manager  *notification.Manager
+	notifier *mockNotifier
+	output   chan channel.TaggedMessage
 }
 
 func setupManager(t *testing.T) *managerHarness {
@@ -171,7 +141,6 @@ func setupManager(t *testing.T) *managerHarness {
 	require.NoError(t, err)
 
 	output := make(chan channel.TaggedMessage, 8)
-	activity := channel.NewActivityTracker()
 
 	channels := func() map[channel.ChannelID]channel.Channel {
 		return map[channel.ChannelID]channel.Channel{
@@ -179,25 +148,20 @@ func setupManager(t *testing.T) *managerHarness {
 		}
 	}
 
-	pendingStore := notification.NewPendingStore(s)
 	mgr := notification.NewManager(notification.ManagerParams{
-		Store:        notification.NewStore(s),
-		PendingStore: pendingStore,
-		Output:       output,
-		Channels:     channels,
-		Activity:     activity,
+		Store:    notification.NewStore(s),
+		Output:   output,
+		Channels: channels,
 	})
 
 	notifier := newMockNotifier()
 	mgr.RegisterNotifier("test", notifier)
 
 	return &managerHarness{
-		ctx:          context.Background(),
-		manager:      mgr,
-		notifier:     notifier,
-		output:       output,
-		activity:     activity,
-		pendingStore: pendingStore,
+		ctx:      context.Background(),
+		manager:  mgr,
+		notifier: notifier,
+		output:   output,
 	}
 }
 

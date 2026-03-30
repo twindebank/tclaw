@@ -12,6 +12,7 @@ import (
 	"tclaw/libraries/secret"
 	"tclaw/libraries/store"
 	"tclaw/mcp"
+	"tclaw/queue"
 	"tclaw/tool/modeltools"
 )
 
@@ -28,7 +29,7 @@ type AgentOptionParams struct {
 	Channels     map[channel.ChannelID]channel.Channel
 	ChannelsFunc func() map[channel.ChannelID]channel.Channel
 	Sessions     map[channel.ChannelID]string
-	QueueStore   *channel.QueueStore
+	Queue        *queue.Queue
 
 	ChannelToolOverrides map[channel.ChannelID]agent.ChannelToolPermissions
 	MCPConfigPath        string
@@ -80,7 +81,7 @@ func BuildAgentOptions(ctx context.Context, p AgentOptionParams) agent.Options {
 		Channels:     p.Channels,
 		ChannelsFunc: p.ChannelsFunc,
 		Sessions:     p.Sessions,
-		QueueStore:   p.QueueStore,
+		Queue:        p.Queue,
 		OnSessionUpdate: func(chID channel.ChannelID, sessionID string) {
 			if saveErr := saveSession(ctx, p.SessionStore, chID, sessionID); saveErr != nil {
 				slog.Error("failed to save session", "err", saveErr)

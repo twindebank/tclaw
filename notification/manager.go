@@ -5,31 +5,28 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"time"
 
 	"tclaw/channel"
 )
 
-const drainInterval = 15 * time.Second
-
 // ManagerParams holds configuration for creating a Manager.
 type ManagerParams struct {
-	Store        *Store
-	PendingStore *PendingStore
-	Output       chan<- channel.TaggedMessage
-	Channels     func() map[channel.ChannelID]channel.Channel
-	Activity     *channel.ActivityTracker
+	Store    *Store
+	Output   chan<- channel.TaggedMessage
+	Channels func() map[channel.ChannelID]channel.Channel
 }
 
 // Manager is the notification system's central orchestrator. It persists
 // subscriptions, delegates to package Notifiers for mechanism-specific logic,
 // and routes emitted notifications to channels. Runs at user lifetime.
+//
+// The manager does not handle busy-channel queueing — that's the unified
+// queue's responsibility. Notifications are delivered to the output channel
+// immediately; the queue decides when to process them based on source priority.
 type Manager struct {
 	store    *Store
-	pending  *PendingStore
 	output   chan<- channel.TaggedMessage
 	channels func() map[channel.ChannelID]channel.Channel
-	activity *channel.ActivityTracker
 
 	mu        sync.Mutex
 	notifiers map[string]Notifier           // package_name -> notifier
@@ -40,10 +37,8 @@ type Manager struct {
 func NewManager(p ManagerParams) *Manager {
 	return &Manager{
 		store:     p.Store,
-		pending:   p.PendingStore,
 		output:    p.Output,
 		channels:  p.Channels,
-		activity:  p.Activity,
 		notifiers: make(map[string]Notifier),
 		cancels:   make(map[SubscriptionID]CancelFunc),
 	}
@@ -57,25 +52,15 @@ func (m *Manager) RegisterNotifier(packageName string, notifier Notifier) {
 	m.notifiers[packageName] = notifier
 }
 
-// Run loads persisted subscriptions, restarts their watchers, and runs
-// the pending-notification drain loop. Blocks until ctx is cancelled.
+// Run loads persisted subscriptions, restarts their watchers, and blocks
+// until ctx is cancelled.
 func (m *Manager) Run(ctx context.Context) {
 	slog.Info("notification manager: started")
 
 	m.resubscribeAll(ctx)
 
-	ticker := time.NewTicker(drainInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			m.cancelAll()
-			return
-		case <-ticker.C:
-			m.drainPending(ctx)
-		}
-	}
+	<-ctx.Done()
+	m.cancelAll()
 }
 
 // Subscribe delegates to the package's Notifier, persists the subscription,
@@ -95,7 +80,6 @@ func (m *Manager) Subscribe(ctx context.Context, packageName string, params Subs
 	}
 
 	if err := m.store.Add(ctx, result.Subscription); err != nil {
-		// Subscription started but store failed — cancel it so we don't leak.
 		if result.Cancel != nil {
 			result.Cancel()
 		}
@@ -211,8 +195,7 @@ func (m *Manager) resubscribeAll(ctx context.Context) {
 	}
 }
 
-// emitterFor creates an Emitter that delivers to the given channel,
-// queueing if busy and handling one-shot cleanup.
+// emitterFor creates an Emitter that delivers to the given channel.
 func (m *Manager) emitterFor(channelName string, scope Scope, label string) *emitter {
 	return &emitter{
 		manager:     m,
@@ -240,31 +223,12 @@ func (e *emitter) Emit(ctx context.Context, n Notification) error {
 	e.delivered = true
 	e.mu.Unlock()
 
-	// Check if the channel is busy.
-	if e.manager.activity != nil && e.manager.activity.IsBusy(e.channelName) {
-		// Queue for later delivery.
-		pn := PendingNotification{
-			ID:             GeneratePendingID(),
-			SubscriptionID: n.SubscriptionID,
-			ChannelName:    e.channelName,
-			Text:           n.Text,
-			QueuedAt:       time.Now(),
-			Scope:          e.scope,
-			Label:          e.label,
-		}
-		if err := e.manager.pending.Add(ctx, pn); err != nil {
-			return fmt.Errorf("queue pending notification: %w", err)
-		}
-		slog.Info("notification: channel busy, queued",
-			"subscription", n.SubscriptionID, "channel", e.channelName)
-		return nil
-	}
-
 	e.manager.deliver(ctx, n.SubscriptionID, e.channelName, n.Text, e.scope, e.label)
 	return nil
 }
 
 // deliver resolves the channel and sends the notification as a TaggedMessage.
+// The unified queue handles busy-channel awareness — we just send immediately.
 func (m *Manager) deliver(ctx context.Context, subID SubscriptionID, channelName, text string, scope Scope, label string) {
 	channelID, ok := m.resolveChannel(channelName)
 	if !ok {
@@ -301,32 +265,8 @@ func (m *Manager) deliver(ctx context.Context, subID SubscriptionID, channelName
 	if scope == ScopeOneShot {
 		m.cancelOne(subID)
 		if err := m.store.Remove(ctx, subID); err != nil {
-			// "not found" is expected if the notifier emitted synchronously
-			// during Subscribe() before the subscription was persisted.
 			slog.Debug("notification: one-shot removal after delivery",
 				"subscription", subID, "error", err)
-		}
-	}
-}
-
-// drainPending delivers queued notifications whose channels are now free.
-func (m *Manager) drainPending(ctx context.Context) {
-	items, err := m.pending.List(ctx)
-	if err != nil {
-		slog.Error("notification: failed to list pending notifications", "error", err)
-		return
-	}
-
-	for _, item := range items {
-		if m.activity != nil && m.activity.IsBusy(item.ChannelName) {
-			continue
-		}
-
-		m.deliver(ctx, item.SubscriptionID, item.ChannelName, item.Text, item.Scope, item.Label)
-
-		if err := m.pending.Remove(ctx, item.ID); err != nil {
-			slog.Error("notification: failed to remove delivered pending notification",
-				"id", item.ID, "error", err)
 		}
 	}
 }

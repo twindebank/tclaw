@@ -198,11 +198,9 @@ func setup(t *testing.T) (*mcp.Handler, *notification.Manager) {
 	}
 
 	mgr := notification.NewManager(notification.ManagerParams{
-		Store:        notification.NewStore(s),
-		PendingStore: notification.NewPendingStore(s),
-		Output:       output,
-		Channels:     channels,
-		Activity:     channel.NewActivityTracker(),
+		Store:    notification.NewStore(s),
+		Output:   output,
+		Channels: channels,
 	})
 	mgr.RegisterNotifier("test", &mockNotifier{})
 
@@ -221,11 +219,9 @@ func setupEmpty(t *testing.T) (*mcp.Handler, *notification.Manager) {
 
 	output := make(chan channel.TaggedMessage, 8)
 	mgr := notification.NewManager(notification.ManagerParams{
-		Store:        notification.NewStore(s),
-		PendingStore: notification.NewPendingStore(s),
-		Output:       output,
-		Channels:     func() map[channel.ChannelID]channel.Channel { return nil },
-		Activity:     channel.NewActivityTracker(),
+		Store:    notification.NewStore(s),
+		Output:   output,
+		Channels: func() map[channel.ChannelID]channel.Channel { return nil },
 	})
 
 	handler := mcp.NewHandler()
