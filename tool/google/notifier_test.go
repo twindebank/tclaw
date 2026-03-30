@@ -111,14 +111,13 @@ func TestNotifier_Resubscribe(t *testing.T) {
 		cancel()
 	})
 
-	t.Run("loads persisted cursor over config cursor", func(t *testing.T) {
+	t.Run("loads cursor from state store", func(t *testing.T) {
 		n, s := setupNotifier(t)
 		ctx := context.Background()
 
 		config := gmailPollConfig{
 			CredentialSetID: "google/work",
 			Interval:        defaultPollInterval,
-			HistoryID:       "old_cursor",
 		}
 		configJSON, err := json.Marshal(config)
 		require.NoError(t, err)
@@ -133,16 +132,16 @@ func TestNotifier_Resubscribe(t *testing.T) {
 			CredentialSetID: "google/work",
 		}
 
-		// Simulate a cursor persisted by a previous poll (more recent than config).
-		require.NoError(t, s.Set(ctx, cursorKey(sub.ID), []byte("newer_cursor")))
+		// Simulate a cursor persisted by a previous session's poll loop.
+		require.NoError(t, s.Set(ctx, cursorKey(sub.ID), []byte("persisted_cursor")))
 
 		cancel, err := n.Resubscribe(ctx, sub, &noopEmitter{})
 		require.NoError(t, err)
 		require.NotNil(t, cancel)
 		cancel()
 
-		// Verify the persisted cursor was loaded (not the config one).
-		require.Equal(t, "newer_cursor", n.loadCursor(ctx, sub.ID))
+		// The poll loop should have loaded the persisted cursor.
+		require.Equal(t, "persisted_cursor", n.loadCursor(ctx, sub.ID))
 	})
 }
 

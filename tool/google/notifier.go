@@ -23,13 +23,10 @@ const (
 )
 
 // gmailPollConfig is stored in Subscription.Config (opaque to the manager).
+// The history cursor is persisted separately in the state store — not here.
 type gmailPollConfig struct {
 	CredentialSetID string        `json:"credential_set_id"`
 	Interval        time.Duration `json:"interval"`
-
-	// HistoryID is the Gmail history cursor at subscribe time. The live cursor
-	// is persisted separately in the state store so it stays current across polls.
-	HistoryID string `json:"history_id,omitempty"`
 }
 
 // notifier implements notification.Notifier for the Google package.
@@ -94,14 +91,12 @@ func (n *notifier) Subscribe(ctx context.Context, params notification.SubscribeP
 		Interval:        defaultPollInterval,
 	}
 
-	// Seed the history ID from the user's current profile so we only
-	// notify about messages arriving after subscribe — not existing mail.
+	// Seed the history cursor so we only notify about messages arriving
+	// after subscribe — not existing mail.
 	historyID, err := n.fetchCurrentHistoryID(ctx, config.CredentialSetID)
 	if err != nil {
 		slog.Warn("gmail notifier: failed to seed history ID, will retry on first poll",
 			"error", err)
-	} else {
-		config.HistoryID = historyID
 	}
 
 	configJSON, err := json.Marshal(config)
@@ -122,8 +117,8 @@ func (n *notifier) Subscribe(ctx context.Context, params notification.SubscribeP
 	}
 
 	// Persist initial cursor if we got one.
-	if config.HistoryID != "" {
-		n.saveCursor(ctx, sub.ID, config.HistoryID)
+	if historyID != "" {
+		n.saveCursor(ctx, sub.ID, historyID)
 	}
 
 	cancel := n.startPolling(ctx, sub.ID, config, emitter)
@@ -175,21 +170,19 @@ func (n *notifier) startPolling(ctx context.Context, id notification.Subscriptio
 }
 
 func (n *notifier) pollLoop(ctx context.Context, id notification.SubscriptionID, config gmailPollConfig, emitter notification.Emitter) {
-	// Load persisted cursor — more recent than the config snapshot.
-	if persisted := n.loadCursor(ctx, id); persisted != "" {
-		config.HistoryID = persisted
-	}
+	// Load persisted cursor from state store.
+	cursor := n.loadCursor(ctx, id)
 
-	// If we still don't have a history ID, try to seed.
-	if config.HistoryID == "" {
-		historyID, err := n.fetchCurrentHistoryID(ctx, config.CredentialSetID)
+	// If we don't have a cursor yet, try to seed from the Gmail profile.
+	if cursor == "" {
+		seeded, err := n.fetchCurrentHistoryID(ctx, config.CredentialSetID)
 		if err != nil {
 			slog.Warn("gmail notifier: failed to fetch initial history ID, will retry",
 				"subscription", id, "error", err)
 		} else {
-			config.HistoryID = historyID
-			n.saveCursor(ctx, id, historyID)
-			slog.Info("gmail notifier: seeded history ID", "subscription", id, "history_id", historyID)
+			cursor = seeded
+			n.saveCursor(ctx, id, cursor)
+			slog.Info("gmail notifier: seeded history ID", "subscription", id, "history_id", cursor)
 		}
 	}
 
@@ -201,44 +194,44 @@ func (n *notifier) pollLoop(ctx context.Context, id notification.SubscriptionID,
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			n.poll(ctx, id, &config, emitter)
+			cursor = n.poll(ctx, id, config.CredentialSetID, cursor, emitter)
 		}
 	}
 }
 
-// poll checks for new messages since the last history ID using Gmail's
-// history.list API.
-func (n *notifier) poll(ctx context.Context, id notification.SubscriptionID, config *gmailPollConfig, emitter notification.Emitter) {
-	if config.HistoryID == "" {
-		historyID, err := n.fetchCurrentHistoryID(ctx, config.CredentialSetID)
+// poll checks for new messages since the cursor using Gmail's history.list API.
+// Returns the updated cursor.
+func (n *notifier) poll(ctx context.Context, id notification.SubscriptionID, credSetID, cursor string, emitter notification.Emitter) string {
+	if cursor == "" {
+		// Still no cursor — try to seed.
+		seeded, err := n.fetchCurrentHistoryID(ctx, credSetID)
 		if err != nil {
 			slog.Error("gmail notifier: cannot fetch history ID", "subscription", id, "error", err)
-			return
+			return cursor
 		}
-		config.HistoryID = historyID
-		n.saveCursor(ctx, id, historyID)
-		slog.Info("gmail notifier: seeded history ID on poll", "subscription", id, "history_id", historyID)
-		return
+		n.saveCursor(ctx, id, seeded)
+		slog.Info("gmail notifier: seeded history ID on poll", "subscription", id, "history_id", seeded)
+		return seeded
 	}
 
-	newMessageIDs, newHistoryID, err := n.fetchHistory(ctx, config.CredentialSetID, config.HistoryID)
+	newMessageIDs, newHistoryID, err := n.fetchHistory(ctx, credSetID, cursor)
 	if err != nil {
 		slog.Error("gmail notifier: history fetch failed", "subscription", id, "error", err)
-		return
+		return cursor
 	}
 
 	if newHistoryID != "" {
-		config.HistoryID = newHistoryID
-		n.saveCursor(ctx, id, newHistoryID)
+		cursor = newHistoryID
+		n.saveCursor(ctx, id, cursor)
 	}
 
 	if len(newMessageIDs) == 0 {
-		return
+		return cursor
 	}
 
-	summaries := n.fetchMetadata(ctx, config.CredentialSetID, newMessageIDs)
+	summaries := n.fetchMetadata(ctx, credSetID, newMessageIDs)
 	if len(summaries) == 0 {
-		return
+		return cursor
 	}
 
 	text := formatNewEmailNotification(summaries)
@@ -248,6 +241,8 @@ func (n *notifier) poll(ctx context.Context, id notification.SubscriptionID, con
 	}); err != nil {
 		slog.Error("gmail notifier: emit failed", "subscription", id, "error", err)
 	}
+
+	return cursor
 }
 
 func (n *notifier) fetchCurrentHistoryID(ctx context.Context, credSetID string) (string, error) {
