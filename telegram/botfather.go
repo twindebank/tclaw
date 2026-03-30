@@ -1,4 +1,4 @@
-package telegramclient
+package telegram
 
 import (
 	"context"
@@ -76,7 +76,7 @@ func (bf *BotFather) CreateBot(ctx context.Context, purpose string) (*CreateBotR
 	var lastErr error
 	for attempt := range maxUsernameRetries {
 		_ = attempt
-		username, displayName, err := generateBotNames(purpose)
+		username, displayName, err := GenerateBotNames(purpose)
 		if err != nil {
 			return nil, fmt.Errorf("generate bot names: %w", err)
 		}
@@ -185,6 +185,41 @@ func (bf *BotFather) ConfigureBot(ctx context.Context, params ConfigureBotParams
 		}
 	}
 
+	return nil
+}
+
+// StartBot sends /start to a bot as the authenticated user via MTProto.
+func (bf *BotFather) StartBot(ctx context.Context, botUsername string) error {
+	resolved, err := bf.client.API().ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{
+		Username: botUsername,
+	})
+	if err != nil {
+		return fmt.Errorf("resolve bot @%s: %w", botUsername, err)
+	}
+	if len(resolved.Users) == 0 {
+		return fmt.Errorf("bot @%s not found", botUsername)
+	}
+
+	u, ok := resolved.Users[0].(*tg.User)
+	if !ok {
+		return fmt.Errorf("unexpected user type for @%s", botUsername)
+	}
+
+	peer := &tg.InputPeerUser{
+		UserID:     u.ID,
+		AccessHash: u.AccessHash,
+	}
+
+	_, err = bf.client.API().MessagesSendMessage(ctx, &tg.MessagesSendMessageRequest{
+		Peer:     peer,
+		Message:  "/start",
+		RandomID: GenerateRandomID(),
+	})
+	if err != nil {
+		return fmt.Errorf("send /start to @%s: %w", botUsername, err)
+	}
+
+	slog.Info("auto-started bot conversation", "bot", botUsername)
 	return nil
 }
 
@@ -345,7 +380,7 @@ func (bf *BotFather) sendMessage(ctx context.Context, text string) error {
 	_, err := bf.client.API().MessagesSendMessage(ctx, &tg.MessagesSendMessageRequest{
 		Peer:     bf.peer,
 		Message:  text,
-		RandomID: generateRandomID(),
+		RandomID: GenerateRandomID(),
 	})
 	if err != nil {
 		slog.Error("botfather: send failed", "err", err)
@@ -473,10 +508,10 @@ const (
 	MaxBotPurposeRunes = 56
 )
 
-// generateBotNames creates a randomized username and a human-readable display name.
+// GenerateBotNames creates a randomized username and a human-readable display name.
 // The username has a random hex suffix for non-discoverability. Returns an error if
 // the purpose exceeds MaxBotPurposeRunes — callers should validate upfront.
-func generateBotNames(purpose string) (username, displayName string, err error) {
+func GenerateBotNames(purpose string) (username, displayName string, err error) {
 	if len([]rune(purpose)) > MaxBotPurposeRunes {
 		return "", "", fmt.Errorf("purpose too long: %d runes, max %d (BotFather display name limit)", len([]rune(purpose)), MaxBotPurposeRunes)
 	}
@@ -493,8 +528,8 @@ func generateBotNames(purpose string) (username, displayName string, err error) 
 	return username, displayName, nil
 }
 
-// generateRandomID creates a random int64 for Telegram message deduplication.
-func generateRandomID() int64 {
+// GenerateRandomID creates a random int64 for Telegram message deduplication.
+func GenerateRandomID() int64 {
 	b := make([]byte, 8)
 	rand.Read(b)
 	var id int64

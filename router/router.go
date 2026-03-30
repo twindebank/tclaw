@@ -16,6 +16,8 @@ import (
 
 	"tclaw/agent"
 	"tclaw/channel"
+	channelall "tclaw/channel/all"
+	"tclaw/channel/channelpkg"
 	"tclaw/claudecli"
 	"tclaw/config"
 	"tclaw/credential"
@@ -63,8 +65,8 @@ type Router struct {
 	callback  *oauth.CallbackServer // nil if OAuth is not configured
 	publicURL string                // externally-reachable base URL, enables Telegram webhooks
 
-	// builders maps channel types to their ChannelBuilder implementation.
-	builders map[channel.ChannelType]ChannelBuilder
+	// channelRegistry maps channel types to their package implementations.
+	channelRegistry *channelpkg.Registry
 
 	// configCredentials holds pre-configured credential entries from tclaw.yaml.
 	// Seeded into credential sets at startup.
@@ -130,11 +132,8 @@ func New(baseDir string, env config.Env, configCredentials config.CredentialsCon
 		mcpServers: make(map[user.ID]*mcp.Server),
 		baseDir:    baseDir,
 		env:        env,
-		builders: map[channel.ChannelType]ChannelBuilder{
-			channel.TypeSocket:   SocketBuilder{},
-			channel.TypeStdio:    StdioBuilder{},
-			channel.TypeTelegram: TelegramBuilder{},
-		},
+		// Provisioner is nil here — set per-user in startUser after telegramclient.RegisterTools.
+		channelRegistry:   channelall.NewRegistry(nil),
 		configCredentials: configCredentials,
 		callback:          callback,
 		publicURL:         publicURL,
@@ -1046,7 +1045,7 @@ func sendLifecycleNotification(ctx context.Context, channels []channel.Channel, 
 }
 
 // BuildChannels creates channel instances from config for a given user.
-// Dispatches to registered ChannelBuilder implementations by type.
+// Dispatches to the channel registry by type.
 // Channels whose Envs list doesn't include env are skipped.
 type BuildChannelsParams struct {
 	UserID      user.ID
@@ -1065,17 +1064,12 @@ func (r *Router) BuildChannels(ctx context.Context, params BuildChannelsParams) 
 			continue
 		}
 
-		builder, ok := r.builders[chCfg.Type]
-		if !ok {
-			return nil, fmt.Errorf("channel %q: unsupported type %q", chCfg.Name, chCfg.Type)
-		}
-
 		var registerHandler func(string, http.Handler)
 		if r.callback != nil {
 			registerHandler = r.callback.Handle
 		}
 
-		ch, err := builder.Build(ctx, ChannelBuildParams{
+		ch, err := r.channelRegistry.Build(ctx, chCfg.Type, channelpkg.BuildParams{
 			ChannelCfg:      chCfg,
 			UserCfg:         params.UserCfg,
 			UserID:          params.UserID,

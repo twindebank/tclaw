@@ -25,6 +25,7 @@ import (
 
 	"tclaw/agent"
 	"tclaw/channel"
+	"tclaw/channel/socketchannel"
 	"tclaw/claudecli"
 	"tclaw/libraries/store"
 	"tclaw/mcp"
@@ -181,7 +182,7 @@ func setupAgent(t *testing.T) *socketClient {
 		t.Fatalf("create home dir: %v", err)
 	}
 
-	sock := channel.NewSocketServer(socketPath, "test", "Integration test channel")
+	sock := socketchannel.NewServer(socketPath, "test", "Integration test channel")
 	chMap := channel.ChannelMap(sock)
 
 	apiKey, setupToken := agentCredentials(t)
@@ -299,7 +300,7 @@ func TestIntegration_SessionPersistence(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 
-	sock := channel.NewSocketServer(socketPath, "test", "Test channel")
+	sock := socketchannel.NewServer(socketPath, "test", "Test channel")
 	chMap := channel.ChannelMap(sock)
 
 	var savedSessionID string
@@ -396,7 +397,7 @@ func TestIntegration_MemoryLoaded(t *testing.T) {
 		t.Fatalf("create symlink: %v", err)
 	}
 
-	sock := channel.NewSocketServer(socketPath, "test", "Memory test channel")
+	sock := socketchannel.NewServer(socketPath, "test", "Memory test channel")
 	chMap := channel.ChannelMap(sock)
 
 	mlAPIKey, mlSetupToken := agentCredentials(t)
@@ -469,7 +470,7 @@ func TestIntegration_DynamicChannelLifecycle(t *testing.T) {
 		t.Fatalf("create socket dir: %v", err)
 	}
 
-	sock := channel.NewSocketServer(socketPath, "phone", "Test phone channel")
+	sock := socketchannel.NewServer(socketPath, "phone", "Test phone channel")
 	chMap := channel.ChannelMap(sock)
 
 	dcAPIKey, dcSetupToken := agentCredentials(t)
@@ -575,7 +576,7 @@ func TestIntegration_MCPToolGlobPermission(t *testing.T) {
 		t.Fatalf("generate MCP config: %v", err)
 	}
 
-	sock := channel.NewSocketServer(socketPath, "test", "Integration test channel")
+	sock := socketchannel.NewServer(socketPath, "test", "Integration test channel")
 	chMap := channel.ChannelMap(sock)
 	chID := sock.Info().ID
 

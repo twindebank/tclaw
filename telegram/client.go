@@ -1,4 +1,7 @@
-package telegramclient
+// Package telegram provides a pure platform SDK for Telegram Bot API and MTProto
+// operations. It knows nothing about channels, MCP tools, or other tclaw abstractions.
+// Consumers (channel/telegramchannel, tool/telegramclient) build on top of it.
+package telegram
 
 import (
 	"context"
@@ -31,11 +34,11 @@ type Client struct {
 }
 
 // NewClient creates a Client that will lazily connect using the given credentials.
-func NewClient(apiID int, apiHash string, secretStore secret.Store) *Client {
+func NewClient(apiID int, apiHash string, secretStore secret.Store, sessionStoreKey string) *Client {
 	return &Client{
 		apiID:   apiID,
 		apiHash: apiHash,
-		storage: newSecretSessionStorage(secretStore),
+		storage: newSecretSessionStorage(secretStore, sessionStoreKey),
 		ready:   make(chan struct{}),
 		stopped: make(chan struct{}),
 	}

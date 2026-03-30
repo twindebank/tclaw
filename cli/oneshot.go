@@ -14,6 +14,7 @@ import (
 
 	"tclaw/agent"
 	"tclaw/channel"
+	"tclaw/channel/stdiochannel"
 	"tclaw/claudecli"
 	"tclaw/config"
 	"tclaw/credential"
@@ -155,7 +156,7 @@ func runOneshot() {
 	agentCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	ch := channel.NewOneshot(message, cancel, *telegramMode)
+	ch := stdiochannel.NewOneshot(message, cancel, *telegramMode)
 	chMap := map[channel.ChannelID]channel.Channel{"oneshot": ch}
 
 	msgs := channel.FanIn(agentCtx, chMap)

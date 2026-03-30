@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"tclaw/channel"
+	"tclaw/channel/telegramchannel"
 	"tclaw/config"
 	"tclaw/libraries/store"
 	"tclaw/mcp"
@@ -420,7 +421,7 @@ func TestChannelDone(t *testing.T) {
 		reloadRegistry(t, th.testHarness)
 
 		require.NoError(t, th.runtimeState.Update(context.Background(), "ephemeral-test", func(rs *channel.RuntimeState) {
-			rs.TeardownState = channel.NewTelegramTeardownState("tclaw_test_bot")
+			rs.TeardownState = telegramchannel.NewTeardownState("tclaw_test_bot")
 		}))
 		require.NoError(t, th.secretStore.Set(context.Background(), channel.ChannelSecretKey("ephemeral-test"), "fake-token"))
 
@@ -453,7 +454,7 @@ func TestChannelDone(t *testing.T) {
 		reloadRegistry(t, th.testHarness)
 
 		require.NoError(t, th.runtimeState.Update(context.Background(), "failing-ephemeral", func(rs *channel.RuntimeState) {
-			rs.TeardownState = channel.NewTelegramTeardownState("tclaw_fail_bot")
+			rs.TeardownState = telegramchannel.NewTeardownState("tclaw_fail_bot")
 		}))
 
 		toolErr := callToolExpectError(t, th.handler, "channel_done", map[string]any{
@@ -486,8 +487,8 @@ func TestChannelDone(t *testing.T) {
 
 		// Seed platform state (Telegram chat ID) and teardown state.
 		require.NoError(t, th.runtimeState.Update(context.Background(), "confirm-test", func(rs *channel.RuntimeState) {
-			rs.PlatformState = channel.NewTelegramPlatformState(12345)
-			rs.TeardownState = channel.NewTelegramTeardownState("tclaw_confirm_bot")
+			rs.PlatformState = telegramchannel.NewPlatformState(12345)
+			rs.TeardownState = telegramchannel.NewTeardownState("tclaw_confirm_bot")
 		}))
 		require.NoError(t, th.secretStore.Set(context.Background(), channel.ChannelSecretKey("confirm-test"), "fake-token"))
 
@@ -522,8 +523,8 @@ func TestChannelDone(t *testing.T) {
 		reloadRegistry(t, th.testHarness)
 
 		require.NoError(t, th.runtimeState.Update(context.Background(), "prompt-fail-test", func(rs *channel.RuntimeState) {
-			rs.PlatformState = channel.NewTelegramPlatformState(12345)
-			rs.TeardownState = channel.NewTelegramTeardownState("tclaw_fail_bot")
+			rs.PlatformState = telegramchannel.NewPlatformState(12345)
+			rs.TeardownState = telegramchannel.NewTeardownState("tclaw_fail_bot")
 		}))
 		require.NoError(t, th.secretStore.Set(context.Background(), channel.ChannelSecretKey("prompt-fail-test"), "fake-token"))
 
@@ -873,14 +874,14 @@ func (m *mockProvisioner) Provision(_ context.Context, params channel.ProvisionP
 	}
 	return &channel.ProvisionResult{
 		Token:         "mock-bot-token",
-		TeardownState: channel.NewTelegramTeardownState("tclaw_mock_bot"),
+		TeardownState: telegramchannel.NewTeardownState("tclaw_mock_bot"),
 	}, nil
 }
 
 func (m *mockProvisioner) Teardown(_ context.Context, state channel.TeardownState) error {
 	m.teardownCalled = true
-	if state.Telegram != nil {
-		m.teardownUsername = state.Telegram.BotUsername
+	if tgState, err := telegramchannel.ParseTeardownState(state); err == nil {
+		m.teardownUsername = tgState.BotUsername
 	}
 	return m.teardownErr
 }
