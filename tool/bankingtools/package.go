@@ -5,13 +5,19 @@ import (
 
 	"tclaw/claudecli"
 	"tclaw/libraries/secret"
+	"tclaw/libraries/store"
 	"tclaw/mcp"
+	"tclaw/oauth"
 	"tclaw/tool/toolpkg"
 	"tclaw/toolgroup"
 )
 
 // Package implements toolpkg.Package for Open Banking tools.
-type Package struct{}
+type Package struct {
+	SecretStore secret.Store
+	StateStore  store.Store
+	Callback    *oauth.CallbackServer
+}
 
 func (p *Package) Name() string { return "banking" }
 func (p *Package) Description() string {
@@ -19,8 +25,10 @@ func (p *Package) Description() string {
 }
 func (p *Package) Group() toolgroup.ToolGroup { return toolgroup.GroupPersonalServices }
 
-func (p *Package) ToolPatterns() []claudecli.Tool {
-	return []claudecli.Tool{"mcp__tclaw__banking_*"}
+func (p *Package) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
+	return map[toolgroup.ToolGroup][]claudecli.Tool{
+		p.Group(): {"mcp__tclaw__banking_*"},
+	}
 }
 
 func (p *Package) RequiredSecrets() []toolpkg.SecretSpec {
@@ -55,15 +63,15 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 
 func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationContext) error {
 	deps := Deps{
-		SecretStore: regCtx.SecretStore,
-		StateStore:  regCtx.StateStore,
-		Callback:    regCtx.Callback,
+		SecretStore: p.SecretStore,
+		StateStore:  p.StateStore,
+		Callback:    p.Callback,
 		OnCredentialsStored: func() {
 			// Register operational tools when credentials become available.
 			RegisterTools(handler, Deps{
-				SecretStore: regCtx.SecretStore,
-				StateStore:  regCtx.StateStore,
-				Callback:    regCtx.Callback,
+				SecretStore: p.SecretStore,
+				StateStore:  p.StateStore,
+				Callback:    p.Callback,
 			})
 		},
 	}
@@ -72,7 +80,7 @@ func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationCont
 	RegisterInfoTools(handler, deps)
 
 	// Register operational tools if credentials already configured.
-	if hasBankingCredentials(context.Background(), regCtx.SecretStore) {
+	if hasBankingCredentials(context.Background(), p.SecretStore) {
 		RegisterTools(handler, deps)
 	}
 

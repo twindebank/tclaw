@@ -251,18 +251,18 @@ Tool packages implement the `toolpkg.Package` interface (see `tool/toolpkg/toolp
 2. Implement the `toolpkg.Package` interface:
    - `Name()` — stable identifier (e.g. "mytool")
    - `Description()` — human-readable summary
-   - `Group()` — which toolgroup this belongs to
-   - `ToolPatterns()` — CLI glob patterns for permission matching
+   - `Group()` — primary toolgroup (used for display in info tools)
+   - `GroupTools()` — maps toolgroups to CLI glob patterns. Most packages return one entry; packages that span multiple groups return multiple.
    - `RequiredSecrets()` — what secrets this package needs (with env var prefix for seeding)
    - `Info()` — returns structured `PackageInfo` with credential status
    - `Register()` — registers tools on the MCP handler
-3. Add the package to the registry in router.go
+3. Add the package to the registry in `tool/all/all.go`
 
-The registry auto-generates a `<name>_info` tool for every package. Packages don't need to register their own info tool.
-
-**Secret seeding is automatic.** Each `SecretSpec` declares an `EnvVarPrefix` — the registry combines it with the user ID to form the full env var name and seeds it into the secret store at boot.
-
-**Tool groups are declared by the package.** Each package returns its group from `Group()` and its tool patterns from `ToolPatterns()`.
+That's it — the registry handles everything else:
+- Auto-generates a `<name>_info` tool for every package
+- Seeds secrets from env vars via `RequiredSecrets()`
+- Builds the tool group map from `GroupTools()` — no manual wiring in `toolgroup/group.go`
+- The router calls `toolgroup.SetPackageTools()` at startup to merge package-declared tools into the group system
 
 **See `tool/tfl/package.go` for a minimal example** (simple package with optional secret), or `tool/scheduletools/package.go` for a package with extra deps via `RegistrationContext.Extra`.
 

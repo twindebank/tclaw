@@ -91,15 +91,13 @@ func (r *Registry) AllInfo(ctx context.Context, store secret.Store) []PackageInf
 }
 
 // BuildGroupTools builds a toolgroup -> tools map from all registered packages.
-// Each package declares its group and tool patterns; this method collects them.
+// Each package declares its group contributions via GroupTools().
 func (r *Registry) BuildGroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
 	result := make(map[toolgroup.ToolGroup][]claudecli.Tool)
 	for _, pkg := range r.packages {
-		group := pkg.Group()
-		if group == "" {
-			continue
+		for group, tools := range pkg.GroupTools() {
+			result[group] = append(result[group], tools...)
 		}
-		result[group] = append(result[group], pkg.ToolPatterns()...)
 	}
 	return result
 }

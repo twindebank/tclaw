@@ -15,10 +15,6 @@ import (
 	"tclaw/toolgroup"
 )
 
-// ExtraKeyCredentialManager is the RegistrationContext.Extra key for *credential.Manager.
-// Shared with credentialtools — both packages read from the same key.
-const ExtraKeyCredentialManager = "credential_manager"
-
 // Package implements toolpkg.Package and toolpkg.CredentialProvider for
 // Google Workspace tools.
 //
@@ -34,8 +30,18 @@ func (p *Package) Description() string {
 }
 func (p *Package) Group() toolgroup.ToolGroup { return toolgroup.GroupGSuiteWrite }
 
-func (p *Package) ToolPatterns() []claudecli.Tool {
-	return []claudecli.Tool{"mcp__tclaw__google_*"}
+func (p *Package) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
+	return map[toolgroup.ToolGroup][]claudecli.Tool{
+		// GSuiteWrite includes all Google tools (superset of GSuiteRead).
+		toolgroup.GroupGSuiteWrite: {"mcp__tclaw__google_*"},
+		// GSuiteRead includes only the read-only subset.
+		toolgroup.GroupGSuiteRead: {
+			"mcp__tclaw__google_gmail_list",
+			"mcp__tclaw__google_gmail_read",
+			"mcp__tclaw__google_workspace",
+			"mcp__tclaw__google_workspace_schema",
+		},
+	}
 }
 
 func (p *Package) RequiredSecrets() []toolpkg.SecretSpec {
@@ -97,9 +103,9 @@ func (p *Package) CredentialSpec() toolpkg.CredentialSpec {
 // unregisters Google Workspace tools based on which credential sets have OAuth
 // tokens ready.
 func (p *Package) OnCredentialSetChange(handler *mcp.Handler, regCtx toolpkg.RegistrationContext, sets []toolpkg.ResolvedCredentialSet) error {
-	credMgr, ok := regCtx.Extra[ExtraKeyCredentialManager].(*credential.Manager)
-	if !ok || credMgr == nil {
-		return fmt.Errorf("google: missing credential manager in RegistrationContext.Extra")
+	credMgr := regCtx.CredentialManager
+	if credMgr == nil {
+		return fmt.Errorf("google: missing credential manager in RegistrationContext")
 	}
 
 	spec := p.CredentialSpec()

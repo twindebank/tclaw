@@ -8,7 +8,6 @@ package credentialtools
 
 import (
 	"context"
-	"fmt"
 
 	"tclaw/claudecli"
 	"tclaw/credential"
@@ -56,14 +55,11 @@ func RegisterTools(h *mcp.Handler, deps Deps) {
 	}
 }
 
-// ExtraKeyCredentialManager is the RegistrationContext.Extra key for *credential.Manager.
-const ExtraKeyCredentialManager = "credential_manager"
-
-// ExtraKeyOnCredentialChange is the RegistrationContext.Extra key for the change callback.
-const ExtraKeyOnCredentialChange = "on_credential_change"
-
 // Package implements toolpkg.Package for credential management tools.
-type Package struct{}
+type Package struct {
+	CredentialManager *credential.Manager
+	Registry          *toolpkg.Registry
+}
 
 func (p *Package) Name() string { return "credential" }
 func (p *Package) Description() string {
@@ -71,8 +67,10 @@ func (p *Package) Description() string {
 }
 func (p *Package) Group() toolgroup.ToolGroup { return toolgroup.GroupConnections }
 
-func (p *Package) ToolPatterns() []claudecli.Tool {
-	return []claudecli.Tool{"mcp__tclaw__credential_*"}
+func (p *Package) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
+	return map[toolgroup.ToolGroup][]claudecli.Tool{
+		p.Group(): {"mcp__tclaw__credential_*"},
+	}
 }
 
 func (p *Package) RequiredSecrets() []toolpkg.SecretSpec { return nil }
@@ -88,25 +86,12 @@ func (p *Package) Info(_ context.Context, _ secret.Store) (*toolpkg.PackageInfo,
 }
 
 func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationContext) error {
-	credMgr, ok := regCtx.Extra[ExtraKeyCredentialManager].(*credential.Manager)
-	if !ok || credMgr == nil {
-		return fmt.Errorf("credentialtools: missing %s in Extra", ExtraKeyCredentialManager)
-	}
-
-	var onChange func(string)
-	if fn, ok := regCtx.Extra[ExtraKeyOnCredentialChange].(func(string)); ok {
-		onChange = fn
-	}
-
 	RegisterTools(handler, Deps{
-		CredentialManager:  credMgr,
-		Registry:           regCtx.Extra[ExtraKeyToolpkgRegistry].(*toolpkg.Registry),
+		CredentialManager:  p.CredentialManager,
+		Registry:           p.Registry,
 		Callback:           regCtx.Callback,
-		OnCredentialChange: onChange,
+		OnCredentialChange: regCtx.OnCredentialChange,
 	})
 
 	return nil
 }
-
-// ExtraKeyToolpkgRegistry is the RegistrationContext.Extra key for *toolpkg.Registry.
-const ExtraKeyToolpkgRegistry = "toolpkg_registry"

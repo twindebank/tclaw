@@ -14,6 +14,7 @@ import (
 	googletools "tclaw/tool/google"
 	"tclaw/tool/modeltools"
 	monzotools "tclaw/tool/monzo"
+	"tclaw/tool/notificationtools"
 	"tclaw/tool/onboardingtools"
 	"tclaw/tool/remotemcp"
 	"tclaw/tool/repotools"
@@ -28,7 +29,7 @@ import (
 func TestAllPackages_ImplementInterface(t *testing.T) {
 	// Verify every tool package implements toolpkg.Package at compile time.
 	packages := allPackages()
-	require.Len(t, packages, 15, "expected 15 tool packages")
+	require.Len(t, packages, 16, "expected 16 tool packages")
 
 	seen := make(map[string]bool)
 	for _, pkg := range packages {
@@ -38,7 +39,7 @@ func TestAllPackages_ImplementInterface(t *testing.T) {
 		seen[name] = true
 
 		require.NotEmpty(t, pkg.Description(), "package %s must have a description", name)
-		require.NotEmpty(t, pkg.ToolPatterns(), "package %s must have tool patterns", name)
+		require.NotEmpty(t, pkg.GroupTools(), "package %s must have group tools", name)
 	}
 }
 
@@ -63,24 +64,24 @@ func TestAllPackages_InfoReturnsValidData(t *testing.T) {
 }
 
 func TestRegistry_RegistersInfoTools(t *testing.T) {
-	// Test with packages that don't require Extra deps (they register
-	// without external infrastructure like stores, schedulers, etc.).
+	handler := mcp.NewHandler()
+	secrets := &memorySecretStore{data: make(map[string]string)}
+
+	// Test with packages that don't require external infrastructure like
+	// stores, schedulers, etc. Packages that read SecretStore during
+	// Register() need it set on the struct.
 	simplePkgs := []toolpkg.Package{
 		&modeltools.Package{},
-		&tfltools.Package{},
-		&restauranttools.Package{},
-		&bankingtools.Package{},
+		&tfltools.Package{SecretStore: secrets},
+		&restauranttools.Package{SecretStore: secrets},
+		&bankingtools.Package{SecretStore: secrets},
 		&monzotools.Package{},
 		&googletools.Package{},
 	}
-
-	handler := mcp.NewHandler()
-	secrets := &memorySecretStore{data: make(map[string]string)}
 	reg := toolpkg.NewRegistry(simplePkgs...)
 
 	err := reg.RegisterAll(handler, toolpkg.RegistrationContext{
 		SecretStore: secrets,
-		Extra:       make(map[string]any),
 	})
 	require.NoError(t, err)
 
@@ -121,5 +122,6 @@ func allPackages() []toolpkg.Package {
 		&remotemcp.Package{},
 		&googletools.Package{},
 		&channeltools.Package{},
+		&notificationtools.Package{},
 	}
 }
