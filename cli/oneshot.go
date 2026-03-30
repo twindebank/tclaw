@@ -91,7 +91,8 @@ func runOneshot() {
 			Type:   "stdio",
 			Source: "static",
 		}},
-		nil,
+		nil, // no dev sessions in oneshot mode
+		nil, // no notifications in oneshot mode
 		userCfg.SystemPrompt,
 		nil, // no onboarding in oneshot mode
 	)

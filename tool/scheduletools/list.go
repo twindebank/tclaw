@@ -14,7 +14,7 @@ const ToolList = "schedule_list"
 func scheduleListDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name:        ToolList,
-		Description: "List all scheduled prompts with their ID, cron expression, full prompt text, channel, status, wait_for_free flag, and next/last run times.",
+		Description: "List all scheduled prompts with their ID, cron expression, full prompt text, channel, status, and next/last run times.",
 		InputSchema: json.RawMessage(`{"type": "object", "properties": {}}`),
 	}
 }
@@ -25,7 +25,6 @@ type scheduleListEntry struct {
 	Prompt      string `json:"prompt"`
 	ChannelName string `json:"channel_name"`
 	Status      string `json:"status"`
-	WaitForFree bool   `json:"wait_for_free,omitempty"`
 	LastRunAt   string `json:"last_run_at,omitempty"`
 	NextRunAt   string `json:"next_run_at,omitempty"`
 }
@@ -49,7 +48,6 @@ func scheduleListHandler(deps Deps) mcp.ToolHandler {
 				Prompt:      sched.Prompt,
 				ChannelName: sched.ChannelName,
 				Status:      string(sched.Status),
-				WaitForFree: sched.WaitForFree,
 			}
 			if !sched.LastRunAt.IsZero() {
 				entry.LastRunAt = sched.LastRunAt.Format(time.RFC3339)
