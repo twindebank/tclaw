@@ -24,6 +24,7 @@ import (
 	"tclaw/libraries/secret"
 	"tclaw/libraries/store"
 	"tclaw/mcp"
+	"tclaw/notification"
 	"tclaw/oauth"
 	"tclaw/onboarding"
 	"tclaw/reconciler"
@@ -34,6 +35,7 @@ import (
 	"tclaw/tool/channeltools"
 	"tclaw/tool/devtools"
 	"tclaw/tool/modeltools"
+	"tclaw/tool/notificationtools"
 	"tclaw/tool/onboardingtools"
 	"tclaw/tool/remotemcp"
 	"tclaw/tool/repotools"
@@ -397,6 +399,25 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		Scheduler: scheduler,
 	})
 
+	// Set up the notification manager — runs at user lifetime, outlives the agent.
+	// Tool packages register as notifiers, the manager persists subscriptions and
+	// routes emitted notifications to channels (queueing when busy).
+	notificationStore := notification.NewStore(s)
+	notificationPendingStore := notification.NewPendingStore(s)
+	notificationMsgs := make(chan channel.TaggedMessage, 8)
+	notificationManager := notification.NewManager(notification.ManagerParams{
+		Store:        notificationStore,
+		PendingStore: notificationPendingStore,
+		Output:       notificationMsgs,
+		Channels:     channelSet.Snapshot,
+		Activity:     activityTracker,
+	})
+	go notificationManager.Run(ctx)
+
+	notificationtools.RegisterTools(mcpHandler, notificationtools.Deps{
+		Manager: notificationManager,
+	})
+
 	// Set up dev workflow tools for code changes, PRs, and deployment.
 	devStore := dev.NewStore(s)
 	devtools.RegisterTools(mcpHandler, devtools.Deps{
@@ -545,10 +566,9 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		onChannelChange()
 	}
 
-	// Merge schedule and cross-channel messages into the static stream so
-	// they outlive the agent. hotAddMsgs is included here too — it outlives
-	// agent sessions and collects messages from hot-added channels.
-	allStaticMsgs := channel.MergeFanIns(ctx, staticMsgs, scheduleMsgs, crossChannelMsgs, hotAddMsgs)
+	// Merge schedule, cross-channel, notification, and hot-add messages into
+	// the static stream so they outlive the agent.
+	allStaticMsgs := channel.MergeFanIns(ctx, staticMsgs, scheduleMsgs, crossChannelMsgs, hotAddMsgs, notificationMsgs)
 
 	firstBoot := true
 	for {
