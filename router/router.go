@@ -399,7 +399,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		Store:    scheduleStore,
 		Output:   scheduleMsgs,
 		Channels: channelSet.Snapshot,
-		Activity: activityTracker,
 	})
 	go scheduler.Run(ctx)
 
@@ -518,21 +517,14 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		ActiveChannel: activeChannelFunc,
 	})
 
-	// Deferred cross-channel delivery — waits until the target is free.
-	// Uses a durable queue in the state store so pending messages survive restarts.
-	pendingStore := channel.NewPendingStore(s)
+	// Deferred cross-channel delivery — the unified queue handles busy-check
+	// and priority, so this tool just injects into the output channel.
 	channeltools.RegisterSendWhenFreeTool(mcpHandler, channeltools.SendWhenFreeDeps{
-		Links:           linksFunc,
-		Output:          crossChannelMsgs,
-		Channels:        channelsFunc,
-		ActiveChannel:   activeChannelFunc,
-		ActivityTracker: activityTracker,
-		PendingStore:    pendingStore,
+		Links:         linksFunc,
+		Output:        crossChannelMsgs,
+		Channels:      channelsFunc,
+		ActiveChannel: activeChannelFunc,
 	})
-
-	// Drain goroutine for pending messages. Runs at user lifetime (not agent
-	// lifetime) so pending messages are delivered even across agent restarts.
-	go drainPendingMessages(ctx, pendingStore, activityTracker, crossChannelMsgs, channelsFunc)
 
 	// Ephemeral channel cleanup goroutine. Runs at user lifetime and
 	// periodically tears down ephemeral channels that have been idle past
