@@ -1,4 +1,4 @@
-package channel
+package telegramchannel
 
 import (
 	"context"
@@ -10,14 +10,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+
+	"tclaw/channel"
+	tgsdk "tclaw/telegram"
 )
 
 // maxMediaDownloadBytes is the maximum file size we'll download from Telegram.
@@ -111,10 +112,10 @@ func generateWebhookSecret() string {
 	return hex.EncodeToString(b)
 }
 
-func (t *Telegram) Info() Info {
-	return Info{
-		ID:          ChannelID("telegram:" + t.name),
-		Type:        TypeTelegram,
+func (t *Telegram) Info() channel.Info {
+	return channel.Info{
+		ID:          channel.ChannelID("telegram:" + t.name),
+		Type:        channel.TypeTelegram,
 		Name:        t.name,
 		Description: t.description,
 	}
@@ -175,7 +176,7 @@ func (t *Telegram) Messages(ctx context.Context) <-chan string {
 				// Prepend a short snippet of the replied-to message so the
 				// agent knows what the user is referring to.
 				if reply := msg.ReplyToMessage; reply != nil && reply.Text != "" {
-					snippet := truncateReplySnippet(reply.Text, 100)
+					snippet := tgsdk.TruncateSnippet(reply.Text, 100)
 					text = "[replying to: \"" + snippet + "\"]\n" + text
 				}
 
@@ -263,7 +264,7 @@ func (t *Telegram) startWebhook(ctx context.Context, b *bot.Bot) {
 	slog.Info("telegram bot stopped", "channel", t.name)
 }
 
-func (t *Telegram) Send(ctx context.Context, text string) (MessageID, error) {
+func (t *Telegram) Send(ctx context.Context, text string) (channel.MessageID, error) {
 	t.mu.Lock()
 	chatID := t.currentChatID
 	b := t.bot
@@ -284,17 +285,17 @@ func (t *Telegram) Send(ctx context.Context, text string) (MessageID, error) {
 
 	msg, err := b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:    chatID,
-		Text:      sanitizeTelegramHTML(markdownToTelegramHTML(text)),
+		Text:      tgsdk.SanitizeHTML(tgsdk.MarkdownToHTML(text)),
 		ParseMode: models.ParseModeHTML,
 	})
 	if err != nil {
 		return "", fmt.Errorf("telegram send: %w", err)
 	}
 
-	return MessageID(strconv.Itoa(msg.ID)), nil
+	return channel.MessageID(strconv.Itoa(msg.ID)), nil
 }
 
-func (t *Telegram) Edit(ctx context.Context, msgID MessageID, text string) error {
+func (t *Telegram) Edit(ctx context.Context, msgID channel.MessageID, text string) error {
 	t.mu.Lock()
 	chatID := t.currentChatID
 	b := t.bot
@@ -320,7 +321,7 @@ func (t *Telegram) Edit(ctx context.Context, msgID MessageID, text string) error
 	_, err = b.EditMessageText(ctx, &bot.EditMessageTextParams{
 		ChatID:    chatID,
 		MessageID: telegramMsgID,
-		Text:      sanitizeTelegramHTML(markdownToTelegramHTML(text)),
+		Text:      tgsdk.SanitizeHTML(tgsdk.MarkdownToHTML(text)),
 		ParseMode: models.ParseModeHTML,
 	})
 	if err != nil {
@@ -338,12 +339,12 @@ func (t *Telegram) SplitStatusMessages() bool {
 	return true
 }
 
-func (t *Telegram) Markup() Markup {
-	return MarkupHTML
+func (t *Telegram) Markup() channel.Markup {
+	return channel.MarkupHTML
 }
 
-func (t *Telegram) StatusWrap() StatusWrap {
-	return StatusWrap{Open: "<blockquote expandable>", Close: "</blockquote>"}
+func (t *Telegram) StatusWrap() channel.StatusWrap {
+	return channel.StatusWrap{Open: "<blockquote expandable>", Close: "</blockquote>"}
 }
 
 // downloadMedia downloads the media attachment from a Telegram message to the
@@ -497,64 +498,3 @@ func cleanupOldMedia(dir string) {
 	}
 }
 
-// markdownBold matches **text** that the model emits despite being told to use HTML.
-var markdownBold = regexp.MustCompile(`\*\*(.+?)\*\*`)
-
-// markdownInlineCode matches `text` (single backtick, not triple).
-var markdownInlineCode = regexp.MustCompile("(?s)`([^`]+)`")
-
-// htmlTagRe matches HTML-like opening and closing tags.
-var htmlTagRe = regexp.MustCompile(`<(/?[a-zA-Z][a-zA-Z0-9-]*)(\s[^>]*)?>`)
-
-// supportedTelegramTags is the set of tag names that Telegram's HTML parser accepts.
-var supportedTelegramTags = map[string]bool{
-	"b": true, "i": true, "u": true, "s": true,
-	"code": true, "pre": true, "a": true,
-	"blockquote": true, "tg-spoiler": true,
-}
-
-// escapeUnsupportedTags replaces any HTML-like tag whose name is not in
-// Telegram's supported set with its entity-escaped equivalent so Telegram
-// doesn't reject the message with a parse error.
-func escapeUnsupportedTags(s string) string {
-	return htmlTagRe.ReplaceAllStringFunc(s, func(match string) string {
-		sub := htmlTagRe.FindStringSubmatch(match)
-		if sub == nil {
-			return match
-		}
-		// sub[1] is the tag name, with an optional leading "/" for closing tags.
-		tagName := strings.ToLower(strings.TrimPrefix(sub[1], "/"))
-		if supportedTelegramTags[tagName] {
-			return match
-		}
-		return strings.ReplaceAll(strings.ReplaceAll(match, "<", "&lt;"), ">", "&gt;")
-	})
-}
-
-// markdownToTelegramHTML converts common markdown patterns the model may
-// produce into Telegram-compatible HTML. This is a best-effort fallback —
-// the system prompt asks for HTML, but models sometimes slip into markdown.
-// It also escapes any HTML-like tags that Telegram doesn't support so they
-// don't cause parse errors.
-func markdownToTelegramHTML(s string) string {
-	// Only convert markdown if no HTML tags are present — if the model
-	// followed the instructions we shouldn't double-convert.
-	if !strings.Contains(s, "<b>") && !strings.Contains(s, "<code>") && !strings.Contains(s, "<pre>") {
-		s = markdownBold.ReplaceAllString(s, "<b>$1</b>")
-		s = markdownInlineCode.ReplaceAllString(s, "<code>$1</code>")
-	}
-
-	// Always escape unsupported tags — the model may include path-like strings
-	// such as <userDir> that Telegram's HTML parser rejects.
-	return escapeUnsupportedTags(s)
-}
-
-// truncateReplySnippet returns the first maxLen characters of s, appending "…"
-// if truncated. Newlines are collapsed to spaces for a compact single-line preview.
-func truncateReplySnippet(s string, maxLen int) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	if len([]rune(s)) <= maxLen {
-		return s
-	}
-	return string([]rune(s)[:maxLen]) + "…"
-}

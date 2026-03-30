@@ -1,10 +1,12 @@
-package channel
+package stdiochannel
 
 import (
 	"context"
 	"fmt"
 	"os"
 	"sync/atomic"
+
+	"tclaw/channel"
 )
 
 // Oneshot is a channel that delivers a single pre-loaded message and prints
@@ -25,7 +27,7 @@ type Oneshot struct {
 
 	// lastPrinted tracks per-message printed length so edits only output
 	// the new content (avoids re-printing the full buffer on each edit).
-	lastPrinted map[MessageID]int
+	lastPrinted map[channel.MessageID]int
 }
 
 // NewOneshot creates a channel that delivers message once and exits after the
@@ -36,14 +38,14 @@ func NewOneshot(message string, cancel context.CancelFunc, telegramMode bool) *O
 		message:     message,
 		cancel:      cancel,
 		telegram:    telegramMode,
-		lastPrinted: make(map[MessageID]int),
+		lastPrinted: make(map[channel.MessageID]int),
 	}
 }
 
-func (o *Oneshot) Info() Info {
-	return Info{
+func (o *Oneshot) Info() channel.Info {
+	return channel.Info{
 		ID:   "oneshot",
-		Type: TypeStdio,
+		Type: channel.TypeStdio,
 		Name: "oneshot",
 	}
 }
@@ -60,9 +62,9 @@ func (o *Oneshot) Messages(ctx context.Context) <-chan string {
 	return out
 }
 
-func (o *Oneshot) Send(_ context.Context, text string) (MessageID, error) {
+func (o *Oneshot) Send(_ context.Context, text string) (channel.MessageID, error) {
 	n := o.msgCount.Add(1)
-	id := MessageID(fmt.Sprintf("msg-%d", n))
+	id := channel.MessageID(fmt.Sprintf("msg-%d", n))
 	if o.telegram {
 		fmt.Fprintf(os.Stderr, "[send %s]\n", id)
 		fmt.Fprint(os.Stdout, text)
@@ -73,7 +75,7 @@ func (o *Oneshot) Send(_ context.Context, text string) (MessageID, error) {
 	return id, nil
 }
 
-func (o *Oneshot) Edit(_ context.Context, id MessageID, text string) error {
+func (o *Oneshot) Edit(_ context.Context, id channel.MessageID, text string) error {
 	if o.telegram {
 		// In telegram mode, show each edit verbatim so the user can see
 		// the exact content that would be sent to Telegram.
@@ -100,16 +102,16 @@ func (o *Oneshot) SplitStatusMessages() bool {
 	return o.telegram
 }
 
-func (o *Oneshot) Markup() Markup {
+func (o *Oneshot) Markup() channel.Markup {
 	if o.telegram {
-		return MarkupHTML
+		return channel.MarkupHTML
 	}
-	return MarkupMarkdown
+	return channel.MarkupMarkdown
 }
 
-func (o *Oneshot) StatusWrap() StatusWrap {
+func (o *Oneshot) StatusWrap() channel.StatusWrap {
 	if o.telegram {
-		return StatusWrap{Open: "<blockquote expandable>", Close: "</blockquote>"}
+		return channel.StatusWrap{Open: "<blockquote expandable>", Close: "</blockquote>"}
 	}
-	return StatusWrap{}
+	return channel.StatusWrap{}
 }

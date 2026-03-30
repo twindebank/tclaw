@@ -8,8 +8,8 @@ import (
 )
 
 func TestPlatformState_JSONRoundTrip(t *testing.T) {
-	t.Run("telegram", func(t *testing.T) {
-		original := NewTelegramPlatformState(830516211)
+	t.Run("round trip with data", func(t *testing.T) {
+		original := NewPlatformState(PlatformTelegram, map[string]int64{"chat_id": 830516211})
 
 		data, err := json.Marshal(original)
 		require.NoError(t, err)
@@ -18,8 +18,11 @@ func TestPlatformState_JSONRoundTrip(t *testing.T) {
 		require.NoError(t, json.Unmarshal(data, &restored))
 
 		require.Equal(t, PlatformTelegram, restored.Type)
-		require.NotNil(t, restored.Telegram)
-		require.Equal(t, int64(830516211), restored.Telegram.ChatID)
+		require.True(t, restored.HasPlatformState())
+
+		var parsed map[string]int64
+		require.NoError(t, restored.ParsePlatformData(&parsed))
+		require.Equal(t, int64(830516211), parsed["chat_id"])
 	})
 
 	t.Run("zero value", func(t *testing.T) {
@@ -29,8 +32,8 @@ func TestPlatformState_JSONRoundTrip(t *testing.T) {
 }
 
 func TestTeardownState_JSONRoundTrip(t *testing.T) {
-	t.Run("telegram", func(t *testing.T) {
-		original := NewTelegramTeardownState("tclaw_bot")
+	t.Run("round trip with data", func(t *testing.T) {
+		original := NewTeardownState(PlatformTelegram, map[string]string{"bot_username": "tclaw_bot"})
 
 		data, err := json.Marshal(original)
 		require.NoError(t, err)
@@ -39,8 +42,11 @@ func TestTeardownState_JSONRoundTrip(t *testing.T) {
 		require.NoError(t, json.Unmarshal(data, &restored))
 
 		require.Equal(t, PlatformTelegram, restored.Type)
-		require.NotNil(t, restored.Telegram)
-		require.Equal(t, "tclaw_bot", restored.Telegram.BotUsername)
+		require.True(t, restored.HasTeardownState())
+
+		var parsed map[string]string
+		require.NoError(t, restored.ParseTeardownData(&parsed))
+		require.Equal(t, "tclaw_bot", parsed["bot_username"])
 	})
 
 	t.Run("zero value", func(t *testing.T) {

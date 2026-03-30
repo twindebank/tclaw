@@ -2,7 +2,6 @@ package router
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -53,28 +52,4 @@ func saveSession(ctx context.Context, s store.Store, chID channel.ChannelID, id 
 		return fmt.Errorf("save session: %w", err)
 	}
 	return nil
-}
-
-// loadChatID returns the persisted Telegram chat ID for a channel, or 0 if none.
-func loadChatID(ctx context.Context, s store.Store, channelName string) int64 {
-	data, err := s.Get(ctx, "chatid_"+channelName)
-	if err != nil {
-		slog.Error("failed to load chat ID", "channel", channelName, "err", err)
-		return 0
-	}
-	if len(data) != 8 {
-		return 0
-	}
-	return int64(binary.LittleEndian.Uint64(data))
-}
-
-// saveChatIDFunc returns a callback that persists a Telegram chat ID to the store.
-func saveChatIDFunc(s store.Store, channelName string) func(int64) {
-	return func(chatID int64) {
-		buf := make([]byte, 8)
-		binary.LittleEndian.PutUint64(buf, uint64(chatID))
-		if err := s.Set(context.Background(), "chatid_"+channelName, buf); err != nil {
-			slog.Error("failed to persist chat ID", "channel", channelName, "err", err)
-		}
-	}
 }

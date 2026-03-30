@@ -277,19 +277,20 @@ The registry auto-generates a `<name>_info` tool for every package. Packages don
 
 ## Channel Types
 
+Channel types live in sub-packages under `channel/` and implement the `channelpkg.Package` interface (see `channel/channelpkg/channelpkg.go`). This mirrors the `toolpkg.Package` pattern for MCP tools — each channel type is a self-contained package with its own build logic, and the `channel/all/` registry aggregates them.
+
 Adding a new channel type requires:
 
-1. Implement the `Channel` interface (e.g. `channel/slack.go`)
-2. Add platform state fields to `PlatformState` and `TeardownState` structs in `channel/platform_state.go`:
-   ```go
-   type PlatformState struct {
-       Type     PlatformType            `json:"type"`
-       Telegram *TelegramPlatformState  `json:"telegram,omitempty"`
-       Slack    *SlackPlatformState     `json:"slack,omitempty"` // add this
-   }
-   ```
-3. Add a constructor: `NewSlackPlatformState(...)` / `NewSlackTeardownState(...)`
-4. Implement `EphemeralProvisioner` if the channel supports provisioned lifecycle
-5. Add a `ChannelBuilder` in `router/` (e.g. `builder_slack.go`) and register it in `router.New()`
-6. Add the platform type constant: `PlatformSlack PlatformType = "slack"`
-7. Add `TelegramChannelConfig`-equivalent for the new platform in `config/config.go`
+1. Create a new directory under `channel/` (e.g. `channel/slackchannel/`)
+2. Implement the `Channel` interface in a transport file (e.g. `slack.go`)
+3. Implement `channelpkg.Package`:
+   - `Type()` — the `ChannelType` constant (e.g. `channel.TypeSlack`)
+   - `Build(ctx, params)` — constructs the live `Channel` from config
+   - `Provisioner()` — returns `EphemeralProvisioner` or nil
+4. Define platform state types in the package using `channel.NewPlatformState()` / `channel.NewTeardownState()` with `json.RawMessage` data
+5. Add the platform type constant in `channel/platform_state.go`: `PlatformSlack PlatformType = "slack"`
+6. Add the channel type constant in `channel/channel.go`: `TypeSlack ChannelType = "slack"`
+7. Add `SlackChannelConfig`-equivalent in `config/config.go`
+8. Add the package to the registry in `channel/all/all.go`
+
+**See `channel/socketchannel/` for a minimal example** (no provisioner), or `channel/telegramchannel/` for a package with provisioning and platform state.
