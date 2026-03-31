@@ -32,21 +32,20 @@ tclaw config diff        # Show differences between local and remote config
 
 The runtime config lives on the persistent Fly volume at `/data/tclaw.yaml`. On first boot (or after a volume wipe), the seed config baked into the image at `/etc/tclaw/tclaw.yaml` is automatically copied to the volume. All agent mutations (channel create/edit/delete) write to the volume copy, so they survive redeploys.
 
-The image-baked config comes from the `TCLAW_YAML` GitHub secret, written to `tclaw.yaml` during CI and COPYed into the image at `/etc/tclaw/tclaw.yaml`. This seed is only used when no volume config exists yet.
+The image-baked seed config comes from the `TCLAW_YAML` GitHub secret, written to `tclaw.yaml` during CI and COPYed into the image at `/etc/tclaw/tclaw.yaml`. This seed is only used on first boot (or after a volume wipe) — it never overwrites the live config on the persistent volume.
 
 **Commands:**
 
-- `tclaw config push` — overwrites the remote volume config with your local `tclaw.yaml`, then syncs secrets. Use `--persist` to also update the `TCLAW_YAML` GitHub secret (disaster recovery for volume wipes).
-- `tclaw config pull` — pulls the remote volume config to your local `tclaw.yaml`. Use this to get agent-created channels back locally.
+- `tclaw config push` — overwrites the remote volume config with your local `tclaw.yaml`, syncs secrets, and updates the `TCLAW_YAML` seed secret.
+- `tclaw config pull` — pulls the remote volume config to your local `tclaw.yaml`. Use this to get agent-created changes back locally.
 - `tclaw config diff` — shows a unified diff between local and remote configs.
 
 **Typical workflow:**
 
 ```
 tclaw config diff          # Preview what's different
-tclaw config push          # Push local config to remote volume + sync secrets
+tclaw config push          # Push local config to remote volume + sync secrets + update seed
 tclaw config pull          # Pull agent changes back to local
-tclaw config push --persist  # Push + update GitHub secret for DR
 ```
 
 ## First-Time Setup

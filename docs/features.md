@@ -56,7 +56,7 @@ This means a Telegram channel can be added to config without a bot token — the
 
 ### Config Sync
 
-The runtime config lives on the persistent Fly volume (`/data/tclaw.yaml`) so agent mutations survive redeploys. `tclaw config push` writes local config to the volume, `tclaw config pull` reads it back, and `tclaw config diff` shows differences. Use `push --persist` to also update the GitHub secret for disaster recovery.
+The runtime config lives on the persistent Fly volume (`/data/tclaw.yaml`) — this is the source of truth. Agent mutations and `config_set` write here directly. `tclaw config push` syncs local config to the volume and updates the seed secret, `tclaw config pull` reads it back, and `tclaw config diff` shows differences.
 
 ### Runtime State
 

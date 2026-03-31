@@ -37,8 +37,9 @@ RUN npm install -g @anthropic-ai/claude-code @googleworkspace/cli
 # Copy the Go binary.
 COPY --from=builder /bin/tclaw /usr/local/bin/tclaw
 
-# tclaw.yaml is gitignored — written from GitHub secret in CI, or copied
-# by the local deploy tool. Build fails if missing.
+# Seed config for first boot. Written from the TCLAW_YAML GitHub secret in CI,
+# or present locally for local deploys. Only used when the persistent volume
+# has no config yet — never overwrites the live runtime config.
 COPY tclaw.yaml /etc/tclaw/tclaw.yaml
 
 # Persistent volume at /data holds all per-user state.
