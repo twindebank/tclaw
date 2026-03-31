@@ -11,7 +11,6 @@ import (
 	"syscall"
 
 	"tclaw/libraries/secret"
-	"tclaw/version"
 )
 
 const flyApp = "tclaw"
@@ -67,17 +66,11 @@ func deployApp() {
 		dockerHost = "unix://" + home + "/.docker/run/docker.sock"
 	}
 
-	// Pass build args since .git is excluded from the Docker context.
+	// Pass the git commit as a build arg since .git is excluded from the Docker context.
 	commit, _ := exec.Command("git", "rev-parse", "--short", "HEAD").Output()
-	repoSlug := version.RepoSlug()
 
-	args := []string{"deploy", "--local-only", "-a", flyApp,
-		"--build-arg", "COMMIT=" + strings.TrimSpace(string(commit)),
-	}
-	if repoSlug != "" {
-		args = append(args, "--build-arg", "GITHUB_REPOSITORY="+repoSlug)
-	}
-	cmd := exec.Command("fly", args...)
+	cmd := exec.Command("fly", "deploy", "--local-only", "-a", flyApp,
+		"--build-arg", "COMMIT="+strings.TrimSpace(string(commit)))
 	cmd.Env = append(os.Environ(), "DOCKER_HOST="+dockerHost)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
