@@ -5,21 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 
 	"tclaw/mcp"
-	"tclaw/version"
-)
-
-const (
-	// configSecretName is the GitHub secret that seeds tclaw.yaml on fresh deploys.
-	// CI writes it to /etc/tclaw/tclaw.yaml in the image; on first boot, it's
-	// copied to the persistent volume at /data/tclaw.yaml where all runtime
-	// mutations happen.
-	configSecretName = "TCLAW_YAML"
 )
 
 const ToolConfigGet = "config_get"
@@ -67,17 +56,15 @@ const ToolConfigSet = "config_set"
 func configSetDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name: ToolConfigSet,
-		Description: `Update the tclaw.yaml config and persist to the TCLAW_YAML GitHub secret.
+		Description: `Update the active tclaw.yaml config file.
 
 Takes the full YAML content as a string. The YAML is validated before writing.
-Two things happen:
-1. The file at the active config path is updated immediately (takes effect now).
-2. The TCLAW_YAML GitHub secret is updated so the change survives the next deploy.
+The file is updated immediately — no restart needed for most changes.
 
-Requires github_token in the secret store. The repo slug is derived automatically
-from the build (GITHUB_REPOSITORY) or git remote.
-
-Secret store key: github_token`,
+The config lives on the persistent Fly volume and survives redeploys. A seed
+copy is baked into the Docker image for first boot only. Use 'tclaw config push'
+from the dev CLI to sync local changes to the remote volume, or
+'tclaw config pull' to retrieve agent-made changes.`,
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -115,50 +102,14 @@ func configSetHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("config path not set — cannot write config")
 		}
 
-		token, err := deps.SecretStore.Get(ctx, githubTokenKey)
-		if err != nil {
-			return nil, fmt.Errorf("read github token: %w", err)
-		}
-		if token == "" {
-			return nil, fmt.Errorf("github_token not set — provide it via the credential flow")
-		}
-
-		repoSlug := version.RepoSlug()
-		if repoSlug == "" {
-			return nil, fmt.Errorf("cannot determine repo — GITHUB_REPOSITORY not set at build time and no git remote available")
-		}
-
-		// Write to the active config path first so the change takes effect
-		// immediately even if the GitHub secret update fails.
 		if err := os.WriteFile(deps.ConfigPath, []byte(a.Content), 0o644); err != nil {
 			return nil, fmt.Errorf("write config file: %w", err)
 		}
 
-		// Persist to the GitHub secret so the change survives the next deploy.
-		if err := ghSecretSet(repoSlug, configSecretName, a.Content, token); err != nil {
-			return nil, fmt.Errorf("config written to %s but failed to update GitHub secret: %w", deps.ConfigPath, err)
-		}
-
 		result := map[string]any{
 			"path":    deps.ConfigPath,
-			"repo":    repoSlug,
-			"secret":  configSecretName,
-			"message": fmt.Sprintf("Config written to %s and persisted to GitHub secret %s on %s.", deps.ConfigPath, configSecretName, repoSlug),
+			"message": fmt.Sprintf("Config written to %s.", deps.ConfigPath),
 		}
 		return json.Marshal(result)
 	}
-}
-
-// ghSecretSet updates a GitHub Actions secret using the gh CLI.
-func ghSecretSet(repoSlug, secretName, value, token string) error {
-	cmd := exec.Command("gh", "secret", "set", secretName,
-		"--repo", repoSlug,
-		"--body", value,
-	)
-	cmd.Env = ghEnv(token)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%s: %w", strings.TrimSpace(string(out)), err)
-	}
-	return nil
 }
