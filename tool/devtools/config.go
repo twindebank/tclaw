@@ -61,10 +61,8 @@ func configSetDef() mcp.ToolDef {
 Takes the full YAML content as a string. The YAML is validated before writing.
 The file is updated immediately — no restart needed for most changes.
 
-The config lives on the persistent Fly volume and survives redeploys. A seed
-copy is baked into the Docker image for first boot only. Use 'tclaw config push'
-from the dev CLI to sync local changes to the remote volume, or
-'tclaw config pull' to retrieve agent-made changes.`,
+Changes persist across redeploys (the config lives on the persistent volume).
+Use config_get to read the current config before making changes.`,
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
