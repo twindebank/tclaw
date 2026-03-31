@@ -17,9 +17,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # tclaw.yaml is gitignored — write it from the GitHub secret so the
-      # Dockerfile COPY finds it. The file contains ${secret:NAME} refs,
-      # not actual secrets.
+      # tclaw.yaml is gitignored — write it from the TCLAW_YAML GitHub secret
+      # so the Dockerfile COPY finds it. This is a seed config for first boot
+      # only — it never overwrites the live config on the persistent volume.
       - name: Write tclaw.yaml
         run: echo "$TCLAW_YAML" > tclaw.yaml
         env:

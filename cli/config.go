@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,15 +11,12 @@ import (
 	"syscall"
 )
 
-const configUsage = `Usage: tclaw config <command> [flags]
+const configUsage = `Usage: tclaw config <command>
 
 Commands:
-  push     Push local config to remote Fly volume
+  push     Push local config to remote Fly volume + update seed secret
   pull     Pull remote config to local
   diff     Show differences between local and remote config
-
-Flags for push:
-  --persist  Also update the TCLAW_YAML GitHub secret for disaster recovery
 `
 
 func runConfig() {
@@ -52,13 +48,9 @@ func runConfig() {
 const remoteConfigPath = "/data/tclaw.yaml"
 
 // configPush overwrites the remote config on the Fly volume with the local
-// one. Optionally also updates the TCLAW_YAML GitHub secret so the config
-// survives a volume wipe (disaster recovery).
+// one, syncs secrets to Fly, and updates the TCLAW_YAML GitHub secret (used
+// as a seed for first boot only — never overwrites the live volume config).
 func configPush() {
-	fs := flag.NewFlagSet("config push", flag.ExitOnError)
-	persist := fs.Bool("persist", false, "Also update the TCLAW_YAML GitHub secret for disaster recovery")
-	fs.Parse(os.Args[3:])
-
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -78,12 +70,12 @@ func configPush() {
 	fmt.Println("-> syncing secrets...")
 	deploySecrets()
 
-	if *persist {
-		fmt.Println("-> updating TCLAW_YAML GitHub secret...")
-		if err := updateGitHubConfigSecret(ctx, localData); err != nil {
-			fmt.Fprintf(os.Stderr, "error updating GitHub secret: %v\n", err)
-			os.Exit(1)
-		}
+	// Update the seed config GitHub secret so first boot after a volume wipe
+	// starts from the latest config. This never overwrites the live volume config.
+	fmt.Println("-> updating TCLAW_YAML seed secret...")
+	if err := updateGitHubConfigSecret(ctx, localData); err != nil {
+		fmt.Fprintf(os.Stderr, "error updating GitHub secret: %v\n", err)
+		os.Exit(1)
 	}
 
 	fmt.Println("done: config pushed")
@@ -202,8 +194,9 @@ func writeRemoteFile(ctx context.Context, path string, data []byte) error {
 	return cmd.Run()
 }
 
-// updateGitHubConfigSecret updates the TCLAW_YAML GitHub secret so the config
-// survives a volume wipe. Requires the gh CLI to be authenticated.
+// updateGitHubConfigSecret updates the TCLAW_YAML GitHub secret used as a seed
+// for first boot. This never overwrites the live config on the persistent volume —
+// it only matters when the volume is wiped. Requires the gh CLI to be authenticated.
 func updateGitHubConfigSecret(ctx context.Context, data []byte) error {
 	cmd := exec.CommandContext(ctx, "gh", "secret", "set", "TCLAW_YAML",
 		"--repo", "twindebank/tclaw",
