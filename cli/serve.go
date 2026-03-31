@@ -25,15 +25,16 @@ import (
 )
 
 // volumeConfigPath is where the runtime config lives on the persistent Fly
-// volume. Agent mutations (channel create/edit/delete) write here so they
-// survive redeploys. The image-baked config at /etc/tclaw/tclaw.yaml is
-// only used as a seed on first boot.
+// volume. Agent mutations (channel create/edit/delete) and config_set write
+// here so they survive redeploys. The image-baked seed config at
+// /etc/tclaw/tclaw.yaml is only copied here on first boot (or after a volume
+// wipe) — it never overwrites an existing volume config.
 const volumeConfigPath = "/data/tclaw.yaml"
 
 // bootstrapConfig resolves the active config path. In production, the runtime
-// config lives on the persistent volume so agent mutations survive redeploys.
-// On first boot (or after a volume wipe), the seed config baked into the image
-// is copied to the volume.
+// config lives on the persistent volume — this is the source of truth. The
+// seed config baked into the image is only copied to the volume on first boot
+// (or after a volume wipe). It never overwrites an existing volume config.
 func bootstrapConfig(seedPath, env string) string {
 	if env != "prod" {
 		return seedPath
