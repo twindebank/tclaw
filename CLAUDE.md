@@ -48,6 +48,7 @@
 - Replay harness — record + replay Telegram message sequences to test agent behavior without live bots
 
 ## Code Style
+- **Fail early, fail at build time** — if something is required at runtime, validate it as early as possible. Prefer build-time checks (Dockerfile `RUN test`, compile-time assertions) over runtime errors. Never deploy a binary that's known to be broken.
 - Comment code that isn't obvious, prefer readability over clever code
 - Prefer inline docs on individual items over big block comments at the top of a group
 - Errors must never be silently ignored — return errors up the call stack. Only log+swallow at the highest level (Run loop, Router) where recovery is clear.

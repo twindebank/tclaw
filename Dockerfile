@@ -1,12 +1,18 @@
 FROM golang:1.26-bookworm AS builder
 
-ARG COMMIT=""
+ARG COMMIT
+ARG GITHUB_REPOSITORY
 
 WORKDIR /src
 COPY go.mod go.sum ./
 COPY vendor/ vendor/
 COPY . .
-RUN CGO_ENABLED=0 go build -ldflags "-X tclaw/version.Commit=${COMMIT}" -o /bin/tclaw .
+
+# Fail fast if required build args are missing rather than deploying a broken build.
+RUN test -n "${COMMIT}" || (echo "ERROR: COMMIT build arg is required" && false)
+RUN test -n "${GITHUB_REPOSITORY}" || (echo "ERROR: GITHUB_REPOSITORY build arg is required" && false)
+
+RUN CGO_ENABLED=0 go build -ldflags "-X tclaw/version.Commit=${COMMIT} -X tclaw/version.Repository=${GITHUB_REPOSITORY}" -o /bin/tclaw .
 
 # ---
 
