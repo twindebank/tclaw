@@ -11,6 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"tclaw/mcp"
+	"tclaw/version"
 )
 
 const (
@@ -66,16 +67,15 @@ const ToolConfigSet = "config_set"
 func configSetDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name: ToolConfigSet,
-		Description: `Update the tclaw.yaml config and persist it to the TCLAW_YAML GitHub secret.
+		Description: `Update the tclaw.yaml config and persist to the TCLAW_YAML GitHub secret.
 
 Takes the full YAML content as a string. The YAML is validated before writing.
 Two things happen:
-1. The file at the active config path is updated immediately (takes effect now, no restart needed for most changes).
-2. The TCLAW_YAML secret on twindebank/tclaw is updated so the change survives the next deploy.
+1. The file at the active config path is updated immediately (takes effect now).
+2. The TCLAW_YAML GitHub secret is updated so the change survives the next deploy.
 
-Requires:
-- github_token in the secret store (from dev_start, or re-provide it here)
-- repo_url in the dev store (from dev_start)
+Requires github_token in the secret store. The repo slug is derived automatically
+from the build (GITHUB_REPOSITORY) or git remote.
 
 Secret store key: github_token`,
 		InputSchema: json.RawMessage(`{
@@ -120,40 +120,30 @@ func configSetHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("read github token: %w", err)
 		}
 		if token == "" {
-			return nil, fmt.Errorf("github_token not set — run dev_start once to configure it")
+			return nil, fmt.Errorf("github_token not set — provide it via the credential flow")
 		}
 
-		repoURL, err := deps.Store.GetRepoURL(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("read repo url: %w", err)
-		}
-		if repoURL == "" {
-			return nil, fmt.Errorf("repo URL not configured — run dev_start once to set it up")
+		repoSlug := version.RepoSlug()
+		if repoSlug == "" {
+			return nil, fmt.Errorf("cannot determine repo — GITHUB_REPOSITORY not set at build time and no git remote available")
 		}
 
-		// Extract owner/repo from the GitHub URL (e.g. https://github.com/twindebank/tclaw).
-		repoSlug := strings.TrimPrefix(repoURL, "https://github.com/")
-		repoSlug = strings.TrimSuffix(repoSlug, ".git")
-		if repoSlug == repoURL || !strings.Contains(repoSlug, "/") {
-			return nil, fmt.Errorf("unexpected repo URL format %q — expected https://github.com/owner/repo", repoURL)
-		}
-
-		// Update the GitHub secret so the change survives the next deploy.
-		if err := ghSecretSet(repoSlug, configSecretName, a.Content, token); err != nil {
-			return nil, fmt.Errorf("update GitHub secret: %w", err)
-		}
-
-		// Write to the active config path so the change takes effect immediately
-		// without waiting for a redeploy.
+		// Write to the active config path first so the change takes effect
+		// immediately even if the GitHub secret update fails.
 		if err := os.WriteFile(deps.ConfigPath, []byte(a.Content), 0o644); err != nil {
 			return nil, fmt.Errorf("write config file: %w", err)
+		}
+
+		// Persist to the GitHub secret so the change survives the next deploy.
+		if err := ghSecretSet(repoSlug, configSecretName, a.Content, token); err != nil {
+			return nil, fmt.Errorf("config written to %s but failed to update GitHub secret: %w", deps.ConfigPath, err)
 		}
 
 		result := map[string]any{
 			"path":    deps.ConfigPath,
 			"repo":    repoSlug,
 			"secret":  configSecretName,
-			"message": fmt.Sprintf("Config written to %s and persisted to GitHub secret %s on %s. Local change takes effect immediately; the secret will be used on next deploy.", deps.ConfigPath, configSecretName, repoSlug),
+			"message": fmt.Sprintf("Config written to %s and persisted to GitHub secret %s on %s.", deps.ConfigPath, configSecretName, repoSlug),
 		}
 		return json.Marshal(result)
 	}

@@ -8,6 +8,7 @@ import (
 	"tclaw/channel"
 	"tclaw/config"
 	"tclaw/mcp"
+	"tclaw/toolgroup"
 )
 
 const ToolChannelEdit = "channel_edit"
@@ -32,15 +33,25 @@ func channelEditDef() mcp.ToolDef {
 					"items": {"type": "string"},
 					"description": "Platform user IDs for access control. Replaces existing list."
 				},
+				"tool_groups": {
+					"type": "array",
+					"items": {"type": "string"},
+					"description": "Named tool groups (additive). Replaces existing tool_groups. Mutually exclusive with allowed_tools. Use tool_group_list to see available groups."
+				},
 				"allowed_tools": {
 					"type": "array",
 					"items": {"type": "string"},
-					"description": "Tools this channel is allowed to use. Replaces any existing allowed_tools."
+					"description": "Tools this channel is allowed to use. Replaces any existing allowed_tools. Mutually exclusive with tool_groups."
 				},
 				"disallowed_tools": {
 					"type": "array",
 					"items": {"type": "string"},
 					"description": "Tools explicitly denied on this channel. Replaces any existing disallowed_tools."
+				},
+				"creatable_groups": {
+					"type": "array",
+					"items": {"type": "string"},
+					"description": "Tool groups this channel can delegate when creating new channels. Replaces existing creatable_groups. Empty array removes channel creation ability."
 				},
 				"links": {
 					"type": "array",
@@ -64,8 +75,10 @@ type channelEditArgs struct {
 	Name            string          `json:"name"`
 	Description     string          `json:"description"`
 	AllowedUsers    *[]string       `json:"allowed_users"`
+	ToolGroups      []string        `json:"tool_groups"`
 	AllowedTools    []string        `json:"allowed_tools"`
 	DisallowedTools []string        `json:"disallowed_tools"`
+	CreatableGroups *[]string       `json:"creatable_groups"`
 	Links           *[]channel.Link `json:"links"`
 }
 
@@ -76,12 +89,39 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
-		if a.Description == "" && a.AllowedUsers == nil && a.AllowedTools == nil && a.DisallowedTools == nil && a.Links == nil {
-			return nil, fmt.Errorf("at least one of 'description', 'allowed_users', 'allowed_tools', 'disallowed_tools', or 'links' must be provided")
+		hasChange := a.Description != "" || a.AllowedUsers != nil ||
+			a.ToolGroups != nil || a.AllowedTools != nil || a.DisallowedTools != nil ||
+			a.CreatableGroups != nil || a.Links != nil
+		if !hasChange {
+			return nil, fmt.Errorf("at least one field to update must be provided")
 		}
 
 		if !deps.Registry.NameExists(a.Name) {
 			return nil, fmt.Errorf("channel %q not found", a.Name)
+		}
+
+		// Validate tool_groups / allowed_tools mutual exclusion.
+		if len(a.ToolGroups) > 0 && len(a.AllowedTools) > 0 {
+			return nil, fmt.Errorf("tool_groups and allowed_tools are mutually exclusive — set exactly one")
+		}
+
+		// Validate tool group names.
+		var toolGroups []toolgroup.ToolGroup
+		for _, g := range a.ToolGroups {
+			tg := toolgroup.ToolGroup(g)
+			if !toolgroup.ValidGroup(tg) {
+				return nil, fmt.Errorf("unknown tool group %q — use tool_group_list to see available groups", g)
+			}
+			toolGroups = append(toolGroups, tg)
+		}
+
+		// Validate creatable group names.
+		if a.CreatableGroups != nil {
+			for _, g := range *a.CreatableGroups {
+				if !toolgroup.ValidGroup(toolgroup.ToolGroup(g)) {
+					return nil, fmt.Errorf("unknown creatable group %q", g)
+				}
+			}
 		}
 
 		// Validate links before writing.
@@ -105,11 +145,21 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 			if a.Description != "" {
 				ch.Description = a.Description
 			}
+			if len(toolGroups) > 0 {
+				ch.ToolGroups = toolGroups
+				// Clear allowed_tools since they're mutually exclusive.
+				ch.AllowedTools = nil
+			}
 			if a.AllowedTools != nil {
 				ch.AllowedTools = a.AllowedTools
+				// Clear tool_groups since they're mutually exclusive.
+				ch.ToolGroups = nil
 			}
 			if a.DisallowedTools != nil {
 				ch.DisallowedTools = a.DisallowedTools
+			}
+			if a.CreatableGroups != nil {
+				ch.CreatableGroups = creatableGroupsToToolGroups(*a.CreatableGroups)
 			}
 			if a.Links != nil {
 				ch.Links = *a.Links
