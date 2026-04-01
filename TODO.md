@@ -16,7 +16,7 @@
 - [x] System and agent memories — system prompt (--append-system-prompt) for identity/rules, CLAUDE.md for persistent per-user memory, seeded on first startup
 - [x] Custom MCPs can be built in — register Go-native MCP servers alongside the agent
 - [x] TfL MCP — London transport status, journey planning, disruptions
-- [ ] Calendar MCP — read/write calendar events (Google Calendar, etc.)
+- [x] Calendar MCP — read/write calendar events (Google Calendar via `gws` binary)
 - [ ] Home Assistant MCP — control smart home devices, query states, trigger automations
 - [ ] Google Maps / location tools — place search, directions, travel time; location history integration
 
@@ -25,7 +25,7 @@
 - [x] Channel descriptions — agent aware of current and other channels via config descriptions
 - [x] Per-channel tool allowlists — restrict which tools are available on each channel independently, with builtin command gating via `builtin__*` names
 - [ ] Clearly define session access boundaries — make it explicit what the agent can/can't access in terms of current session state vs other sessions (cross-session isolation model)
-- [ ] Tool permissions / 2FA — approve or deny tool calls via the chat channel
+- [x] Tool permissions / 2FA — approve or deny tool calls via the chat channel (flow_approval.go)
 - [ ] Privileged sessions — temporary elevated permissions with a timeout (e.g. user grants write access for 30 min)
 - [ ] Permission matching rules — expressive rules for tool permissions based on provider, read/write, resource scope, etc.
 
@@ -36,7 +36,8 @@
 - [x] Visual message separation — clearer boundaries between messages in the chat UI
 - [x] Show tool arguments — display tool call parameters alongside tool use events
 - [x] Chat keywords — builtin commands: `stop` (abort current response), `compact` (compact context), `new`/`reset`/`clear`/`delete` (multi-level reset menu), `login`/`auth` (interactive auth flow)
-- [ ] Chat keywords (remaining) — `model` (switch model), `help` (list commands)
+- [x] Model switching — `model_get` / `model_set` MCP tools with runtime ModelFunc support
+- [ ] Chat keywords (remaining) — `help` (list commands)
 - [ ] Render markdown in chat — parse and render markdown formatting in the TUI client
 - [ ] Web browser tool / Selenium — give the agent the ability to browse and interact with web pages
 
@@ -58,7 +59,7 @@
 - [x] Channel types in own packages — socket/stdio/telegram in `channel/socketchannel/` etc. with builders co-located.
 - [ ] `channel_delete` cleanup — basic cleanup exists (runtime state, secrets, knowledge dir), but still needs: archive the chat (export/preserve history before deleting the bot) and automatically cancel any associated dev sessions. Requires channels to track their dev sessions and dev sessions to be tagged with the originating channel. (Note: `channel_done` now requires user confirmation before teardown.)
 - [x] Channel busy/free check — `channel_is_busy` tool: returns whether a channel has an active agent turn or recent conversation activity (with configurable timeout). Enables scheduled tasks to check before sending cross-channel messages, and to queue/defer if busy rather than interrupting.
-- [ ] Ephemeral channel system prompt enrichment — initial_message delivery works (via `injectInitialMessages`), but the system prompt doesn't yet include metadata about the channel being ephemeral/purpose-scoped (so the agent stays focused and knows to call `channel_done` when done).
+- [x] Ephemeral channel system prompt enrichment — initial_message delivery via `injectInitialMessages`, plus system prompt includes ephemeral channel guidance (focus, `channel_done` usage)
 - [ ] Error channel — dedicated channel that receives errors from the logger. Hook into `slog` (or the logbuffer) so that ERROR-level log entries are automatically posted to a designated channel. Enables the agent to see and react to runtime errors without manually checking `dev_logs`.
 
 ## Connectivity
@@ -97,10 +98,10 @@
 
 ## Dev Experience
 - [x] GitHub Actions CI: run `go build ./...` + `go test ./...` on every PR
-- [ ] `dev_logs` time range filter — `since` param (e.g. "last 4 days") so historical logs are easily queryable
+- [x] `dev_logs` time range filter — `since` param (e.g. "4d", "2h", "1w") for historical log queries
 - [ ] Local dev parity — `make dev` that spins up the full stack with a test Telegram bot token and hot reload
 - [ ] PR preview deployments — deploy PRs to a separate Fly.io app (`tclaw-preview`) for manual testing before merge
-- [ ] `dev_status` should show CI check results alongside uncommitted changes
+- [x] `dev_pr_checks` tool — show CI check results and PR state (open/merged/closed)
 - [ ] Structured log viewer — `dev_logs` currently returns raw text; a mode that groups by session/tool-call would help debug agent turns
 - [ ] Replay harness — record + replay Telegram message sequences to test agent behavior without live bots
 
