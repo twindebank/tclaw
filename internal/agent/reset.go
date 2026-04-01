@@ -61,8 +61,7 @@ var resetLevelBuiltin = map[ResetLevel]claudecli.Tool{
 }
 
 // allowedResetLevels returns the reset levels permitted on the given channel.
-// Session is always included (it's the most basic reset). Other levels are
-// included if their corresponding builtin tool is allowed.
+// Only levels whose corresponding builtin tool is explicitly allowed are included.
 func allowedResetLevels(opts Options, channelID channel.ChannelID) []ResetLevel {
 	var levels []ResetLevel
 	for _, level := range allResetLevels {
@@ -70,10 +69,6 @@ func allowedResetLevels(opts Options, channelID channel.ChannelID) []ResetLevel 
 		if isBuiltinAllowed(opts, channelID, builtin) {
 			levels = append(levels, level)
 		}
-	}
-	// Session is always allowed as a minimum.
-	if len(levels) == 0 {
-		levels = []ResetLevel{ResetSession}
 	}
 	return levels
 }
