@@ -46,278 +46,300 @@ func (m *mockChannel) Edit(_ context.Context, id channel.MessageID, text string)
 	return nil
 }
 
-func TestWriteSplit_ProactiveSplitStatus(t *testing.T) {
-	ch := &mockChannel{}
-	tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
+func TestWriteSplit(t *testing.T) {
+	t.Run("proactive split status", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
 
-	// First write creates a new message.
-	if err := tw.writeSplit(phaseStatus, "start\n"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(ch.sends) != 1 {
-		t.Fatalf("expected 1 send, got %d", len(ch.sends))
-	}
-
-	// Write enough to exceed maxMessageLen.
-	bigChunk := strings.Repeat("x", maxMessageLen)
-	if err := tw.writeSplit(phaseStatus, bigChunk); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Should have sent a second message (the rotation).
-	if len(ch.sends) != 2 {
-		t.Fatalf("expected 2 sends after proactive split, got %d", len(ch.sends))
-	}
-	// The new message should contain only the big chunk, not the old content.
-	if ch.sends[1] != bigChunk {
-		t.Fatalf("expected new message to contain only the new chunk, got %d chars", len(ch.sends[1]))
-	}
-}
-
-func TestWriteSplit_ProactiveSplitResponse(t *testing.T) {
-	ch := &mockChannel{}
-	tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
-
-	if err := tw.writeSplit(phaseResponse, "start\n"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(ch.sends) != 1 {
-		t.Fatalf("expected 1 send, got %d", len(ch.sends))
-	}
-
-	bigChunk := strings.Repeat("y", maxMessageLen)
-	if err := tw.writeSplit(phaseResponse, bigChunk); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(ch.sends) != 2 {
-		t.Fatalf("expected 2 sends after proactive split, got %d", len(ch.sends))
-	}
-	if ch.sends[1] != bigChunk {
-		t.Fatalf("expected new message to contain only the new chunk, got %d chars", len(ch.sends[1]))
-	}
-}
-
-func TestWriteSplit_EditFailureRecovery_Status(t *testing.T) {
-	ch := &mockChannel{}
-	tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
-
-	// First write creates message.
-	if err := tw.writeSplit(phaseStatus, "hello"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Make Edit fail.
-	ch.editError = errors.New("MESSAGE_TOO_LONG")
-
-	// Second write should recover: log error, send new message, not return error.
-	if err := tw.writeSplit(phaseStatus, " world"); err != nil {
-		t.Fatalf("status edit failure should not propagate, got: %v", err)
-	}
-
-	// Should have 2 sends: original + recovery.
-	if len(ch.sends) != 2 {
-		t.Fatalf("expected 2 sends after recovery, got %d", len(ch.sends))
-	}
-	// Recovery message should only contain the new text.
-	if ch.sends[1] != " world" {
-		t.Fatalf("expected recovery message to be ' world', got %q", ch.sends[1])
-	}
-}
-
-func TestWriteSplit_EditFailureRecovery_Response(t *testing.T) {
-	ch := &mockChannel{}
-	tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
-
-	// First write creates message.
-	if err := tw.writeSplit(phaseResponse, "hello"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Make Edit fail.
-	ch.editError = errors.New("MESSAGE_TOO_LONG")
-
-	// Second write should recover with a new Send.
-	if err := tw.writeSplit(phaseResponse, " world"); err != nil {
-		t.Fatalf("response edit failure should recover, got: %v", err)
-	}
-
-	if len(ch.sends) != 2 {
-		t.Fatalf("expected 2 sends after recovery, got %d", len(ch.sends))
-	}
-	if ch.sends[1] != " world" {
-		t.Fatalf("expected recovery message to be ' world', got %q", ch.sends[1])
-	}
-}
-
-func TestWriteSplit_ResponseSealedAfterInterleavedStatus(t *testing.T) {
-	ch := &mockChannel{}
-	tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
-
-	// 1. Status write creates msg 1.
-	if err := tw.writeSplit(phaseStatus, "🤔 Thinking...\n"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(ch.sends) != 1 {
-		t.Fatalf("expected 1 send after status, got %d", len(ch.sends))
-	}
-
-	// 2. Response write creates msg 2 and seals status.
-	if err := tw.writeSplit(phaseResponse, "Here is the answer"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(ch.sends) != 2 {
-		t.Fatalf("expected 2 sends after response, got %d", len(ch.sends))
-	}
-	if !tw.statusSealed {
-		t.Fatal("expected statusSealed to be true after first response")
-	}
-
-	// 3. New status write creates msg 3 (statusSealed resets) and seals response.
-	if err := tw.writeSplit(phaseStatus, "🔧 Using tool\n"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(ch.sends) != 3 {
-		t.Fatalf("expected 3 sends after second status, got %d", len(ch.sends))
-	}
-	if !tw.respSealed {
-		t.Fatal("expected respSealed to be true after status sent below response")
-	}
-
-	// 4. Next response write must create msg 4 (not edit msg 2).
-	if err := tw.writeSplit(phaseResponse, "More answer text"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(ch.sends) != 4 {
-		t.Fatalf("expected 4 sends (linear ordering), got %d", len(ch.sends))
-	}
-	if ch.sends[3] != "More answer text" {
-		t.Fatalf("expected 4th message to be new response text, got %q", ch.sends[3])
-	}
-
-	// No response edits should have happened — each response was a fresh message.
-	for _, edit := range ch.edits {
-		if edit.id == "mm" {
-			// "mm" is the ID of the 2nd send (response msg 2).
-			t.Fatal("response msg 2 was edited after a status message appeared below it")
+		// First write creates a new message.
+		if err := tw.writeSplit(phaseStatus, "start\n"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
 		}
-	}
-}
-
-func TestWriteSplit_TruncatesOversizedStatusMessage(t *testing.T) {
-	ch := &mockChannel{}
-	tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
-
-	// Write a single chunk that exceeds the telegram truncation limit.
-	oversized := strings.Repeat("x", telegramTruncateLen+500)
-	if err := tw.writeSplit(phaseStatus, oversized); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(ch.sends) != 1 {
-		t.Fatalf("expected 1 send, got %d", len(ch.sends))
-	}
-	if len(ch.sends[0]) > telegramTruncateLen+20 {
-		t.Fatalf("sent message too long: %d chars (limit %d)", len(ch.sends[0]), telegramTruncateLen+20)
-	}
-	if !strings.Contains(ch.sends[0], "[truncated]") {
-		t.Fatal("expected truncation notice in sent message")
-	}
-}
-
-func TestBuildEnv_AllowlistExcludesDangerousVars(t *testing.T) {
-	// Set dangerous env vars that should NOT leak to the subprocess.
-	dangerous := map[string]string{
-		"AWS_SECRET_ACCESS_KEY":          "secret",
-		"GITHUB_TOKEN":                   "ghp_fake",
-		"GH_TOKEN":                       "ghp_fake",
-		"SSH_AUTH_SOCK":                  "/tmp/ssh-agent",
-		"GOOGLE_APPLICATION_CREDENTIALS": "/path/to/creds.json",
-		"TCLAW_SECRET_KEY":               "masterkey",
-		"CLAUDECODE":                     "1",
-		"CLAUDE_CODE_ENTRYPOINT":         "/bin/claude",
-		"DATABASE_URL":                   "postgres://secret",
-		"OPENAI_API_KEY":                 "sk-openai",
-	}
-	for k, v := range dangerous {
-		os.Setenv(k, v)
-		defer os.Unsetenv(k)
-	}
-
-	env := buildEnv(Options{})
-
-	envMap := make(map[string]string)
-	for _, kv := range env {
-		key, val, _ := strings.Cut(kv, "=")
-		envMap[key] = val
-	}
-
-	for k := range dangerous {
-		if _, found := envMap[k]; found {
-			t.Errorf("dangerous env var %q leaked to subprocess", k)
+		if len(ch.sends) != 1 {
+			t.Fatalf("expected 1 send, got %d", len(ch.sends))
 		}
-	}
-}
 
-func TestBuildEnv_AllowsExpectedVars(t *testing.T) {
-	allowed := map[string]string{
-		"PATH":    "/usr/bin",
-		"TERM":    "xterm-256color",
-		"LANG":    "en_US.UTF-8",
-		"LC_ALL":  "en_US.UTF-8",
-		"TMPDIR":  "/tmp",
-		"USER":    "testuser",
-		"SHELL":   "/bin/zsh",
-		"TZ":      "UTC",
-		"EDITOR":  "vim",
-		"VISUAL":  "code",
-		"LOGNAME": "testuser",
-	}
-	for k, v := range allowed {
-		os.Setenv(k, v)
-		defer os.Unsetenv(k)
-	}
-
-	env := buildEnv(Options{})
-
-	envMap := make(map[string]string)
-	for _, kv := range env {
-		key, val, _ := strings.Cut(kv, "=")
-		envMap[key] = val
-	}
-
-	for k, v := range allowed {
-		if envMap[k] != v {
-			t.Errorf("allowed env var %q=%q not found in subprocess env", k, v)
+		// Write enough to exceed maxMessageLen.
+		bigChunk := strings.Repeat("x", maxMessageLen)
+		if err := tw.writeSplit(phaseStatus, bigChunk); err != nil {
+			t.Fatalf("unexpected error: %v", err)
 		}
-	}
-}
 
-func TestBuildEnv_OverridesAlwaysSet(t *testing.T) {
-	env := buildEnv(Options{
-		HomeDir:    "/home/test",
-		APIKey:     "sk-ant-test",
-		SetupToken: "sk-ant-oat01-test",
+		// Should have sent a second message (the rotation).
+		if len(ch.sends) != 2 {
+			t.Fatalf("expected 2 sends after proactive split, got %d", len(ch.sends))
+		}
+		// The new message should contain only the big chunk, not the old content.
+		if ch.sends[1] != bigChunk {
+			t.Fatalf("expected new message to contain only the new chunk, got %d chars", len(ch.sends[1]))
+		}
 	})
 
-	envMap := make(map[string]string)
-	for _, kv := range env {
-		key, val, _ := strings.Cut(kv, "=")
-		envMap[key] = val
-	}
+	t.Run("proactive split response", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
 
-	if envMap["HOME"] != "/home/test" {
-		t.Errorf("HOME override not set, got %q", envMap["HOME"])
-	}
-	if envMap["ANTHROPIC_API_KEY"] != "sk-ant-test" {
-		t.Errorf("ANTHROPIC_API_KEY override not set, got %q", envMap["ANTHROPIC_API_KEY"])
-	}
-	if envMap["CLAUDE_CODE_OAUTH_TOKEN"] != "sk-ant-oat01-test" {
-		t.Errorf("CLAUDE_CODE_OAUTH_TOKEN override not set, got %q", envMap["CLAUDE_CODE_OAUTH_TOKEN"])
-	}
+		if err := tw.writeSplit(phaseResponse, "start\n"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(ch.sends) != 1 {
+			t.Fatalf("expected 1 send, got %d", len(ch.sends))
+		}
+
+		bigChunk := strings.Repeat("y", maxMessageLen)
+		if err := tw.writeSplit(phaseResponse, bigChunk); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(ch.sends) != 2 {
+			t.Fatalf("expected 2 sends after proactive split, got %d", len(ch.sends))
+		}
+		if ch.sends[1] != bigChunk {
+			t.Fatalf("expected new message to contain only the new chunk, got %d chars", len(ch.sends[1]))
+		}
+	})
+
+	t.Run("edit failure recovery status", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
+
+		// First write creates message.
+		if err := tw.writeSplit(phaseStatus, "hello"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Make Edit fail.
+		ch.editError = errors.New("MESSAGE_TOO_LONG")
+
+		// Second write should recover: log error, send new message, not return error.
+		if err := tw.writeSplit(phaseStatus, " world"); err != nil {
+			t.Fatalf("status edit failure should not propagate, got: %v", err)
+		}
+
+		// Should have 2 sends: original + recovery.
+		if len(ch.sends) != 2 {
+			t.Fatalf("expected 2 sends after recovery, got %d", len(ch.sends))
+		}
+		// Recovery message should only contain the new text.
+		if ch.sends[1] != " world" {
+			t.Fatalf("expected recovery message to be ' world', got %q", ch.sends[1])
+		}
+	})
+
+	t.Run("edit failure recovery response", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
+
+		// First write creates message.
+		if err := tw.writeSplit(phaseResponse, "hello"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Make Edit fail.
+		ch.editError = errors.New("MESSAGE_TOO_LONG")
+
+		// Second write should recover with a new Send.
+		if err := tw.writeSplit(phaseResponse, " world"); err != nil {
+			t.Fatalf("response edit failure should recover, got: %v", err)
+		}
+
+		if len(ch.sends) != 2 {
+			t.Fatalf("expected 2 sends after recovery, got %d", len(ch.sends))
+		}
+		if ch.sends[1] != " world" {
+			t.Fatalf("expected recovery message to be ' world', got %q", ch.sends[1])
+		}
+	})
+
+	t.Run("response sealed after interleaved status", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
+
+		// 1. Status write creates msg 1.
+		if err := tw.writeSplit(phaseStatus, "🤔 Thinking...\n"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(ch.sends) != 1 {
+			t.Fatalf("expected 1 send after status, got %d", len(ch.sends))
+		}
+
+		// 2. Response write creates msg 2 and seals status.
+		if err := tw.writeSplit(phaseResponse, "Here is the answer"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(ch.sends) != 2 {
+			t.Fatalf("expected 2 sends after response, got %d", len(ch.sends))
+		}
+		if !tw.statusSealed {
+			t.Fatal("expected statusSealed to be true after first response")
+		}
+
+		// 3. New status write creates msg 3 (statusSealed resets) and seals response.
+		if err := tw.writeSplit(phaseStatus, "🔧 Using tool\n"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(ch.sends) != 3 {
+			t.Fatalf("expected 3 sends after second status, got %d", len(ch.sends))
+		}
+		if !tw.respSealed {
+			t.Fatal("expected respSealed to be true after status sent below response")
+		}
+
+		// 4. Next response write must create msg 4 (not edit msg 2).
+		if err := tw.writeSplit(phaseResponse, "More answer text"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(ch.sends) != 4 {
+			t.Fatalf("expected 4 sends (linear ordering), got %d", len(ch.sends))
+		}
+		if ch.sends[3] != "More answer text" {
+			t.Fatalf("expected 4th message to be new response text, got %q", ch.sends[3])
+		}
+
+		// No response edits should have happened — each response was a fresh message.
+		for _, edit := range ch.edits {
+			if edit.id == "mm" {
+				// "mm" is the ID of the 2nd send (response msg 2).
+				t.Fatal("response msg 2 was edited after a status message appeared below it")
+			}
+		}
+	})
+
+	t.Run("truncates oversized status message", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
+
+		// Write a single chunk that exceeds the telegram truncation limit.
+		oversized := strings.Repeat("x", telegramTruncateLen+500)
+		if err := tw.writeSplit(phaseStatus, oversized); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(ch.sends) != 1 {
+			t.Fatalf("expected 1 send, got %d", len(ch.sends))
+		}
+		if len(ch.sends[0]) > telegramTruncateLen+20 {
+			t.Fatalf("sent message too long: %d chars (limit %d)", len(ch.sends[0]), telegramTruncateLen+20)
+		}
+		if !strings.Contains(ch.sends[0], "[truncated]") {
+			t.Fatal("expected truncation notice in sent message")
+		}
+	})
+
+	t.Run("no split below threshold", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
+
+		// Write many small chunks that stay under the limit.
+		for i := 0; i < 100; i++ {
+			if err := tw.writeSplit(phaseStatus, "ok\n"); err != nil {
+				t.Fatalf("unexpected error on write %d: %v", i, err)
+			}
+		}
+
+		// Only the first write should Send; all others should Edit.
+		if len(ch.sends) != 1 {
+			t.Fatalf("expected 1 send for small writes, got %d", len(ch.sends))
+		}
+		if len(ch.edits) != 99 {
+			t.Fatalf("expected 99 edits, got %d", len(ch.edits))
+		}
+	})
 }
 
-func TestBuildEnv_NodeMaxHeap(t *testing.T) {
+func TestBuildEnv(t *testing.T) {
+	t.Run("allowlist excludes dangerous vars", func(t *testing.T) {
+		// Set dangerous env vars that should NOT leak to the subprocess.
+		dangerous := map[string]string{
+			"AWS_SECRET_ACCESS_KEY":          "secret",
+			"GITHUB_TOKEN":                   "ghp_fake",
+			"GH_TOKEN":                       "ghp_fake",
+			"SSH_AUTH_SOCK":                  "/tmp/ssh-agent",
+			"GOOGLE_APPLICATION_CREDENTIALS": "/path/to/creds.json",
+			"TCLAW_SECRET_KEY":               "masterkey",
+			"CLAUDECODE":                     "1",
+			"CLAUDE_CODE_ENTRYPOINT":         "/bin/claude",
+			"DATABASE_URL":                   "postgres://secret",
+			"OPENAI_API_KEY":                 "sk-openai",
+		}
+		for k, v := range dangerous {
+			os.Setenv(k, v)
+			defer os.Unsetenv(k)
+		}
+
+		env := buildEnv(Options{})
+
+		envMap := make(map[string]string)
+		for _, kv := range env {
+			key, val, _ := strings.Cut(kv, "=")
+			envMap[key] = val
+		}
+
+		for k := range dangerous {
+			if _, found := envMap[k]; found {
+				t.Errorf("dangerous env var %q leaked to subprocess", k)
+			}
+		}
+	})
+
+	t.Run("allows expected vars", func(t *testing.T) {
+		allowed := map[string]string{
+			"PATH":    "/usr/bin",
+			"TERM":    "xterm-256color",
+			"LANG":    "en_US.UTF-8",
+			"LC_ALL":  "en_US.UTF-8",
+			"TMPDIR":  "/tmp",
+			"USER":    "testuser",
+			"SHELL":   "/bin/zsh",
+			"TZ":      "UTC",
+			"EDITOR":  "vim",
+			"VISUAL":  "code",
+			"LOGNAME": "testuser",
+		}
+		for k, v := range allowed {
+			os.Setenv(k, v)
+			defer os.Unsetenv(k)
+		}
+
+		env := buildEnv(Options{})
+
+		envMap := make(map[string]string)
+		for _, kv := range env {
+			key, val, _ := strings.Cut(kv, "=")
+			envMap[key] = val
+		}
+
+		for k, v := range allowed {
+			if envMap[k] != v {
+				t.Errorf("allowed env var %q=%q not found in subprocess env", k, v)
+			}
+		}
+	})
+
+	t.Run("overrides always set", func(t *testing.T) {
+		env := buildEnv(Options{
+			HomeDir:    "/home/test",
+			APIKey:     "sk-ant-test",
+			SetupToken: "sk-ant-oat01-test",
+		})
+
+		envMap := make(map[string]string)
+		for _, kv := range env {
+			key, val, _ := strings.Cut(kv, "=")
+			envMap[key] = val
+		}
+
+		if envMap["HOME"] != "/home/test" {
+			t.Errorf("HOME override not set, got %q", envMap["HOME"])
+		}
+		if envMap["ANTHROPIC_API_KEY"] != "sk-ant-test" {
+			t.Errorf("ANTHROPIC_API_KEY override not set, got %q", envMap["ANTHROPIC_API_KEY"])
+		}
+		if envMap["CLAUDE_CODE_OAUTH_TOKEN"] != "sk-ant-oat01-test" {
+			t.Errorf("CLAUDE_CODE_OAUTH_TOKEN override not set, got %q", envMap["CLAUDE_CODE_OAUTH_TOKEN"])
+		}
+	})
+
 	t.Run("sets NODE_OPTIONS when env var present", func(t *testing.T) {
 		t.Setenv("NODE_MAX_HEAP_MB", "128")
 		env := buildEnv(Options{})
@@ -340,24 +362,4 @@ func TestBuildEnv_NodeMaxHeap(t *testing.T) {
 			}
 		}
 	})
-}
-
-func TestWriteSplit_NoSplitBelowThreshold(t *testing.T) {
-	ch := &mockChannel{}
-	tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
-
-	// Write many small chunks that stay under the limit.
-	for i := 0; i < 100; i++ {
-		if err := tw.writeSplit(phaseStatus, "ok\n"); err != nil {
-			t.Fatalf("unexpected error on write %d: %v", i, err)
-		}
-	}
-
-	// Only the first write should Send; all others should Edit.
-	if len(ch.sends) != 1 {
-		t.Fatalf("expected 1 send for small writes, got %d", len(ch.sends))
-	}
-	if len(ch.edits) != 99 {
-		t.Fatalf("expected 99 edits, got %d", len(ch.edits))
-	}
 }

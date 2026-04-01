@@ -33,20 +33,43 @@ local:
       # system_prompt: |
       #   You are a personal assistant. Be concise and direct.
 
-      # Role-based permissions (superuser | developer | assistant).
-      # Roles are simpler than listing individual tools — see docs/features.md for details.
-      role: superuser
+      # Tool groups control which tools are available.
+      # See `tool_group_list` for all available groups with descriptions.
+      tool_groups:
+        - core_tools
+        - all_builtins
+        - channel_messaging
+        - channel_management
+        - scheduling
+        - dev_workflow
+        - repo_monitoring
+        - gsuite_read
+        - gsuite_write
+        - personal_services
+        - connections
+        - telegram_client
+        - notifications
+        - onboarding
+        - secret_form
 
       channels:
         - type: socket
           name: main
           description: Primary desktop workstation
 
-        # Additional channels can override the user-level role:
+        # Additional channels can use a restricted tool set:
         # - type: telegram
         #   name: mobile
         #   description: Mobile assistant — concise responses
-        #   role: assistant
+        #   tool_groups:
+        #     - core_tools
+        #     - safe_builtins
+        #     - channel_messaging
+        #     - scheduling
+        #     - notifications
+        #     - personal_services
+        #     - connections
+        #     - secret_form
         #   telegram:
         #     token: ${secret:TELEGRAM_BOT_TOKEN}
         #     allowed_users: [123456789]  # your Telegram user ID

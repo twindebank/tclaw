@@ -1,3 +1,7 @@
+// Package agent implements the stateless agent loop. It reads messages from channels, spawns an
+// isolated claude CLI subprocess per turn, and streams responses back. Auth flows, reset menus, and
+// builtin commands (stop, compact, login) are handled inline. The subprocess runs with an environment
+// allowlist (only safe env vars inherited) and, on Linux, inside a bubblewrap filesystem sandbox.
 package agent
 
 import (
@@ -6,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -249,7 +254,7 @@ type handleResult struct {
 }
 
 // channels returns the current channel map. Uses ChannelsFunc when set for
-// live updates (e.g. hot-added channels); falls back to the static Channels map.
+// live updates (e.g. hot-added channels); falls back to the initial Channels map.
 func (opts Options) channels() map[channel.ChannelID]channel.Channel {
 	if opts.ChannelsFunc != nil {
 		return opts.ChannelsFunc()
@@ -790,15 +795,9 @@ func isBuiltinAllowed(opts Options, channelID channel.ChannelID, cmd claudecli.T
 		tools = opts.AllowedTools
 	}
 
-	// If no builtin entries exist at all, allow everything (backwards compat).
-	hasAnyBuiltin := false
-	for _, t := range tools {
-		if claudecli.IsBuiltinTool(t) {
-			hasAnyBuiltin = true
-			break
-		}
-	}
-	if !hasAnyBuiltin {
+	// If no builtin__ entries exist in the tool list, all builtins are allowed.
+	// This is the default when tool_groups don't include all_builtins or safe_builtins.
+	if !slices.ContainsFunc(tools, claudecli.IsBuiltinTool) {
 		return true
 	}
 

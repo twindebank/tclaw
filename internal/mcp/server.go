@@ -1,3 +1,6 @@
+// Package mcp implements a JSON-RPC MCP server over HTTP. Each user gets their own server on a
+// random localhost port with bearer token authentication. The Handler provides the tool registry,
+// and GenerateConfigFile writes the mcp-config.json consumed by the claude CLI's --mcp-config flag.
 package mcp
 
 import (

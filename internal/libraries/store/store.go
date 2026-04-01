@@ -1,3 +1,6 @@
+// Package store provides a key-value Store interface with a filesystem-backed implementation.
+// JSON values are serialized to individual files on disk. Used for persisting agent state,
+// session IDs, schedule data, and other structured data that needs to survive restarts.
 package store
 
 import "context"

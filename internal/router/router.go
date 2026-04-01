@@ -1,3 +1,6 @@
+// Package router is the top-level per-user orchestrator and the only stateful struct in the system.
+// It manages agent goroutine lifecycles, per-user directory setup, MCP server creation, tool
+// registration, channel building via the channelpkg registry, and secret seeding from Fly env vars.
 package router
 
 import (
@@ -148,7 +151,7 @@ func (r *Router) Register(ctx context.Context, cfg user.Config, channels []chann
 	}
 	r.users[cfg.ID] = mu
 
-	// Start listening on all static channels and fan messages into a trigger
+	// Start listening on all initial channels and fan messages into a trigger
 	// that starts the agent on the first arrival.
 	staticChMap := channel.ChannelMap(channels...)
 	staticMsgs := channel.FanIn(ctx, staticChMap)
@@ -567,7 +570,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			})
 		}
 		allChMap := channel.ChannelMap(liveChannels...)
-		// Also include the initial static channels so existing listeners are reachable.
+		// Also include the initial channels so existing listeners are reachable.
 		for id, ch := range staticChMap {
 			if _, exists := allChMap[id]; !exists {
 				allChMap[id] = ch
@@ -840,8 +843,8 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		<-done
 		<-bridgeDone
 
-		// Cancel dynamic channels so their listeners/sockets close.
-		// Next iteration will recreate them from the (possibly updated) store.
+		// Cancel agent-created channels so their listeners/sockets close.
+		// Next iteration will recreate them from the (possibly updated) config.
 		cancelDynamic()
 
 		r.mu.Lock()

@@ -18,7 +18,7 @@ var FeatureAreas = []FeatureArea{
 	{ID: "web_search", Name: "Web access", Description: "search, fetch pages, weather, news, prices, current events"},
 	{ID: "connections", Name: "Service connections", Description: "Google Workspace, Monzo, built-in providers vs remote MCPs"},
 	{ID: "channels", Name: "Multiple channels", Description: "separate Telegram bots, roles, per-channel tool permissions"},
-	{ID: "channel_management", Name: "Dynamic channels", Description: "creating ephemeral channels at runtime, tool groups, cross-channel messaging"},
+	{ID: "channel_management", Name: "Channel management", Description: "creating channels at runtime, tool groups, cross-channel messaging"},
 	{ID: "remote_mcps", Name: "MCP ecosystem", Description: "remote MCP servers, directory of available services"},
 	{ID: "compact_reset", Name: "Context management", Description: "compact command, reset options, session management"},
 	{ID: "dev_workflow", Name: "Dev workflow", Description: "self-modification, git worktrees, PRs, deployment"},

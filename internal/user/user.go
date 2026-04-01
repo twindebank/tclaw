@@ -1,3 +1,5 @@
+// Package user defines the User ID type and per-user Config struct. Pure data types with no I/O —
+// system-derived paths (home dir, store path, socket path) are computed by the router at runtime.
 package user
 
 import "tclaw/internal/claudecli"

@@ -12,7 +12,7 @@ import (
 	"tclaw/internal/queue"
 )
 
-func TestQueue_Next(t *testing.T) {
+func TestQueue(t *testing.T) {
 	t.Run("returns user message immediately", func(t *testing.T) {
 		q, _ := setup(t)
 		ctx := context.Background()
@@ -155,9 +155,7 @@ func TestQueue_Next(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorIs(t, err, queue.ErrInputClosed)
 	})
-}
 
-func TestQueue_Persistence(t *testing.T) {
 	t.Run("messages survive reload", func(t *testing.T) {
 		s, err := store.NewFS(t.TempDir())
 		require.NoError(t, err)
@@ -199,10 +197,8 @@ func TestQueue_Persistence(t *testing.T) {
 		require.NoError(t, q2.LoadPersisted(ctx))
 		require.Equal(t, channel.ChannelID("ch1"), q2.InterruptedChannel())
 	})
-}
 
-func TestQueue_SetInterrupted(t *testing.T) {
-	t.Run("set and clear", func(t *testing.T) {
+	t.Run("set and clear interrupted", func(t *testing.T) {
 		q, _ := setup(t)
 		ctx := context.Background()
 

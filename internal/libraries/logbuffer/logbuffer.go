@@ -1,3 +1,6 @@
+// Package logbuffer provides a thread-safe ring buffer for capturing slog output. It implements
+// io.Writer for use as a tee alongside stderr, and supports querying stored lines by user ID,
+// log level, and substring match. Used by the dev_logs MCP tool to show each user only their logs.
 package logbuffer
 
 import (

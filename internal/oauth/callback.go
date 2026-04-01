@@ -1,3 +1,7 @@
+// Package oauth provides stateless OAuth 2.0 helpers (BuildAuthURL, ExchangeCode, RefreshToken) and
+// the CallbackServer HTTP server. The server handles OAuth redirect callbacks, Telegram webhook
+// endpoints, secure credential collection forms, and the /healthz health check. State codes use TTL
+// and per-state rate limiting to prevent brute-force attacks.
 package oauth
 
 import (

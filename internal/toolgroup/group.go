@@ -1,3 +1,6 @@
+// Package toolgroup defines named sets of related tools that are composed additively for channel
+// permissions. Channels start with no tools and add groups to build up their allowed set. Tool
+// packages declare their group memberships via GroupTools(), and the router merges them at startup.
 package toolgroup
 
 import "tclaw/internal/claudecli"

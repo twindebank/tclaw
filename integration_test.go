@@ -509,22 +509,22 @@ func TestIntegration_DynamicChannelLifecycle(t *testing.T) {
 
 	msgs, err := client.send("Say hello. Reply with only 'hello'.")
 	if err != nil {
-		t.Fatalf("send on dynamic channel: %v", err)
+		t.Fatalf("send on agent-created channel: %v", err)
 	}
 	text := fullText(msgs)
-	t.Logf("Dynamic channel response:\n%s", text)
+	t.Logf("Agent-created channel response:\n%s", text)
 
 	if len(msgs) == 0 {
-		t.Fatal("expected response on dynamic channel, got none")
+		t.Fatal("expected response on agent-created channel, got none")
 	}
 
-	// Verify we can read back the dynamic configs from the store.
+	// Verify we can read back the channel configs from the store.
 	configs, err := ds.List(context.Background())
 	if err != nil {
-		t.Fatalf("list dynamic channels: %v", err)
+		t.Fatalf("list channel configs: %v", err)
 	}
 	if len(configs) != 1 || configs[0].Name != "phone" {
-		t.Fatalf("unexpected dynamic channel configs: %+v", configs)
+		t.Fatalf("unexpected channel configs: %+v", configs)
 	}
 }
 

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 
 	"tclaw/internal/channel"
@@ -106,7 +107,7 @@ func resetLevelMenuLine(level ResetLevel, m channel.Markup) string {
 	case ResetProject:
 		return bold(m, "Project") + " — clear Claude state + sessions on " + bold(m, "all") + " channels (keeps memories, connections, schedules)"
 	case ResetAll:
-		return bold(m, "Everything") + " — erase all data including OAuth connections, dynamic channel tokens, and schedules"
+		return bold(m, "Everything") + " — erase all data including OAuth connections, channel tokens, and schedules"
 	default:
 		return "unknown"
 	}
@@ -146,10 +147,8 @@ func resolveResetChoice(choice string, levels []ResetLevel) ResetLevel {
 
 // findInLevels returns the level if it's in the allowed list, otherwise resetInvalid.
 func findInLevels(level ResetLevel, levels []ResetLevel) ResetLevel {
-	for _, l := range levels {
-		if l == level {
-			return level
-		}
+	if slices.Contains(levels, level) {
+		return level
 	}
 	return resetInvalid
 }
@@ -178,9 +177,9 @@ func resetConfirmPrompt(level ResetLevel, m channel.Markup) string {
 			"  • Claude Code internal state\n" +
 			"  • OAuth connections (Google Workspace, etc.)\n" +
 			"  • Schedules\n" +
-			"  • Dynamic channel tokens (Telegram bot tokens)\n\n" +
+			"  • Channel tokens (Telegram bot tokens)\n\n" +
 			bold(m, "Not affected:") + " credentials managed by the deploy environment (Fly secrets, env vars)\n\n" +
-			"You will need to reconnect OAuth services and recreate dynamic channels."
+			"You will need to reconnect OAuth services and recreate agent-created channels."
 	}
 
 	return "⚠️ " + bold(m, "Confirm reset") + "\n\n" +

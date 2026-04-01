@@ -1,3 +1,7 @@
+// Package notification implements a push-based event system for tool integrations. Tool packages
+// implement the Notifier interface to declare notification types and own the watch mechanism
+// (polling, webhook, etc.). Manager orchestrates subscriptions, delegates to notifier packages,
+// and routes emitted notifications to channels via the unified message queue.
 package notification
 
 import (

@@ -1,3 +1,6 @@
+// Package dev provides types and a store for dev workflow sessions. Tracks active git worktree
+// sessions, cached repo URLs, GitHub tokens, and the currently deployed commit hash. Used by
+// dev_start, dev_end, dev_status, and deploy MCP tools.
 package dev
 
 import "time"

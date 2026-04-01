@@ -48,7 +48,7 @@ func (cs *ChannelSet) Add(channels map[channel.ChannelID]channel.Channel) {
 }
 
 // Replace replaces the entire channel map. Called at the start of each
-// agent iteration to set the combined static + dynamic channels.
+// agent iteration to set the combined initial + agent-created channels.
 func (cs *ChannelSet) Replace(channels map[channel.ChannelID]channel.Channel) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()

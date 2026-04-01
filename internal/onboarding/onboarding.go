@@ -1,3 +1,6 @@
+// Package onboarding provides the state model and store for new user onboarding. Tracks phase
+// progression (welcome, info gathering, daily tips, complete), information gathered during setup,
+// and feature areas covered. State is persisted as JSON in the user's state store.
 package onboarding
 
 import (
@@ -48,7 +51,7 @@ type State struct {
 	TipsShown []string `json:"tips_shown,omitempty"`
 
 	// CompletedAt is set when onboarding finishes.
-	CompletedAt time.Time `json:"completed_at,omitempty"`
+	CompletedAt time.Time `json:"completed_at,omitzero"`
 }
 
 // Known info fields that onboarding collects.

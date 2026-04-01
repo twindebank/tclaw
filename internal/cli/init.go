@@ -41,7 +41,22 @@ local:
       {{- end}}
       model: {{.Model}}
       permission_mode: dontAsk
-      role: superuser
+      tool_groups:
+        - core_tools
+        - all_builtins
+        - channel_messaging
+        - channel_management
+        - scheduling
+        - dev_workflow
+        - repo_monitoring
+        - gsuite_read
+        - gsuite_write
+        - personal_services
+        - connections
+        - telegram_client
+        - notifications
+        - onboarding
+        - secret_form
 
       channels:
         - type: socket
