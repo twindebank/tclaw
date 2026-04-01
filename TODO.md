@@ -15,7 +15,7 @@
 ## Memory & Context
 - [x] System and agent memories — system prompt (--append-system-prompt) for identity/rules, CLAUDE.md for persistent per-user memory, seeded on first startup
 - [x] Custom MCPs can be built in — register Go-native MCP servers alongside the agent
-- [ ] TfL MCP — London transport status, journey planning, disruptions
+- [x] TfL MCP — London transport status, journey planning, disruptions
 - [ ] Calendar MCP — read/write calendar events (Google Calendar, etc.)
 - [ ] Home Assistant MCP — control smart home devices, query states, trigger automations
 - [ ] Google Maps / location tools — place search, directions, travel time; location history integration
@@ -55,7 +55,7 @@
 - [ ] Slack support
 - [ ] Signal support
 - [ ] Channel history store — archive deleted channels (name, type, session ID, dev session, timestamps) so the agent can reference past ephemeral tasks. `channel_history` MCP tool for querying.
-- [ ] Channel types in own packages — move socket/stdio/telegram/oneshot into `channel/socketchannel/` etc. with builders co-located. Currently builders are in `router/`.
+- [x] Channel types in own packages — socket/stdio/telegram in `channel/socketchannel/` etc. with builders co-located.
 - [ ] `channel_delete` cleanup — archive the chat (export/preserve history before deleting the bot) and automatically cancel any associated dev sessions. Requires channels to track their dev sessions and dev sessions to be tagged with the originating channel. (Note: `channel_done` now requires user confirmation before teardown.)
 - [ ] Channel busy/free check — `channel_is_busy` tool: returns whether a channel has an active agent turn or recent conversation activity (with configurable timeout). Enables scheduled tasks to check before sending cross-channel messages, and to queue/defer if busy rather than interrupting.
 - [ ] Ephemeral channel system prompt enrichment — when a channel is created as ephemeral, inject context into its system prompt: the `initial_message` (so the agent knows its task from the start, not just from the first inbound message), and a note that it is a purpose-scoped ephemeral channel (so it stays focused and knows to call `channel_done` when done).
@@ -96,7 +96,7 @@
 - [ ] Periodic job to audit repo dependencies and open upgrade PRs (needs `repo_*` + `dev_*` tools working together)
 
 ## Dev Experience
-- [ ] GitHub Actions CI: run `go build ./...` + `go test ./...` on every PR (currently no CI)
+- [x] GitHub Actions CI: run `go build ./...` + `go test ./...` on every PR
 - [ ] `dev_logs` time range filter — `since` param (e.g. "last 4 days") so historical logs are easily queryable
 - [ ] Local dev parity — `make dev` that spins up the full stack with a test Telegram bot token and hot reload
 - [ ] PR preview deployments — deploy PRs to a separate Fly.io app (`tclaw-preview`) for manual testing before merge
