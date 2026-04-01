@@ -67,6 +67,7 @@ type ChannelInfo struct {
 	Name        string
 	Type        string
 	Description string
+	Purpose     string // optional behavioral guidance for the agent on this channel
 	Source      string // "static" or "dynamic"
 
 	// OutboundLinks lists channels this channel can send messages to.
