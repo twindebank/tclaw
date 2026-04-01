@@ -421,7 +421,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Ephemeral channel cleanup goroutine. Runs at user lifetime and
 	// periodically tears down ephemeral channels that have been idle past
 	// their timeout. Reads channel config each tick via the config writer.
-	go cleanupEphemeralChannels(ctx, mu.cfg.ID, configWriter, runtimeState, activityTracker, secretStore, provisioners, onChannelChange)
+	go cleanupEphemeralChannels(ctx, mu.cfg.ID, configWriter, runtimeState, activityTracker, secretStore, provisioners, onChannelChange, messageQueue, channelSet.Snapshot)
 
 	// hotAddMsgs carries messages from channels added mid-session via hot-reload.
 	// Lives at user lifetime (like scheduleMsgs) so it outlives agent sessions.
@@ -507,11 +507,21 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			slog.Error("channel reconciliation failed", "user", mu.cfg.ID, "err", reconcileErr)
 		}
 
-		// Build transports only for ready channels.
+		// Build transports only for ready channels. Notify parents of provisioning failures.
 		var readyChannels []config.Channel
 		for _, rc := range reconciled {
 			if rc.Status == reconciler.ChannelReady {
 				readyChannels = append(readyChannels, rc.Config)
+				continue
+			}
+			if rc.ProvisionErr != nil {
+				notifyParent(dynamicCtx, notifyParentParams{
+					ChildName:    rc.Config.Name,
+					Parent:       rc.Config.Parent,
+					Message:      fmt.Sprintf("Channel %q provisioning failed: %v", rc.Config.Name, rc.ProvisionErr),
+					Queue:        messageQueue,
+					ChannelsFunc: channelSet.Snapshot,
+				})
 			}
 		}
 
@@ -530,7 +540,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			}
 		}
 
-		liveChannels, buildErr := r.BuildChannels(dynamicCtx, BuildChannelsParams{
+		liveChannels, buildFailures := r.BuildChannels(dynamicCtx, BuildChannelsParams{
 			UserID:      mu.cfg.ID,
 			UserCfg:     currentUserCfg,
 			Channels:    readyChannels,
@@ -538,8 +548,14 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			StateStore:  s,
 			SecretStore: secretStore,
 		})
-		if buildErr != nil {
-			slog.Error("failed to build channels", "user", mu.cfg.ID, "err", buildErr)
+		for _, bf := range buildFailures {
+			notifyParent(dynamicCtx, notifyParentParams{
+				ChildName:    bf.Name,
+				Parent:       bf.Parent,
+				Message:      fmt.Sprintf("Channel %q failed to start: %v", bf.Name, bf.Err),
+				Queue:        messageQueue,
+				ChannelsFunc: channelSet.Snapshot,
+			})
 		}
 		allChMap := channel.ChannelMap(liveChannels...)
 		// Also include the initial static channels so existing listeners are reachable.
@@ -922,8 +938,16 @@ type BuildChannelsParams struct {
 	SecretStore secret.Store
 }
 
-func (r *Router) BuildChannels(ctx context.Context, params BuildChannelsParams) ([]channel.Channel, error) {
+// BuildFailure records a channel that failed to build on startup.
+type BuildFailure struct {
+	Name   string
+	Parent string
+	Err    error
+}
+
+func (r *Router) BuildChannels(ctx context.Context, params BuildChannelsParams) ([]channel.Channel, []BuildFailure) {
 	var channels []channel.Channel
+	var failures []BuildFailure
 	for _, chCfg := range params.Channels {
 		if len(chCfg.Envs) > 0 && !slices.Contains(chCfg.Envs, params.Env) {
 			slog.Info("skipping channel (env mismatch)", "channel", chCfg.Name, "envs", chCfg.Envs, "current", params.Env)
@@ -950,9 +974,14 @@ func (r *Router) BuildChannels(ctx context.Context, params BuildChannelsParams) 
 			// Skip channels that fail to build so one broken channel doesn't
 			// take down the entire app. The agent can fix or delete the channel.
 			slog.Error("skipping channel (build failed)", "channel", chCfg.Name, "err", err)
+			failures = append(failures, BuildFailure{
+				Name:   chCfg.Name,
+				Parent: chCfg.Parent,
+				Err:    err,
+			})
 			continue
 		}
 		channels = append(channels, ch)
 	}
-	return channels, nil
+	return channels, failures
 }

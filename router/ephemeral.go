@@ -9,6 +9,7 @@ import (
 	"tclaw/channel"
 	"tclaw/config"
 	"tclaw/libraries/secret"
+	"tclaw/queue"
 	"tclaw/user"
 )
 
@@ -29,6 +30,8 @@ func cleanupEphemeralChannels(
 	secretStore secret.Store,
 	provisioners map[channel.ChannelType]channel.EphemeralProvisioner,
 	onChannelChange func(),
+	messageQueue *queue.Queue,
+	channelsFunc func() map[channel.ChannelID]channel.Channel,
 ) {
 	ticker := time.NewTicker(ephemeralCheckInterval)
 	defer ticker.Stop()
@@ -40,7 +43,7 @@ func cleanupEphemeralChannels(
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			cleanupOnce(ctx, userID, configWriter, runtimeState, tracker, secretStore, provisioners, onChannelChange, lastLoggedError)
+			cleanupOnce(ctx, userID, configWriter, runtimeState, tracker, secretStore, provisioners, onChannelChange, lastLoggedError, messageQueue, channelsFunc)
 		}
 	}
 }
@@ -55,6 +58,8 @@ func cleanupOnce(
 	provisioners map[channel.ChannelType]channel.EphemeralProvisioner,
 	onChannelChange func(),
 	lastLoggedError map[string]string,
+	messageQueue *queue.Queue,
+	channelsFunc func() map[channel.ChannelID]channel.Channel,
 ) {
 	channels, err := configWriter.ReadChannels(userID)
 	if err != nil {
@@ -131,6 +136,14 @@ func cleanupOnce(
 		delete(lastLoggedError, ch.Name)
 		cleaned = true
 		slog.Info("ephemeral cleanup: channel torn down", "channel", ch.Name)
+
+		notifyParent(ctx, notifyParentParams{
+			ChildName:    ch.Name,
+			Parent:       ch.Parent,
+			Message:      fmt.Sprintf("Ephemeral channel %q cleaned up (idle timeout).", ch.Name),
+			Queue:        messageQueue,
+			ChannelsFunc: channelsFunc,
+		})
 	}
 
 	if cleaned && onChannelChange != nil {
