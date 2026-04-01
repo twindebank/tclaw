@@ -93,7 +93,7 @@ func TestChannelCreate(t *testing.T) {
 		require.Contains(t, err.Error(), "not allowed")
 	})
 
-	t.Run("telegram creates config entry", func(t *testing.T) {
+	t.Run("telegram provisions synchronously", func(t *testing.T) {
 		th := setupHarnessWithProvisioner(t, config.EnvProd)
 
 		result := callTool(t, th.handler, "channel_create", map[string]any{
@@ -107,8 +107,12 @@ func TestChannelCreate(t *testing.T) {
 		require.NoError(t, json.Unmarshal(result, &created))
 		require.Equal(t, "mybot", created["name"])
 		require.Equal(t, "telegram", created["type"])
+		require.Equal(t, "ready", created["status"])
 
-		// Channel should be in the config file (no token — provisioner runs at restart).
+		// Provisioner should have been called synchronously during the tool call.
+		require.True(t, th.provisioner.provisionCalled, "expected provisioner.Provision to be called synchronously")
+
+		// Channel should be in the config file.
 		channels, err := th.configWriter.ReadChannels(testUserID)
 		require.NoError(t, err)
 
@@ -122,11 +126,41 @@ func TestChannelCreate(t *testing.T) {
 		require.True(t, found, "expected channel 'mybot' in config")
 	})
 
-	t.Run("telegram requires provisioner for validation", func(t *testing.T) {
+	t.Run("telegram provisioning failure returns error", func(t *testing.T) {
+		th := setupHarnessWithProvisioner(t, config.EnvProd)
+		th.provisioner.provisionErr = fmt.Errorf("BotFather unreachable")
+
+		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
+			"name":          "mybot",
+			"description":   "Personal Telegram bot",
+			"type":          "telegram",
+			"allowed_users": []any{"123456789"},
+		})
+
+		// The tool should return the provisioning error, not silently succeed.
+		require.Contains(t, err.Error(), "provisioning failed")
+		require.Contains(t, err.Error(), "BotFather unreachable")
+	})
+
+	t.Run("telegram rejects description exceeding BotFather limit", func(t *testing.T) {
+		th := setupHarnessWithProvisioner(t, config.EnvProd)
+		th.provisioner.validateCreateErr = fmt.Errorf("description too long for Telegram channel: 62 characters, max 56")
+
+		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
+			"name":          "mybot",
+			"description":   "This description is way too long for the BotFather display name limit of 56 characters",
+			"type":          "telegram",
+			"allowed_users": []any{"123456789"},
+		})
+
+		require.Contains(t, err.Error(), "description too long")
+	})
+
+	t.Run("telegram without provisioner skips validation", func(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 
-		// No provisioner configured — Telegram validation is skipped, but the
-		// channel is still written to config for later reconciliation.
+		// No provisioner configured — validation is skipped, channel is written
+		// to config for later reconciliation.
 		result := callTool(t, th.handler, "channel_create", map[string]any{
 			"name":          "mybot",
 			"description":   "No provisioner",

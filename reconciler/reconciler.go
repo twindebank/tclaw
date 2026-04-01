@@ -27,6 +27,11 @@ type ReconciledChannel struct {
 	Config       config.Channel
 	RuntimeState *channel.RuntimeState
 	Status       ChannelStatus
+
+	// ProvisionErr is set when auto-provisioning failed. Reconcile() continues
+	// past provisioning errors (marks channel as needs_setup), but ReconcileOne()
+	// surfaces this error so tool calls get immediate feedback.
+	ProvisionErr error
 }
 
 // ReconcileParams holds dependencies for reconciliation.
@@ -96,6 +101,7 @@ func Reconcile(ctx context.Context, params ReconcileParams) ([]ReconciledChannel
 				Config:       ch,
 				RuntimeState: rs,
 				Status:       ChannelNeedsSetup,
+				ProvisionErr: provErr,
 			})
 			continue
 		}
@@ -124,7 +130,8 @@ func Reconcile(ctx context.Context, params ReconcileParams) ([]ReconciledChannel
 }
 
 // ReconcileOne reconciles a single channel. Used by channel tools after config
-// mutations to give synchronous feedback to the agent.
+// mutations to give synchronous feedback to the agent. Unlike Reconcile(),
+// this surfaces provisioning errors so the tool call fails visibly.
 func ReconcileOne(ctx context.Context, ch config.Channel, params ReconcileParams) (*ReconciledChannel, error) {
 	results, err := Reconcile(ctx, ReconcileParams{
 		Channels:     []config.Channel{ch},
@@ -137,5 +144,9 @@ func ReconcileOne(ctx context.Context, ch config.Channel, params ReconcileParams
 	if len(results) == 0 {
 		return nil, fmt.Errorf("reconciliation produced no result for channel %q", ch.Name)
 	}
-	return &results[0], nil
+	rc := &results[0]
+	if rc.ProvisionErr != nil {
+		return nil, rc.ProvisionErr
+	}
+	return rc, nil
 }
