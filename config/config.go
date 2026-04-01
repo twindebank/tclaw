@@ -518,6 +518,10 @@ func cacheResolvedSecret(name, value string) {
 
 // ToUserConfig converts a config User to a user.Config (without system-derived fields).
 func (u *User) ToUserConfig() user.Config {
+	var tgUserID string
+	if u.Telegram != nil {
+		tgUserID = u.Telegram.UserID
+	}
 	return user.Config{
 		ID:              u.ID,
 		APIKey:          u.APIKey,
@@ -528,5 +532,6 @@ func (u *User) ToUserConfig() user.Config {
 		MaxTurns:        u.MaxTurns,
 		Debug:           u.Debug,
 		SystemPrompt:    u.SystemPrompt,
+		TelegramUserID:  tgUserID,
 	}
 }
