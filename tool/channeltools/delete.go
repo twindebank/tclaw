@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 
 	"tclaw/channel"
 	"tclaw/mcp"
@@ -61,6 +63,14 @@ func channelDeleteHandler(deps Deps) mcp.ToolHandler {
 		if err := deps.SecretStore.Delete(ctx, channel.ChannelSecretKey(a.Name)); err != nil {
 			slog.Warn("failed to clean up channel secret after delete", "channel", a.Name, "err", err)
 			warnings = append(warnings, fmt.Sprintf("secret cleanup: %v", err))
+		}
+
+		if deps.MemoryDir != "" {
+			knowledgeDir := filepath.Join(deps.MemoryDir, "channels", a.Name)
+			if err := os.RemoveAll(knowledgeDir); err != nil {
+				slog.Warn("failed to clean up channel knowledge dir", "channel", a.Name, "dir", knowledgeDir, "err", err)
+				warnings = append(warnings, fmt.Sprintf("knowledge dir cleanup: %v", err))
+			}
 		}
 
 		if deps.OnChannelChange != nil {

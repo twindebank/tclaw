@@ -23,6 +23,10 @@ type Deps struct {
 	// messages so the user knows which file to check.
 	ConfigPath string
 
+	// MemoryDir is the user's memory directory root. Used to clean up
+	// per-channel knowledge dirs on channel deletion.
+	MemoryDir string
+
 	// OnChannelAdded is called after a new channel is created with the channel's
 	// name. Unlike OnChannelChange (which triggers a full restart), this signals
 	// a hot-add: the router wires in the new channel without restarting existing

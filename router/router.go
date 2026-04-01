@@ -684,7 +684,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 					// Intercept messages that are responses to a pending channel_done
 					// confirmation. If the channel has PendingDone set (from a prior
 					// channel_done call), handle it here instead of passing to the agent.
-					if interceptPendingDone(agentCtx, msg, channelsFunc, runtimeState, configWriter, mu.cfg.ID, secretStore, provisioners, onChannelChange) {
+					if interceptPendingDone(agentCtx, msg, channelsFunc, runtimeState, configWriter, mu.cfg.ID, secretStore, provisioners, onChannelChange, memoryDir) {
 						continue
 					}
 					select {
