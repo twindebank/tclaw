@@ -46,6 +46,7 @@ func BuildIterationPrompt(ctx context.Context, params PromptParams) IterationPro
 			Name:        info.Name,
 			Type:        string(info.Type),
 			Description: info.Description,
+			Purpose:     info.Purpose,
 		})
 	}
 

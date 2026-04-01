@@ -42,7 +42,11 @@ func channelCreateDef() mcp.ToolDef {
 				},
 				"description": {
 					"type": "string",
-					"description": "Describes the channel's purpose. For Telegram, used as the bot display name (max 56 chars)."
+					"description": "Describes the channel's device or context. For Telegram, used as the bot display name (max 56 chars)."
+				},
+				"purpose": {
+					"type": "string",
+					"description": "Optional behavioral guidance for the agent on this channel. Defines what kind of work the channel is for and how the agent should behave (e.g. 'Day-to-day personal tasks: email, calendar, travel. No dev work.'). Persisted in the system prompt."
 				},
 				"type": {
 					"type": "string",
@@ -107,6 +111,7 @@ func channelCreateDef() mcp.ToolDef {
 type channelCreateArgs struct {
 	Name                      string         `json:"name"`
 	Description               string         `json:"description"`
+	Purpose                   string         `json:"purpose"`
 	Type                      string         `json:"type"`
 	Ephemeral                 bool           `json:"ephemeral"`
 	EphemeralIdleTimeoutHours int            `json:"ephemeral_idle_timeout_hours"`
@@ -230,6 +235,7 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			Type:                 channelType,
 			Name:                 a.Name,
 			Description:          a.Description,
+			Purpose:              a.Purpose,
 			ToolGroups:           toolGroups,
 			AllowedTools:         a.AllowedTools,
 			DisallowedTools:      a.DisallowedTools,

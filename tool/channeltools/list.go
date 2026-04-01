@@ -21,6 +21,7 @@ type channelListEntry struct {
 	Name            string   `json:"name"`
 	Type            string   `json:"type"`
 	Description     string   `json:"description"`
+	Purpose         string   `json:"purpose,omitempty"`
 	AllowedTools    []string `json:"allowed_tools,omitempty"`
 	DisallowedTools []string `json:"disallowed_tools,omitempty"`
 }
@@ -35,6 +36,7 @@ func channelListHandler(deps Deps) mcp.ToolHandler {
 				Name:            e.Name,
 				Type:            string(e.Type),
 				Description:     e.Description,
+				Purpose:         e.Purpose,
 				AllowedTools:    e.AllowedTools,
 				DisallowedTools: e.DisallowedTools,
 			})

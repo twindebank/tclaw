@@ -68,6 +68,7 @@ type Telegram struct {
 	token       string
 	name        string
 	description string
+	purpose     string
 	opts        TelegramOptions
 
 	// allowedUsers restricts which Telegram user IDs can interact with this bot.
@@ -85,7 +86,7 @@ type Telegram struct {
 	bot           *bot.Bot // set in Messages(), used by Send/Edit
 }
 
-func NewTelegram(token, name, description string, allowedUsers []int64, opts TelegramOptions) *Telegram {
+func NewTelegram(token, name, description, purpose string, allowedUsers []int64, opts TelegramOptions) *Telegram {
 	allowed := make(map[int64]struct{}, len(allowedUsers))
 	for _, uid := range allowedUsers {
 		allowed[uid] = struct{}{}
@@ -95,6 +96,7 @@ func NewTelegram(token, name, description string, allowedUsers []int64, opts Tel
 		token:         token,
 		name:          name,
 		description:   description,
+		purpose:       purpose,
 		opts:          opts,
 		allowedUsers:  allowed,
 		webhookSecret: generateWebhookSecret(),
@@ -118,6 +120,7 @@ func (t *Telegram) Info() channel.Info {
 		Type:        channel.TypeTelegram,
 		Name:        t.name,
 		Description: t.description,
+		Purpose:     t.purpose,
 	}
 }
 
@@ -497,4 +500,3 @@ func cleanupOldMedia(dir string) {
 		}
 	}
 }
-

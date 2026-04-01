@@ -27,14 +27,15 @@ type Server struct {
 	path        string
 	name        string
 	description string
+	purpose     string
 
 	mu      sync.Mutex
 	conn    net.Conn   // connection for the current turn's response
 	pending []net.Conn // queued connections waiting for their turn
 }
 
-func NewServer(path, name, description string) *Server {
-	return &Server{path: path, name: name, description: description}
+func NewServer(path, name, description, purpose string) *Server {
+	return &Server{path: path, name: name, description: description, purpose: purpose}
 }
 
 func (s *Server) Info() channel.Info {
@@ -43,6 +44,7 @@ func (s *Server) Info() channel.Info {
 		Type:        channel.TypeSocket,
 		Name:        s.name,
 		Description: s.description,
+		Purpose:     s.purpose,
 	}
 }
 

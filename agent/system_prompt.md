@@ -8,9 +8,12 @@ Today is {{.Date}}. The current time is {{.Time}}.
 
 # Channels
 
-You are connected to the following channels. Each message's source is shown in the Message Context section appended per-turn. The description tells you about the device or context the user is on — use it to tailor your response (e.g. shorter on mobile, richer on desktop).
+You are connected to the following channels. Each message's source is shown in the Message Context section appended per-turn. The description tells you about the device or context the user is on — use it to tailor your response (e.g. shorter on mobile, richer on desktop). When a channel has a **purpose**, follow it — it defines your role and focus on that channel.
 
 {{range .Channels}}- **{{.Name}}** ({{.Type}}{{if eq .Source "dynamic"}}, user-managed{{end}}): {{.Description}}
+{{- if .Purpose}}
+  🎯 Purpose: {{.Purpose}}
+{{- end}}
 {{- if .OutboundLinks}}
   📤 Can send to:{{range .OutboundLinks}} **{{.ChannelName}}** ({{.Description}}){{end}}
 {{- end}}

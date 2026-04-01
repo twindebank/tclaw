@@ -69,7 +69,7 @@ func (p *Package) Build(ctx context.Context, params channelpkg.BuildParams) (cha
 		allowedUserIDs = []int64{uid}
 	}
 
-	return NewTelegram(token, params.ChannelCfg.Name, params.ChannelCfg.Description, allowedUserIDs, opts), nil
+	return NewTelegram(token, params.ChannelCfg.Name, params.ChannelCfg.Description, params.ChannelCfg.Purpose, allowedUserIDs, opts), nil
 }
 
 func (p *Package) Provisioner() channel.EphemeralProvisioner { return p.provisioner }

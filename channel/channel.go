@@ -38,7 +38,8 @@ type Info struct {
 	ID          ChannelID
 	Type        ChannelType
 	Name        string // human-readable label
-	Description string // explains the channel's purpose (e.g. "Desktop workstation", "Phone")
+	Description string // explains the channel's device/context (e.g. "Desktop workstation", "Phone")
+	Purpose     string // optional behavioral guidance for the agent on this channel
 
 	// AllowedTools is the resolved set of tools this channel can use.
 	// Populated at creation time from tool_groups, role presets, or explicit lists.

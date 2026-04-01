@@ -109,6 +109,11 @@ type Channel struct {
 	Name        string      `yaml:"name"`
 	Description string      `yaml:"description"`
 
+	// Purpose is optional behavioral guidance for the agent operating on this
+	// channel. Unlike Description (which describes the device/context), Purpose
+	// tells the agent what kind of work this channel is for and how to behave.
+	Purpose string `yaml:"purpose,omitempty"`
+
 	// Telegram holds Telegram-specific channel config.
 	// Non-nil when Type is "telegram".
 	Telegram *TelegramChannelConfig `yaml:"telegram,omitempty"`
