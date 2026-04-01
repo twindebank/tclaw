@@ -68,6 +68,10 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 					"max_results": {
 						"type": "integer",
 						"description": "Number of messages to return. Defaults to 10, maximum 25. Each message requires a separate API call internally, so keep this low for faster responses."
+					},
+					"page_token": {
+						"type": "string",
+						"description": "Page token from a previous google_gmail_list response (next_page_token field). Pass this to fetch the next page of results."
 					}
 				},
 				"required": ["credential_set"]
@@ -187,6 +191,10 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 					"calendar_id": {
 						"type": "string",
 						"description": "Calendar ID. Defaults to 'primary' (the user's main calendar). Use a specific calendar ID for shared or secondary calendars."
+					},
+					"page_token": {
+						"type": "string",
+						"description": "Page token from a previous google_calendar_list response (next_page_token field). Pass this to fetch the next page of results."
 					}
 				},
 				"required": ["credential_set"]

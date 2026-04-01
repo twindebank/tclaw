@@ -531,7 +531,8 @@ func createGroupHandler(s *handlerState) mcp.ToolHandler {
 func listChatsHandler(s *handlerState) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 		var a struct {
-			Limit int `json:"limit"`
+			Limit    int `json:"limit"`
+			OffsetID int `json:"offset_id"`
 		}
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
@@ -545,24 +546,30 @@ func listChatsHandler(s *handlerState) mcp.ToolHandler {
 		}
 
 		dialogs, err := s.client.API().MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
-			Limit:      a.Limit,
-			OffsetPeer: &tg.InputPeerEmpty{},
+			Limit:         a.Limit,
+			OffsetPeer:    &tg.InputPeerEmpty{},
+			OffsetID:      a.OffsetID,
+			ExcludePinned: a.OffsetID != 0,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("get dialogs: %w", err)
 		}
 
 		var chats []chatInfo
+		hasMore := false
 		switch d := dialogs.(type) {
 		case *tg.MessagesDialogs:
 			chats = extractChats(d.Chats)
 		case *tg.MessagesDialogsSlice:
 			chats = extractChats(d.Chats)
+			// Telegram returns a slice when there are more results beyond what was returned.
+			hasMore = len(d.Chats) >= a.Limit
 		}
 
 		return json.Marshal(map[string]any{
-			"chats": chats,
-			"count": len(chats),
+			"chats":    chats,
+			"count":    len(chats),
+			"has_more": hasMore,
 		})
 	}
 }
@@ -570,8 +577,9 @@ func listChatsHandler(s *handlerState) mcp.ToolHandler {
 func getHistoryHandler(s *handlerState) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 		var a struct {
-			ChatID int64 `json:"chat_id"`
-			Limit  int   `json:"limit"`
+			ChatID   int64 `json:"chat_id"`
+			Limit    int   `json:"limit"`
+			OffsetID int   `json:"offset_id"`
 		}
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
@@ -588,28 +596,36 @@ func getHistoryHandler(s *handlerState) mcp.ToolHandler {
 		}
 
 		messages, err := s.client.API().MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
-			Peer:  &tg.InputPeerChat{ChatID: a.ChatID},
-			Limit: a.Limit,
+			Peer:     &tg.InputPeerChat{ChatID: a.ChatID},
+			Limit:    a.Limit,
+			OffsetID: a.OffsetID,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("get history: %w", err)
 		}
 
-		return json.Marshal(extractMessages(messages))
+		result := extractMessages(messages)
+		result["has_more"] = result["count"].(int) >= a.Limit
+		return json.Marshal(result)
 	}
 }
 
 func searchHandler(s *handlerState) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 		var a struct {
-			Query  string `json:"query"`
-			ChatID int64  `json:"chat_id"`
+			Query    string `json:"query"`
+			ChatID   int64  `json:"chat_id"`
+			Limit    int    `json:"limit"`
+			OffsetID int    `json:"offset_id"`
 		}
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 		if a.Query == "" {
 			return nil, fmt.Errorf("query is required")
+		}
+		if a.Limit <= 0 {
+			a.Limit = 50
 		}
 
 		if err := ensureConnected(ctx, s); err != nil {
@@ -624,16 +640,19 @@ func searchHandler(s *handlerState) mcp.ToolHandler {
 		}
 
 		results, err := s.client.API().MessagesSearch(ctx, &tg.MessagesSearchRequest{
-			Peer:   peer,
-			Q:      a.Query,
-			Filter: &tg.InputMessagesFilterEmpty{},
-			Limit:  50,
+			Peer:     peer,
+			Q:        a.Query,
+			Filter:   &tg.InputMessagesFilterEmpty{},
+			Limit:    a.Limit,
+			OffsetID: a.OffsetID,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("search messages: %w", err)
 		}
 
-		return json.Marshal(extractMessages(results))
+		result := extractMessages(results)
+		result["has_more"] = result["count"].(int) >= a.Limit
+		return json.Marshal(result)
 	}
 }
 
