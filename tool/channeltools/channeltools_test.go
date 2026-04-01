@@ -168,8 +168,8 @@ func TestChannelCreate(t *testing.T) {
 			"allowed_users": []any{"123456789"},
 		})
 
-		require.Contains(t, err.Error(), "no Telegram Client API credentials")
-		require.Contains(t, err.Error(), "no bot token found")
+		require.Contains(t, err.Error(), "auto-provisioning is unavailable")
+		require.Contains(t, err.Error(), "telegram_client_info")
 	})
 
 	t.Run("rejects name collision", func(t *testing.T) {
