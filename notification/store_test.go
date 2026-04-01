@@ -127,6 +127,44 @@ func TestStore_RemoveByCredentialSet(t *testing.T) {
 	})
 }
 
+func TestStore_FindExisting(t *testing.T) {
+	t.Run("returns matching subscription", func(t *testing.T) {
+		s := newTestStore(t)
+		ctx := context.Background()
+
+		sub := testSubscription("google", "new_email", "email", notification.ScopeCredential)
+		sub.CredentialSetID = "google/personal"
+		require.NoError(t, s.Add(ctx, sub))
+
+		got, err := s.FindExisting(ctx, "google", "new_email", "email", notification.ScopeCredential, "google/personal")
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Equal(t, sub.ID, got.ID)
+	})
+
+	t.Run("returns nil when no match", func(t *testing.T) {
+		s := newTestStore(t)
+		ctx := context.Background()
+
+		sub := testSubscription("google", "new_email", "email", notification.ScopeCredential)
+		sub.CredentialSetID = "google/personal"
+		require.NoError(t, s.Add(ctx, sub))
+
+		got, err := s.FindExisting(ctx, "google", "new_email", "email", notification.ScopeCredential, "google/shared")
+		require.NoError(t, err)
+		require.Nil(t, got)
+	})
+
+	t.Run("returns nil for empty store", func(t *testing.T) {
+		s := newTestStore(t)
+		ctx := context.Background()
+
+		got, err := s.FindExisting(ctx, "google", "new_email", "email", notification.ScopeCredential, "google/personal")
+		require.NoError(t, err)
+		require.Nil(t, got)
+	})
+}
+
 func TestStore_List(t *testing.T) {
 	t.Run("returns nil for empty store", func(t *testing.T) {
 		s := newTestStore(t)

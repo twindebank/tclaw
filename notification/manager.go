@@ -83,13 +83,26 @@ func (m *Manager) Run(ctx context.Context) {
 }
 
 // Subscribe delegates to the package's Notifier, persists the subscription,
-// and stores the cancel func.
+// and stores the cancel func. Returns the existing subscription if an identical
+// one already exists (same package, type, channel, scope, credential set) to
+// prevent duplicates across restarts.
 func (m *Manager) Subscribe(ctx context.Context, packageName string, params SubscribeParams) (*SubscribeResult, error) {
 	m.mu.Lock()
 	notifier, ok := m.notifiers[packageName]
 	m.mu.Unlock()
 	if !ok {
 		return nil, fmt.Errorf("no notifier registered for package %q", packageName)
+	}
+
+	existing, err := m.store.FindExisting(ctx, packageName, params.TypeName, params.ChannelName, params.Scope, params.CredentialSetID)
+	if err != nil {
+		return nil, fmt.Errorf("check for existing subscription: %w", err)
+	}
+	if existing != nil {
+		// Duplicate — return the existing subscription without creating a new one.
+		slog.Info("notification manager: duplicate subscribe ignored, returning existing",
+			"id", existing.ID, "package", packageName, "type", params.TypeName, "channel", params.ChannelName)
+		return &SubscribeResult{Subscription: *existing}, nil
 	}
 
 	em := m.emitterFor(params.ChannelName, params.Scope, params.Label)
