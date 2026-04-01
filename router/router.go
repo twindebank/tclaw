@@ -360,7 +360,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	}
 
 	// Build the tool package registry with all deps populated on each package.
-	toolRegistry, provisioners := all.NewRegistry(all.Params{
+	toolRegistry, provisioners, populateProvisioners := all.NewRegistry(all.Params{
 		SecretStore:         secretStore,
 		StateStore:          s,
 		Callback:            r.callback,
@@ -412,6 +412,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Register all tool packages via the registry. This calls Register() on
 	// each package and auto-generates info tools.
 	registerCredentialSystem(ctx, mcpHandler, toolRegistry, credMgr, regCtx, string(mu.cfg.ID))
+
+	// Populate provisioners now that Register() has been called on all packages.
+	// Must happen after registerCredentialSystem (which calls RegisterAll).
+	populateProvisioners()
 
 	// Populate group tools from packages so channels can resolve tool groups.
 	toolgroup.SetPackageTools(toolRegistry.BuildGroupTools())
