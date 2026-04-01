@@ -663,6 +663,18 @@ func TestCreatableGroups(t *testing.T) {
 	})
 }
 
+func TestChannelNotify(t *testing.T) {
+	t.Run("rejects notify on current channel", func(t *testing.T) {
+		th := setupHarnessWithActiveChannel(t, config.EnvLocal, "admin")
+
+		err := callToolExpectError(t, th.handler, "channel_notify", map[string]any{
+			"channel_name": "admin",
+			"message":      "hello",
+		})
+		require.Contains(t, err.Error(), "cannot notify the current channel")
+	})
+}
+
 // --- helpers ---
 
 type testHarness struct {

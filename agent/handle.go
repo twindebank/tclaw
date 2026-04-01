@@ -341,7 +341,14 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		slog.Debug("resolved channel tools", "channel", msg.ChannelID,
 			"allowed", allowed, "disallowed", disallowed, "mcp_config", mcpConfigPath)
 	}
-	args := buildArgs(opts, sessionID, systemPrompt, msg.Text, allowed, disallowed, mcpConfigPath)
+	// Prepend the one-shot resume notice (if any) so the CLI sees the
+	// restart warning. The caller clears ResumeNotice after the first turn.
+	promptText := msg.Text
+	if opts.ResumeNotice != "" {
+		promptText = opts.ResumeNotice + promptText
+	}
+
+	args := buildArgs(opts, sessionID, systemPrompt, promptText, allowed, disallowed, mcpConfigPath)
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	// Send SIGTERM on context cancel instead of the default SIGKILL, giving
 	// the CLI and its Node.js child processes a chance to exit cleanly.
