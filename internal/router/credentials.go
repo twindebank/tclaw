@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"tclaw/internal/config"
 	"tclaw/internal/credential"
@@ -84,11 +85,17 @@ func registerCredentialSystem(
 		slog.Error("failed to seed credentials from env", "user", userID, "err", err)
 	}
 
-	// Call OnCredentialSetChange for all CredentialProvider packages that have
-	// existing credential sets, so they can register their tools at startup.
+	// Notify credential providers in parallel so network-bound operations
+	// (OAuth token verification, account detail loading) don't serialize.
+	var wg sync.WaitGroup
 	for _, cp := range registry.CredentialProviders() {
-		notifyCredentialChange(ctx, handler, registry, credMgr, regCtx, cp.Name())
+		wg.Add(1)
+		go func(name string) {
+			defer wg.Done()
+			notifyCredentialChange(ctx, handler, registry, credMgr, regCtx, name)
+		}(cp.Name())
 	}
+	wg.Wait()
 }
 
 // notifyCredentialChange loads credential sets for a package and calls

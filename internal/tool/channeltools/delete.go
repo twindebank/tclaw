@@ -46,6 +46,28 @@ func channelDeleteHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("channel %q not found", a.Name)
 		}
 
+		// Tear down platform resources synchronously before removing config.
+		// This mirrors channel_create's synchronous provisioning so the agent
+		// gets immediate feedback on success/failure and no half-states.
+		runtimeState, err := deps.RuntimeState.Get(ctx, a.Name)
+		if err != nil {
+			return nil, fmt.Errorf("read runtime state: %w", err)
+		}
+		if runtimeState.TeardownState.HasTeardownState() {
+			entry := deps.Registry.ByName(a.Name)
+			if entry != nil {
+				provisioner := deps.Provisioners.Get(entry.Type)
+				if provisioner != nil {
+					if teardownErr := provisioner.Teardown(ctx, runtimeState.TeardownState); teardownErr != nil {
+						return nil, fmt.Errorf("platform teardown failed for channel %q (channel NOT deleted — retry or clean up manually): %w", a.Name, teardownErr)
+					}
+				} else {
+					slog.Error("no provisioner for channel type, skipping platform teardown",
+						"channel", a.Name, "type", entry.Type)
+				}
+			}
+		}
+
 		if err := deps.ConfigWriter.RemoveChannel(deps.UserID, a.Name); err != nil {
 			return nil, fmt.Errorf("delete channel from config: %w", err)
 		}
@@ -53,23 +75,16 @@ func channelDeleteHandler(deps Deps) mcp.ToolHandler {
 		// Clean up runtime state and secrets. Best-effort since the config
 		// entry is already removed — an orphaned secret is less harmful than
 		// telling the agent the delete failed.
-		var warnings []string
-
 		if err := deps.RuntimeState.Delete(ctx, a.Name); err != nil {
-			slog.Warn("failed to clean up runtime state after delete", "channel", a.Name, "err", err)
-			warnings = append(warnings, fmt.Sprintf("runtime state cleanup: %v", err))
+			slog.Error("failed to clean up runtime state after delete", "channel", a.Name, "err", err)
 		}
-
 		if err := deps.SecretStore.Delete(ctx, channel.ChannelSecretKey(a.Name)); err != nil {
-			slog.Warn("failed to clean up channel secret after delete", "channel", a.Name, "err", err)
-			warnings = append(warnings, fmt.Sprintf("secret cleanup: %v", err))
+			slog.Error("failed to clean up channel secret after delete", "channel", a.Name, "err", err)
 		}
-
 		if deps.MemoryDir != "" {
 			knowledgeDir := filepath.Join(deps.MemoryDir, "channels", a.Name)
 			if err := os.RemoveAll(knowledgeDir); err != nil {
 				slog.Warn("failed to clean up channel knowledge dir", "channel", a.Name, "dir", knowledgeDir, "err", err)
-				warnings = append(warnings, fmt.Sprintf("knowledge dir cleanup: %v", err))
 			}
 		}
 
@@ -77,14 +92,9 @@ func channelDeleteHandler(deps Deps) mcp.ToolHandler {
 			deps.OnChannelChange()
 		}
 
-		msg := fmt.Sprintf("Channel %q deleted. The agent will restart automatically.", a.Name)
-		if len(warnings) > 0 {
-			msg += fmt.Sprintf(" Warnings: %v", warnings)
-		}
-
 		return json.Marshal(map[string]string{
 			"name":    a.Name,
-			"message": msg,
+			"message": fmt.Sprintf("Channel %q deleted. The agent will restart automatically.", a.Name),
 		})
 	}
 }

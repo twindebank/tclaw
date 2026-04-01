@@ -43,7 +43,7 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
-					"connection": {
+					"credential_set": {
 						"type": "string",
 						"description": %q,
 						"enum": %s
@@ -54,7 +54,7 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 						"enum": ["uk_retail", "uk_retail_joint", "uk_monzo_flex"]
 					}
 				},
-				"required": ["connection"]
+				"required": ["credential_set"]
 			}`, connDescription, enumJSON)),
 		},
 		{
@@ -64,7 +64,7 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
-					"connection": {
+					"credential_set": {
 						"type": "string",
 						"description": %q,
 						"enum": %s
@@ -74,7 +74,7 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 						"description": "The account ID from monzo_list_accounts."
 					}
 				},
-				"required": ["connection", "account_id"]
+				"required": ["credential_set", "account_id"]
 			}`, connDescription, enumJSON)),
 		},
 		{
@@ -84,7 +84,7 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
-					"connection": {
+					"credential_set": {
 						"type": "string",
 						"description": %q,
 						"enum": %s
@@ -94,7 +94,7 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 						"description": "The account ID from monzo_list_accounts."
 					}
 				},
-				"required": ["connection", "account_id"]
+				"required": ["credential_set", "account_id"]
 			}`, connDescription, enumJSON)),
 		},
 		{
@@ -106,7 +106,7 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
-					"connection": {
+					"credential_set": {
 						"type": "string",
 						"description": %q,
 						"enum": %s
@@ -128,7 +128,7 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 						"description": "Number of transactions to return. Default 25, max 100."
 					}
 				},
-				"required": ["connection", "account_id"]
+				"required": ["credential_set", "account_id"]
 			}`, connDescription, enumJSON)),
 		},
 		{
@@ -138,7 +138,7 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
-					"connection": {
+					"credential_set": {
 						"type": "string",
 						"description": %q,
 						"enum": %s
@@ -148,7 +148,7 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 						"description": "The transaction ID from monzo_list_transactions."
 					}
 				},
-				"required": ["connection", "transaction_id"]
+				"required": ["credential_set", "transaction_id"]
 			}`, connDescription, enumJSON)),
 		},
 	}

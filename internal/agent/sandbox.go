@@ -44,6 +44,7 @@ var systemReadOnlyPaths = []string{
 	"/usr/share/zoneinfo",
 	"/usr/local/bin", // claude, gws binaries
 	"/usr/local/lib", // node modules (npm -g)
+	"/usr/local/go",  // Go toolchain for dev sessions (go test, go build)
 }
 
 // wrapWithSandbox prepends bubblewrap arguments to run the command inside a
