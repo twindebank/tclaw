@@ -947,7 +947,10 @@ func (r *Router) BuildChannels(ctx context.Context, params BuildChannelsParams) 
 			RegisterHandler: registerHandler,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("channel %q: %w", chCfg.Name, err)
+			// Skip channels that fail to build so one broken channel doesn't
+			// take down the entire app. The agent can fix or delete the channel.
+			slog.Error("skipping channel (build failed)", "channel", chCfg.Name, "err", err)
+			continue
 		}
 		channels = append(channels, ch)
 	}
