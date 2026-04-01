@@ -16,7 +16,8 @@ func channelNotifyDef() mcp.ToolDef {
 		Name: ToolChannelNotify,
 		Description: "Send a notification message directly to a channel's user via the platform. " +
 			"Useful for making newly created channels visible or sending out-of-band alerts. " +
-			"Only works for channel types that support direct notifications.",
+			"Only works for channel types that support direct notifications. " +
+			"Cannot be used on the channel you are currently processing — use normal replies instead.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -50,6 +51,12 @@ func channelNotifyHandler(deps Deps) mcp.ToolHandler {
 		}
 		if a.Message == "" {
 			return nil, fmt.Errorf("message is required")
+		}
+
+		// Block notifications to the channel currently being processed —
+		// the agent should use normal replies for the active channel.
+		if deps.ActiveChannel != nil && deps.ActiveChannel() == a.ChannelName {
+			return nil, fmt.Errorf("cannot notify the current channel %q — use a normal reply instead", a.ChannelName)
 		}
 
 		entry := deps.Registry.ByName(a.ChannelName)
