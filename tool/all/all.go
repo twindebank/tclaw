@@ -168,7 +168,7 @@ func NewRegistry(p Params) (*toolpkg.Registry, *telegramclient.Package) {
 		chPkg,
 
 		// Credential providers (OAuth / API key).
-		&google.Package{},
+		&google.Package{NotificationManager: p.NotificationManager},
 		&monzo.Package{},
 		&tfl.Package{SecretStore: p.SecretStore},
 		&restauranttools.Package{SecretStore: p.SecretStore},

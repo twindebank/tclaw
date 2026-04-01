@@ -398,6 +398,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 	regCtx := toolpkg.RegistrationContext{
 		SecretStore:       secretStore,
+		StateStore:        s,
 		Callback:          r.callback,
 		CredentialManager: credMgr,
 		Registry:          toolRegistry,

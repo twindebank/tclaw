@@ -3,6 +3,7 @@ package google
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"tclaw/claudecli"
 	"tclaw/credential"
@@ -22,7 +23,11 @@ import (
 // router's OnProviderConnect callback. The CredentialProvider interface
 // declares the OAuth config so it's owned by this package rather than
 // provider/google.go.
-type Package struct{}
+type Package struct {
+	// NotificationManager is used to register/unregister the Gmail notifier
+	// when credentials become ready or are revoked.
+	NotificationManager *notification.Manager
+}
 
 func (p *Package) Name() string { return "google" }
 func (p *Package) Description() string {
@@ -101,7 +106,8 @@ func (p *Package) CredentialSpec() toolpkg.CredentialSpec {
 
 // OnCredentialSetChange implements toolpkg.CredentialProvider. Registers or
 // unregisters Google Workspace tools based on which credential sets have OAuth
-// tokens ready.
+// tokens ready. Also registers/unregisters the Gmail notifier with the
+// notification manager so the agent can discover and subscribe to new_email.
 func (p *Package) OnCredentialSetChange(handler *mcp.Handler, regCtx toolpkg.RegistrationContext, sets []toolpkg.ResolvedCredentialSet) error {
 	credMgr := regCtx.CredentialManager
 	if credMgr == nil {
@@ -117,10 +123,32 @@ func (p *Package) OnCredentialSetChange(handler *mcp.Handler, regCtx toolpkg.Reg
 
 	if len(depsMap) == 0 {
 		UnregisterTools(handler)
+		if p.NotificationManager != nil {
+			p.NotificationManager.UnregisterNotifier(p.Name())
+		}
 		return nil
 	}
 
 	RegisterTools(handler, depsMap)
+
+	// Register the Gmail notifier so the agent can discover and subscribe
+	// to new_email notifications. The depsMap closure rebuilds credentials
+	// on each poll so it stays fresh after token refreshes.
+	if p.NotificationManager != nil && regCtx.StateStore != nil {
+		depsFunc := func() map[credential.CredentialSetID]Deps {
+			freshSpec := p.CredentialSpec()
+			freshResolved := toResolvedSets(sets)
+			freshDeps, buildErr := providerutil.BuildDepsMap(context.Background(), credMgr, toOAuthSpec(freshSpec.OAuth), freshResolved)
+			if buildErr != nil {
+				slog.Error("google notifier: failed to rebuild deps", "error", buildErr)
+				return nil
+			}
+			return freshDeps
+		}
+		notif := NewNotifier(depsFunc, regCtx.StateStore)
+		p.NotificationManager.RegisterNotifier(p.Name(), notif)
+	}
+
 	return nil
 }
 
