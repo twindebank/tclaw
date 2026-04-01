@@ -156,21 +156,20 @@ func TestChannelCreate(t *testing.T) {
 		require.Contains(t, err.Error(), "description too long")
 	})
 
-	t.Run("telegram without provisioner skips validation", func(t *testing.T) {
+	t.Run("telegram without provisioner or token returns error", func(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 
-		// No provisioner configured — validation is skipped, channel is written
-		// to config for later reconciliation.
-		result := callTool(t, th.handler, "channel_create", map[string]any{
+		// No provisioner and no bot token — creation must fail so the agent
+		// knows to prompt the user for Telegram Client API credentials.
+		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
 			"name":          "mybot",
 			"description":   "No provisioner",
 			"type":          "telegram",
 			"allowed_users": []any{"123456789"},
 		})
 
-		var created map[string]any
-		require.NoError(t, json.Unmarshal(result, &created))
-		require.Equal(t, "mybot", created["name"])
+		require.Contains(t, err.Error(), "no Telegram Client API credentials")
+		require.Contains(t, err.Error(), "no bot token found")
 	})
 
 	t.Run("rejects name collision", func(t *testing.T) {
@@ -366,13 +365,14 @@ func TestChannelDelete(t *testing.T) {
 	t.Run("cleans up secret on delete", func(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 
-		// Create a channel and manually seed a secret for it.
+		// Seed a bot token so the channel passes the "no provisioner" check.
+		require.NoError(t, th.secretStore.Set(context.Background(), channel.ChannelSecretKey("mybot"), "fake-token"))
+
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "mybot", "description": "Telegram bot", "type": "telegram",
 			"allowed_users": []any{"123456789"},
 		})
 		reloadRegistry(t, th)
-		require.NoError(t, th.secretStore.Set(context.Background(), channel.ChannelSecretKey("mybot"), "fake-token"))
 
 		callTool(t, th.handler, "channel_delete", map[string]any{"name": "mybot"})
 
