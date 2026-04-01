@@ -611,18 +611,28 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		worktreesDir := filepath.Join(userDir, "worktrees")
 		reposDir := filepath.Join(userDir, "repos")
 
-		// Wait for a message or shutdown.
+		// If the agent was interrupted mid-turn (e.g. force-killed during a
+		// channel change), start immediately with a synthetic resume message
+		// instead of blocking for a new inbound message. Without this, the
+		// agent would never restart because no one sends it a message.
 		var firstMsg channel.TaggedMessage
-		select {
-		case <-ctx.Done():
-			cancelDynamic()
-			return
-		case m, ok := <-mergedMsgs:
-			if !ok {
+		if resumeMsg := checkAutoResume(ctx, messageQueue, allChMap); resumeMsg != nil {
+			firstMsg = *resumeMsg
+		}
+
+		// If no auto-resume, wait for a message or shutdown.
+		if firstMsg.ChannelID == "" {
+			select {
+			case <-ctx.Done():
 				cancelDynamic()
 				return
+			case m, ok := <-mergedMsgs:
+				if !ok {
+					cancelDynamic()
+					return
+				}
+				firstMsg = m
 			}
-			firstMsg = m
 		}
 
 		slog.Info("message received, starting agent", "user", mu.cfg.ID, "channel", firstMsg.ChannelID)
