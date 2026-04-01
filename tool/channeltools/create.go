@@ -29,8 +29,10 @@ func channelCreateDef() mcp.ToolDef {
 		Name: ToolChannelCreate,
 		Description: "Create a new channel by adding it to config. " +
 			"If the platform supports auto-provisioning (e.g. Telegram with Client API), " +
-			"the channel is provisioned automatically on restart. Otherwise, the agent " +
-			"will guide the user through manual setup.\n\n" +
+			"the channel is provisioned synchronously and the result is returned immediately. " +
+			"If provisioning fails, the error is returned so you can fix the issue and retry. " +
+			"If auto-provisioning is not available, the channel is created with status 'needs_setup' " +
+			"and the agent guides the user through manual setup.\n\n" +
 			"Set ephemeral: true for channels that should auto-delete after idle timeout. " +
 			"Use initial_message to deliver a kick-off task to the new channel on first boot.",
 		InputSchema: json.RawMessage(`{
@@ -229,8 +231,8 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			idleTimeoutStr = timeout.String()
 		}
 
-		// Build the config channel entry. No provisioning here — the reconciler
-		// handles that on the next startup/reload cycle.
+		// Build the config channel entry. Provisioning happens synchronously via
+		// ReconcileOne below so the agent gets immediate feedback.
 		ch := config.Channel{
 			Type:                 channelType,
 			Name:                 a.Name,
