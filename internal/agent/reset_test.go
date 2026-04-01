@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"tclaw/internal/channel"
+	"tclaw/internal/claudecli"
 )
 
 func TestResetFlow(t *testing.T) {
@@ -457,6 +458,15 @@ func sendMessages(t *testing.T, opts Options, messages ...string) (error, []stri
 	opts.Channels = map[channel.ChannelID]channel.Channel{"test-ch": ch}
 	if opts.Sessions == nil {
 		opts.Sessions = make(map[channel.ChannelID]string)
+	}
+	// Default to all builtins so reset/stop/compact tests work.
+	if opts.AllowedTools == nil {
+		opts.AllowedTools = []claudecli.Tool{
+			claudecli.BuiltinStop, claudecli.BuiltinCompact,
+			claudecli.BuiltinReset, claudecli.BuiltinResetSession,
+			claudecli.BuiltinResetMemories, claudecli.BuiltinResetProject,
+			claudecli.BuiltinResetAll,
+		}
 	}
 
 	msgCh := make(chan channel.TaggedMessage, len(messages)+1)

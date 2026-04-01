@@ -108,7 +108,6 @@ func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationCont
 		MemoryDir:    p.MemoryDir,
 		ReconcileParams: reconciler.ReconcileParams{
 			Channels:     nil, // Populated from config at runtime.
-			SecretStore:  p.SecretStore,
 			RuntimeState: p.RuntimeState,
 			Provisioners: p.Provisioners,
 		},

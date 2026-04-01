@@ -41,7 +41,6 @@ type ReconciledChannel struct {
 // ReconcileParams holds dependencies for reconciliation.
 type ReconcileParams struct {
 	Channels     []config.Channel
-	SecretStore  any // unused now but kept for ProvisionResult token storage
 	RuntimeState *channel.RuntimeStateStore
 	Provisioners channel.ProvisionerLookup
 }

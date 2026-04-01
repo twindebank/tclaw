@@ -9,16 +9,16 @@ import (
 )
 
 func TestIsBuiltinAllowed(t *testing.T) {
-	t.Run("no builtins allows everything", func(t *testing.T) {
-		// Backwards compat: no builtin__ entries -> all builtins allowed.
+	t.Run("no builtins denies everything", func(t *testing.T) {
+		// Without explicit builtin groups, no builtins are available.
 		opts := Options{
 			AllowedTools: []claudecli.Tool{"Bash", "Read"},
 		}
-		if !isBuiltinAllowed(opts, "ch1", claudecli.BuiltinStop) {
-			t.Error("expected stop allowed when no builtins in list")
+		if isBuiltinAllowed(opts, "ch1", claudecli.BuiltinStop) {
+			t.Error("expected stop denied when no builtins in list")
 		}
-		if !isBuiltinAllowed(opts, "ch1", claudecli.BuiltinResetAll) {
-			t.Error("expected reset_all allowed when no builtins in list")
+		if isBuiltinAllowed(opts, "ch1", claudecli.BuiltinResetAll) {
+			t.Error("expected reset_all denied when no builtins in list")
 		}
 	})
 
@@ -167,14 +167,14 @@ func TestResolveResetChoice(t *testing.T) {
 }
 
 func TestAllowedResetLevels(t *testing.T) {
-	t.Run("no builtins gives all levels", func(t *testing.T) {
-		// No builtins -> all levels allowed (backwards compat).
+	t.Run("no builtins gives no levels", func(t *testing.T) {
+		// Without explicit builtin groups, no reset levels are available.
 		opts := Options{
 			AllowedTools: []claudecli.Tool{"Bash"},
 		}
 		levels := allowedResetLevels(opts, "ch1")
-		if len(levels) != 4 {
-			t.Errorf("expected 4 levels (all), got %d: %v", len(levels), levels)
+		if len(levels) != 0 {
+			t.Errorf("expected 0 levels, got %d: %v", len(levels), levels)
 		}
 	})
 
@@ -205,14 +205,14 @@ func TestAllowedResetLevels(t *testing.T) {
 		}
 	})
 
-	t.Run("session always included", func(t *testing.T) {
-		// Even if no reset builtins match, Session is always included.
+	t.Run("no reset builtins gives empty", func(t *testing.T) {
+		// Only non-reset builtins → no reset levels available.
 		opts := Options{
 			AllowedTools: []claudecli.Tool{claudecli.BuiltinStop},
 		}
 		levels := allowedResetLevels(opts, "ch1")
-		if len(levels) != 1 || levels[0] != ResetSession {
-			t.Errorf("expected [Session] as minimum, got %v", levels)
+		if len(levels) != 0 {
+			t.Errorf("expected empty levels, got %v", levels)
 		}
 	})
 }
@@ -266,36 +266,27 @@ func TestStop(t *testing.T) {
 }
 
 func TestResetPermission(t *testing.T) {
-	t.Run("denied on restricted channel", func(t *testing.T) {
+	t.Run("denied when no reset builtins", func(t *testing.T) {
 		opts := Options{
 			ChannelToolOverrides: map[channel.ChannelID]ChannelToolPermissions{
 				"test-ch": {
-					// No reset builtins at all, but has some builtin
-					// so the default-allow doesn't apply.
+					// Has stop but no reset builtins — reset command should be denied.
 					AllowedTools: []claudecli.Tool{claudecli.BuiltinStop},
 				},
 			},
 		}
 		_, sends := sendMessages(t, opts, "reset")
 
-		// Reset should still be allowed (session is always included),
-		// but only show session + cancel.
+		// Should get the denial message, not a reset menu.
 		found := false
 		for _, s := range sends {
-			if strings.Contains(s, "Reset") && strings.Contains(s, "Session") {
+			if strings.Contains(s, "not available") {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("expected reset menu with at least Session, got: %v", sends)
-		}
-
-		// Should NOT contain Project or Everything.
-		for _, s := range sends {
-			if strings.Contains(s, "Project") || strings.Contains(s, "Everything") {
-				t.Errorf("restricted reset menu should not contain Project/Everything, got: %s", s)
-			}
+			t.Errorf("expected denial message, got: %v", sends)
 		}
 	})
 }
