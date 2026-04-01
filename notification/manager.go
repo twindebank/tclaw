@@ -52,6 +52,13 @@ func (m *Manager) RegisterNotifier(packageName string, notifier Notifier) {
 	m.notifiers[packageName] = notifier
 }
 
+// UnregisterNotifier removes a package's notifier (e.g. when credentials are revoked).
+func (m *Manager) UnregisterNotifier(packageName string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.notifiers, packageName)
+}
+
 // Run loads persisted subscriptions, restarts their watchers, and blocks
 // until ctx is cancelled.
 func (m *Manager) Run(ctx context.Context) {
