@@ -9,44 +9,6 @@
 **EVERY time you write or modify code — including in resumed/continued sessions — you MUST read @docs/go-patterns.md first AND follow every pattern exactly.** No exceptions. This includes tests, one-line fixes, and refactors. Don't rely on memory or assumptions about conventions; read the file and match its patterns precisely. Tests MUST use `t.Run` subtests grouped under one top-level func per method — never split scenarios into separate top-level test functions.
 
 
-## TODO
-
-### Features
-- System message posted to admin channel on every redeployment (with commit hash / changelog)
-- Google Maps / location tools — place search, directions, travel time; location history integration
-- Periodic job to inspect logs automatically and open PRs to fix recurring errors
-- Proper versioning for deployments (semver tags, changelog generation, release notes)
-- Periodic job to audit repo dependencies and open upgrade PRs (needs `repo_*` + `dev_*` tools working together)
-- Voice message transcription — Telegram sends voice notes as .ogg files which the agent can't read. Claude API has no native audio input (as of Mar 2026); use Groq Whisper API (generous free tier). Transcribe at ingest in the Telegram handler, inject as `[Voice message: "<transcript>"]` so the agent sees plain text with no changes needed downstream.
-- Token exhausted state — when Claude API limit is hit, record reset time in channel state. Scheduled jobs should be deferred until reset time (not silently dropped). On reset, prompt user whether to run deferred schedules or skip them. Normal inbound messages should be queued and replayed (or flagged as unactioned) when the limit resets so nothing is silently lost.
-- Channel busy/free check — `channel_is_busy` tool: returns whether a channel has an active agent turn or recent conversation activity (with configurable timeout). Enables scheduled tasks to check before sending cross-channel messages, and to queue/defer if busy rather than interrupting.
-- ~~Channel hot-reload~~ ✅ Done (PR #57) — channel creates hot-add without restart; edits/deletes still restart.
-- ~~Graceful message queuing on restart~~ ✅ Done (PR #59) — persistent queue, messages survive restarts. Unified into `queue/` package (PR #74) with source-based priority.
-- ~~Agent auto-resume on restart~~ ✅ Done — interrupted marker preserved on shutdown, resume message injected on restart.
-- ~~Config-driven channels~~ ✅ Done — all channels in tclaw.yaml, DynamicStore removed, reconciler for desired-state provisioning, config.Writer for atomic YAML mutation, RuntimeStateStore for transient state, ChannelBuilder interface for platform-agnostic channel building.
-- Channel history store — archive deleted channels (name, type, session ID, dev session, timestamps) so the agent can reference past ephemeral tasks. `channel_history` MCP tool for querying.
-- Channel types in own packages — move socket/stdio/telegram/oneshot into `channel/socketchannel/` etc. with builders co-located. Currently builders are in `router/`.
-- `channel_delete` cleanup — archive the chat (export/preserve history before deleting the bot) and automatically cancel any associated dev sessions. Requires channels to track their dev sessions and dev sessions to be tagged with the originating channel. (Note: `channel_done` now requires user confirmation before teardown.)
-- ~~Notification system~~ ✅ Done (PR #74) — push-based notifications with Notifier interface, unified priority queue, Gmail history.list polling, MCP tools (subscribe/unsubscribe/list/types).
-- GitHub PR merged notifications — notify the relevant channel when a PR is merged. Now possible via the notification system — devtools implements `Notifier` with a webhook watcher.
-- Email auto-categorisation — auto-categorise emails (e.g. receipts, travel, action-required) and apply a skill to handle each category automatically. Gmail notifications are already in place; categorisation is the next step.
-- Ephemeral channel system prompt enrichment — when a channel is created as ephemeral, inject context into its system prompt: the `initial_message` (so the agent knows its task from the start, not just from the first inbound message), and a note that it is a purpose-scoped ephemeral channel (so it stays focused and knows to call `channel_done` when done).
-
-### Maintenance
-- Periodic jobs to check Claude Code changelog and dynamically update agent/CLI behavior
-- Check CVEs and dynamically update dependencies
-- Generally update dependencies (go mod tidy, bump versions)
-- Other periodic maintenance tasks (e.g. rotate secrets, audit configs)
-
-### Dev Experience
-- GitHub Actions CI: run `go build ./...` + `go test ./...` on every PR (currently no CI)
-- `dev_logs` time range filter — `since` param (e.g. "last 4 days") so historical logs are easily queryable
-- Local dev parity — `make dev` that spins up the full stack with a test Telegram bot token and hot reload
-- PR preview deployments — deploy PRs to a separate Fly.io app (`tclaw-preview`) for manual testing before merge
-- `dev_status` should show CI check results alongside uncommitted changes
-- Structured log viewer — `dev_logs` currently returns raw text; a mode that groups by session/tool-call would help debug agent turns
-- Replay harness — record + replay Telegram message sequences to test agent behavior without live bots
-
 ## Code Style
 - **Fail early, fail at build time** — if something is required at runtime, validate it as early as possible. Prefer build-time checks (Dockerfile `RUN test`, compile-time assertions) over runtime errors. Never deploy a binary that's known to be broken.
 - Comment code that isn't obvious, prefer readability over clever code
