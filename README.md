@@ -1,8 +1,48 @@
 # tclaw
 
-Multi-user Claude Code host. Spawns isolated `claude` CLI subprocesses with persistent memory, multi-channel communication, OAuth connections, scheduling, and MCP tool extensibility.
+A self-hosted personal AI assistant that wraps the real `claude` CLI — not an Agent SDK. This means you get everything Claude Code already has (Bash, file tools, web search, model switching, context compaction) without reimplementing any of it. tclaw adds multi-channel communication, per-channel permissions, OAuth connections, scheduling, and a full MCP tool layer on top.
 
-Self-hosted, single binary, drives the `claude` CLI directly (not the Agent SDK).
+Single Go binary. No containers required to run.
+
+## How It Works
+
+```
+  Channels (socket, Telegram, stdio)
+              │
+         ┌────▼─────┐
+         │  Router   │  per-user lifecycle, lazy start/stop
+         └────┬──────┘
+              │
+    ┌─────────▼──────────┐
+    │  claude CLI subprocess  │  spawned per turn, stream-json output
+    │  (the real Claude Code) │  all built-in tools available
+    └─────────┬──────────┘
+              │
+    ┌─────────▼──────────┐
+    │  MCP Server (per-user) │  tclaw's own tools: channels, schedules,
+    │  localhost:<random>     │  connections, secrets, dev workflow, etc.
+    └────────────────────┘
+```
+
+tclaw spawns the actual `claude` CLI binary per conversation turn, streaming structured JSON events back to the channel. Each user gets their own isolated subprocess with a separate HOME directory, memory files, encrypted secret store, and MCP server. The agent starts lazily on the first message and shuts down after 10 minutes of inactivity.
+
+## Key Features
+
+**Multi-channel with per-channel roles** — Socket (local TUI), Telegram (mobile), stdio. Each channel gets its own session and can have a different role: `superuser` on desktop, `assistant` (no Bash) on mobile.
+
+**Agent-managed channels** — The agent can create, edit, and delete channels at runtime via MCP tools. Ephemeral channels auto-provision Telegram bots and clean up after an idle timeout. Config is the source of truth — a reconciler auto-converges desired state on every change.
+
+**OAuth connections** — Google Workspace, Monzo, Enable Banking, and more. Connections are scoped per-channel with automatic token refresh. The agent walks users through the OAuth flow.
+
+**Remote MCP servers** — Connect to any MCP server (Linear, etc.) with automatic OAuth discovery and registration. Scoped per-channel.
+
+**Scheduling and notifications** — Cron schedules, Gmail polling, push notifications. All message sources (user, schedule, notification, cross-channel) flow through a unified priority queue — user messages always come first, everything else waits for idle.
+
+**Dev workflow** — The agent can work on its own codebase: git worktrees, PR creation, deployment, log inspection. It can also monitor external repos for new commits.
+
+**Persistent memory** — Per-user `CLAUDE.md` and topic files. The agent reads and writes its own memory, carried across sessions and restarts.
+
+**Security** — Per-user filesystem sandbox via bubblewrap (Linux), environment allowlist (no cloud credentials leak to subprocess), NaCl-encrypted secret store with three-tier resolution (keychain, encrypted store, Fly secrets), env var scrubbing before subprocess spawn.
 
 ## Prerequisites
 
@@ -43,9 +83,9 @@ tclaw oneshot "hello, what can you do?" 2>/dev/null
 
 > **Tip:** See `tclaw.example.yaml` for a fully commented config reference.
 
-## What You Can Do Locally
+## What You Can Do Out of the Box
 
-Out of the box with just the socket channel, your agent can:
+With just the socket channel, your agent can:
 
 - **Remember things** — ask it to remember preferences, it writes to its `CLAUDE.md` memory file
 - **Use all Claude Code tools** — Bash, file read/write/edit, web search, web fetch, etc.
