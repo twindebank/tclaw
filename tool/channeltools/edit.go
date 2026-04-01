@@ -28,6 +28,10 @@ func channelEditDef() mcp.ToolDef {
 					"type": "string",
 					"description": "New description for the channel."
 				},
+				"purpose": {
+					"type": "string",
+					"description": "Behavioral guidance for the agent on this channel. Pass empty string to clear."
+				},
 				"allowed_users": {
 					"type": "array",
 					"items": {"type": "string"},
@@ -74,6 +78,7 @@ func channelEditDef() mcp.ToolDef {
 type channelEditArgs struct {
 	Name            string          `json:"name"`
 	Description     string          `json:"description"`
+	Purpose         *string         `json:"purpose"`
 	AllowedUsers    *[]string       `json:"allowed_users"`
 	ToolGroups      []string        `json:"tool_groups"`
 	AllowedTools    []string        `json:"allowed_tools"`
@@ -89,7 +94,7 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
-		hasChange := a.Description != "" || a.AllowedUsers != nil ||
+		hasChange := a.Description != "" || a.Purpose != nil || a.AllowedUsers != nil ||
 			a.ToolGroups != nil || a.AllowedTools != nil || a.DisallowedTools != nil ||
 			a.CreatableGroups != nil || a.Links != nil
 		if !hasChange {
@@ -144,6 +149,9 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 		if err := deps.ConfigWriter.UpdateChannel(deps.UserID, a.Name, func(ch *config.Channel) {
 			if a.Description != "" {
 				ch.Description = a.Description
+			}
+			if a.Purpose != nil {
+				ch.Purpose = *a.Purpose
 			}
 			if len(toolGroups) > 0 {
 				ch.ToolGroups = toolGroups
