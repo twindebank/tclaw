@@ -18,6 +18,10 @@ type Package struct {
 	StateStore   store.Store
 	RuntimeState *channel.RuntimeStateStore
 
+	// TelegramUserID is the user's Telegram user ID from config, passed
+	// through to the provisioner for auto-start and notification delivery.
+	TelegramUserID string
+
 	// Provisioner is set by Register and read by the router to pass to
 	// channeltools for auto-provisioning.
 	Provisioner channel.EphemeralProvisioner
@@ -73,6 +77,8 @@ func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationCont
 		SecretStore: p.SecretStore,
 		StateStore:  p.StateStore,
 	})
+
+	provisioner.TelegramUserID = p.TelegramUserID
 
 	// Store the provisioner on the struct so the router can read it.
 	p.Provisioner = provisioner
