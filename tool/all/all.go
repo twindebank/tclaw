@@ -6,6 +6,8 @@ package all
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"tclaw/channel"
@@ -70,6 +72,11 @@ type Params struct {
 	CrossChOutput chan<- channel.TaggedMessage
 	ChannelsFunc  func() map[channel.ChannelID]channel.Channel
 
+	// Channel transcript deps.
+	SessionStore *channel.SessionStore
+	HomeDir      string
+	MemoryDir    string
+
 	// Schedule tools.
 	ScheduleStore *schedule.Store
 	Scheduler     *schedule.Scheduler
@@ -112,8 +119,9 @@ func NewRegistry(p Params) (*toolpkg.Registry, *telegramclient.Package) {
 	}
 
 	tgClientPkg := &telegramclient.Package{
-		SecretStore: p.SecretStore,
-		StateStore:  p.StateStore,
+		SecretStore:  p.SecretStore,
+		StateStore:   p.StateStore,
+		RuntimeState: p.RuntimeState,
 	}
 
 	// Build the provisioners map — populated after telegramclient.Register()
@@ -135,6 +143,18 @@ func NewRegistry(p Params) (*toolpkg.Registry, *telegramclient.Package) {
 		Links:           p.Links,
 		Output:          p.CrossChOutput,
 		Channels:        p.ChannelsFunc,
+		SessionStore:    p.SessionStore,
+		HomeDir:         p.HomeDir,
+		MemoryDir:       p.MemoryDir,
+		// Lazy — tgClientPkg.state is nil until Register() runs, so we
+		// call ChannelHistoryFunc() at invocation time, not construction time.
+		TelegramHistory: func(ctx context.Context, channelName string, limit int) (json.RawMessage, error) {
+			fn := tgClientPkg.ChannelHistoryFunc()
+			if fn == nil {
+				return nil, fmt.Errorf("telegram client not available — credentials may not be configured")
+			}
+			return fn(ctx, channelName, limit)
+		},
 	}
 
 	reg := toolpkg.NewRegistry(

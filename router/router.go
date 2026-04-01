@@ -180,7 +180,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Aliases for backward compat within this function — these will be
 	// removed as the remaining inline code is extracted.
 	s := stores.State
-	sessionStore := stores.Session
+	sessionStore := channel.NewSessionStore(stores.Session)
 	secretStore := stores.Secret
 	userDir := dirs.Base
 	homeDir := dirs.Home
@@ -379,6 +379,9 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		Links:               linksFunc,
 		CrossChOutput:       chan<- channel.TaggedMessage(crossChannelMsgs),
 		ChannelsFunc:        channelsFunc,
+		SessionStore:        sessionStore,
+		HomeDir:             homeDir,
+		MemoryDir:           memoryDir,
 		ScheduleStore:       scheduleStore,
 		Scheduler:           scheduler,
 		NotificationManager: notificationManager,
@@ -645,7 +648,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// Load sessions from store for each channel.
 		sessions := make(map[channel.ChannelID]string)
 		for chID := range allChMap {
-			sid, loadErr := loadSession(ctx, sessionStore, chID)
+			sid, loadErr := sessionStore.Current(ctx, channel.SessionKey(chID))
 			if loadErr != nil {
 				slog.Warn("failed to load session, starting fresh", "channel", chID, "err", loadErr)
 			}
@@ -740,7 +743,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			Sessions:     sessions,
 			Queue:        messageQueue,
 			OnSessionUpdate: func(chID channel.ChannelID, sessionID string) {
-				if saveErr := saveSession(ctx, sessionStore, chID, sessionID); saveErr != nil {
+				if saveErr := sessionStore.SetCurrent(ctx, channel.SessionKey(chID), sessionID); saveErr != nil {
 					slog.Error("failed to save session", "err", saveErr)
 				}
 			},
