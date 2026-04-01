@@ -42,7 +42,7 @@ func devDeployedHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("read github token: %w", err)
 		}
 
-		repoDir := fmt.Sprintf("%s/repo", deps.UserDir)
+		repoDir := repoDirForURL(deps.UserDir, repoURL)
 		if err := cloneOrFetch(repoDir, repoURL, token); err != nil {
 			return nil, fmt.Errorf("fetch: %w", err)
 		}

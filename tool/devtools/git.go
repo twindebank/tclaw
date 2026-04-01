@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -236,6 +237,29 @@ func checkPermissionError(output string, err error) error {
 		return fmt.Errorf("%w — check that your GitHub PAT has Contents: Read and write access at https://github.com/settings/personal-access-tokens", err)
 	}
 	return err
+}
+
+// repoDirForURL returns the bare repo directory for a given repo URL, namespaced
+// under <userDir>/repos/<owner>-<repo> so that multiple repos never share the same
+// bare clone and silently clobber each other.
+//
+// Example: https://github.com/twindebank/tclaw → <userDir>/repos/twindebank-tclaw
+func repoDirForURL(userDir string, repoURL string) string {
+	// Strip scheme (https://) and host (github.com/), then take "owner/repo".
+	slug := repoURL
+	if i := strings.Index(slug, "://"); i >= 0 {
+		slug = slug[i+3:]
+	}
+	if i := strings.Index(slug, "/"); i >= 0 {
+		slug = slug[i+1:]
+	}
+	slug = strings.TrimSuffix(slug, ".git")
+	// Replace path separators with dashes: "owner/repo" → "owner-repo".
+	slug = strings.ReplaceAll(slug, "/", "-")
+	if slug == "" {
+		slug = "repo"
+	}
+	return filepath.Join(userDir, "repos", slug)
 }
 
 // resetOriginURL sets the origin remote URL to the clean (token-free) URL so

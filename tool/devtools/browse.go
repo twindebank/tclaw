@@ -51,7 +51,7 @@ func devBrowseHandler(deps Deps) mcp.ToolHandler {
 			)
 		}
 
-		repoDir := filepath.Join(deps.UserDir, "repo")
+		repoDir := repoDirForURL(deps.UserDir, repoURL)
 		if err := cloneOrFetch(repoDir, repoURL, token); err != nil {
 			return nil, fmt.Errorf("fetch: %w", err)
 		}

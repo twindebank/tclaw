@@ -126,8 +126,8 @@ func devStartHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("session already exists for branch %q — use dev_status to check it or dev_cancel to remove it", branch)
 		}
 
-		// Clone or fetch the bare repo.
-		repoDir := filepath.Join(deps.UserDir, "repo")
+		// Clone or fetch the bare repo, namespaced by repo URL so multiple repos don't clobber each other.
+		repoDir := repoDirForURL(deps.UserDir, repoURL)
 		if err := cloneOrFetch(repoDir, repoURL, token); err != nil {
 			return nil, fmt.Errorf("clone/fetch: %w", err)
 		}

@@ -60,7 +60,7 @@ func devPRChecksHandler(deps Deps) mcp.ToolHandler {
 
 		// Run gh pr checks in the bare repo directory so gh can infer the repo.
 		// Falls back to the first available worktree if the bare repo doesn't exist yet.
-		repoDir := filepath.Join(deps.UserDir, "repo")
+		repoDir := repoDirForURL(deps.UserDir, repoURL)
 		prStr := fmt.Sprintf("%d", a.PR)
 
 		// Fetch PR state (open/merged/closed) separately — gh pr checks doesn't include it.
