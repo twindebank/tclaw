@@ -235,6 +235,12 @@ type Options struct {
 	// Handles persistence, source-based priority (user first), and
 	// busy-channel awareness. May be nil if not needed.
 	Queue *queue.Queue
+
+	// ResumeNotice is prepended to the first message's prompt (but not
+	// msg.Text) after a restart so the CLI sees the context warning
+	// while builtin command detection still operates on the raw user
+	// input. Set by the router when isRestart is true.
+	ResumeNotice string
 }
 
 type handleResult struct {
@@ -569,12 +575,15 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		}
 
 		handleDone := make(chan handleResult, 1)
+		// Snapshot and clear so only the first turn gets the resume notice.
+		turnOpts := opts
+		opts.ResumeNotice = ""
 		go func() {
 			currentSessionID := sessionID
 			delay := rateLimitInitialDelay
 
 			for attempt := 0; attempt <= rateLimitMaxRetries; attempt++ {
-				newSessionID, err := handle(turnCtx, opts, currentSessionID, msg)
+				newSessionID, err := handle(turnCtx, turnOpts, currentSessionID, msg)
 				if newSessionID != "" {
 					currentSessionID = newSessionID
 				}
@@ -588,7 +597,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 					"attempt", attempt+1, "max_retries", rateLimitMaxRetries,
 					"delay", delay, "channel", msg.ChannelID)
 
-				if retryCh, ok := opts.channels()[msg.ChannelID]; ok {
+				if retryCh, ok := turnOpts.channels()[msg.ChannelID]; ok {
 					notice := fmt.Sprintf("⏳ Rate limited — retrying in %ds (attempt %d/%d)...",
 						int(delay.Seconds()), attempt+1, rateLimitMaxRetries)
 					if _, sendErr := retryCh.Send(turnCtx, notice); sendErr != nil {

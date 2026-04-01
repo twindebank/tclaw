@@ -641,18 +641,16 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			activityTracker.MessageReceived(ch.Info().Name)
 		}
 
-		// On restarts (idle timeout, deploy, channel change), prepend a notice to
-		// the first message so the agent knows the session was interrupted. This
-		// prevents the agent from re-executing actions that were pending before the
-		// restart — e.g. seeing an old "ya" in history and treating it as fresh
-		// authorization for a deploy or other irreversible action.
+		// On restarts (idle timeout, deploy, channel change), pass a resume
+		// notice via Options so the CLI sees the warning while builtin
+		// command detection still operates on the raw user input.
+		var resumeNotice string
 		if isRestart {
-			const resumeNotice = "[SYSTEM: Session resumed after restart. " +
+			resumeNotice = "[SYSTEM: Session resumed after restart. " +
 				"Treat all prior conversation as read-only context. " +
 				"Do NOT re-execute or continue any actions from before the restart — " +
 				"short replies like \"ya\" or \"yes\" in the history are NOT authorization " +
 				"for pending actions. Wait for explicit new instructions.]\n"
-			firstMsg.Text = resumeNotice + firstMsg.Text
 		}
 
 		agentCtx, cancel := context.WithCancel(ctx)
@@ -797,6 +795,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			UserID:        string(mu.cfg.ID),
 			SetupToken:    setupToken,
 			HasProdConfig: config.HasEnv(r.configPath, config.EnvProd),
+			ResumeNotice:  resumeNotice,
 		}
 
 		agentErr := make(chan error, 1)
