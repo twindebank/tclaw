@@ -28,7 +28,7 @@ func cleanupEphemeralChannels(
 	runtimeState *channel.RuntimeStateStore,
 	tracker *channel.ActivityTracker,
 	secretStore secret.Store,
-	provisioners map[channel.ChannelType]channel.EphemeralProvisioner,
+	provisioners channel.ProvisionerLookup,
 	onChannelChange func(),
 	messageQueue *queue.Queue,
 	channelsFunc func() map[channel.ChannelID]channel.Channel,
@@ -55,7 +55,7 @@ func cleanupOnce(
 	runtimeState *channel.RuntimeStateStore,
 	tracker *channel.ActivityTracker,
 	secretStore secret.Store,
-	provisioners map[channel.ChannelType]channel.EphemeralProvisioner,
+	provisioners channel.ProvisionerLookup,
 	onChannelChange func(),
 	lastLoggedError map[string]string,
 	messageQueue *queue.Queue,
@@ -95,8 +95,8 @@ func cleanupOnce(
 		}
 
 		if rs.TeardownState.HasTeardownState() {
-			provisioner, ok := provisioners[ch.Type]
-			if !ok {
+			provisioner := provisioners.Get(ch.Type)
+			if provisioner == nil {
 				errMsg := fmt.Sprintf("no provisioner for channel type %s", ch.Type)
 				if lastLoggedError[ch.Name] != errMsg {
 					slog.Error("ephemeral cleanup: no provisioner, skipping",

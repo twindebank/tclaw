@@ -29,7 +29,7 @@ func TestInterceptPendingDone(t *testing.T) {
 			doneTaggedMsg("mychan-id", "yes"),
 			doneChannelsFunc("mychan-id", "mychan", channel.TypeSocket),
 			rs, cw, testUserID, ss,
-			map[channel.ChannelType]channel.EphemeralProvisioner{channel.TypeSocket: prov},
+			provLookup(channel.TypeSocket, prov),
 			func() { changeCalled = true },
 			"",
 		)
@@ -62,7 +62,7 @@ func TestInterceptPendingDone(t *testing.T) {
 			doneTaggedMsg("ephemeral-id", "yes"),
 			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeTelegram),
 			rs, cw, testUserID, ss,
-			map[channel.ChannelType]channel.EphemeralProvisioner{channel.TypeTelegram: prov},
+			provLookup(channel.TypeTelegram, prov),
 			func() { changeCalled = true },
 			"",
 		)
@@ -97,7 +97,7 @@ func TestInterceptPendingDone(t *testing.T) {
 			doneTaggedMsg("ephemeral-id", "yes"),
 			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeTelegram),
 			rs, cw, testUserID, ss,
-			map[channel.ChannelType]channel.EphemeralProvisioner{channel.TypeTelegram: prov},
+			provLookup(channel.TypeTelegram, prov),
 			nil,
 			"",
 		)
@@ -122,7 +122,7 @@ func TestInterceptPendingDone(t *testing.T) {
 			doneTaggedMsg("ephemeral-id", "no"),
 			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeSocket),
 			rs, cw, testUserID, ss,
-			map[channel.ChannelType]channel.EphemeralProvisioner{channel.TypeSocket: prov},
+			provLookup(channel.TypeSocket, prov),
 			func() { changeCalled = true },
 			"",
 		)
@@ -156,7 +156,7 @@ func TestInterceptPendingDone(t *testing.T) {
 			doneTaggedMsg("ephemeral-id", "yes"),
 			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeTelegram),
 			rs, cw, testUserID, ss,
-			map[channel.ChannelType]channel.EphemeralProvisioner{channel.TypeTelegram: prov},
+			provLookup(channel.TypeTelegram, prov),
 			func() { changeCalled = true },
 			"",
 		)
@@ -173,6 +173,15 @@ func TestInterceptPendingDone(t *testing.T) {
 }
 
 // --- helpers ---
+
+func provLookup(ct channel.ChannelType, prov channel.EphemeralProvisioner) channel.ProvisionerLookup {
+	return func(t channel.ChannelType) channel.EphemeralProvisioner {
+		if t == ct {
+			return prov
+		}
+		return nil
+	}
+}
 
 func setupDoneTest(t *testing.T) (*channel.RuntimeStateStore, *memDoneSecretStore, *config.Writer) {
 	t.Helper()

@@ -30,7 +30,7 @@ func interceptPendingDone(
 	configWriter *config.Writer,
 	userID user.ID,
 	secretStore secret.Store,
-	provisioners map[channel.ChannelType]channel.EphemeralProvisioner,
+	provisioners channel.ProvisionerLookup,
 	onChannelChange func(),
 	memoryDir string,
 ) bool {
@@ -71,7 +71,7 @@ func interceptPendingDone(
 
 	// Send closing message before teardown (best-effort).
 	if rs.PlatformState.HasPlatformState() {
-		if provisioner, hasProv := provisioners[ch.Info().Type]; hasProv {
+		if provisioner := provisioners.Get(ch.Info().Type); provisioner != nil {
 			token, tokenErr := secretStore.Get(ctx, channel.ChannelSecretKey(chName))
 			if tokenErr != nil {
 				slog.Warn("interceptPendingDone: failed to read token for closing message",
@@ -85,8 +85,8 @@ func interceptPendingDone(
 
 	// Platform teardown.
 	if rs.TeardownState.HasTeardownState() {
-		provisioner, hasProv := provisioners[ch.Info().Type]
-		if !hasProv {
+		provisioner := provisioners.Get(ch.Info().Type)
+		if provisioner == nil {
 			slog.Error("interceptPendingDone: no provisioner, skipping platform teardown",
 				"channel", chName, "type", ch.Info().Type)
 		} else {
