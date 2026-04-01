@@ -31,6 +31,7 @@ func TestInterceptPendingDone(t *testing.T) {
 			rs, cw, testUserID, ss,
 			map[channel.ChannelType]channel.EphemeralProvisioner{channel.TypeSocket: prov},
 			func() { changeCalled = true },
+			"",
 		)
 
 		require.False(t, consumed)
@@ -63,6 +64,7 @@ func TestInterceptPendingDone(t *testing.T) {
 			rs, cw, testUserID, ss,
 			map[channel.ChannelType]channel.EphemeralProvisioner{channel.TypeTelegram: prov},
 			func() { changeCalled = true },
+			"",
 		)
 
 		require.True(t, consumed)
@@ -97,6 +99,7 @@ func TestInterceptPendingDone(t *testing.T) {
 			rs, cw, testUserID, ss,
 			map[channel.ChannelType]channel.EphemeralProvisioner{channel.TypeTelegram: prov},
 			nil,
+			"",
 		)
 
 		require.True(t, consumed)
@@ -121,6 +124,7 @@ func TestInterceptPendingDone(t *testing.T) {
 			rs, cw, testUserID, ss,
 			map[channel.ChannelType]channel.EphemeralProvisioner{channel.TypeSocket: prov},
 			func() { changeCalled = true },
+			"",
 		)
 
 		require.False(t, consumed)
@@ -154,6 +158,7 @@ func TestInterceptPendingDone(t *testing.T) {
 			rs, cw, testUserID, ss,
 			map[channel.ChannelType]channel.EphemeralProvisioner{channel.TypeTelegram: prov},
 			func() { changeCalled = true },
+			"",
 		)
 
 		// Message consumed but channel survives.
