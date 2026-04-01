@@ -186,6 +186,9 @@ func (n *notifier) pollLoop(ctx context.Context, id notification.SubscriptionID,
 		}
 	}
 
+	// Poll immediately so resubscriptions after a restart don't wait a full interval.
+	cursor = n.poll(ctx, id, config.CredentialSetID, cursor, emitter)
+
 	ticker := time.NewTicker(config.Interval)
 	defer ticker.Stop()
 
@@ -224,6 +227,9 @@ func (n *notifier) poll(ctx context.Context, id notification.SubscriptionID, cre
 		cursor = newHistoryID
 		n.saveCursor(ctx, id, cursor)
 	}
+
+	slog.Debug("gmail notifier: poll complete",
+		"subscription", id, "new_messages", len(newMessageIDs), "cursor", cursor)
 
 	if len(newMessageIDs) == 0 {
 		return cursor
