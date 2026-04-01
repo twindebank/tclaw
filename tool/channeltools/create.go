@@ -155,10 +155,18 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 				return nil, fmt.Errorf("socket channels are not allowed in %q environment (no authentication)", deps.Env)
 			}
 		case channel.TypeTelegram:
-			// Platform-specific validation via provisioner.
-			if provisioner, ok := deps.Provisioners[channelType]; ok {
+			provisioner, hasProvisioner := deps.Provisioners[channelType]
+			if hasProvisioner {
+				// Platform-specific validation via provisioner.
 				if err := provisioner.ValidateCreate(a.Description); err != nil {
 					return nil, err
+				}
+			} else {
+				// No provisioner — Telegram Client API credentials are not configured.
+				// Check if a bot token already exists (from manual setup).
+				token, _ := deps.SecretStore.Get(ctx, channel.ChannelSecretKey(a.Name))
+				if token == "" {
+					return nil, fmt.Errorf("cannot create Telegram channel: no Telegram Client API credentials configured for auto-provisioning, and no bot token found for channel %q. Either configure Telegram Client API credentials (telegram_client_auth) or create a bot manually via @BotFather and provide the token", a.Name)
 				}
 			}
 		default:
