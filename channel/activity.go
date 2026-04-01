@@ -117,6 +117,15 @@ func (t *ActivityTracker) NotifyIdle(channelName string) <-chan struct{} {
 	}
 
 	e.idleWaiters = append(e.idleWaiters, ch)
+
+	// If the channel is in its cooldown window (not processing, just waiting
+	// for the idle timeout to expire), schedule a timer. TurnEnded only
+	// schedules a timer if waiters already exist — but this waiter was just
+	// added after TurnEnded ran, so no timer is pending.
+	if !e.processing && e.idleTimer == nil {
+		e.scheduleIdleCheck(t, channelName)
+	}
+
 	return ch
 }
 
