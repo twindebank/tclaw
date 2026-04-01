@@ -23,13 +23,13 @@ import (
 	"testing"
 	"time"
 
-	"tclaw/agent"
-	"tclaw/channel"
-	"tclaw/channel/socketchannel"
-	"tclaw/claudecli"
-	"tclaw/libraries/store"
-	"tclaw/mcp"
-	"tclaw/user"
+	"tclaw/internal/agent"
+	"tclaw/internal/channel"
+	"tclaw/internal/channel/socketchannel"
+	"tclaw/internal/claudecli"
+	"tclaw/internal/libraries/store"
+	"tclaw/internal/mcp"
+	"tclaw/internal/user"
 )
 
 // wireMsg matches the socket protocol (same as cmd/chat and channel/socket.go).
@@ -139,7 +139,7 @@ func skipIfNoClaude(t *testing.T) {
 func getSetupToken(t *testing.T) string {
 	t.Helper()
 	out, err := exec.Command("security", "find-generic-password",
-		"-s", "tclaw/theo", "-a", "claude_setup_token", "-w").Output()
+		"-s", "tclaw/internal/theo", "-a", "claude_setup_token", "-w").Output()
 	if err != nil {
 		return ""
 	}
