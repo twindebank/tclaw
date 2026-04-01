@@ -392,13 +392,21 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			}
 		}
 
-		// Notify the user when a message arrives from another channel, so
-		// it's clear what triggered the agent turn before the response appears.
-		if msg.SourceInfo != nil && msg.SourceInfo.Source == channel.SourceChannel {
-			if ch, ok := opts.channels()[msg.ChannelID]; ok {
-				notification := fmt.Sprintf("↩️ Message from %s channel", msg.SourceInfo.FromChannel)
-				if _, err := ch.Send(ctx, notification); err != nil {
-					slog.Error("failed to send cross-channel notification", "channel", msg.ChannelID, "err", err)
+		// Notify the user when a message arrives from another channel or a
+		// child lifecycle event, so it's clear what triggered the agent turn.
+		if msg.SourceInfo != nil {
+			var notification string
+			switch msg.SourceInfo.Source {
+			case channel.SourceChannel:
+				notification = fmt.Sprintf("↩️ Message from %s channel", msg.SourceInfo.FromChannel)
+			case channel.SourceChild:
+				notification = fmt.Sprintf("👶 Event from child channel %s", msg.SourceInfo.ChildChannel)
+			}
+			if notification != "" {
+				if ch, ok := opts.channels()[msg.ChannelID]; ok {
+					if _, err := ch.Send(ctx, notification); err != nil {
+						slog.Error("failed to send source notification", "channel", msg.ChannelID, "err", err)
+					}
 				}
 			}
 		}
