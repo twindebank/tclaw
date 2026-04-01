@@ -117,7 +117,7 @@ type Params struct {
 // Returns the provisioners map shared with channeltools — callers must use
 // this map (not build their own) so reconciliation in tool calls and router
 // restarts use the same provisioner instances.
-func NewRegistry(p Params) (*toolpkg.Registry, map[channel.ChannelType]channel.EphemeralProvisioner, func()) {
+func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 	credPkg := &credentialtools.Package{
 		CredentialManager: p.CredentialManager,
 	}
@@ -128,10 +128,14 @@ func NewRegistry(p Params) (*toolpkg.Registry, map[channel.ChannelType]channel.E
 		RuntimeState: p.RuntimeState,
 	}
 
-	// Shared provisioners map — channeltools gets a reference now; populated
-	// after NewRegistry calls telegramclient.Register() which sets
-	// tgClientPkg.Provisioner.
-	provisioners := make(map[channel.ChannelType]channel.EphemeralProvisioner)
+	// Lazy provisioner lookup — reads tgClientPkg.Provisioner at call time, so
+	// it works regardless of whether Register() has been called yet.
+	provisioners := channel.ProvisionerLookup(func(ct channel.ChannelType) channel.EphemeralProvisioner {
+		if ct == channel.TypeTelegram && tgClientPkg.Provisioner != nil {
+			return tgClientPkg.Provisioner
+		}
+		return nil
+	})
 
 	chPkg := &channeltools.Package{
 		Registry:        p.ChannelRegistry,
@@ -227,16 +231,5 @@ func NewRegistry(p Params) (*toolpkg.Registry, map[channel.ChannelType]channel.E
 	// Set the registry on credentialtools now that it exists.
 	credPkg.Registry = reg
 
-	// populateProvisioners fills the shared provisioners map AFTER RegisterAll()
-	// has been called. Register() sets tgClientPkg.Provisioner, so this must run
-	// after the router calls registerCredentialSystem (which calls RegisterAll).
-	// channeltools already holds a reference to this map, so writing here makes
-	// provisioners visible to ValidateCreate and ReconcileOne during tool calls.
-	populateProvisioners := func() {
-		if tgClientPkg.Provisioner != nil {
-			provisioners[channel.TypeTelegram] = tgClientPkg.Provisioner
-		}
-	}
-
-	return reg, provisioners, populateProvisioners
+	return reg, provisioners
 }

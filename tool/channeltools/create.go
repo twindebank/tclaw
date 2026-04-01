@@ -155,8 +155,8 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 				return nil, fmt.Errorf("socket channels are not allowed in %q environment (no authentication)", deps.Env)
 			}
 		case channel.TypeTelegram:
-			provisioner, hasProvisioner := deps.Provisioners[channelType]
-			if hasProvisioner {
+			provisioner := deps.Provisioners.Get(channelType)
+			if provisioner != nil {
 				// Platform-specific validation via provisioner.
 				if err := provisioner.ValidateCreate(a.Description); err != nil {
 					return nil, err
@@ -302,8 +302,8 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			result["message"] = fmt.Sprintf("Channel %q created and provisioned. The agent will restart to activate it.", a.Name)
 
 			// Include platform-specific info if available.
-			if provisioner, ok := deps.Provisioners[channelType]; ok && rc.RuntimeState != nil {
-				if info := provisioner.PlatformResponseInfo(rc.RuntimeState.TeardownState); info != nil {
+			if prov := deps.Provisioners.Get(channelType); prov != nil && rc.RuntimeState != nil {
+				if info := prov.PlatformResponseInfo(rc.RuntimeState.TeardownState); info != nil {
 					for k, v := range info {
 						result[k] = v
 					}

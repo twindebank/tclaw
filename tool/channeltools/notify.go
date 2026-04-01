@@ -57,8 +57,8 @@ func channelNotifyHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("channel %q not found", a.ChannelName)
 		}
 
-		provisioner, ok := deps.Provisioners[entry.Type]
-		if !ok {
+		provisioner := deps.Provisioners.Get(entry.Type)
+		if provisioner == nil {
 			return nil, fmt.Errorf("channel %q (type %s) does not support direct notifications", a.ChannelName, entry.Type)
 		}
 

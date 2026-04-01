@@ -39,7 +39,7 @@ type ReconcileParams struct {
 	Channels     []config.Channel
 	SecretStore  interface{} // unused now but kept for ProvisionResult token storage
 	RuntimeState *channel.RuntimeStateStore
-	Provisioners map[channel.ChannelType]channel.EphemeralProvisioner
+	Provisioners channel.ProvisionerLookup
 }
 
 // Reconcile compares desired state (config channels) against actual state
@@ -57,8 +57,8 @@ func Reconcile(ctx context.Context, params ReconcileParams) ([]ReconciledChannel
 			return nil, fmt.Errorf("read runtime state for %q: %w", ch.Name, err)
 		}
 
-		provisioner, hasProvisioner := params.Provisioners[ch.Type]
-		if !hasProvisioner {
+		provisioner := params.Provisioners.Get(ch.Type)
+		if provisioner == nil {
 			// No provisioner — nothing to provision (e.g. socket, stdio).
 			results = append(results, ReconciledChannel{
 				Config:       ch,

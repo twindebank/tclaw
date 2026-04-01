@@ -754,9 +754,12 @@ func setupHarnessWithProvisioner(t *testing.T, env config.Env) testHarnessWithPr
 	th := buildHarness(t, env)
 	prov := &mockProvisioner{}
 
-	provisioners := map[channel.ChannelType]channel.EphemeralProvisioner{
-		channel.TypeTelegram: prov,
-	}
+	provisioners := channel.ProvisionerLookup(func(ct channel.ChannelType) channel.EphemeralProvisioner {
+		if ct == channel.TypeTelegram {
+			return prov
+		}
+		return nil
+	})
 
 	channeltools.RegisterTools(th.handler, channeltools.Deps{
 		Registry:     th.registry,

@@ -42,8 +42,9 @@ type Deps struct {
 	// ActivityTracker tracks per-channel processing state for channel_is_busy.
 	ActivityTracker *channel.ActivityTracker
 
-	// Provisioners maps channel types to their EphemeralProvisioner.
-	Provisioners map[channel.ChannelType]channel.EphemeralProvisioner
+	// Provisioners returns the EphemeralProvisioner for a channel type, or nil.
+	// May be nil if no provisioners are configured.
+	Provisioners channel.ProvisionerLookup
 
 	// ReconcileParams provides dependencies for synchronous reconciliation
 	// after config mutations. Channel tools call the reconciler to provision

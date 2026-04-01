@@ -86,8 +86,8 @@ func channelDoneHandler(deps Deps) mcp.ToolHandler {
 		// confirmation prompt and return immediately. The router intercepts the
 		// user's reply asynchronously via PendingDone.
 		if runtimeState.PlatformState.HasPlatformState() {
-			provisioner, ok := deps.Provisioners[entry.Type]
-			if !ok {
+			provisioner := deps.Provisioners.Get(entry.Type)
+			if provisioner == nil {
 				return nil, fmt.Errorf("no provisioner for channel type %q — cannot send teardown confirmation", entry.Type)
 			}
 
@@ -116,8 +116,8 @@ func channelDoneHandler(deps Deps) mcp.ToolHandler {
 
 		// No platform chat — tear down immediately.
 		if runtimeState.TeardownState.HasTeardownState() {
-			provisioner, ok := deps.Provisioners[entry.Type]
-			if !ok {
+			provisioner := deps.Provisioners.Get(entry.Type)
+			if provisioner == nil {
 				slog.Error("no provisioner for channel type, skipping platform teardown",
 					"channel", a.ChannelName, "type", entry.Type)
 			} else {

@@ -98,7 +98,7 @@ func runOneshot() {
 	credMgr := credential.NewManager(stateStore, secretStore)
 	mcpHandler := mcp.NewHandler()
 
-	toolRegistry, _, populateProvisioners := all.NewRegistry(all.Params{
+	toolRegistry, _ := all.NewRegistry(all.Params{
 		SecretStore:       secretStore,
 		StateStore:        stateStore,
 		UserDir:           userDir,
@@ -122,7 +122,6 @@ func runOneshot() {
 		slog.Error("failed to register tool packages", "err", regErr)
 		os.Exit(1)
 	}
-	populateProvisioners()
 
 	mcpServer := mcp.NewServer(mcpHandler)
 	mcpAddr, err := mcpServer.Start("127.0.0.1:0")
