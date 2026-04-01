@@ -163,6 +163,11 @@ type Channel struct {
 	// it fires exactly once.
 	InitialMessage string `yaml:"initial_message,omitempty"`
 
+	// Parent is the name of the channel that created this one. Lifecycle events
+	// (ephemeral teardown, build failures) are reported to the parent via the
+	// message queue so the agent on that channel can react.
+	Parent string `yaml:"parent,omitempty"`
+
 	// CreatedAt is the RFC3339 timestamp of when this channel was created by
 	// a tool. Empty for hand-written channels.
 	CreatedAt string `yaml:"created_at,omitempty"`

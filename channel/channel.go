@@ -73,6 +73,7 @@ const (
 	SourceChannel      MessageSource = "channel"      // sent from another channel via channel_send
 	SourceResume       MessageSource = "resume"       // auto-injected to continue interrupted work
 	SourceNotification MessageSource = "notification" // pushed by a notification subscription
+	SourceChild        MessageSource = "child"        // lifecycle event from a child channel
 )
 
 // MessageSourceInfo carries attribution details for a message.
@@ -90,6 +91,9 @@ type MessageSourceInfo struct {
 
 	// SubscriptionLabel is the human-readable label (set when Source == SourceNotification).
 	SubscriptionLabel string `json:"subscription_label,omitempty"`
+
+	// ChildChannel is the name of the child channel (set when Source == SourceChild).
+	ChildChannel string `json:"child_channel,omitempty"`
 }
 
 // TaggedMessage pairs an incoming message with the channel it arrived on

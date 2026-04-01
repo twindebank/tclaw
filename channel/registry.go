@@ -5,7 +5,8 @@ import "sync"
 // RegistryEntry is the unified metadata for any channel.
 type RegistryEntry struct {
 	Info
-	Links []Link
+	Links  []Link
+	Parent string
 }
 
 // Registry provides a read view of all channel metadata. Entries are loaded

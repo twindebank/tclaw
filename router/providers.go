@@ -73,7 +73,8 @@ func buildRegistryEntries(configChannels []config.Channel) []channel.RegistryEnt
 				CreatableGroups: toolGroupsToStrings(cc.CreatableGroups),
 				NotifyLifecycle: cc.NotifyLifecycle,
 			},
-			Links: cc.Links,
+			Links:  cc.Links,
+			Parent: cc.Parent,
 		}
 		entries = append(entries, entry)
 	}

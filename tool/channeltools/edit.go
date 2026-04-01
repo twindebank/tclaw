@@ -68,6 +68,10 @@ func channelEditDef() mcp.ToolDef {
 						},
 						"required": ["target", "description"]
 					}
+				},
+				"parent": {
+					"type": "string",
+					"description": "Parent channel name. Pass empty string to clear."
 				}
 			},
 			"required": ["name"]
@@ -85,6 +89,7 @@ type channelEditArgs struct {
 	DisallowedTools []string        `json:"disallowed_tools"`
 	CreatableGroups *[]string       `json:"creatable_groups"`
 	Links           *[]channel.Link `json:"links"`
+	Parent          *string         `json:"parent"`
 }
 
 func channelEditHandler(deps Deps) mcp.ToolHandler {
@@ -96,7 +101,7 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 
 		hasChange := a.Description != "" || a.Purpose != nil || a.AllowedUsers != nil ||
 			a.ToolGroups != nil || a.AllowedTools != nil || a.DisallowedTools != nil ||
-			a.CreatableGroups != nil || a.Links != nil
+			a.CreatableGroups != nil || a.Links != nil || a.Parent != nil
 		if !hasChange {
 			return nil, fmt.Errorf("at least one field to update must be provided")
 		}
@@ -127,6 +132,11 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 					return nil, fmt.Errorf("unknown creatable group %q", g)
 				}
 			}
+		}
+
+		// Validate parent if explicitly set (non-empty means it must exist).
+		if a.Parent != nil && *a.Parent != "" && !deps.Registry.NameExists(*a.Parent) {
+			return nil, fmt.Errorf("parent channel %q not found", *a.Parent)
 		}
 
 		// Validate links before writing.
@@ -171,6 +181,9 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 			}
 			if a.Links != nil {
 				ch.Links = *a.Links
+			}
+			if a.Parent != nil {
+				ch.Parent = *a.Parent
 			}
 		}); err != nil {
 			return nil, fmt.Errorf("edit channel: %w", err)

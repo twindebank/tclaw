@@ -324,6 +324,8 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		contextSection += fmt.Sprintf("Source: scheduled prompt (%s)\n", source.ScheduleName)
 	case channel.SourceChannel:
 		contextSection += fmt.Sprintf("Source: cross-channel message from **%s**\n", source.FromChannel)
+	case channel.SourceChild:
+		contextSection += fmt.Sprintf("Source: lifecycle event from child channel **%s**\n", source.ChildChannel)
 	case channel.SourceResume:
 		contextSection += "Source: auto-resume after interrupted turn\n"
 	default:

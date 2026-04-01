@@ -152,7 +152,7 @@ func runServe() {
 			slog.Error("failed to create secret store for channels", "user", u.ID, "err", err)
 			os.Exit(1)
 		}
-		channels, err := r.BuildChannels(ctx, router.BuildChannelsParams{
+		channels, buildFailures := r.BuildChannels(ctx, router.BuildChannelsParams{
 			UserID:      u.ID,
 			UserCfg:     u,
 			Channels:    u.Channels,
@@ -160,9 +160,8 @@ func runServe() {
 			StateStore:  stateStore,
 			SecretStore: secretStore,
 		})
-		if err != nil {
-			slog.Error("failed to build channels", "user", u.ID, "err", err)
-			os.Exit(1)
+		for _, bf := range buildFailures {
+			slog.Error("channel failed to build at startup", "channel", bf.Name, "err", bf.Err)
 		}
 
 		if err := r.Register(ctx, u.ToUserConfig(), channels, u.Channels); err != nil {

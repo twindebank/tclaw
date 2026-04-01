@@ -103,6 +103,10 @@ func channelCreateDef() mcp.ToolDef {
 				"initial_message": {
 					"type": "string",
 					"description": "Message delivered to the new channel as its first inbound message. Fires exactly once."
+				},
+				"parent": {
+					"type": "string",
+					"description": "Parent channel name. The parent receives lifecycle notifications (e.g. ephemeral teardown, build failures). Should be set to the current channel when creating child channels."
 				}
 			},
 			"required": ["name", "description", "type"]
@@ -123,6 +127,7 @@ type channelCreateArgs struct {
 	CreatableGroups           []string       `json:"creatable_groups"`
 	Links                     []channel.Link `json:"links"`
 	InitialMessage            string         `json:"initial_message"`
+	Parent                    string         `json:"parent"`
 }
 
 func channelCreateHandler(deps Deps) mcp.ToolHandler {
@@ -221,6 +226,10 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			linkTargets[link.Target] = true
 		}
 
+		if a.Parent != "" && !deps.Registry.NameExists(a.Parent) {
+			return nil, fmt.Errorf("parent channel %q not found", a.Parent)
+		}
+
 		// Build the idle timeout string for config.
 		var idleTimeoutStr string
 		if a.Ephemeral {
@@ -246,6 +255,7 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			Ephemeral:            a.Ephemeral,
 			EphemeralIdleTimeout: idleTimeoutStr,
 			InitialMessage:       a.InitialMessage,
+			Parent:               a.Parent,
 			CreatedAt:            time.Now().Format(time.RFC3339),
 		}
 
