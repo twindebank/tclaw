@@ -3,6 +3,8 @@ package router
 import (
 	"context"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"tclaw/channel"
@@ -30,6 +32,7 @@ func interceptPendingDone(
 	secretStore secret.Store,
 	provisioners map[channel.ChannelType]channel.EphemeralProvisioner,
 	onChannelChange func(),
+	memoryDir string,
 ) bool {
 	chMap := channelsFunc()
 	if chMap == nil {
@@ -102,7 +105,7 @@ func interceptPendingDone(
 		return true
 	}
 
-	// Clean up runtime state and secret (best-effort).
+	// Clean up runtime state, secret, and knowledge dir (best-effort).
 	if deleteErr := runtimeState.Delete(ctx, chName); deleteErr != nil {
 		slog.Error("interceptPendingDone: failed to delete runtime state",
 			"channel", chName, "err", deleteErr)
@@ -110,6 +113,13 @@ func interceptPendingDone(
 	if deleteErr := secretStore.Delete(ctx, channel.ChannelSecretKey(chName)); deleteErr != nil {
 		slog.Error("interceptPendingDone: failed to delete channel secret",
 			"channel", chName, "err", deleteErr)
+	}
+	if memoryDir != "" {
+		knowledgeDir := filepath.Join(memoryDir, "channels", chName)
+		if removeErr := os.RemoveAll(knowledgeDir); removeErr != nil {
+			slog.Warn("interceptPendingDone: failed to clean up channel knowledge dir",
+				"channel", chName, "dir", knowledgeDir, "err", removeErr)
+		}
 	}
 
 	slog.Info("interceptPendingDone: channel torn down", "channel", chName)

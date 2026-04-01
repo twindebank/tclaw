@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 
 	"tclaw/channel"
 	"tclaw/mcp"
@@ -130,12 +132,18 @@ func channelDoneHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("delete channel from config: %w", err)
 		}
 
-		// Clean up runtime state and secret (best-effort).
+		// Clean up runtime state, secret, and knowledge dir (best-effort).
 		if err := deps.RuntimeState.Delete(ctx, a.ChannelName); err != nil {
 			slog.Error("failed to delete runtime state during teardown", "channel", a.ChannelName, "err", err)
 		}
 		if err := deps.SecretStore.Delete(ctx, channel.ChannelSecretKey(a.ChannelName)); err != nil {
 			slog.Error("failed to delete channel secret during teardown", "channel", a.ChannelName, "err", err)
+		}
+		if deps.MemoryDir != "" {
+			knowledgeDir := filepath.Join(deps.MemoryDir, "channels", a.ChannelName)
+			if err := os.RemoveAll(knowledgeDir); err != nil {
+				slog.Warn("failed to clean up channel knowledge dir", "channel", a.ChannelName, "err", err)
+			}
 		}
 
 		if deps.OnChannelChange != nil {
