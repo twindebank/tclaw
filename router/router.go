@@ -393,6 +393,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		RegisterHandler:     secretFormRegisterHandler,
 		OnboardingStore:     onboardingStore,
 		ModelStore:          s,
+		TelegramUserID:      mu.cfg.TelegramUserID,
 	})
 
 	regCtx := toolpkg.RegistrationContext{
