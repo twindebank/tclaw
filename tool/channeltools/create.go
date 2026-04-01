@@ -168,7 +168,8 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 				if token == "" {
 					return nil, fmt.Errorf("cannot create Telegram channel %q: auto-provisioning is unavailable (Telegram Client API credentials not configured). "+
 						"To fix, either: (1) run telegram_client_info to check credential status and set up Telegram Client API credentials for auto-provisioning, "+
-						"or (2) ask the user to create a bot manually via @BotFather, then store the token with secret_form_request and retry", a.Name)
+						"or (2) ask the user to create a bot manually via @BotFather, then store the token with secret_form_request. "+
+						"After setting up credentials via either path, call channel_create again to retry — the channel is NOT written to config until creation succeeds", a.Name)
 				}
 			}
 		default:
