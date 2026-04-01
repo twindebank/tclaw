@@ -326,6 +326,11 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 	// tool approval) in one place with explicit typed states.
 	fm := NewFlowManager()
 
+	// stoppedChannels tracks channels where the user sent "stop" to cancel
+	// the previous turn. The next message on a stopped channel gets a system
+	// notice so the agent doesn't continue the cancelled task.
+	stoppedChannels := make(map[channel.ChannelID]bool)
+
 	for {
 		// restoreOverride reverts temporary tool expansions after a tool
 		// approval retry. Reset each iteration; set by the approval handler.
@@ -585,6 +590,14 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		// Snapshot and clear so only the first turn gets the resume notice.
 		turnOpts := opts
 		opts.ResumeNotice = ""
+
+		// After a stop, inject a notice so the agent doesn't continue the
+		// cancelled task when it picks up the next message (e.g. a notification).
+		if stoppedChannels[msg.ChannelID] {
+			delete(stoppedChannels, msg.ChannelID)
+			turnOpts.ResumeNotice = "[SYSTEM: The previous task on this channel was stopped by the user. " +
+				"Do NOT continue, summarize, or reference it. Focus only on the new message below.]\n"
+		}
 		go func() {
 			currentSessionID := sessionID
 			delay := rateLimitInitialDelay
@@ -692,6 +705,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 						slog.Info("turn interrupted by stop")
 						cancelTurn()
 						stopped = true
+						stoppedChannels[msg.ChannelID] = true
 					}
 				} else {
 					if opts.Queue != nil {
@@ -701,11 +715,12 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 					}
 					// Acknowledge the queued message so the user knows it was received.
 					if queueCh, ok := opts.channels()[newMsg.ChannelID]; ok {
-						ackMsg := "📥 Queued — will process after the current turn finishes."
+						cooldown := int(channel.DefaultIdleTimeout.Minutes())
+						ackMsg := fmt.Sprintf("📥 Queued — will process after the current turn finishes (+ %dm cooldown).", cooldown)
 						if newMsg.ChannelID != msg.ChannelID {
 							// Show which channel is busy so the user knows what's blocking.
 							if busyCh, busyOK := opts.channels()[msg.ChannelID]; busyOK {
-								ackMsg = fmt.Sprintf("📥 Queued — agent is busy on %s. Will process once the current turn finishes.", busyCh.Info().Name)
+								ackMsg = fmt.Sprintf("📥 Queued — agent is busy on **%s**. Will process once the current turn finishes (+ %dm cooldown).", busyCh.Info().Name, cooldown)
 							}
 						}
 						if _, sendErr := queueCh.Send(ctx, ackMsg); sendErr != nil {
