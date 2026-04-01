@@ -14,7 +14,7 @@ import (
 	"tclaw/internal/notification"
 )
 
-func TestManager_Subscribe(t *testing.T) {
+func TestManager(t *testing.T) {
 	t.Run("persists subscription and delivers notification", func(t *testing.T) {
 		h := setupManager(t)
 
@@ -48,9 +48,7 @@ func TestManager_Subscribe(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "no notifier registered")
 	})
-}
 
-func TestManager_Unsubscribe(t *testing.T) {
 	t.Run("removes subscription and cancels watcher", func(t *testing.T) {
 		h := setupManager(t)
 
@@ -70,10 +68,8 @@ func TestManager_Unsubscribe(t *testing.T) {
 		require.Empty(t, subs)
 		require.True(t, h.notifier.wasCancelled(result.Subscription.ID))
 	})
-}
 
-func TestManager_OneShotAutoRemove(t *testing.T) {
-	t.Run("removes subscription after first delivery", func(t *testing.T) {
+	t.Run("one-shot auto removes after first delivery", func(t *testing.T) {
 		h := setupManager(t)
 
 		result, err := h.manager.Subscribe(h.ctx, "test", notification.SubscribeParams{
@@ -90,10 +86,8 @@ func TestManager_OneShotAutoRemove(t *testing.T) {
 		require.Empty(t, subs)
 		require.True(t, h.notifier.wasCancelled(result.Subscription.ID))
 	})
-}
 
-func TestManager_UnsubscribeByCredentialSet(t *testing.T) {
-	t.Run("removes all subscriptions for the credential set", func(t *testing.T) {
+	t.Run("unsubscribe by credential set removes all matching", func(t *testing.T) {
 		h := setupManager(t)
 
 		_, err := h.manager.Subscribe(h.ctx, "test", notification.SubscribeParams{
@@ -112,10 +106,8 @@ func TestManager_UnsubscribeByCredentialSet(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, subs)
 	})
-}
 
-func TestManager_AvailableTypes(t *testing.T) {
-	t.Run("returns types from registered notifiers", func(t *testing.T) {
+	t.Run("available types returns types from registered notifiers", func(t *testing.T) {
 		h := setupManager(t)
 
 		types := h.manager.AvailableTypes()
@@ -123,9 +115,7 @@ func TestManager_AvailableTypes(t *testing.T) {
 		require.Len(t, types["test"], 1)
 		require.Equal(t, "event", types["test"][0].Name)
 	})
-}
 
-func TestManager_Run(t *testing.T) {
 	t.Run("resubscribes persisted subscriptions after ready signal", func(t *testing.T) {
 		s, err := store.NewFS(t.TempDir())
 		require.NoError(t, err)

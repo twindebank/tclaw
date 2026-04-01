@@ -1,3 +1,6 @@
+// Package credential provides unified credential storage for tool packages. A CredentialSet is a
+// named, optionally channel-scoped collection of secrets (API keys, OAuth tokens). Manager handles
+// CRUD for credential sets, individual secret fields, and OAuth token lifecycle including refresh.
 package credential
 
 import (

@@ -48,6 +48,27 @@ func TestSetup(t *testing.T) {
 		})
 		require.Contains(t, err.Error(), "api_hash")
 	})
+
+	t.Run("status reflects stored credentials", func(t *testing.T) {
+		h, _ := setup(t)
+
+		// Initially no credentials.
+		result := callTool(t, h, "telegram_client_status", map[string]any{})
+		var status map[string]any
+		require.NoError(t, json.Unmarshal(result, &status))
+		require.Equal(t, false, status["credentials_stored"])
+
+		// Store credentials.
+		callTool(t, h, "telegram_client_setup", map[string]any{
+			"api_id":   99999,
+			"api_hash": "deadbeef",
+		})
+
+		// Now status should show stored.
+		result = callTool(t, h, "telegram_client_status", map[string]any{})
+		require.NoError(t, json.Unmarshal(result, &status))
+		require.Equal(t, true, status["credentials_stored"])
+	})
 }
 
 func TestStatus(t *testing.T) {
@@ -246,29 +267,6 @@ func TestAllToolsRegistered(t *testing.T) {
 	for _, name := range expectedTools {
 		require.True(t, registeredNames[name], "tool %q not registered", name)
 	}
-}
-
-func TestSetupThenStatus(t *testing.T) {
-	t.Run("setup credentials then status reflects them", func(t *testing.T) {
-		h, _ := setup(t)
-
-		// Initially no credentials.
-		result := callTool(t, h, "telegram_client_status", map[string]any{})
-		var status map[string]any
-		require.NoError(t, json.Unmarshal(result, &status))
-		require.Equal(t, false, status["credentials_stored"])
-
-		// Store credentials.
-		callTool(t, h, "telegram_client_setup", map[string]any{
-			"api_id":   99999,
-			"api_hash": "deadbeef",
-		})
-
-		// Now status should show stored.
-		result = callTool(t, h, "telegram_client_status", map[string]any{})
-		require.NoError(t, json.Unmarshal(result, &status))
-		require.Equal(t, true, status["credentials_stored"])
-	})
 }
 
 // --- helpers ---

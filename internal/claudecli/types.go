@@ -1,3 +1,6 @@
+// Package claudecli defines typed enums and event structs for the claude CLI's stream-json output
+// format. It models permission modes, tool names, content block types, and streaming events. Pure
+// data types with no I/O — used by the agent package to parse and route CLI output.
 package claudecli
 
 import "strings"

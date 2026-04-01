@@ -18,7 +18,7 @@ const maxSendMessageLength = 8000
 type SendDeps struct {
 	// Links returns the current outbound link map (source channel name →
 	// allowed targets). Called on each send so it picks up links from
-	// both static config and dynamic channels.
+	// all channels regardless of how they were created.
 	Links func() map[string][]channel.Link
 
 	// Output receives cross-channel messages for injection into the

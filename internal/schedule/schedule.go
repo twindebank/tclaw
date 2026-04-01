@@ -1,3 +1,7 @@
+// Package schedule provides the cron schedule store, model, and scheduler daemon. The scheduler
+// runs at user lifetime (not agent lifetime), so schedules fire even when the agent is idle. Fired
+// messages are injected into channels and wake the agent lazily. Schedule state persists across
+// restarts via the store.
 package schedule
 
 import (
@@ -31,8 +35,8 @@ type Schedule struct {
 	ChannelName string     `json:"channel_name"`
 	Status      Status     `json:"status"`
 	CreatedAt   time.Time  `json:"created_at"`
-	LastRunAt   time.Time  `json:"last_run_at,omitempty"`
-	NextRunAt   time.Time  `json:"next_run_at,omitempty"`
+	LastRunAt   time.Time  `json:"last_run_at,omitzero"`
+	NextRunAt   time.Time  `json:"next_run_at,omitzero"`
 }
 
 // GenerateID creates a new unique schedule ID.

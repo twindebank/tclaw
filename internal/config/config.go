@@ -1,3 +1,7 @@
+// Package config handles YAML configuration loading, validation, and secret resolution. Secrets
+// referenced as ${secret:NAME} are resolved from the OS keychain or environment variables.
+// config.Writer provides atomic read-modify-write mutations (temp file + rename) for runtime
+// changes made by channel and config tools.
 package config
 
 import (
