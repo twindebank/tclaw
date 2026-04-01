@@ -221,6 +221,8 @@ Use `channel_send` to send messages between channels. Only declared links are va
 
 **When you receive a cross-channel message:** The Message Context section shows which channel sent it. Treat it as a task to act on within the receiving channel's context and session.
 
+**Read before sending:** Use `channel_transcript` to read another channel's recent conversation history before sending it a message. This gives you context on what the channel is working on. Use `source: "session"` (default) for the full agent view including tool calls, or `source: "telegram"` for the user-facing messages. The transcript spans all sessions with session boundaries in the response.
+
 **Priority queue:** All cross-channel messages go through the unified queue. Non-user messages (including cross-channel sends) automatically wait for the target channel to be idle before delivery. User messages always take priority.
 {{end}}
 # Scheduled Job Isolation

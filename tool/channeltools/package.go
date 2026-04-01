@@ -2,6 +2,7 @@ package channeltools
 
 import (
 	"context"
+	"encoding/json"
 
 	"tclaw/channel"
 	"tclaw/claudecli"
@@ -32,6 +33,15 @@ type Package struct {
 	Links    func() map[string][]channel.Link
 	Output   chan<- channel.TaggedMessage
 	Channels func() map[channel.ChannelID]channel.Channel
+
+	// Transcript deps.
+	SessionStore *channel.SessionStore
+	HomeDir      string
+	MemoryDir    string
+
+	// TelegramHistory reads Telegram message history for a channel. Nil if
+	// the Telegram Client API is not available.
+	TelegramHistory func(ctx context.Context, channelName string, limit int) (json.RawMessage, error)
 }
 
 func (p *Package) Name() string { return "channel" }
@@ -57,11 +67,13 @@ func (p *Package) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
 			"mcp__tclaw__channel_done",
 			"mcp__tclaw__channel_is_busy",
 			"mcp__tclaw__channel_send",
+			"mcp__tclaw__channel_transcript",
 		},
 		toolgroup.GroupChannelMessaging: {
 			"mcp__tclaw__channel_send",
 			"mcp__tclaw__channel_is_busy",
 			"mcp__tclaw__channel_done",
+			"mcp__tclaw__channel_transcript",
 			// Read-only — lets channels discover available tool groups without
 			// needing the full channel_management group.
 			"mcp__tclaw__tool_group_list",
@@ -113,6 +125,17 @@ func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationCont
 			Output:        p.Output,
 			Channels:      p.Channels,
 			ActiveChannel: p.ActiveChannel,
+		})
+	}
+
+	// Cross-channel transcript tool.
+	if p.SessionStore != nil && p.Channels != nil {
+		RegisterTranscriptTool(handler, TranscriptDeps{
+			SessionStore:    p.SessionStore,
+			HomeDir:         p.HomeDir,
+			MemoryDir:       p.MemoryDir,
+			Channels:        p.Channels,
+			TelegramHistory: p.TelegramHistory,
 		})
 	}
 
