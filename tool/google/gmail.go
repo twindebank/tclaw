@@ -28,6 +28,7 @@ type gmailListArgs struct {
 	CredentialSet string `json:"credential_set"`
 	Query         string `json:"query"`
 	MaxResults    int    `json:"max_results"`
+	PageToken     string `json:"page_token"`
 }
 
 // gmailListResponse matches the Gmail API's users.messages.list response.
@@ -119,6 +120,9 @@ func gmailListHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandl
 		}
 		if a.Query != "" {
 			listParams["q"] = a.Query
+		}
+		if a.PageToken != "" {
+			listParams["pageToken"] = a.PageToken
 		}
 
 		listOutput, err := runGWS(ctx, deps, gws.Gmail.ListMessages(listParams))

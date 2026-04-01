@@ -159,7 +159,7 @@ var toolDefs = []mcp.ToolDef{
 	},
 	{
 		Name:        ToolListChats,
-		Description: "List the authenticated user's Telegram chats and groups.",
+		Description: "List the authenticated user's Telegram chats and groups. Returns a has_more flag — pass the last chat's ID as offset_id to paginate.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -167,13 +167,17 @@ var toolDefs = []mcp.ToolDef{
 					"type": "integer",
 					"description": "Maximum number of chats to return. Defaults to 20.",
 					"default": 20
+				},
+				"offset_id": {
+					"type": "integer",
+					"description": "Message ID offset for pagination. Pass the last message ID from a previous response to fetch the next page of chats."
 				}
 			}
 		}`),
 	},
 	{
 		Name:        ToolGetHistory,
-		Description: "Get message history from a Telegram chat.",
+		Description: "Get message history from a Telegram chat. Returns messages newest-first. Pass the last message's ID as offset_id to fetch older messages.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -185,6 +189,10 @@ var toolDefs = []mcp.ToolDef{
 					"type": "integer",
 					"description": "Maximum number of messages to return. Defaults to 50.",
 					"default": 50
+				},
+				"offset_id": {
+					"type": "integer",
+					"description": "Message ID offset for pagination. Pass the last (oldest) message ID from a previous response to fetch older messages."
 				}
 			},
 			"required": ["chat_id"]
@@ -192,7 +200,7 @@ var toolDefs = []mcp.ToolDef{
 	},
 	{
 		Name:        ToolSearch,
-		Description: "Search messages across Telegram chats.",
+		Description: "Search messages across Telegram chats. Pass the last message's ID as offset_id to paginate through results.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -203,6 +211,15 @@ var toolDefs = []mcp.ToolDef{
 				"chat_id": {
 					"type": "integer",
 					"description": "Limit search to a specific chat. Omit for global search."
+				},
+				"limit": {
+					"type": "integer",
+					"description": "Maximum number of results to return. Defaults to 50.",
+					"default": 50
+				},
+				"offset_id": {
+					"type": "integer",
+					"description": "Message ID offset for pagination. Pass the last message ID from a previous response to fetch the next page of results."
 				}
 			},
 			"required": ["query"]

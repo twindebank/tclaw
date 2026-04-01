@@ -21,11 +21,13 @@ type calendarListArgs struct {
 	Query         string `json:"query"`
 	MaxResults    int    `json:"max_results"`
 	CalendarID    string `json:"calendar_id"`
+	PageToken     string `json:"page_token"`
 }
 
 // calendarEventsResponse matches the Google Calendar API's events.list response.
 type calendarEventsResponse struct {
-	Items []calendarEvent `json:"items"`
+	Items         []calendarEvent `json:"items"`
+	NextPageToken string          `json:"nextPageToken,omitempty"`
 }
 
 type calendarEvent struct {
@@ -83,9 +85,10 @@ type calendarEventSummary struct {
 }
 
 type calendarListToolResponse struct {
-	Events     []calendarEventSummary `json:"events"`
-	TimeRange  string                 `json:"time_range"`
-	EventCount int                    `json:"event_count"`
+	Events        []calendarEventSummary `json:"events"`
+	TimeRange     string                 `json:"time_range"`
+	EventCount    int                    `json:"event_count"`
+	NextPageToken string                 `json:"next_page_token,omitempty"`
 }
 
 func calendarListHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandler {
@@ -133,6 +136,9 @@ func calendarListHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHa
 		if a.Query != "" {
 			params["q"] = a.Query
 		}
+		if a.PageToken != "" {
+			params["pageToken"] = a.PageToken
+		}
 
 		output, err := runGWS(ctx, deps, gws.Calendar.ListEvents(params))
 		if err != nil {
@@ -157,9 +163,10 @@ func calendarListHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHa
 		slog.Info("calendar list done", "connection", a.CredentialSet, "event_count", len(summaries))
 
 		return json.Marshal(calendarListToolResponse{
-			Events:     summaries,
-			TimeRange:  timeRange,
-			EventCount: len(summaries),
+			Events:        summaries,
+			TimeRange:     timeRange,
+			EventCount:    len(summaries),
+			NextPageToken: eventsRsp.NextPageToken,
 		})
 	}
 }
