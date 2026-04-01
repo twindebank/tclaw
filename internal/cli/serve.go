@@ -17,8 +17,6 @@ import (
 	"tclaw/internal/agent"
 	"tclaw/internal/config"
 	"tclaw/internal/libraries/logbuffer"
-	"tclaw/internal/libraries/secret"
-	"tclaw/internal/libraries/store"
 	"tclaw/internal/oauth"
 	"tclaw/internal/router"
 	"tclaw/internal/version"
@@ -142,29 +140,12 @@ func runServe() {
 	defer r.StopAll()
 
 	for _, u := range cfg.Users {
-		stateStore, err := store.NewFS(filepath.Join(cfg.BaseDir, string(u.ID), "state"))
-		if err != nil {
-			slog.Error("failed to create state store for channels", "user", u.ID, "err", err)
-			os.Exit(1)
-		}
-		secretStore, err := secret.Resolve(string(u.ID), filepath.Join(cfg.BaseDir, string(u.ID), "secrets"), os.Getenv(secret.MasterKeyEnv))
-		if err != nil {
-			slog.Error("failed to create secret store for channels", "user", u.ID, "err", err)
-			os.Exit(1)
-		}
-		channels, buildFailures := r.BuildChannels(ctx, router.BuildChannelsParams{
-			UserID:      u.ID,
-			UserCfg:     u,
-			Channels:    u.Channels,
-			Env:         cfg.Env,
-			StateStore:  stateStore,
-			SecretStore: secretStore,
-		})
-		for _, bf := range buildFailures {
-			slog.Error("channel failed to build at startup", "channel", bf.Name, "err", bf.Err)
-		}
-
-		if err := r.Register(ctx, u.ToUserConfig(), channels, u.Channels); err != nil {
+		// Don't pre-build channel transports here. The agent loop builds all
+		// channels on its first iteration (before accepting messages), which
+		// avoids duplicate webhook registrations for Telegram bots. Previously,
+		// building here AND in the loop caused each bot to register two different
+		// webhook URLs, hitting Telegram's rate limits on every startup/restart.
+		if err := r.Register(ctx, u.ToUserConfig(), nil, u.Channels); err != nil {
 			slog.Error("failed to register user", "user", u.ID, "err", err)
 			os.Exit(1)
 		}

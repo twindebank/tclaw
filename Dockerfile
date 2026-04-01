@@ -27,6 +27,10 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o 
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*
 
+# Go toolchain — needed by the agent to run tests in dev sessions (go test, go build).
+COPY --from=builder /usr/local/go /usr/local/go
+ENV PATH="/usr/local/go/bin:${PATH}"
+
 # Fly.io CLI — needed by deploy tool for `fly deploy`.
 RUN curl -fsSL https://fly.io/install.sh | sh
 ENV PATH="/root/.fly/bin:${PATH}"
