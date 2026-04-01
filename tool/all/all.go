@@ -113,7 +113,11 @@ type Params struct {
 //
 // Order matters: telegramclient must come before channeltools because
 // channeltools needs the telegram provisioner from telegramclient.
-func NewRegistry(p Params) (*toolpkg.Registry, *telegramclient.Package) {
+//
+// Returns the provisioners map shared with channeltools — callers must use
+// this map (not build their own) so reconciliation in tool calls and router
+// restarts use the same provisioner instances.
+func NewRegistry(p Params) (*toolpkg.Registry, map[channel.ChannelType]channel.EphemeralProvisioner) {
 	credPkg := &credentialtools.Package{
 		CredentialManager: p.CredentialManager,
 	}
@@ -124,8 +128,9 @@ func NewRegistry(p Params) (*toolpkg.Registry, *telegramclient.Package) {
 		RuntimeState: p.RuntimeState,
 	}
 
-	// Build the provisioners map — populated after telegramclient.Register()
-	// sets tgClientPkg.Provisioner.
+	// Shared provisioners map — channeltools gets a reference now; populated
+	// after NewRegistry calls telegramclient.Register() which sets
+	// tgClientPkg.Provisioner.
 	provisioners := make(map[channel.ChannelType]channel.EphemeralProvisioner)
 
 	chPkg := &channeltools.Package{
@@ -222,5 +227,13 @@ func NewRegistry(p Params) (*toolpkg.Registry, *telegramclient.Package) {
 	// Set the registry on credentialtools now that it exists.
 	credPkg.Registry = reg
 
-	return reg, tgClientPkg
+	// Populate the provisioners map now that telegramclient.Register() has set
+	// its Provisioner field. channeltools already holds a reference to this map,
+	// so writing here makes provisioners available for ValidateCreate and
+	// ReconcileOne during tool calls.
+	if tgClientPkg.Provisioner != nil {
+		provisioners[channel.TypeTelegram] = tgClientPkg.Provisioner
+	}
+
+	return reg, provisioners
 }

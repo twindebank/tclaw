@@ -35,7 +35,6 @@ import (
 	"tclaw/repo"
 	"tclaw/schedule"
 	"tclaw/tool/all"
-	"tclaw/tool/channeltools"
 	"tclaw/tool/modeltools"
 	"tclaw/tool/toolpkg"
 	"tclaw/toolgroup"
@@ -301,7 +300,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		default:
 		}
 	}
-	// Forward-declared so it can be referenced by channeltools during Register()
+	// Forward-declared so it can be referenced by channel tools during Register()
 	// before the full implementation is defined later alongside hotAddMsgs.
 	var onChannelAdded func(string)
 
@@ -361,7 +360,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	}
 
 	// Build the tool package registry with all deps populated on each package.
-	toolRegistry, tgClientPkg := all.NewRegistry(all.Params{
+	toolRegistry, provisioners := all.NewRegistry(all.Params{
 		SecretStore:         secretStore,
 		StateStore:          s,
 		Callback:            r.callback,
@@ -417,16 +416,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Populate group tools from packages so channels can resolve tool groups.
 	toolgroup.SetPackageTools(toolRegistry.BuildGroupTools())
 
-	// The telegram provisioner is set on the telegramclient.Package struct
-	// by its Register() method. Read it to build the provisioners map used
-	// by ephemeral channel cleanup.
-	provisioners := map[channel.ChannelType]channel.EphemeralProvisioner{}
-	if tgClientPkg.Provisioner != nil {
-		provisioners[channel.TypeTelegram] = tgClientPkg.Provisioner
-	}
-
-	// Register tool_list last so it can see all MCP tools from every package.
-	channeltools.RegisterToolListTool(mcpHandler)
+	// tool_list is registered inside channeltools.Register() — no separate call needed.
 
 	// Ephemeral channel cleanup goroutine. Runs at user lifetime and
 	// periodically tears down ephemeral channels that have been idle past
