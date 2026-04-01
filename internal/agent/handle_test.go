@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"tclaw/internal/channel"
 )
 
@@ -361,5 +363,18 @@ func TestBuildEnv(t *testing.T) {
 				t.Error("NODE_OPTIONS should not be set when NODE_MAX_HEAP_MB is absent")
 			}
 		}
+	})
+}
+
+func TestSandboxPaths(t *testing.T) {
+	t.Run("includes Go toolchain for dev sessions", func(t *testing.T) {
+		var found bool
+		for _, p := range systemReadOnlyPaths {
+			if p == "/usr/local/go" {
+				found = true
+				break
+			}
+		}
+		require.True(t, found, "systemReadOnlyPaths must include /usr/local/go for dev sessions")
 	})
 }

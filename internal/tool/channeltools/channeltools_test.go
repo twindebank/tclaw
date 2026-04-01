@@ -598,6 +598,92 @@ func TestChannelDone(t *testing.T) {
 	})
 }
 
+func TestChannelDeleteTeardown(t *testing.T) {
+	t.Run("calls provisioner teardown synchronously", func(t *testing.T) {
+		th := setupHarnessWithProvisioner(t, config.EnvLocal)
+
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "teardown-test", "description": "Bot to delete", "type": "telegram",
+			"allowed_users": []any{"123456789"},
+		})
+		reloadRegistry(t, th.testHarness)
+
+		// Seed teardown state so the delete handler has something to tear down.
+		require.NoError(t, th.runtimeState.Update(context.Background(), "teardown-test", func(rs *channel.RuntimeState) {
+			rs.TeardownState = telegramchannel.NewTeardownState("tclaw_delete_bot")
+		}))
+
+		callTool(t, th.handler, "channel_delete", map[string]any{"name": "teardown-test"})
+
+		// Provisioner should have been called synchronously during the tool call.
+		require.True(t, th.provisioner.teardownCalled, "expected provisioner.Teardown to be called")
+		require.Equal(t, "tclaw_delete_bot", th.provisioner.teardownUsername)
+
+		// Channel should be removed from config.
+		channels, err := th.configWriter.ReadChannels(testUserID)
+		require.NoError(t, err)
+		for _, ch := range channels {
+			require.NotEqual(t, "teardown-test", ch.Name)
+		}
+
+		// Secret should be cleaned up.
+		token, err := th.secretStore.Get(context.Background(), channel.ChannelSecretKey("teardown-test"))
+		require.NoError(t, err)
+		require.Empty(t, token)
+	})
+
+	t.Run("does not delete channel if teardown fails", func(t *testing.T) {
+		th := setupHarnessWithProvisioner(t, config.EnvLocal)
+		th.provisioner.teardownErr = fmt.Errorf("BotFather unreachable")
+
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "fail-delete", "description": "Bot that fails teardown", "type": "telegram",
+			"allowed_users": []any{"123456789"},
+		})
+		reloadRegistry(t, th.testHarness)
+
+		require.NoError(t, th.runtimeState.Update(context.Background(), "fail-delete", func(rs *channel.RuntimeState) {
+			rs.TeardownState = telegramchannel.NewTeardownState("tclaw_fail_bot")
+		}))
+
+		toolErr := callToolExpectError(t, th.handler, "channel_delete", map[string]any{"name": "fail-delete"})
+		require.Contains(t, toolErr.Error(), "platform teardown failed")
+		require.Contains(t, toolErr.Error(), "BotFather unreachable")
+
+		// Channel should still be in config since teardown failed.
+		channels, err := th.configWriter.ReadChannels(testUserID)
+		require.NoError(t, err)
+		var found bool
+		for _, ch := range channels {
+			if ch.Name == "fail-delete" {
+				found = true
+			}
+		}
+		require.True(t, found, "channel should not be deleted when teardown fails")
+	})
+
+	t.Run("skips teardown when no teardown state exists", func(t *testing.T) {
+		th := setupHarnessWithProvisioner(t, config.EnvLocal)
+
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "no-teardown", "description": "Socket channel", "type": "socket",
+		})
+		reloadRegistry(t, th.testHarness)
+
+		callTool(t, th.handler, "channel_delete", map[string]any{"name": "no-teardown"})
+
+		// No teardown state means no provisioner call.
+		require.False(t, th.provisioner.teardownCalled)
+
+		// Channel should still be removed from config.
+		channels, err := th.configWriter.ReadChannels(testUserID)
+		require.NoError(t, err)
+		for _, ch := range channels {
+			require.NotEqual(t, "no-teardown", ch.Name)
+		}
+	})
+}
+
 func TestCreatableGroups(t *testing.T) {
 	t.Run("channel with empty creatable_groups cannot create", func(t *testing.T) {
 		th := setupHarnessWithActiveChannel(t, config.EnvLocal, "monitor-chan")
