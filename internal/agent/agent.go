@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -452,12 +451,15 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		}
 
 		// Reset command: show the multi-option reset menu.
-		// Always allowed — allowedResetLevels guarantees at least Session.
 		if isResetCommand(msg.Text) {
+			levels := allowedResetLevels(opts, msg.ChannelID)
+			if len(levels) == 0 {
+				sendDenied(ctx, opts, msg.ChannelID)
+				continue
+			}
 			fm.Cancel(msg.ChannelID)
 			ch, ok := opts.channels()[msg.ChannelID]
 			if ok {
-				levels := allowedResetLevels(opts, msg.ChannelID)
 				if _, err := ch.Send(ctx, dynamicResetMenuPrompt(levels, ch.Markup())); err != nil {
 					slog.Error("failed to send reset menu", "err", err)
 				}
@@ -785,20 +787,13 @@ func (t *idleTimerT) Stop() {
 
 // isBuiltinAllowed checks whether a builtin command is permitted on the given channel.
 // If the channel has overrides, checks those; otherwise checks user-level tools.
-// If NO builtin entries exist at all (neither channel nor user level), everything
-// is allowed for backwards compatibility.
+// Builtins must be explicitly included via all_builtins or safe_builtins tool groups.
 func isBuiltinAllowed(opts Options, channelID channel.ChannelID, cmd claudecli.Tool) bool {
 	var tools []claudecli.Tool
 	if override, ok := opts.ChannelToolOverrides[channelID]; ok {
 		tools = override.AllowedTools
 	} else {
 		tools = opts.AllowedTools
-	}
-
-	// If no builtin__ entries exist in the tool list, all builtins are allowed.
-	// This is the default when tool_groups don't include all_builtins or safe_builtins.
-	if !slices.ContainsFunc(tools, claudecli.IsBuiltinTool) {
-		return true
 	}
 
 	for _, t := range tools {

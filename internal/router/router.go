@@ -511,7 +511,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// Reconcile: provision channels that need it, identify needs_setup channels.
 		reconciled, reconcileErr := reconciler.Reconcile(dynamicCtx, reconciler.ReconcileParams{
 			Channels:     currentChannels,
-			SecretStore:  secretStore,
 			RuntimeState: runtimeState,
 			Provisioners: provisioners,
 		})

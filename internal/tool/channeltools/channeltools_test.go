@@ -708,7 +708,6 @@ func setupHarnessWithActiveChannel(t *testing.T, env config.Env, activeChannel s
 		SecretStore:  th.secretStore,
 		ReconcileParams: reconciler.ReconcileParams{
 			RuntimeState: th.runtimeState,
-			SecretStore:  th.secretStore,
 		},
 		ActiveChannel: func() string {
 			return activeChannel
@@ -732,7 +731,6 @@ func setupHarnessWithCallback(t *testing.T, env config.Env, onChange func()) tes
 		OnChannelChange: onChange,
 		ReconcileParams: reconciler.ReconcileParams{
 			RuntimeState: th.runtimeState,
-			SecretStore:  th.secretStore,
 		},
 	})
 
@@ -754,7 +752,6 @@ func setupHarnessWithHotAdd(t *testing.T, env config.Env, onChange func(), onAdd
 		OnChannelAdded:  onAdded,
 		ReconcileParams: reconciler.ReconcileParams{
 			RuntimeState: th.runtimeState,
-			SecretStore:  th.secretStore,
 		},
 	})
 
@@ -783,7 +780,6 @@ func setupHarnessWithProvisioner(t *testing.T, env config.Env) testHarnessWithPr
 		Provisioners: provisioners,
 		ReconcileParams: reconciler.ReconcileParams{
 			RuntimeState: th.runtimeState,
-			SecretStore:  th.secretStore,
 			Provisioners: provisioners,
 		},
 	})
