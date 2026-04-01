@@ -21,6 +21,7 @@ import (
 	"tclaw/claudecli"
 	"tclaw/credential"
 	"tclaw/libraries/secret"
+	"tclaw/libraries/store"
 	"tclaw/mcp"
 	"tclaw/oauth"
 	"tclaw/toolgroup"
@@ -121,6 +122,7 @@ type PackageInfo struct {
 // Package-specific deps go on the Package struct, not here.
 type RegistrationContext struct {
 	SecretStore        secret.Store
+	StateStore         store.Store
 	Callback           *oauth.CallbackServer
 	CredentialManager  *credential.Manager
 	Registry           *Registry
