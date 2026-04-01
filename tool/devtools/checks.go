@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"tclaw/libraries/credentialerror"
@@ -44,6 +43,14 @@ func devPRChecksHandler(deps Deps) mcp.ToolHandler {
 		}
 		if a.PR <= 0 {
 			return nil, fmt.Errorf("pr must be a positive integer")
+		}
+
+		repoURL, err := deps.Store.GetRepoURL(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if repoURL == "" {
+			return nil, fmt.Errorf("no repo URL configured — run dev_start first to set up the repo")
 		}
 
 		token, err := deps.SecretStore.Get(ctx, githubTokenKey)
