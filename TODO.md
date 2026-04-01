@@ -56,9 +56,9 @@
 - [ ] Signal support
 - [ ] Channel history store — archive deleted channels (name, type, session ID, dev session, timestamps) so the agent can reference past ephemeral tasks. `channel_history` MCP tool for querying.
 - [x] Channel types in own packages — socket/stdio/telegram in `channel/socketchannel/` etc. with builders co-located.
-- [ ] `channel_delete` cleanup — archive the chat (export/preserve history before deleting the bot) and automatically cancel any associated dev sessions. Requires channels to track their dev sessions and dev sessions to be tagged with the originating channel. (Note: `channel_done` now requires user confirmation before teardown.)
-- [ ] Channel busy/free check — `channel_is_busy` tool: returns whether a channel has an active agent turn or recent conversation activity (with configurable timeout). Enables scheduled tasks to check before sending cross-channel messages, and to queue/defer if busy rather than interrupting.
-- [ ] Ephemeral channel system prompt enrichment — when a channel is created as ephemeral, inject context into its system prompt: the `initial_message` (so the agent knows its task from the start, not just from the first inbound message), and a note that it is a purpose-scoped ephemeral channel (so it stays focused and knows to call `channel_done` when done).
+- [ ] `channel_delete` cleanup — basic cleanup exists (runtime state, secrets, knowledge dir), but still needs: archive the chat (export/preserve history before deleting the bot) and automatically cancel any associated dev sessions. Requires channels to track their dev sessions and dev sessions to be tagged with the originating channel. (Note: `channel_done` now requires user confirmation before teardown.)
+- [x] Channel busy/free check — `channel_is_busy` tool: returns whether a channel has an active agent turn or recent conversation activity (with configurable timeout). Enables scheduled tasks to check before sending cross-channel messages, and to queue/defer if busy rather than interrupting.
+- [ ] Ephemeral channel system prompt enrichment — initial_message delivery works (via `injectInitialMessages`), but the system prompt doesn't yet include metadata about the channel being ephemeral/purpose-scoped (so the agent stays focused and knows to call `channel_done` when done).
 - [ ] Error channel — dedicated channel that receives errors from the logger. Hook into `slog` (or the logbuffer) so that ERROR-level log entries are automatically posted to a designated channel. Enables the agent to see and react to runtime errors without manually checking `dev_logs`.
 
 ## Connectivity
@@ -69,7 +69,7 @@
 ## Automation
 - [x] Task scheduling — cron-like triggers that kick off agent sessions autonomously
 - [x] Schedule management tools — MCP tools for create, list, edit, delete, pause, resume
-- [ ] GitHub PR merged notifications — notify the relevant channel when a PR is merged. Now possible via the notification system — devtools implements `Notifier` with a webhook watcher.
+- [ ] GitHub PR merged notifications — notify the relevant channel when a PR is merged. Notification system is in place; needs devtools to implement `Notifier` interface with a webhook/polling watcher.
 - [ ] Email auto-categorisation — auto-categorise emails (e.g. receipts, travel, action-required) and apply a skill to handle each category automatically. Gmail notifications are already in place; categorisation is the next step.
 
 ## Self-Modification
@@ -84,7 +84,7 @@
 - [x] Deployment — Docker + Fly.io with persistent volume, health checks, CI workflow
 - [ ] Monitoring — metrics, alerting, cost tracking (logging is in place via slog)
 - [ ] Email monitoring — set up BetterStack or Fly.io native email alerts for downtime/errors
-- [ ] System message posted to admin channel on every redeployment (with commit hash / changelog)
+- [x] System message posted to admin channel on every redeployment (with commit hash / changelog)
 - [ ] Proper versioning for deployments (semver tags, changelog generation, release notes)
 
 ## Maintenance
