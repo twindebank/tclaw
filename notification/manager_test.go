@@ -50,6 +50,33 @@ func TestManager_Subscribe(t *testing.T) {
 	})
 }
 
+func TestManager_Subscribe_Dedup(t *testing.T) {
+	t.Run("returns existing subscription on duplicate", func(t *testing.T) {
+		h := setupManager(t)
+
+		params := notification.SubscribeParams{
+			TypeName:    "event",
+			ChannelName: "main",
+			Scope:       notification.ScopePersistent,
+			Label:       "test/event",
+		}
+
+		first, err := h.manager.Subscribe(h.ctx, "test", params)
+		require.NoError(t, err)
+		_ = receiveMessage(t, h.output)
+
+		second, err := h.manager.Subscribe(h.ctx, "test", params)
+		require.NoError(t, err)
+
+		// Should return the same subscription ID, not create a new one.
+		require.Equal(t, first.Subscription.ID, second.Subscription.ID)
+
+		subs, err := h.manager.List(h.ctx)
+		require.NoError(t, err)
+		require.Len(t, subs, 1)
+	})
+}
+
 func TestManager_Unsubscribe(t *testing.T) {
 	t.Run("removes subscription and cancels watcher", func(t *testing.T) {
 		h := setupManager(t)

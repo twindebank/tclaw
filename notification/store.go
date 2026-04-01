@@ -52,6 +52,25 @@ func (s *Store) Get(ctx context.Context, id SubscriptionID) (*Subscription, erro
 	return nil, nil
 }
 
+// FindExisting returns a subscription matching the given identity fields, or nil if none exists.
+// Used by Manager.Subscribe to prevent duplicate subscriptions.
+func (s *Store) FindExisting(ctx context.Context, packageName, typeName, channelName string, scope Scope, credentialSetID string) (*Subscription, error) {
+	subs, err := s.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, sub := range subs {
+		if sub.PackageName == packageName &&
+			sub.TypeName == typeName &&
+			sub.ChannelName == channelName &&
+			sub.Scope == scope &&
+			sub.CredentialSetID == credentialSetID {
+			return &sub, nil
+		}
+	}
+	return nil, nil
+}
+
 // Add persists a new subscription. Returns an error if one with the same ID exists.
 func (s *Store) Add(ctx context.Context, sub Subscription) error {
 	subs, err := s.List(ctx)
