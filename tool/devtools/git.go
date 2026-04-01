@@ -10,13 +10,17 @@ import (
 
 // cloneOrFetch ensures a bare repo exists at repoDir. If the directory doesn't
 // exist, it clones. Otherwise it fetches. Returns an error if git operations fail.
+//
+// The token is injected only for the network operation and never persisted in the
+// git remote URL — the origin is always reset to the clean URL afterwards so that
+// `git remote -v` does not expose the credential.
 func cloneOrFetch(repoDir string, repoURL string, token string) error {
 	authURL := authenticatedURL(repoURL, token)
 
 	if _, err := os.Stat(repoDir); os.IsNotExist(err) {
 		cmd := exec.Command("git", "-c", "core.hooksPath=/dev/null", "clone", "--bare", authURL, repoDir)
 		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("git clone: %s: %w", sanitizeGitOutput(string(out), token), err)
+			return fmt.Errorf("git clone: %s: %w", sanitizeGitOutput(string(out), token), checkPermissionError(string(out), err))
 		}
 		// Bare clones don't set up remote tracking refs (origin/*) by default.
 		// Configure the fetch refspec so that `git fetch origin` populates
@@ -27,11 +31,16 @@ func cloneOrFetch(repoDir string, repoURL string, token string) error {
 		}
 		cmd = exec.Command("git", "-C", repoDir, "fetch", "origin")
 		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("git initial fetch: %s: %w", sanitizeGitOutput(string(out), token), err)
+			return fmt.Errorf("git initial fetch: %s: %w", sanitizeGitOutput(string(out), token), checkPermissionError(string(out), err))
+		}
+		// Strip token from origin URL — it's only needed during network ops.
+		if err := resetOriginURL(repoDir, repoURL); err != nil {
+			return err
 		}
 		return nil
 	}
 
+	// Set the auth URL only for the fetch, then immediately strip it.
 	cmd := exec.Command("git", "-C", repoDir, "remote", "set-url", "origin", authURL)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git set-url: %s: %w", sanitizeGitOutput(string(out), token), err)
@@ -46,7 +55,14 @@ func cloneOrFetch(repoDir string, repoURL string, token string) error {
 
 	cmd = exec.Command("git", "-C", repoDir, "fetch", "origin")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git fetch: %s: %w", sanitizeGitOutput(string(out), token), err)
+		// Strip the auth URL before returning so the token isn't left in git config on failure.
+		_ = resetOriginURL(repoDir, repoURL)
+		return fmt.Errorf("git fetch: %s: %w", sanitizeGitOutput(string(out), token), checkPermissionError(string(out), err))
+	}
+
+	// Strip token from origin URL — it's only needed during network ops.
+	if err := resetOriginURL(repoDir, repoURL); err != nil {
+		return err
 	}
 	return nil
 }
@@ -147,12 +163,13 @@ func gitAddAndCommit(worktreeDir string, message string) (bool, error) {
 	return true, nil
 }
 
-// gitPush pushes the branch to origin.
+// gitPush pushes the branch to origin. The token is passed via the push URL and
+// is never written to the repo's git config — the remote origin URL is not modified.
 func gitPush(worktreeDir string, branch string, token string, repoURL string) error {
 	authURL := authenticatedURL(repoURL, token)
 	cmd := exec.Command("git", "-c", "core.hooksPath=/dev/null", "-C", worktreeDir, "push", authURL, branch)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git push: %s: %w", sanitizeGitOutput(string(out), token), err)
+		return fmt.Errorf("git push: %s: %w", sanitizeGitOutput(string(out), token), checkPermissionError(string(out), err))
 	}
 	return nil
 }
@@ -204,6 +221,31 @@ func sanitizeGitOutput(output string, token string) string {
 		return output
 	}
 	return strings.ReplaceAll(output, token, "[REDACTED]")
+}
+
+// checkPermissionError inspects git output for HTTP 403 / "Permission denied"
+// signals and wraps the error with actionable guidance if found. Returns the
+// original error unchanged if no permission pattern is detected.
+func checkPermissionError(output string, err error) error {
+	if err == nil {
+		return nil
+	}
+	lower := strings.ToLower(output)
+	if strings.Contains(lower, "403") || strings.Contains(lower, "permission denied") || strings.Contains(lower, "repository not found") {
+		// "Repository not found" is GitHub's way of saying "no access" for private repos.
+		return fmt.Errorf("%w — check that your GitHub PAT has Contents: Read and write access at https://github.com/settings/personal-access-tokens", err)
+	}
+	return err
+}
+
+// resetOriginURL sets the origin remote URL to the clean (token-free) URL so
+// that the credential is never persisted in git config between operations.
+func resetOriginURL(repoDir string, repoURL string) error {
+	cmd := exec.Command("git", "-C", repoDir, "remote", "set-url", "origin", repoURL)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git reset origin url: %s: %w", string(out), err)
+	}
+	return nil
 }
 
 // authenticatedURL injects a GitHub token into an HTTPS URL for push/clone auth.
