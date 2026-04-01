@@ -14,12 +14,16 @@ import (
 
 // Package implements toolpkg.Package for Telegram Client API tools.
 type Package struct {
-	SecretStore secret.Store
-	StateStore  store.Store
+	SecretStore  secret.Store
+	StateStore   store.Store
+	RuntimeState *channel.RuntimeStateStore
 
 	// Provisioner is set by Register and read by the router to pass to
 	// channeltools for auto-provisioning.
 	Provisioner channel.EphemeralProvisioner
+
+	// state is set by Register so ChannelHistoryFunc can access the MTProto client.
+	state *handlerState
 }
 
 func (p *Package) Name() string { return "telegram_client" }
@@ -72,6 +76,8 @@ func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationCont
 
 	// Store the provisioner on the struct so the router can read it.
 	p.Provisioner = provisioner
+	// Store the handler state so ChannelHistoryFunc can access the MTProto client.
+	p.state = provisioner.state
 
 	return nil
 }
