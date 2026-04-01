@@ -1,6 +1,6 @@
 package main
 
-import "tclaw/cli"
+import "tclaw/internal/cli"
 
 func main() {
 	cli.Run()

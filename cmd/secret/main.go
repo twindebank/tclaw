@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"syscall"
 
-	"tclaw/libraries/secret"
+	"tclaw/internal/libraries/secret"
 )
 
 const usage = `Usage: tclaw-secret <command> [args]
