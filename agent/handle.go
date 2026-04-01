@@ -293,6 +293,12 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		return "", fmt.Errorf("unknown channel %q", msg.ChannelID)
 	}
 
+	// Seed and mount the channel's isolated knowledge directory so its
+	// CLAUDE.md is auto-loaded by the CLI alongside the global one.
+	if channelDir := seedChannelKnowledge(opts.MemoryDir, ch.Info().Name); channelDir != "" {
+		opts.AddDirs = append(opts.AddDirs, channelDir)
+	}
+
 	split := ch.SplitStatusMessages()
 
 	tw := &turnWriter{ch: ch, ctx: ctx, split: split, statusWrap: ch.StatusWrap()}
@@ -323,6 +329,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	default:
 		contextSection += "Source: user message\n"
 	}
+	contextSection += fmt.Sprintf("Channel knowledge: `./channels/%s/`\n", info.Name)
 
 	systemPrompt := opts.SystemPrompt + contextSection
 
@@ -454,6 +461,10 @@ func buildEnv(opts Options) []string {
 	// Disable Claude Code's auto-memory so the agent only writes to
 	// its own memory dir (CWD), not ~/.claude/projects/.../memory/.
 	overrides["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
+
+	// Enable CLAUDE.md loading from --add-dir directories so per-channel
+	// knowledge dirs have their CLAUDE.md auto-loaded into context.
+	overrides["CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"] = "1"
 
 	// Cap the Node.js V8 heap to stay within the VM's memory budget.
 	// NODE_MAX_HEAP_MB is set in fly.toml [env] — see the comment there

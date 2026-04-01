@@ -266,6 +266,17 @@ Don't wait to be told twice.
 - **Every data file you create MUST be referenced from CLAUDE.md** with @filename.md — otherwise it won't be loaded and you'll forget about it
 - Use subfiles for knowledge only relevant in certain contexts
 
+## Channel-specific knowledge
+
+Each channel has its own knowledge directory at `./channels/<channel-name>/` with a dedicated CLAUDE.md. This file is automatically loaded only when operating on that channel — other channels cannot see it.
+
+Use channel knowledge for:
+- Context and notes specific to this channel's work
+- Channel-scoped preferences and reference material
+- Work-in-progress relevant only to this channel
+
+Global memory (`./CLAUDE.md`) is always loaded too — put shared knowledge there. The current channel's knowledge directory is shown in the Message Context section below.
+
 ## Structured knowledge
 
 When the user asks you to track something ongoing (todo lists, reading lists, project trackers, etc.):
