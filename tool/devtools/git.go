@@ -244,22 +244,34 @@ func checkPermissionError(output string, err error) error {
 // bare clone and silently clobber each other.
 //
 // Example: https://github.com/twindebank/tclaw → <userDir>/repos/twindebank-tclaw
-func repoDirForURL(userDir string, repoURL string) string {
-	// Strip scheme (https://) and host (github.com/), then take "owner/repo".
+//
+// Returns an error if the URL cannot be parsed into a valid owner/repo path — callers
+// must not silently fall back, as that is precisely the bug this function prevents.
+func repoDirForURL(userDir string, repoURL string) (string, error) {
+	if repoURL == "" {
+		return "", fmt.Errorf("repo URL is empty")
+	}
+	// Strip scheme (https://) and host (github.com/), leaving "owner/repo[.git]".
 	slug := repoURL
-	if i := strings.Index(slug, "://"); i >= 0 {
-		slug = slug[i+3:]
+	schemeEnd := strings.Index(slug, "://")
+	if schemeEnd < 0 {
+		return "", fmt.Errorf("repo URL %q has no scheme (expected https://...)", repoURL)
 	}
-	if i := strings.Index(slug, "/"); i >= 0 {
-		slug = slug[i+1:]
+	slug = slug[schemeEnd+3:]
+	// Strip host — everything up to and including the first slash.
+	hostEnd := strings.Index(slug, "/")
+	if hostEnd < 0 {
+		return "", fmt.Errorf("repo URL %q has no path after host", repoURL)
 	}
+	slug = slug[hostEnd+1:]
 	slug = strings.TrimSuffix(slug, ".git")
+	// Require at least "owner/repo" — a bare host or single-segment path is not valid.
+	if !strings.Contains(slug, "/") || strings.HasPrefix(slug, "/") || strings.HasSuffix(slug, "/") {
+		return "", fmt.Errorf("repo URL %q path %q must be in owner/repo format", repoURL, slug)
+	}
 	// Replace path separators with dashes: "owner/repo" → "owner-repo".
 	slug = strings.ReplaceAll(slug, "/", "-")
-	if slug == "" {
-		slug = "repo"
-	}
-	return filepath.Join(userDir, "repos", slug)
+	return filepath.Join(userDir, "repos", slug), nil
 }
 
 // resetOriginURL sets the origin remote URL to the clean (token-free) URL so

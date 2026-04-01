@@ -127,7 +127,10 @@ func devStartHandler(deps Deps) mcp.ToolHandler {
 		}
 
 		// Clone or fetch the bare repo, namespaced by repo URL so multiple repos don't clobber each other.
-		repoDir := repoDirForURL(deps.UserDir, repoURL)
+		repoDir, err := repoDirForURL(deps.UserDir, repoURL)
+		if err != nil {
+			return nil, fmt.Errorf("invalid repo URL: %w", err)
+		}
 		if err := cloneOrFetch(repoDir, repoURL, token); err != nil {
 			return nil, fmt.Errorf("clone/fetch: %w", err)
 		}
