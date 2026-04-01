@@ -14,6 +14,11 @@ type ManagerParams struct {
 	Store    *Store
 	Output   chan<- channel.TaggedMessage
 	Channels func() map[channel.ChannelID]channel.Channel
+
+	// Ready is an optional signal channel. If set, Run() waits for it to close
+	// before loading persisted subscriptions. This ensures notifiers are
+	// registered (via credential system init) before resubscription attempts.
+	Ready <-chan struct{}
 }
 
 // Manager is the notification system's central orchestrator. It persists
@@ -27,6 +32,7 @@ type Manager struct {
 	store    *Store
 	output   chan<- channel.TaggedMessage
 	channels func() map[channel.ChannelID]channel.Channel
+	ready    <-chan struct{}
 
 	mu        sync.Mutex
 	notifiers map[string]Notifier           // package_name -> notifier
@@ -39,13 +45,13 @@ func NewManager(p ManagerParams) *Manager {
 		store:     p.Store,
 		output:    p.Output,
 		channels:  p.Channels,
+		ready:     p.Ready,
 		notifiers: make(map[string]Notifier),
 		cancels:   make(map[SubscriptionID]CancelFunc),
 	}
 }
 
 // RegisterNotifier adds a package's notifier for discoverability and delegation.
-// Called during tool registration before Run().
 func (m *Manager) RegisterNotifier(packageName string, notifier Notifier) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -59,10 +65,16 @@ func (m *Manager) UnregisterNotifier(packageName string) {
 	delete(m.notifiers, packageName)
 }
 
-// Run loads persisted subscriptions, restarts their watchers, and blocks
-// until ctx is cancelled.
+// Run waits for the ready signal (notifiers registered), loads persisted
+// subscriptions, restarts their watchers, and blocks until ctx is cancelled.
 func (m *Manager) Run(ctx context.Context) {
-	slog.Info("notification manager: started")
+	slog.Info("notification manager: started, waiting for notifiers")
+
+	select {
+	case <-m.ready:
+	case <-ctx.Done():
+		return
+	}
 
 	m.resubscribeAll(ctx)
 

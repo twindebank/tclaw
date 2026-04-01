@@ -125,6 +125,94 @@ func TestManager_AvailableTypes(t *testing.T) {
 	})
 }
 
+func TestManager_Run(t *testing.T) {
+	t.Run("resubscribes persisted subscriptions after ready signal", func(t *testing.T) {
+		s, err := store.NewFS(t.TempDir())
+		require.NoError(t, err)
+
+		output := make(chan channel.TaggedMessage, 8)
+		channels := func() map[channel.ChannelID]channel.Channel {
+			return map[channel.ChannelID]channel.Channel{
+				"main-id": &mockChannel{name: "main", id: "main-id"},
+			}
+		}
+
+		notifStore := notification.NewStore(s)
+
+		// Pre-persist a subscription (simulating a previous session).
+		sub := notification.Subscription{
+			ID:          notification.GenerateID(),
+			Scope:       notification.ScopePersistent,
+			ChannelName: "main",
+			PackageName: "test",
+			TypeName:    "event",
+			Label:       "persisted/event",
+			CreatedAt:   time.Now(),
+		}
+		require.NoError(t, notifStore.Add(context.Background(), sub))
+
+		ready := make(chan struct{})
+		mgr := notification.NewManager(notification.ManagerParams{
+			Store:    notifStore,
+			Output:   output,
+			Channels: channels,
+			Ready:    ready,
+		})
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		done := make(chan struct{})
+		go func() {
+			mgr.Run(ctx)
+			close(done)
+		}()
+
+		// Register the notifier after Run() starts (mirrors production ordering
+		// where credential system init happens after the goroutine launches).
+		notifier := newMockNotifier()
+		mgr.RegisterNotifier("test", notifier)
+
+		// Signal ready — Run() should now resubscribe the persisted subscription.
+		close(ready)
+
+		// The mock notifier emits on Resubscribe, so we should receive a message.
+		msg := receiveMessage(t, output)
+		require.Equal(t, channel.ChannelID("main-id"), msg.ChannelID)
+		require.Equal(t, channel.SourceNotification, msg.SourceInfo.Source)
+	})
+
+	t.Run("exits cleanly when context cancelled before ready", func(t *testing.T) {
+		s, err := store.NewFS(t.TempDir())
+		require.NoError(t, err)
+
+		ready := make(chan struct{})
+		mgr := notification.NewManager(notification.ManagerParams{
+			Store:    notification.NewStore(s),
+			Output:   make(chan channel.TaggedMessage, 8),
+			Channels: func() map[channel.ChannelID]channel.Channel { return nil },
+			Ready:    ready,
+		})
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		done := make(chan struct{})
+		go func() {
+			mgr.Run(ctx)
+			close(done)
+		}()
+
+		// Cancel before signalling ready — Run() should exit without panic.
+		cancel()
+
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("Run() did not exit after context cancellation")
+		}
+	})
+}
+
 // --- helpers ---
 
 type managerHarness struct {
@@ -148,10 +236,16 @@ func setupManager(t *testing.T) *managerHarness {
 		}
 	}
 
+	// Already-closed ready channel — existing tests don't exercise Run(),
+	// they call Subscribe/Unsubscribe directly.
+	alreadyReady := make(chan struct{})
+	close(alreadyReady)
+
 	mgr := notification.NewManager(notification.ManagerParams{
 		Store:    notification.NewStore(s),
 		Output:   output,
 		Channels: channels,
+		Ready:    alreadyReady,
 	})
 
 	notifier := newMockNotifier()
@@ -226,7 +320,13 @@ func (m *mockNotifier) Subscribe(_ context.Context, params notification.Subscrib
 	}, nil
 }
 
-func (m *mockNotifier) Resubscribe(_ context.Context, sub notification.Subscription, _ notification.Emitter) (notification.CancelFunc, error) {
+func (m *mockNotifier) Resubscribe(_ context.Context, sub notification.Subscription, emitter notification.Emitter) (notification.CancelFunc, error) {
+	// Emit on resubscribe so tests can verify delivery.
+	_ = emitter.Emit(context.Background(), notification.Notification{
+		SubscriptionID: sub.ID,
+		Text:           "resubscribed",
+	})
+
 	return func() {
 		m.mu.Lock()
 		m.cancelled[sub.ID] = true

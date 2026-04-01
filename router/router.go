@@ -327,12 +327,16 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	go scheduler.Run(ctx)
 
 	// Set up the notification manager — runs at user lifetime, outlives the agent.
+	// The ready channel is closed after credential system init so notifiers are
+	// registered before the manager tries to resubscribe persisted subscriptions.
 	notificationStore := notification.NewStore(s)
 	notificationMsgs := make(chan channel.TaggedMessage, 8)
+	notifiersReady := make(chan struct{})
 	notificationManager := notification.NewManager(notification.ManagerParams{
 		Store:    notificationStore,
 		Output:   notificationMsgs,
 		Channels: channelSet.Snapshot,
+		Ready:    notifiersReady,
 	})
 	go notificationManager.Run(ctx)
 
@@ -413,6 +417,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Register all tool packages via the registry. This calls Register() on
 	// each package and auto-generates info tools.
 	registerCredentialSystem(ctx, mcpHandler, toolRegistry, credMgr, regCtx, string(mu.cfg.ID))
+
+	// Signal that all notifiers are registered so the notification manager
+	// can safely resubscribe persisted subscriptions.
+	close(notifiersReady)
 
 	// Populate group tools from packages so channels can resolve tool groups.
 	toolgroup.SetPackageTools(toolRegistry.BuildGroupTools())
