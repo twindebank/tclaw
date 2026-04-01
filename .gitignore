@@ -1,5 +1,6 @@
 .env
 tclaw.yaml
+fly.toml
 /bin/
 tmp/
 .idea/

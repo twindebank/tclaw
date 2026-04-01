@@ -1,0 +1,48 @@
+# Fly.io application configuration for tclaw.
+#
+# Copy this file to fly.toml and update the app name:
+#   cp fly.example.toml fly.toml
+#
+# Or run `tclaw init` which generates it for you.
+
+app = "your-app-name"
+primary_region = "lhr"
+
+[build]
+
+[env]
+  TCLAW_STORE_PATH = "/data/store"
+  # Cap the Node.js V8 heap for the claude CLI subprocess. The CLI is the main
+  # memory consumer — tclaw itself uses ~15MB. Set this low enough to leave
+  # room for the Go process + kernel inside the VM's total memory budget.
+  # At 512MB VM: ~450MB usable, ~30MB system/tclaw, ~400MB for claude CLI.
+  # V8 heap is only part of Node.js memory (add ~30-50MB for native allocations).
+  # Raise this if turns OOM frequently; lower if you shrink the VM.
+  NODE_MAX_HEAP_MB = "350"
+
+[http_service]
+  internal_port = 9876
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 25
+    soft_limit = 20
+
+[[http_service.checks]]
+  grace_period = "30s"
+  interval = "30s"
+  method = "GET"
+  path = "/healthz"
+  timeout = "5s"
+
+[mounts]
+  source = "tclaw_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
