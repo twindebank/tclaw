@@ -14,7 +14,7 @@ RUN CGO_ENABLED=0 go build -ldflags "-X tclaw/version.Commit=${COMMIT}" -o /bin/
 
 # ---
 
-FROM node:22-bookworm-slim
+FROM node:22-trixie-slim
 
 # TLS CA certs (needed for outbound HTTPS, e.g. Telegram API),
 # bubblewrap for subprocess filesystem sandboxing,
