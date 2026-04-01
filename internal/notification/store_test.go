@@ -11,8 +11,8 @@ import (
 	"tclaw/internal/notification"
 )
 
-func TestStore_Add(t *testing.T) {
-	t.Run("persists and is listed", func(t *testing.T) {
+func TestStore(t *testing.T) {
+	t.Run("add persists and is listed", func(t *testing.T) {
 		s := newTestStore(t)
 		ctx := context.Background()
 
@@ -27,7 +27,7 @@ func TestStore_Add(t *testing.T) {
 		require.Equal(t, "type1", subs[0].TypeName)
 	})
 
-	t.Run("rejects duplicate ID", func(t *testing.T) {
+	t.Run("add rejects duplicate ID", func(t *testing.T) {
 		s := newTestStore(t)
 		ctx := context.Background()
 
@@ -38,10 +38,8 @@ func TestStore_Add(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "already exists")
 	})
-}
 
-func TestStore_Get(t *testing.T) {
-	t.Run("returns existing subscription", func(t *testing.T) {
+	t.Run("get returns existing subscription", func(t *testing.T) {
 		s := newTestStore(t)
 		ctx := context.Background()
 
@@ -54,7 +52,7 @@ func TestStore_Get(t *testing.T) {
 		require.Equal(t, sub.ID, got.ID)
 	})
 
-	t.Run("returns nil for missing ID", func(t *testing.T) {
+	t.Run("get returns nil for missing ID", func(t *testing.T) {
 		s := newTestStore(t)
 		ctx := context.Background()
 
@@ -62,10 +60,8 @@ func TestStore_Get(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, got)
 	})
-}
 
-func TestStore_Remove(t *testing.T) {
-	t.Run("deletes the subscription", func(t *testing.T) {
+	t.Run("remove deletes the subscription", func(t *testing.T) {
 		s := newTestStore(t)
 		ctx := context.Background()
 
@@ -82,7 +78,7 @@ func TestStore_Remove(t *testing.T) {
 		require.Equal(t, sub2.ID, subs[0].ID)
 	})
 
-	t.Run("errors on missing ID", func(t *testing.T) {
+	t.Run("remove errors on missing ID", func(t *testing.T) {
 		s := newTestStore(t)
 		ctx := context.Background()
 
@@ -90,10 +86,8 @@ func TestStore_Remove(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "not found")
 	})
-}
 
-func TestStore_RemoveByCredentialSet(t *testing.T) {
-	t.Run("removes matching and returns them", func(t *testing.T) {
+	t.Run("remove by credential set removes matching and returns them", func(t *testing.T) {
 		s := newTestStore(t)
 		ctx := context.Background()
 
@@ -117,7 +111,7 @@ func TestStore_RemoveByCredentialSet(t *testing.T) {
 		require.Len(t, subs, 2)
 	})
 
-	t.Run("returns nil when none match", func(t *testing.T) {
+	t.Run("remove by credential set returns nil when none match", func(t *testing.T) {
 		s := newTestStore(t)
 		ctx := context.Background()
 
@@ -125,10 +119,8 @@ func TestStore_RemoveByCredentialSet(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, removed)
 	})
-}
 
-func TestStore_List(t *testing.T) {
-	t.Run("returns nil for empty store", func(t *testing.T) {
+	t.Run("list returns nil for empty store", func(t *testing.T) {
 		s := newTestStore(t)
 		ctx := context.Background()
 

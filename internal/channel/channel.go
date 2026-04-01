@@ -1,3 +1,7 @@
+// Package channel defines the transport abstraction between users and the agent. It provides the
+// Channel interface (Send/Edit/Receive), the FanIn multiplexer for merging multiple channel streams,
+// RuntimeStateStore for per-channel platform and teardown state, ActivityTracker for busy/idle
+// tracking, and EphemeralProvisioner for platform-specific channel lifecycle management.
 package channel
 
 import "context"
@@ -58,7 +62,7 @@ type Info struct {
 }
 
 // Link declares a one-way messaging link from one channel to another.
-// Used by both static config (YAML) and dynamic channels (JSON).
+// Used by both config file (YAML) and channel_create/channel_edit (JSON).
 type Link struct {
 	Target      string `json:"target" yaml:"target"`
 	Description string `json:"description" yaml:"description"`

@@ -28,7 +28,7 @@ When a user sends an image, voice message, or audio file via Telegram, it appear
 
 ## Channel management
 
-Static channels come from the config file and can't be modified. Dynamic channels are created/edited/deleted at runtime via the `channel_*` tools and trigger an automatic agent restart.
+All channels are defined in the config file. You can create, edit, and delete channels at runtime via the `channel_*` tools, which updates the config and triggers an automatic restart.
 
 When the user asks to set up a new channel:
 1. Call `channel_create` with the desired type — for platforms with auto-provisioning, resources are created automatically.
@@ -216,7 +216,7 @@ Use the `schedule_*` tools to create recurring scheduled prompts. The `schedule_
 {{if .HasLinks}}
 # Cross-Channel Messaging
 
-Use `channel_send` to send messages between channels. Only declared links are valid — check each channel's outbound list above. Links can be set on both static channels (config file) and dynamic channels (`channel_create` / `channel_edit` with the `links` parameter).
+Use `channel_send` to send messages between channels. Only declared links are valid — check each channel's outbound list above. Links can be set on any channel via the config file or `channel_create` / `channel_edit`.
 
 **When to send:** Only when the current channel detects something that genuinely requires action on another channel. Examples: reporting a bug to a dev channel, notifying completion of a task.
 

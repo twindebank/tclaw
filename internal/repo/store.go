@@ -1,3 +1,6 @@
+// Package repo provides a store for tracking external git repositories. Persists repo metadata
+// (name, URL, branch, directory path) and last-seen commit SHA for change detection. Used by
+// the repo_sync, repo_log, and repo_list MCP tools.
 package repo
 
 import (

@@ -1,3 +1,7 @@
+// Package reconciler performs desired-state reconciliation for channels. It compares config-declared
+// channels against runtime state and auto-provisions platform resources (e.g. Telegram bots) via
+// EphemeralProvisioner when possible. Channels that cannot be auto-provisioned are marked as
+// needs_setup so the agent can guide the user.
 package reconciler
 
 import (
@@ -37,7 +41,7 @@ type ReconciledChannel struct {
 // ReconcileParams holds dependencies for reconciliation.
 type ReconcileParams struct {
 	Channels     []config.Channel
-	SecretStore  interface{} // unused now but kept for ProvisionResult token storage
+	SecretStore  any // unused now but kept for ProvisionResult token storage
 	RuntimeState *channel.RuntimeStateStore
 	Provisioners channel.ProvisionerLookup
 }
