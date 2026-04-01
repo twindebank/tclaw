@@ -1,4 +1,11 @@
-app = "tclaw"
+# Fly.io application configuration for tclaw.
+#
+# Copy this file to fly.toml and update the app name:
+#   cp fly.example.toml fly.toml
+#
+# Or run `tclaw init` which generates it for you.
+
+app = "your-app-name"
 primary_region = "lhr"
 
 [build]
