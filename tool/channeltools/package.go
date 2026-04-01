@@ -26,7 +26,7 @@ type Package struct {
 	OnChannelAdded  func(string)
 	OnChannelChange func()
 	ActivityTracker *channel.ActivityTracker
-	Provisioners    map[channel.ChannelType]channel.EphemeralProvisioner
+	Provisioners    channel.ProvisionerLookup
 	ActiveChannel   func() string
 
 	// Send deps.

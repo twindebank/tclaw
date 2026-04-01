@@ -51,6 +51,20 @@ type EphemeralProvisioner interface {
 	PlatformResponseInfo(teardownState TeardownState) map[string]any
 }
 
+// ProvisionerLookup returns the EphemeralProvisioner for a channel type, or nil
+// if none is available. Used instead of a static map so provisioners registered
+// during tool package initialization are visible without ordering constraints.
+// A nil ProvisionerLookup is safe to call via the Get method.
+type ProvisionerLookup func(ChannelType) EphemeralProvisioner
+
+// Get returns the provisioner for the given type, or nil. Safe to call on a nil receiver.
+func (f ProvisionerLookup) Get(ct ChannelType) EphemeralProvisioner {
+	if f == nil {
+		return nil
+	}
+	return f(ct)
+}
+
 // ProvisionParams is the input to EphemeralProvisioner.Provision.
 type ProvisionParams struct {
 	Name    string
