@@ -734,23 +734,8 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			}
 		}
 
-		// Check if a channel change happened during this turn.
-		// The router closed ChannelChangeCh instead of killing us,
-		// so we get to finish the turn and send a notice first.
-		if opts.ChannelChangeCh != nil {
-			select {
-			case <-opts.ChannelChangeCh:
-				if ch != nil {
-					if _, err := ch.Send(ctx, "🔄 Restarting to apply channel changes..."); err != nil {
-						slog.Error("failed to send restart notice", "err", err)
-					}
-					if err := ch.Done(ctx); err != nil {
-						slog.Error("failed to close turn after restart notice", "err", err)
-					}
-				}
-				return ErrChannelChanged
-			default:
-			}
+		if checkChannelChanged(opts.ChannelChangeCh, ch) {
+			return ErrChannelChanged
 		}
 	}
 }
