@@ -10,7 +10,7 @@ COPY . .
 # Fail fast if required build args are missing rather than deploying a broken build.
 RUN test -n "${COMMIT}" || (echo "ERROR: COMMIT build arg is required" && false)
 
-RUN CGO_ENABLED=0 go build -ldflags "-X tclaw/version.Commit=${COMMIT}" -o /bin/tclaw .
+RUN CGO_ENABLED=0 go build -ldflags "-X tclaw/internal/version.Commit=${COMMIT}" -o /bin/tclaw .
 
 # ---
 
