@@ -46,11 +46,25 @@ type persistedState struct {
 	InterruptedChannel channel.ChannelID `json:"interrupted_channel,omitempty"`
 }
 
+// WaitingInfo describes a message that is waiting for a busy channel.
+type WaitingInfo struct {
+	// ChannelID is the target channel the message will be delivered to.
+	ChannelID channel.ChannelID
+	// BusyChannelName is the human-readable name of the channel that is busy.
+	BusyChannelName string
+	// QueuedAt is when the message was first queued.
+	QueuedAt time.Time
+}
+
 // QueueParams holds dependencies for creating a Queue.
 type QueueParams struct {
 	Store    store.Store
 	Activity *channel.ActivityTracker
 	Channels func() map[channel.ChannelID]channel.Channel
+
+	// OnWaiting is called when a queued message starts waiting for a busy
+	// channel. Used to send user-visible feedback. May be nil.
+	OnWaiting func(WaitingInfo)
 }
 
 // Queue is a persistent priority queue for agent messages.
@@ -209,7 +223,11 @@ func (q *Queue) dequeueIndex() int {
 	// Priority 3: non-user messages — only if target channel is not busy.
 	for i, m := range q.messages {
 		channelName := q.resolveChannelName(m.ChannelID)
-		if channelName == "" || !q.activity.IsBusy(channelName) {
+		if channelName == "" {
+			return i
+		}
+		busy, _ := q.activity.IsBusy(channelName)
+		if !busy {
 			return i
 		}
 	}
@@ -236,7 +254,8 @@ func (q *Queue) idleNotifyForQueued() <-chan struct{} {
 			continue
 		}
 		name := q.resolveChannelName(m.ChannelID)
-		if name != "" && q.activity.IsBusy(name) {
+		busy, _ := q.activity.IsBusy(name)
+		if name != "" && busy {
 			busyChannels[name] = true
 		}
 	}
