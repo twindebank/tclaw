@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -41,6 +42,15 @@ func (p *Package) Build(ctx context.Context, params channelpkg.BuildParams) (cha
 		opts.RegisterHandler = params.RegisterHandler
 	}
 	opts.ChatID = loadChatID(ctx, params.StateStore, params.ChannelCfg.Name)
+	if opts.ChatID == 0 {
+		// Provisioning stores the chatID in PlatformState but not in the chatid_
+		// store key that loadChatID reads. Bridge the gap so the transport can
+		// send messages immediately after provisioning (e.g. initial_message).
+		if chatID := loadChatIDFromPlatformState(ctx, params.StateStore, params.ChannelCfg.Name); chatID != 0 {
+			opts.ChatID = chatID
+			saveChatIDFunc(params.StateStore, params.ChannelCfg.Name)(chatID)
+		}
+	}
 	opts.OnChatID = saveChatIDFunc(params.StateStore, params.ChannelCfg.Name)
 	opts.MediaDir = filepath.Join(params.BaseDir, string(params.UserID), "memory", "media")
 
@@ -87,6 +97,34 @@ func loadChatID(ctx context.Context, s store.Store, channelName string) int64 {
 		return 0
 	}
 	return int64(binary.LittleEndian.Uint64(data))
+}
+
+// loadChatIDFromPlatformState reads the chat ID from the RuntimeState's PlatformState.
+// This is the fallback path: after provisioning, the chatID is stored in PlatformState
+// but not yet in the chatid_ key. Returns 0 if no PlatformState or parsing fails.
+func loadChatIDFromPlatformState(ctx context.Context, s store.Store, channelName string) int64 {
+	data, err := s.Get(ctx, "channel_runtime/"+channelName)
+	if err != nil || len(data) == 0 {
+		return 0
+	}
+	// Inline parsing to avoid importing the channel package (circular).
+	var rs struct {
+		PlatformState struct {
+			Type string          `json:"type"`
+			Data json.RawMessage `json:"data"`
+		} `json:"platform_state"`
+	}
+	if err := json.Unmarshal(data, &rs); err != nil {
+		return 0
+	}
+	if rs.PlatformState.Type != "telegram" || len(rs.PlatformState.Data) == 0 {
+		return 0
+	}
+	var tgState TelegramPlatformState
+	if err := json.Unmarshal(rs.PlatformState.Data, &tgState); err != nil {
+		return 0
+	}
+	return tgState.ChatID
 }
 
 // saveChatIDFunc returns a callback that persists a Telegram chat ID to the store.
