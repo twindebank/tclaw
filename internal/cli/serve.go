@@ -140,12 +140,7 @@ func runServe() {
 	defer r.StopAll()
 
 	for _, u := range cfg.Users {
-		// Don't pre-build channel transports here. The agent loop builds all
-		// channels on its first iteration (before accepting messages), which
-		// avoids duplicate webhook registrations for Telegram bots. Previously,
-		// building here AND in the loop caused each bot to register two different
-		// webhook URLs, hitting Telegram's rate limits on every startup/restart.
-		if err := r.Register(ctx, u.ToUserConfig(), nil, u.Channels); err != nil {
+		if err := r.Register(ctx, u.ToUserConfig(), u.Channels); err != nil {
 			slog.Error("failed to register user", "user", u.ID, "err", err)
 			os.Exit(1)
 		}
