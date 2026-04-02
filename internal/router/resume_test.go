@@ -85,6 +85,34 @@ func TestCheckAutoResume(t *testing.T) {
 		// Marker cleared after resume.
 		require.Equal(t, channel.ChannelID(""), q2.InterruptedChannel())
 	})
+
+	t.Run("fresh queue without LoadPersisted misses marker", func(t *testing.T) {
+		// This documents the bug that was fixed: checkAutoResume must be
+		// called AFTER LoadPersisted, otherwise the marker is invisible.
+		s, err := store.NewFS(t.TempDir())
+		require.NoError(t, err)
+		activity := channel.NewActivityTracker()
+		channelsFunc := func() map[channel.ChannelID]channel.Channel {
+			return map[channel.ChannelID]channel.Channel{
+				"ch1": &stubResumeChannel{id: "ch1"},
+			}
+		}
+
+		q1 := queue.New(queue.QueueParams{Store: s, Activity: activity, Channels: channelsFunc})
+		ctx := context.Background()
+		require.NoError(t, q1.SetInterrupted(ctx, "ch1"))
+
+		// New queue WITHOUT LoadPersisted — marker is not visible.
+		q2 := queue.New(queue.QueueParams{Store: s, Activity: activity, Channels: channelsFunc})
+		msg := checkAutoResume(ctx, q2, channelsFunc())
+		require.Nil(t, msg, "fresh queue without LoadPersisted should not see the marker")
+
+		// After LoadPersisted, the marker becomes visible.
+		require.NoError(t, q2.LoadPersisted(ctx))
+		msg = checkAutoResume(ctx, q2, channelsFunc())
+		require.NotNil(t, msg, "after LoadPersisted, marker should be visible")
+		require.Equal(t, channel.ChannelID("ch1"), msg.ChannelID)
+	})
 }
 
 // --- helpers ---

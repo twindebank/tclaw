@@ -284,7 +284,13 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	registry := channel.NewRegistry(buildRegistryEntries(mu.configChannels))
 	mu.registry = registry
 
-	activityTracker := channel.NewActivityTracker()
+	// Persisted tracker so ephemeral cleanup decisions survive restarts.
+	// Load last-message timestamps for all configured channels.
+	channelNames := make([]string, len(mu.configChannels))
+	for i, cc := range mu.configChannels {
+		channelNames[i] = cc.Name
+	}
+	activityTracker := channel.NewPersistedActivityTracker(ctx, runtimeState, channelNames)
 
 	// activeChannelName tracks which channel is currently processing a turn.
 	// Needed by channel_send and channel_create
@@ -622,6 +628,13 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		worktreesDir := filepath.Join(userDir, "worktrees")
 		reposDir := filepath.Join(userDir, "repos")
 
+		// Load persisted queue state (queued messages + interrupted marker)
+		// before checking auto-resume. Without this, checkAutoResume sees an
+		// empty queue on first boot and misses the persisted interrupted marker.
+		if loadErr := messageQueue.LoadPersisted(ctx); loadErr != nil {
+			slog.Error("failed to load persisted queue", "err", loadErr)
+		}
+
 		// If the agent was interrupted mid-turn (e.g. force-killed during a
 		// channel change), start immediately with a synthetic resume message
 		// instead of blocking for a new inbound message. Without this, the
@@ -648,7 +661,11 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 		slog.Info("message received, starting agent", "user", mu.cfg.ID, "channel", firstMsg.ChannelID)
 		if ch, ok := allChMap[firstMsg.ChannelID]; ok {
-			activityTracker.MessageReceived(ch.Info().Name)
+			source := channel.SourceUser
+			if firstMsg.SourceInfo != nil {
+				source = firstMsg.SourceInfo.Source
+			}
+			activityTracker.MessageReceivedFrom(ch.Info().Name, source)
 		}
 
 		// On restarts (idle timeout, deploy, channel change), pass a resume
@@ -704,7 +721,11 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 					// Use channelSet (live) rather than the snapshot allChMap
 					// so hot-added channels are visible here too.
 					if ch := channelSet.Lookup(msg.ChannelID); ch != nil {
-						activityTracker.MessageReceived(ch.Info().Name)
+						source := channel.SourceUser
+						if msg.SourceInfo != nil {
+							source = msg.SourceInfo.Source
+						}
+						activityTracker.MessageReceivedFrom(ch.Info().Name, source)
 					}
 					// Intercept messages that are responses to a pending channel_done
 					// confirmation. If the channel has PendingDone set (from a prior

@@ -1,6 +1,8 @@
 package channel
 
 import (
+	"context"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -16,9 +18,13 @@ const DefaultIdleTimeout = 3 * time.Minute
 // A channel is considered busy if:
 //   - An agent turn is currently processing a message on it, OR
 //   - A message was received within the last idleTimeout (conversation cooldown)
+//
+// When a RuntimeStateStore is provided, lastMessageAt is persisted so
+// ephemeral cleanup decisions survive process restarts.
 type ActivityTracker struct {
-	mu      sync.Mutex
-	entries map[string]*channelActivity
+	mu           sync.Mutex
+	entries      map[string]*channelActivity
+	runtimeState *RuntimeStateStore
 }
 
 type channelActivity struct {
@@ -27,6 +33,9 @@ type channelActivity struct {
 
 	// lastMessageAt is the time the most recent inbound message was received.
 	lastMessageAt time.Time
+
+	// lastMessageSource is who sent the most recent message.
+	lastMessageSource MessageSource
 
 	// idleWaiters are closed when the channel transitions from busy to idle.
 	// Consumers call NotifyIdle() to get a waiter channel, then select on it.
@@ -37,23 +46,56 @@ type channelActivity struct {
 	idleTimer *time.Timer
 }
 
-// NewActivityTracker returns an initialised ActivityTracker.
+// NewActivityTracker returns an initialised ActivityTracker with no persistence.
 func NewActivityTracker() *ActivityTracker {
 	return &ActivityTracker{
 		entries: make(map[string]*channelActivity),
 	}
 }
 
+// NewPersistedActivityTracker returns a tracker that persists lastMessageAt
+// to the given RuntimeStateStore. On construction it loads persisted timestamps
+// for the given channel names so IsBusyWithTimeout works correctly after restart.
+func NewPersistedActivityTracker(ctx context.Context, runtimeState *RuntimeStateStore, channelNames []string) *ActivityTracker {
+	t := &ActivityTracker{
+		entries:      make(map[string]*channelActivity),
+		runtimeState: runtimeState,
+	}
+	for _, name := range channelNames {
+		rs, err := runtimeState.Get(ctx, name)
+		if err != nil {
+			slog.Error("activity tracker: failed to load persisted state", "channel", name, "err", err)
+			continue
+		}
+		if rs.LastMessageAt.IsZero() {
+			continue
+		}
+		t.entries[name] = &channelActivity{
+			lastMessageAt:     rs.LastMessageAt,
+			lastMessageSource: rs.LastMessageSource,
+		}
+	}
+	return t
+}
+
 // MessageReceived records that a message arrived on channelName.
 // Called by the router when a message enters the processing pipeline.
 func (t *ActivityTracker) MessageReceived(channelName string) {
+	t.MessageReceivedFrom(channelName, "")
+}
+
+// MessageReceivedFrom records that a message from the given source arrived.
+func (t *ActivityTracker) MessageReceivedFrom(channelName string, source MessageSource) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	e := t.entry(channelName)
 	e.lastMessageAt = time.Now()
+	e.lastMessageSource = source
 
 	// Reset any pending idle timer — the channel just got busier.
 	e.cancelIdleTimer()
+	t.mu.Unlock()
+
+	t.persistActivity(channelName, e.lastMessageAt, source)
 }
 
 // TurnStarted marks channelName as actively processing a turn.
@@ -76,22 +118,23 @@ func (t *ActivityTracker) TurnEnded(channelName string) {
 	e.scheduleIdleCheck(t, channelName)
 }
 
-// IsBusy returns true if channelName is actively processing a turn or
-// received a message within the default idle timeout window.
-func (t *ActivityTracker) IsBusy(channelName string) bool {
+// IsBusy reports whether channelName is busy using the default idle timeout.
+// Returns (busy, known) — see IsBusyWithTimeout.
+func (t *ActivityTracker) IsBusy(channelName string) (busy bool, known bool) {
 	return t.IsBusyWithTimeout(channelName, DefaultIdleTimeout)
 }
 
-// IsBusyWithTimeout returns true if channelName is actively processing a turn
-// or received a message within the given idle timeout window.
-func (t *ActivityTracker) IsBusyWithTimeout(channelName string, idleTimeout time.Duration) bool {
+// IsBusyWithTimeout reports whether channelName is busy. Returns (busy, known).
+// known is false when the tracker has no record of the channel at all — the
+// caller must decide how to handle that (e.g. skip cleanup, log a warning).
+func (t *ActivityTracker) IsBusyWithTimeout(channelName string, idleTimeout time.Duration) (busy bool, known bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	e, ok := t.entries[channelName]
 	if !ok {
-		return false
+		return false, false
 	}
-	return e.processing || time.Since(e.lastMessageAt) < idleTimeout
+	return e.processing || time.Since(e.lastMessageAt) < idleTimeout, true
 }
 
 // NotifyIdle returns a channel that is closed when channelName transitions
@@ -138,6 +181,29 @@ func (t *ActivityTracker) entry(name string) *channelActivity {
 	e := &channelActivity{}
 	t.entries[name] = e
 	return e
+}
+
+// persistActivity writes lastMessageAt and source to the RuntimeStateStore.
+// Best-effort — errors are logged but don't block the caller.
+func (t *ActivityTracker) persistActivity(channelName string, at time.Time, source MessageSource) {
+	if t.runtimeState == nil {
+		return
+	}
+	if err := t.runtimeState.Update(context.Background(), channelName, func(s *RuntimeState) {
+		s.LastMessageAt = at
+		s.LastMessageSource = source
+	}); err != nil {
+		slog.Error("activity tracker: failed to persist activity", "channel", channelName, "err", err)
+	}
+}
+
+// ForceLastMessageAt sets the lastMessageAt for a channel to an arbitrary time.
+// Test-only — used to simulate aged activity for cleanup testing.
+func (t *ActivityTracker) ForceLastMessageAt(channelName string, at time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	e := t.entry(channelName)
+	e.lastMessageAt = at
 }
 
 // isBusy checks busy state without locking (caller must hold tracker mutex).

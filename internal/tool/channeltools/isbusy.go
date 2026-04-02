@@ -61,7 +61,7 @@ func channelIsBusyHandler(deps Deps) mcp.ToolHandler {
 			timeout = time.Duration(a.IdleTimeout) * time.Second
 		}
 
-		busy := deps.ActivityTracker.IsBusyWithTimeout(a.ChannelName, timeout)
-		return json.Marshal(map[string]any{"busy": busy})
+		busy, known := deps.ActivityTracker.IsBusyWithTimeout(a.ChannelName, timeout)
+		return json.Marshal(map[string]any{"busy": busy, "known": known})
 	}
 }

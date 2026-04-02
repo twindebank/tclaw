@@ -294,29 +294,11 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		}
 	}
 
-	// Restore persisted queue and resume state from a previous agent session.
-	if opts.Queue != nil {
-		if err := opts.Queue.LoadPersisted(ctx); err != nil {
-			slog.Error("failed to load persisted queue", "err", err)
-		}
-		if interruptedCh := opts.Queue.InterruptedChannel(); interruptedCh != "" {
-			// Inject a resume message so the agent continues where it left off.
-			resumeMsg := channel.TaggedMessage{
-				ChannelID:  interruptedCh,
-				Text:       "[SYSTEM: You were interrupted mid-turn. Review your conversation history and continue what you were doing. If you were waiting for user input, let the user know you're back.]",
-				SourceInfo: &channel.MessageSourceInfo{Source: channel.SourceResume},
-			}
-			if pushErr := opts.Queue.Push(ctx, resumeMsg); pushErr != nil {
-				slog.Error("failed to push resume message", "err", pushErr)
-			}
-			slog.Info("injecting resume message for interrupted channel", "channel", interruptedCh)
-			if clearErr := opts.Queue.ClearInterrupted(ctx); clearErr != nil {
-				slog.Error("failed to clear interrupted marker after load", "err", clearErr)
-			}
-		}
-		if opts.Queue.Len() > 0 {
-			slog.Info("restored persisted queued messages", "count", opts.Queue.Len())
-		}
+	// Log if the queue has persisted messages from a previous session.
+	// Loading and resume injection are handled by the router before the
+	// agent starts — see router.go's LoadPersisted + checkAutoResume calls.
+	if opts.Queue != nil && opts.Queue.Len() > 0 {
+		slog.Info("queue has persisted messages", "count", opts.Queue.Len())
 	}
 
 	idle := newIdleTimer()
@@ -715,12 +697,33 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 					}
 					// Acknowledge the queued message so the user knows it was received.
 					if queueCh, ok := opts.channels()[newMsg.ChannelID]; ok {
-						cooldown := int(channel.DefaultIdleTimeout.Minutes())
-						ackMsg := fmt.Sprintf("📥 Queued — will process after the current turn finishes (+ %dm cooldown).", cooldown)
-						if newMsg.ChannelID != msg.ChannelID {
-							// Show which channel is busy so the user knows what's blocking.
-							if busyCh, busyOK := opts.channels()[msg.ChannelID]; busyOK {
-								ackMsg = fmt.Sprintf("📥 Queued — agent is busy on **%s**. Will process once the current turn finishes (+ %dm cooldown).", busyCh.Info().Name, cooldown)
+						isUserMsg := newMsg.SourceInfo == nil || newMsg.SourceInfo.Source == channel.SourceUser
+
+						// User messages bypass the busy/cooldown check entirely, so
+						// never mention cooldown for them. Non-user messages wait
+						// until the TARGET channel is idle (per-channel cooldown).
+						var ackMsg string
+						if isUserMsg {
+							if newMsg.ChannelID == msg.ChannelID {
+								ackMsg = "📥 Queued — will process after the current turn finishes."
+							} else if busyCh, busyOK := opts.channels()[msg.ChannelID]; busyOK {
+								ackMsg = fmt.Sprintf("📥 Queued — agent is busy on **%s**. Will process once the current turn finishes.", busyCh.Info().Name)
+							} else {
+								ackMsg = "📥 Queued — will process after the current turn finishes."
+							}
+						} else {
+							// Non-user message: cooldown applies on the TARGET channel,
+							// not the currently-busy channel. Only mention the cooldown
+							// when the target channel is the one currently active (where
+							// the cooldown is certain). For other channels, the target
+							// may or may not have its own cooldown — don't overclaim.
+							cooldown := int(channel.DefaultIdleTimeout.Minutes())
+							if newMsg.ChannelID == msg.ChannelID {
+								ackMsg = fmt.Sprintf("📥 Queued — will process after the current turn finishes (+ %dm cooldown).", cooldown)
+							} else if busyCh, busyOK := opts.channels()[msg.ChannelID]; busyOK {
+								ackMsg = fmt.Sprintf("📥 Queued — agent is busy on **%s**. Will process once the current turn finishes.", busyCh.Info().Name)
+							} else {
+								ackMsg = "📥 Queued — will process after the current turn finishes."
 							}
 						}
 						if _, sendErr := queueCh.Send(ctx, ackMsg); sendErr != nil {

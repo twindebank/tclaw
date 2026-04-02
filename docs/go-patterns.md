@@ -33,6 +33,7 @@
   - Functions that find "no results" when results were expected — return an error
   - Any branch that "shouldn't happen" — make it visible via error or log
 - **Caller must be informed** — if an operation fails partway through, the caller must receive either an error return or an explicit signal in the data. Silent partial failure is the worst kind of bug: the caller proceeds as if nothing happened.
+- **Bubble up edge cases, don't swallow them** — when a function encounters an unexpected state (missing data, unknown key, empty result), return it explicitly so the caller can decide what to do. Never hide edge cases behind default values or silent skips — that's just moving the bug somewhere harder to find.
 - **Use simple `if err != nil` for single error checks** — don't use switch statements when there's only one condition
 - **Use switch for multiple error types** — `switch { case errors.Is(err, X): ... case err != nil: ... }`
 - **Wrap errors with context** — `fmt.Errorf("context: %w", err)` to build a traceable error chain
