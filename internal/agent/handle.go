@@ -405,6 +405,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("start claude: %w", err)
 	}
+	cliStarted := time.Now()
 
 	// Raise the subprocess OOM score so the kernel kills it before tclaw.
 	markSubprocessOOMTarget(cmd)
@@ -417,7 +418,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		}
 	}()
 
-	newSessionID, err := streamResponse(ctx, opts, tw, stdout, allowed, msg.ChannelID)
+	newSessionID, err := streamResponse(ctx, opts, tw, stdout, allowed, msg.ChannelID, cliStarted)
 	if err != nil {
 		return "", fmt.Errorf("stream response: %w", err)
 	}
@@ -515,7 +516,7 @@ func allowedEnvVar(key string) bool {
 // allowedTools is the resolved allowed tool list for the channel — when
 // non-empty, tool_use events for tools not in this list are tracked and
 // returned as a ToolsDeniedError after the turn completes.
-func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Reader, allowedTools []claudecli.Tool, channelID channel.ChannelID) (string, error) {
+func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Reader, allowedTools []claudecli.Tool, channelID channel.ChannelID, cliStarted time.Time) (string, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 256*1024), 10*1024*1024)
 
@@ -566,6 +567,8 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				continue
 			}
 			if sys.Subtype == claudecli.SystemSubtypeInit {
+				initDelay := time.Since(cliStarted)
+				slog.Info("cli init received", "channel", channelID, "init_delay_ms", initDelay.Milliseconds())
 				if sys.SessionID != "" {
 					sessionID = sys.SessionID
 				}
