@@ -25,6 +25,7 @@ Commands:
   config pull        Pull remote config to local
   config diff        Show differences between local and remote config
   deploy             Build and deploy to Fly.io
+  deploy fly-config  Push local fly.toml config without rebuilding
   deploy secrets     Push keychain secrets to Fly.io
   deploy suspend     Spin down the Fly.io deployment
   deploy resume      Spin up the Fly.io deployment
