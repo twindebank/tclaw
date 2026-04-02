@@ -104,6 +104,7 @@
 - [x] `dev_pr_checks` tool — show CI check results and PR state (open/merged/closed)
 - [ ] Structured log viewer — `dev_logs` currently returns raw text; a mode that groups by session/tool-call would help debug agent turns
 - [ ] Replay harness — record + replay Telegram message sequences to test agent behavior without live bots
+- [ ] Realistic test harness for `waitAndStart` — the router's main loop is too heavy to unit test (needs stores, MCP server, reconciler, channels, scheduler, etc.). Build a harness that wires up the real components with test doubles for I/O, enabling tests for lifecycle events (startup notifications, shutdown notifications, channel changes, idle restarts) without needing the `claude` CLI or live Telegram bots
 
 ## Documentation
 - [x] Project docs — [features](docs/features.md), [architecture](docs/architecture.md), README

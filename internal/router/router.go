@@ -76,12 +76,15 @@ type Router struct {
 }
 
 type managedUser struct {
-	cfg      user.Config
-	channels []channel.Channel
+	cfg user.Config
 
 	// configChannels preserves the raw config.Channel entries so that
 	// per-channel tool permissions can be resolved at agent start time.
 	configChannels []config.Channel
+
+	// channelSet is the live channel map, set in waitAndStart. StopAll
+	// reads it to send shutdown notifications.
+	channelSet *ChannelSet
 
 	// registry is set in waitAndStart so StopAll can look up lifecycle
 	// channels. Provides unified access to static + dynamic metadata.
@@ -136,7 +139,7 @@ func New(baseDir string, env config.Env, configCredentials config.CredentialsCon
 // Register adds a user and its channels to the router without starting
 // the agent. Channels begin listening immediately (sockets accept
 // connections) but the agent goroutine starts lazily on the first message.
-func (r *Router) Register(ctx context.Context, cfg user.Config, channels []channel.Channel, configChannels []config.Channel) error {
+func (r *Router) Register(ctx context.Context, cfg user.Config, configChannels []config.Channel) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -146,19 +149,18 @@ func (r *Router) Register(ctx context.Context, cfg user.Config, channels []chann
 
 	mu := &managedUser{
 		cfg:            cfg,
-		channels:       channels,
 		configChannels: configChannels,
 	}
 	r.users[cfg.ID] = mu
 
-	// Start listening on all initial channels and fan messages into a trigger
-	// that starts the agent on the first arrival.
-	staticChMap := channel.ChannelMap(channels...)
+	// All channels are built lazily in waitAndStart — no pre-built
+	// channels are passed, so start with an empty static map.
+	staticChMap := channel.ChannelMap()
 	staticMsgs := channel.FanIn(ctx, staticChMap)
 
 	go r.waitAndStart(ctx, mu, staticChMap, staticMsgs)
 
-	slog.Info("user registered (agent will start on first message)", "user", cfg.ID, "channels", len(channels))
+	slog.Info("user registered (agent will start on first message)", "user", cfg.ID, "channels", len(configChannels))
 	return nil
 }
 
@@ -319,6 +321,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	scheduleMsgs := make(chan channel.TaggedMessage, 8)
 
 	channelSet := NewChannelSet(nil)
+	mu.channelSet = channelSet
 
 	// Unified message queue — all sources (user, schedule, notification,
 	// cross-channel) flow through one queue with source-based priority.
@@ -942,8 +945,13 @@ func (r *Router) StopAll() {
 	defer cancel()
 	msg := fmt.Sprintf("🔄 Shutting down (v%s)...", version.Commit)
 	for _, u := range users {
-		if u.registry != nil {
-			sendLifecycleNotification(shutdownCtx, u.channels, u.registry, msg)
+		if u.registry != nil && u.channelSet != nil {
+			snapshot := u.channelSet.Snapshot()
+			channels := make([]channel.Channel, 0, len(snapshot))
+			for _, ch := range snapshot {
+				channels = append(channels, ch)
+			}
+			sendLifecycleNotification(shutdownCtx, channels, u.registry, msg)
 		}
 	}
 
