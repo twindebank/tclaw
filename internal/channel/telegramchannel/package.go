@@ -46,7 +46,11 @@ func (p *Package) Build(ctx context.Context, params channelpkg.BuildParams) (cha
 		// Provisioning stores the chatID in PlatformState but not in the chatid_
 		// store key that loadChatID reads. Bridge the gap so the transport can
 		// send messages immediately after provisioning (e.g. initial_message).
-		if chatID := loadChatIDFromPlatformState(ctx, params.StateStore, params.ChannelCfg.Name); chatID != 0 {
+		chatID, err := loadChatIDFromPlatformState(ctx, params.StateStore, params.ChannelCfg.Name)
+		if err != nil {
+			slog.Error("failed to load chat ID from platform state", "channel", params.ChannelCfg.Name, "err", err)
+		}
+		if chatID != 0 {
 			opts.ChatID = chatID
 			saveChatIDFunc(params.StateStore, params.ChannelCfg.Name)(chatID)
 		}
@@ -101,12 +105,17 @@ func loadChatID(ctx context.Context, s store.Store, channelName string) int64 {
 
 // loadChatIDFromPlatformState reads the chat ID from the RuntimeState's PlatformState.
 // This is the fallback path: after provisioning, the chatID is stored in PlatformState
-// but not yet in the chatid_ key. Returns 0 if no PlatformState or parsing fails.
-func loadChatIDFromPlatformState(ctx context.Context, s store.Store, channelName string) int64 {
+// but not yet in the chatid_ key. Returns (0, nil) when no PlatformState exists (normal
+// for channels that haven't been provisioned yet).
+func loadChatIDFromPlatformState(ctx context.Context, s store.Store, channelName string) (int64, error) {
 	data, err := s.Get(ctx, "channel_runtime/"+channelName)
-	if err != nil || len(data) == 0 {
-		return 0
+	if err != nil {
+		return 0, fmt.Errorf("read runtime state: %w", err)
 	}
+	if len(data) == 0 {
+		return 0, nil
+	}
+
 	// Inline parsing to avoid importing the channel package (circular).
 	var rs struct {
 		PlatformState struct {
@@ -115,16 +124,20 @@ func loadChatIDFromPlatformState(ctx context.Context, s store.Store, channelName
 		} `json:"platform_state"`
 	}
 	if err := json.Unmarshal(data, &rs); err != nil {
-		return 0
+		return 0, fmt.Errorf("parse runtime state: %w", err)
 	}
-	if rs.PlatformState.Type != "telegram" || len(rs.PlatformState.Data) == 0 {
-		return 0
+	if rs.PlatformState.Type != "telegram" {
+		return 0, nil
 	}
+	if len(rs.PlatformState.Data) == 0 {
+		return 0, fmt.Errorf("telegram platform state present but data is empty")
+	}
+
 	var tgState TelegramPlatformState
 	if err := json.Unmarshal(rs.PlatformState.Data, &tgState); err != nil {
-		return 0
+		return 0, fmt.Errorf("parse telegram platform state: %w", err)
 	}
-	return tgState.ChatID
+	return tgState.ChatID, nil
 }
 
 // saveChatIDFunc returns a callback that persists a Telegram chat ID to the store.
