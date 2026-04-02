@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"tclaw/internal/credential"
@@ -182,16 +183,35 @@ func (s *CallbackServer) Start() error {
 	})
 	s.mux.HandleFunc("/oauth/callback", s.handleCallback)
 
+	var activeConns atomic.Int64
+	connWarnThreshold := int64(15)
+
 	s.srv = &http.Server{
-		Handler:        s.rateLimiter.Middleware(s.mux),
-		ReadTimeout:    10 * time.Second,
-		WriteTimeout:   10 * time.Second,
-		IdleTimeout:    60 * time.Second,
+		Handler:      s.rateLimiter.Middleware(s.mux),
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		// Short idle timeout so Telegram keep-alive connections are shed quickly.
+		// Webhook requests are infrequent so keep-alive provides no benefit, but
+		// idle connections count toward Fly's concurrency limit.
+		IdleTimeout:    5 * time.Second,
 		MaxHeaderBytes: 1 << 16, // 64 KiB
+		ConnState: func(_ net.Conn, state http.ConnState) {
+			switch state {
+			case http.StateNew:
+				n := activeConns.Add(1)
+				if n >= connWarnThreshold {
+					slog.Warn("http connection pressure", "active_conns", n)
+				}
+			case http.StateClosed, http.StateHijacked:
+				activeConns.Add(-1)
+			}
+		},
 	}
 	go func() {
 		if err := s.srv.Serve(ln); err != nil && err != http.ErrServerClosed {
-			slog.Error("http server error", "err", err)
+			// If Serve exits, the health check endpoint is dead and Fly will
+			// mark the machine unhealthy. Log at ERROR so this is impossible to miss.
+			slog.Error("http server exited unexpectedly", "err", err, "addr", s.addr)
 		}
 	}()
 
