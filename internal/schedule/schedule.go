@@ -33,10 +33,14 @@ type Schedule struct {
 	CronExpr    string     `json:"cron_expr"`
 	Prompt      string     `json:"prompt"`
 	ChannelName string     `json:"channel_name"`
-	Status      Status     `json:"status"`
-	CreatedAt   time.Time  `json:"created_at"`
-	LastRunAt   time.Time  `json:"last_run_at,omitzero"`
-	NextRunAt   time.Time  `json:"next_run_at,omitzero"`
+
+	// Timezone is an IANA timezone name (e.g. "Europe/London", "America/New_York") that
+	// controls how the cron expression is evaluated. Empty means the system default.
+	Timezone  string    `json:"timezone,omitempty"`
+	Status    Status    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+	LastRunAt time.Time `json:"last_run_at,omitzero"`
+	NextRunAt time.Time `json:"next_run_at,omitzero"`
 }
 
 // GenerateID creates a new unique schedule ID.

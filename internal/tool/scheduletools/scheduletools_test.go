@@ -250,3 +250,156 @@ func TestScheduleCreate_AcceptsDescriptors(t *testing.T) {
 		})
 	}
 }
+
+func TestScheduleCreate_WithTimezone(t *testing.T) {
+	t.Run("stores timezone and shows in list", func(t *testing.T) {
+		h, schedStore := setup(t)
+
+		result := callTool(t, h, "schedule_create", map[string]string{
+			"prompt":       "morning brief",
+			"cron_expr":    "0 9 * * *",
+			"channel_name": "desktop",
+			"timezone":     "America/New_York",
+		})
+
+		var createResult map[string]any
+		if err := json.Unmarshal(result, &createResult); err != nil {
+			t.Fatalf("unmarshal create result: %v", err)
+		}
+		if createResult["timezone"] != "America/New_York" {
+			t.Fatalf("expected timezone 'America/New_York' in result, got %v", createResult["timezone"])
+		}
+
+		schedID := createResult["id"].(string)
+		got, err := schedStore.Get(context.Background(), schedule.ScheduleID(schedID))
+		if err != nil {
+			t.Fatalf("get schedule: %v", err)
+		}
+		if got.Timezone != "America/New_York" {
+			t.Fatalf("expected stored timezone 'America/New_York', got %q", got.Timezone)
+		}
+	})
+
+	t.Run("timezone visible in schedule_list", func(t *testing.T) {
+		h, _ := setup(t)
+
+		callTool(t, h, "schedule_create", map[string]string{
+			"prompt":       "check",
+			"cron_expr":    "0 8 * * 1-5",
+			"channel_name": "desktop",
+			"timezone":     "Europe/London",
+		})
+
+		listResult := callTool(t, h, "schedule_list", map[string]any{})
+
+		var entries []struct {
+			Timezone string `json:"timezone"`
+		}
+		if err := json.Unmarshal(listResult, &entries); err != nil {
+			t.Fatalf("unmarshal list result: %v", err)
+		}
+		if len(entries) != 1 {
+			t.Fatalf("expected 1 entry, got %d", len(entries))
+		}
+		if entries[0].Timezone != "Europe/London" {
+			t.Fatalf("expected timezone 'Europe/London' in list, got %q", entries[0].Timezone)
+		}
+	})
+}
+
+func TestScheduleCreate_RejectsInvalidTimezone(t *testing.T) {
+	h, _ := setup(t)
+
+	err := callToolExpectError(t, h, "schedule_create", map[string]string{
+		"prompt":       "test",
+		"cron_expr":    "0 9 * * *",
+		"channel_name": "desktop",
+		"timezone":     "Not/ATimezone",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid timezone")
+	}
+}
+
+func TestScheduleEdit_UpdatesTimezone(t *testing.T) {
+	t.Run("sets new timezone and recalculates next_run_at", func(t *testing.T) {
+		h, schedStore := setup(t)
+
+		result := callTool(t, h, "schedule_create", map[string]string{
+			"prompt":       "test",
+			"cron_expr":    "0 9 * * *",
+			"channel_name": "desktop",
+		})
+		var createResult map[string]any
+		if err := json.Unmarshal(result, &createResult); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		schedID := createResult["id"].(string)
+
+		callTool(t, h, "schedule_edit", map[string]any{
+			"id":       schedID,
+			"timezone": "Asia/Tokyo",
+		})
+
+		got, err := schedStore.Get(context.Background(), schedule.ScheduleID(schedID))
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if got.Timezone != "Asia/Tokyo" {
+			t.Fatalf("expected timezone 'Asia/Tokyo', got %q", got.Timezone)
+		}
+		if got.NextRunAt.IsZero() {
+			t.Fatal("expected NextRunAt to be set after timezone edit")
+		}
+	})
+
+	t.Run("clears timezone when set to empty string", func(t *testing.T) {
+		h, schedStore := setup(t)
+
+		result := callTool(t, h, "schedule_create", map[string]string{
+			"prompt":       "test",
+			"cron_expr":    "0 9 * * *",
+			"channel_name": "desktop",
+			"timezone":     "Europe/London",
+		})
+		var createResult map[string]any
+		if err := json.Unmarshal(result, &createResult); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		schedID := createResult["id"].(string)
+
+		// Pass explicit empty string to reset to system default.
+		callTool(t, h, "schedule_edit", map[string]any{
+			"id":       schedID,
+			"timezone": "",
+		})
+
+		got, err := schedStore.Get(context.Background(), schedule.ScheduleID(schedID))
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if got.Timezone != "" {
+			t.Fatalf("expected empty timezone after reset, got %q", got.Timezone)
+		}
+	})
+}
+
+func TestScheduleEdit_RejectsInvalidTimezone(t *testing.T) {
+	h, _ := setup(t)
+
+	result := callTool(t, h, "schedule_create", map[string]string{
+		"prompt":       "test",
+		"cron_expr":    "0 9 * * *",
+		"channel_name": "desktop",
+	})
+	var createResult map[string]any
+	if err := json.Unmarshal(result, &createResult); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	schedID := createResult["id"].(string)
+
+	callToolExpectError(t, h, "schedule_edit", map[string]any{
+		"id":       schedID,
+		"timezone": "Fake/Timezone",
+	})
+}
