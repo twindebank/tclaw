@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"time"
 
 	"tclaw/internal/credential"
 	"tclaw/internal/mcp"
@@ -79,6 +80,9 @@ func listTransactionsHandler(depsMap map[credential.CredentialSetID]Deps) mcp.To
 		query := url.Values{"account_id": {p.AccountID}}
 		if p.Since != "" {
 			query.Set("since", p.Since)
+		} else {
+			// Default to 30 days. Monzo's SCA blocks access beyond 90 days without in-app verification.
+			query.Set("since", time.Now().AddDate(0, 0, -30).UTC().Format(time.RFC3339))
 		}
 		if p.Limit > 0 {
 			query.Set("limit", strconv.Itoa(p.Limit))

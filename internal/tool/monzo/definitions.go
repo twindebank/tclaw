@@ -117,7 +117,7 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 					},
 					"since": {
 						"type": "string",
-						"description": "Only return transactions after this time. RFC3339 format (e.g. '2025-01-01T00:00:00Z') or a transaction ID to paginate from."
+						"description": "Only return transactions after this time. RFC3339 format (e.g. '2025-01-01T00:00:00Z') or a transaction ID to paginate from. Defaults to 30 days ago. Maximum 90 days — older requests require in-app SCA verification."
 					},
 					"before": {
 						"type": "string",
