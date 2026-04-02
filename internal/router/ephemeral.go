@@ -80,8 +80,16 @@ func cleanupOnce(
 			}
 		}
 
-		if tracker != nil && tracker.IsBusyWithTimeout(ch.Name, timeout) {
-			continue
+		if tracker != nil {
+			busy, known := tracker.IsBusyWithTimeout(ch.Name, timeout)
+			if !known {
+				slog.Warn("ephemeral cleanup: no activity record for channel, skipping",
+					"channel", ch.Name)
+				continue
+			}
+			if busy {
+				continue
+			}
 		}
 
 		slog.Debug("ephemeral cleanup: channel idle past timeout",

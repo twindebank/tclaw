@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"tclaw/internal/libraries/store"
 )
@@ -25,6 +26,14 @@ type RuntimeState struct {
 	// confirmation prompt. The router intercepts the next inbound message:
 	// "yes" triggers teardown, anything else clears the flag.
 	PendingDone bool `json:"pending_done,omitempty"`
+
+	// LastMessageAt is the time the most recent inbound message was received.
+	// Persisted so ephemeral cleanup can survive process restarts.
+	LastMessageAt time.Time `json:"last_message_at,omitempty"`
+
+	// LastMessageSource is who sent the most recent message (e.g. "user", "schedule").
+	// Persisted alongside LastMessageAt for observability.
+	LastMessageSource MessageSource `json:"last_message_source,omitempty"`
 }
 
 // RuntimeStateStore manages per-channel runtime state backed by the user's

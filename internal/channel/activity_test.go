@@ -3,6 +3,8 @@ package channel
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestActivityTracker(t *testing.T) {
@@ -12,7 +14,7 @@ func TestActivityTracker(t *testing.T) {
 		select {
 		case <-ch:
 		default:
-			t.Fatal("expected closed channel for unknown channel")
+			require.Fail(t, "expected closed channel for unknown channel")
 		}
 	})
 
@@ -29,7 +31,7 @@ func TestActivityTracker(t *testing.T) {
 		select {
 		case <-ch:
 		default:
-			t.Fatal("expected closed channel when already idle")
+			require.Fail(t, "expected closed channel when already idle")
 		}
 	})
 
@@ -40,7 +42,7 @@ func TestActivityTracker(t *testing.T) {
 		ch := tracker.NotifyIdle("test")
 		select {
 		case <-ch:
-			t.Fatal("should not be idle while processing")
+			require.Fail(t, "should not be idle while processing")
 		default:
 		}
 
@@ -55,7 +57,7 @@ func TestActivityTracker(t *testing.T) {
 		select {
 		case <-ch:
 		case <-time.After(time.Second):
-			t.Fatal("expected idle notification after turn ended with expired cooldown")
+			require.Fail(t, "expected idle notification after turn ended with expired cooldown")
 		}
 	})
 
@@ -85,7 +87,7 @@ func TestActivityTracker(t *testing.T) {
 		select {
 		case <-ch:
 		case <-time.After(500 * time.Millisecond):
-			t.Fatal("waiter added after TurnEnded should fire once cooldown expires")
+			require.Fail(t, "waiter added after TurnEnded should fire once cooldown expires")
 		}
 	})
 
@@ -107,31 +109,31 @@ func TestActivityTracker(t *testing.T) {
 		select {
 		case <-ch:
 		case <-time.After(500 * time.Millisecond):
-			t.Fatal("NotifyIdle should schedule a timer that fires after cooldown expires")
+			require.Fail(t, "NotifyIdle should schedule a timer that fires after cooldown expires")
 		}
 	})
 
 	t.Run("IsBusy during processing", func(t *testing.T) {
 		tracker := NewActivityTracker()
 		tracker.TurnStarted("test")
-		if !tracker.IsBusy("test") {
-			t.Fatal("expected busy during processing")
-		}
+		busy, known := tracker.IsBusy("test")
+		require.True(t, known)
+		require.True(t, busy)
 		tracker.TurnEnded("test")
 	})
 
 	t.Run("IsBusy during cooldown", func(t *testing.T) {
 		tracker := NewActivityTracker()
 		tracker.MessageReceived("test")
-		if !tracker.IsBusy("test") {
-			t.Fatal("expected busy during cooldown")
-		}
+		busy, known := tracker.IsBusy("test")
+		require.True(t, known)
+		require.True(t, busy)
 	})
 
-	t.Run("not busy for unknown channel", func(t *testing.T) {
+	t.Run("unknown channel returns not known", func(t *testing.T) {
 		tracker := NewActivityTracker()
-		if tracker.IsBusy("unknown") {
-			t.Fatal("expected not busy for unknown channel")
-		}
+		busy, known := tracker.IsBusy("unknown")
+		require.False(t, known)
+		require.False(t, busy)
 	})
 }
