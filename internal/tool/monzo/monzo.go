@@ -93,8 +93,20 @@ func apiGet(ctx context.Context, deps Deps, path string, query url.Values) (json
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		// Provide an actionable message for SCA verification errors instead of the raw API response.
+		if isVerificationRequired(body) {
+			return nil, fmt.Errorf("Monzo requires in-app verification to access transactions older than 90 days. Open your Monzo app to approve extended access, or use a `since` date within the last 90 days.")
+		}
 		return nil, fmt.Errorf("monzo API %s returned %d: %s", path, resp.StatusCode, string(body))
 	}
 
 	return json.RawMessage(body), nil
+}
+
+// isVerificationRequired checks whether a Monzo error response indicates SCA verification is needed.
+func isVerificationRequired(body []byte) bool {
+	var errResp struct {
+		Code string `json:"code"`
+	}
+	return json.Unmarshal(body, &errResp) == nil && errResp.Code == "forbidden.verification_required"
 }
