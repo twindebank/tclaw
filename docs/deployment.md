@@ -21,6 +21,7 @@ tclaw deploy             # Build locally + deploy to Fly
 tclaw deploy secrets     # Push keychain secrets to Fly
 tclaw deploy status      # Check app status
 tclaw deploy logs        # Show recent logs (same as tclaw logs)
+tclaw deploy fly-config  # Push local fly.toml to Fly (no rebuild)
 tclaw deploy suspend     # Spin down (scale to 0)
 tclaw deploy resume      # Spin up (scale to 1)
 tclaw config push        # Push local config to remote Fly volume
@@ -47,6 +48,22 @@ tclaw config diff          # Preview what's different
 tclaw config push          # Push local config to remote volume + sync secrets + update seed
 tclaw config pull          # Pull agent changes back to local
 ```
+
+## Fly Platform Config (fly.toml)
+
+`fly.toml` controls Fly platform settings: concurrency limits, health checks, VM size, environment variables. It's gitignored because it contains the app name.
+
+**CI deploys don't update fly.toml settings** — they only deploy new code. To change platform config, use:
+
+```
+tclaw deploy fly-config    # Diffs local fly.toml against live, then redeploys the current image
+```
+
+This redeploys the same Docker image with the updated `fly.toml` — no rebuild, no code changes. Use it for:
+- Changing concurrency limits (`hard_limit`, `soft_limit`, `type`)
+- Adjusting health check intervals/timeouts
+- Changing VM size or memory
+- Updating environment variables
 
 ## First-Time Setup
 1. `brew install flyctl && fly auth login`
