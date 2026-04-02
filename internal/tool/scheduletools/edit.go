@@ -37,6 +37,10 @@ func scheduleEditDef() mcp.ToolDef {
 				"channel_name": {
 					"type": "string",
 					"description": "New target channel name (optional)."
+				},
+				"timezone": {
+					"type": "string",
+					"description": "New IANA timezone for evaluating the cron expression (e.g. 'Europe/London'). Pass empty string to reset to system default (optional)."
 				}
 			},
 			"required": ["id"]
@@ -45,10 +49,13 @@ func scheduleEditDef() mcp.ToolDef {
 }
 
 type scheduleEditArgs struct {
-	ID          string `json:"id"`
-	Prompt      string `json:"prompt"`
-	CronExpr    string `json:"cron_expr"`
-	ChannelName string `json:"channel_name"`
+	ID          string  `json:"id"`
+	Prompt      string  `json:"prompt"`
+	CronExpr    string  `json:"cron_expr"`
+	ChannelName string  `json:"channel_name"`
+	// Timezone uses a pointer so we can distinguish "not provided" (nil) from "reset to
+	// system default" (pointer to empty string). Other string fields use empty-means-unchanged.
+	Timezone    *string `json:"timezone"`
 }
 
 func scheduleEditHandler(deps Deps) mcp.ToolHandler {
@@ -70,21 +77,45 @@ func scheduleEditHandler(deps Deps) mcp.ToolHandler {
 			}
 		}
 
+		// Validate timezone if provided (non-nil, non-empty means a new IANA name).
+		if a.Timezone != nil && *a.Timezone != "" {
+			if _, err := time.LoadLocation(*a.Timezone); err != nil {
+				return nil, fmt.Errorf("invalid timezone %q: %w. Use an IANA timezone name, e.g. 'Europe/London', 'America/New_York'", *a.Timezone, err)
+			}
+		}
+
 		scheduleID := schedule.ScheduleID(a.ID)
 		err := deps.Store.Update(ctx, scheduleID, func(sched *schedule.Schedule) {
 			if a.Prompt != "" {
 				sched.Prompt = a.Prompt
 			}
+			if a.Timezone != nil {
+				sched.Timezone = *a.Timezone
+			}
 			if a.CronExpr != "" {
 				sched.CronExpr = a.CronExpr
-				// Recalculate next run time. The cron was already validated above,
-				// so this parse should not fail — but surface it if it does.
+			}
+			// Recalculate NextRunAt if the cron expression or timezone changed, since
+			// either affects when the schedule next fires.
+			if a.CronExpr != "" || a.Timezone != nil {
+				// Use the resolved effective timezone (post-edit value).
+				loc := time.Local
+				if sched.Timezone != "" {
+					var locErr error
+					loc, locErr = time.LoadLocation(sched.Timezone)
+					if locErr != nil {
+						// Already validated above — this should not happen.
+						slog.Error("timezone parse failed after validation", "timezone", sched.Timezone, "err", locErr)
+						loc = time.Local
+					}
+				}
 				parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
-				cronSched, parseErr := parser.Parse(a.CronExpr)
+				cronSched, parseErr := parser.Parse(sched.CronExpr)
 				if parseErr != nil {
-					slog.Error("cron parse failed after validation", "cron", a.CronExpr, "err", parseErr)
+					// Already validated above — this should not happen.
+					slog.Error("cron parse failed after validation", "cron", sched.CronExpr, "err", parseErr)
 				} else {
-					sched.NextRunAt = cronSched.Next(time.Now())
+					sched.NextRunAt = cronSched.Next(time.Now().In(loc))
 				}
 			}
 			if a.ChannelName != "" {
