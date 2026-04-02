@@ -202,6 +202,13 @@ func (t *Telegram) Messages(ctx context.Context) <-chan string {
 				select {
 				case out <- text:
 				case <-ctx.Done():
+				case <-time.After(30 * time.Second):
+					// The message pipeline is backed up — the agent is busy and
+					// the bridge channel is full. Drop the message rather than
+					// blocking the bot worker indefinitely, which would prevent
+					// processing of any further webhook updates.
+					slog.Warn("telegram message dropped, pipeline blocked",
+						"channel", t.name, "length", len(text))
 				}
 			}),
 			// Process messages sequentially so we don't interleave responses.
@@ -253,6 +260,10 @@ func (t *Telegram) startWebhook(ctx context.Context, b *bot.Bot) {
 		URL:                t.opts.WebhookURL,
 		DropPendingUpdates: true,
 		SecretToken:        t.webhookSecret,
+		// Limit Telegram to 1 concurrent connection per bot. The default (40)
+		// causes many idle keep-alive connections that count toward Fly's
+		// concurrency limit. We process messages sequentially anyway.
+		MaxConnections: 1,
 	})
 	if err != nil {
 		slog.Error("failed to set telegram webhook", "err", err, "channel", t.name, "url", t.opts.WebhookURL)

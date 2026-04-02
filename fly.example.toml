@@ -28,7 +28,10 @@ primary_region = "lhr"
   min_machines_running = 1
 
   [http_service.concurrency]
-    type = "connections"
+    # Use "requests" not "connections" — idle HTTP keep-alive connections from
+    # Telegram webhooks count toward a "connections" limit and can starve health
+    # checks, causing Fly to mark the machine unhealthy while it's still running.
+    type = "requests"
     hard_limit = 25
     soft_limit = 20
 
