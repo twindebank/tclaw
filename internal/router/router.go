@@ -688,6 +688,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		mu.done = done
 		r.mu.Unlock()
 
+		// Remove stale CLI session files and old session store records
+		// to keep the projects directory lean and CLI startup fast.
+		cleanupStaleSessions(ctx, sessionStore, stores.Session, dirs.Sessions, homeDir)
+
 		// Load sessions from store for each channel.
 		sessions := make(map[channel.ChannelID]string)
 		for chID := range allChMap {
