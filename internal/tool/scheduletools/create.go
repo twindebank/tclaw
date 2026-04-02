@@ -35,6 +35,10 @@ func scheduleCreateDef() mcp.ToolDef {
 				"channel_name": {
 					"type": "string",
 					"description": "Target channel name. If omitted, defaults to the channel from the current message context."
+				},
+				"timezone": {
+					"type": "string",
+					"description": "IANA timezone for evaluating the cron expression (e.g. 'Europe/London', 'America/New_York'). If omitted, uses the server's system timezone."
 				}
 			},
 			"required": ["prompt", "cron_expr"]
@@ -46,6 +50,7 @@ type scheduleCreateArgs struct {
 	Prompt      string `json:"prompt"`
 	CronExpr    string `json:"cron_expr"`
 	ChannelName string `json:"channel_name"`
+	Timezone    string `json:"timezone"`
 }
 
 func scheduleCreateHandler(deps Deps) mcp.ToolHandler {
@@ -69,6 +74,16 @@ func scheduleCreateHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("invalid cron expression %q: %w. Examples: '0 9 * * *' (daily 9am), '*/30 * * * *' (every 30 min), '@hourly', '@daily'", a.CronExpr, err)
 		}
 
+		// Validate the timezone if provided, and use it when computing NextRunAt so
+		// that the stored time reflects when the schedule will actually first fire.
+		loc := time.Local
+		if a.Timezone != "" {
+			loc, err = time.LoadLocation(a.Timezone)
+			if err != nil {
+				return nil, fmt.Errorf("invalid timezone %q: %w. Use an IANA timezone name, e.g. 'Europe/London', 'America/New_York'", a.Timezone, err)
+			}
+		}
+
 		if a.ChannelName == "" {
 			return nil, fmt.Errorf("channel_name is required — specify which channel to send the prompt to")
 		}
@@ -79,9 +94,10 @@ func scheduleCreateHandler(deps Deps) mcp.ToolHandler {
 			CronExpr:    a.CronExpr,
 			Prompt:      a.Prompt,
 			ChannelName: a.ChannelName,
+			Timezone:    a.Timezone,
 			Status:      schedule.StatusActive,
 			CreatedAt:   now,
-			NextRunAt:   cronSched.Next(now),
+			NextRunAt:   cronSched.Next(now.In(loc)),
 		}
 
 		if err := deps.Store.Add(ctx, sched); err != nil {
@@ -95,6 +111,7 @@ func scheduleCreateHandler(deps Deps) mcp.ToolHandler {
 			"cron_expr":    sched.CronExpr,
 			"prompt":       sched.Prompt,
 			"channel_name": sched.ChannelName,
+			"timezone":     sched.Timezone,
 			"status":       string(sched.Status),
 			"next_run_at":  sched.NextRunAt.Format(time.RFC3339),
 			"message":      fmt.Sprintf("Schedule %s created. Next fire: %s", sched.ID, sched.NextRunAt.Format("Mon Jan 2 15:04")),

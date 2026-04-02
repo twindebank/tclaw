@@ -24,6 +24,7 @@ type scheduleListEntry struct {
 	CronExpr    string `json:"cron_expr"`
 	Prompt      string `json:"prompt"`
 	ChannelName string `json:"channel_name"`
+	Timezone    string `json:"timezone,omitempty"`
 	Status      string `json:"status"`
 	LastRunAt   string `json:"last_run_at,omitempty"`
 	NextRunAt   string `json:"next_run_at,omitempty"`
@@ -47,6 +48,7 @@ func scheduleListHandler(deps Deps) mcp.ToolHandler {
 				CronExpr:    sched.CronExpr,
 				Prompt:      sched.Prompt,
 				ChannelName: sched.ChannelName,
+				Timezone:    sched.Timezone,
 				Status:      string(sched.Status),
 			}
 			if !sched.LastRunAt.IsZero() {

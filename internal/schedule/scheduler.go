@@ -142,7 +142,7 @@ func (s *Scheduler) fireReadySchedules(ctx context.Context) {
 		fireTime := now
 		updateErr := s.store.Update(ctx, sched.ID, func(existing *Schedule) {
 			existing.LastRunAt = fireTime
-			existing.NextRunAt = s.computeNextRunFromTime(existing.CronExpr, fireTime)
+			existing.NextRunAt = s.computeNextRunFromTime(existing.CronExpr, fireTime, existing.Timezone)
 		})
 		if updateErr != nil {
 			slog.Error("scheduler: failed to update schedule after fire", "schedule", sched.ID, "err", updateErr)
@@ -193,11 +193,18 @@ func (s *Scheduler) computeNextRun(sched Schedule) time.Time {
 	if !sched.NextRunAt.IsZero() {
 		return sched.NextRunAt
 	}
-	return s.computeNextRunFromTime(sched.CronExpr, time.Now())
+	return s.computeNextRunFromTime(sched.CronExpr, time.Now(), sched.Timezone)
 }
 
-// computeNextRunFromTime parses the cron expression and returns the next time after t.
-func (s *Scheduler) computeNextRunFromTime(cronExpr string, t time.Time) time.Time {
+// computeNextRunFromTime parses the cron expression and returns the next time after t,
+// evaluated in the given IANA timezone (e.g. "Europe/London"). Empty timezone uses the system default.
+func (s *Scheduler) computeNextRunFromTime(cronExpr string, t time.Time, timezone string) time.Time {
+	loc, err := resolveLocation(timezone)
+	if err != nil {
+		slog.Error("scheduler: invalid timezone, falling back to system default", "timezone", timezone, "err", err)
+		loc = time.Local
+	}
+
 	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	sched, err := parser.Parse(cronExpr)
 	if err != nil {
@@ -205,5 +212,16 @@ func (s *Scheduler) computeNextRunFromTime(cronExpr string, t time.Time) time.Ti
 		// Return far future to effectively disable this schedule until fixed.
 		return t.Add(24 * 365 * time.Hour)
 	}
-	return sched.Next(t)
+	// Evaluate the cron expression in the target timezone so that expressions
+	// like "0 9 * * *" mean 9am in that timezone, not 9am UTC.
+	return sched.Next(t.In(loc))
+}
+
+// resolveLocation returns the time.Location for an IANA timezone name.
+// Empty string returns time.Local (system default).
+func resolveLocation(timezone string) (*time.Location, error) {
+	if timezone == "" {
+		return time.Local, nil
+	}
+	return time.LoadLocation(timezone)
 }
