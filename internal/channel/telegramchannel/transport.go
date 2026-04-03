@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -302,6 +303,15 @@ func (t *Telegram) Send(ctx context.Context, text string) (channel.MessageID, er
 		Text:      tgsdk.SanitizeHTML(tgsdk.MarkdownToHTML(text)),
 		ParseMode: models.ParseModeHTML,
 	})
+	if err != nil && isHTMLParseError(err) {
+		// Malformed HTML — fall back to plain text so the message still reaches the user.
+		slog.Warn("telegram send: HTML parse error, falling back to plain text",
+			"channel", t.name, "error", err)
+		msg, err = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "⚠️ [formatting error — sent as plain text]\n\n" + tgsdk.StripAllTags(text),
+		})
+	}
 	if err != nil {
 		return "", fmt.Errorf("telegram send: %w", err)
 	}
@@ -338,6 +348,16 @@ func (t *Telegram) Edit(ctx context.Context, msgID channel.MessageID, text strin
 		Text:      tgsdk.SanitizeHTML(tgsdk.MarkdownToHTML(text)),
 		ParseMode: models.ParseModeHTML,
 	})
+	if err != nil && isHTMLParseError(err) {
+		// Malformed HTML — fall back to plain text so the message still reaches the user.
+		slog.Warn("telegram edit: HTML parse error, falling back to plain text",
+			"channel", t.name, "error", err)
+		_, err = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+			ChatID:    chatID,
+			MessageID: telegramMsgID,
+			Text:      "⚠️ [formatting error — sent as plain text]\n\n" + tgsdk.StripAllTags(text),
+		})
+	}
 	if err != nil {
 		return fmt.Errorf("telegram edit: %w", err)
 	}
@@ -347,6 +367,13 @@ func (t *Telegram) Edit(ctx context.Context, msgID channel.MessageID, text strin
 
 func (t *Telegram) Done(_ context.Context) error {
 	return nil
+}
+
+// isHTMLParseError returns true when Telegram rejected the message because
+// the HTML markup is structurally invalid. Retrying with the same markup
+// will never succeed — the caller should fall back to plain text.
+func isHTMLParseError(err error) bool {
+	return strings.Contains(err.Error(), "can't parse entities")
 }
 
 func (t *Telegram) SplitStatusMessages() bool {

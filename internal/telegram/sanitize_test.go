@@ -44,12 +44,35 @@ func TestSanitizeHTML(t *testing.T) {
 		{"nested allowed tags preserved", "<b><i>bold italic</i></b>", "<b><i>bold italic</i></b>"},
 		{"unclosed code tag passthrough to end", "<code>some code without close", "<code>some code without close"},
 		{"real world: tool result with path", "<blockquote expandable>🔧 Reading /data/tclaw/theo/home/.claude/settings.json\n✅ Tool result (143 chars)\n</blockquote>", "<blockquote expandable>🔧 Reading /data/tclaw/theo/home/.claude/settings.json\n✅ Tool result (143 chars)\n</blockquote>"},
+		{"underscore tag stripped", "<quoted_message>some text</quoted_message>", "some text"},
+		{"underscore tag with attributes stripped", `<quoted_message attr="val">content</quoted_message>`, "content"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := telegram.SanitizeHTML(tt.input)
 			require.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestStripAllTags(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"plain text unchanged", "hello world", "hello world"},
+		{"strips bold", "<b>bold</b> text", "bold text"},
+		{"strips nested tags", "<blockquote expandable><b>text</b></blockquote>", "text"},
+		{"strips link", `<a href="https://example.com">link</a>`, "link"},
+		{"preserves bare angle brackets", "if x < 5", "if x < 5"},
+		{"strips underscore tags", "<quoted_message>quoted</quoted_message>", "quoted"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.expected, telegram.StripAllTags(tt.input))
 		})
 	}
 }
