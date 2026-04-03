@@ -33,13 +33,17 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 		connEnum[i] = fmt.Sprintf("%q", id)
 	}
 	enumJSON := "[" + strings.Join(connEnum, ", ") + "]"
-	connDescription := fmt.Sprintf("Connection ID to use. Available: %s", strings.Join(connEnum, ", "))
+	// All Monzo tools require a credential_set ID. The agent must call monzo_list_accounts first
+	// to discover valid IDs — guessing will produce "unknown credential set" errors.
+	connDescription := fmt.Sprintf("Connection ID to use. Must be a valid ID from monzo_list_accounts — do not guess. Available: %s", strings.Join(connEnum, ", "))
 
 	return []mcp.ToolDef{
 		{
 			Name: ToolListAccounts,
 			Description: "List Monzo bank accounts. Returns account IDs, types (uk_retail, uk_retail_joint, uk_monzo_flex), " +
-				"descriptions, and creation dates. Use the account ID from results in other Monzo tools.",
+				"descriptions, and creation dates. " +
+				"Always call this first before using any other Monzo tool — the response contains both the credential_set ID " +
+				"and account IDs required by all other Monzo calls.",
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
@@ -101,7 +105,8 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 			Name: ToolListTransactions,
 			Description: "List recent transactions for a Monzo account. Returns transaction IDs, amounts, descriptions, " +
 				"merchant info, categories, and timestamps. Amounts in minor units (pence for GBP — negative = debit, positive = credit). " +
-				"Note: after 5 minutes post-authentication, only the last 90 days of transactions are accessible. " +
+				"IMPORTANT: only the last 90 days of transactions are accessible — requests beyond 90 days will fail with an SCA error requiring in-app verification. " +
+				"Always keep `since` within the last 90 days. Default window is 30 days. " +
 				"Max 100 transactions per request.",
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
