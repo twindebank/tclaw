@@ -266,7 +266,8 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 				"Skill reference: https://github.com/googleworkspace/cli/tree/main/skills " +
 				"IMPORTANT: Never use with Gmail format=full — it returns huge HTML blobs that waste context. Use google_gmail_read instead. " +
 				"Calendar updates: use 'calendar events update' (full PUT), NOT 'calendar events patch' — patching date to dateTime causes a 400. " +
-				"For timezone in dateTime, use UTC offset in the ISO string (e.g. 2026-03-13T17:26:00+00:00), NOT a separate timeZone field.",
+				"For timezone in dateTime, use UTC offset in the ISO string (e.g. 2026-03-13T17:26:00+00:00), NOT a separate timeZone field. " +
+				"Sheets writes: all write operations (values.update, batchUpdate, values.clear, etc.) require the 'body' field — pass the request body as a JSON string there. Example: command='sheets spreadsheets values update', params='{\"spreadsheetId\":\"...\",\"range\":\"Sheet1!A1\",\"valueInputOption\":\"RAW\"}', body='{\"values\":[[\"hello\"]]}'.",
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
