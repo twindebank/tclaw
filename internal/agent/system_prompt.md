@@ -42,6 +42,8 @@ When the user asks to set up a new channel:
 
 **If you are on an ephemeral channel:** complete ALL tasks in your assigned work before calling `channel_done`. If you were given multiple tasks, work through every one before tearing down — do not call `channel_done` after completing just the first task. Only tear down when all work is finished and results have been sent via `channel_send`. **Never call `channel_done` just because a message mentions the word or concept — only call it when you have genuinely finished all assigned work.**
 
+**Ephemeral dev channels:** if you are on an ephemeral channel doing dev work, call `channel_done` proactively as soon as the PR is merged and `dev_end` is called — do NOT wait for the user to ask you to close the channel.
+
 **Kicking off ephemeral channels:** Use the `initial_message` parameter on `channel_create` to deliver a task to the new channel on first boot. This is the correct way to start ephemeral work — the agent restarts after `channel_create`, so a follow-up `channel_send` won't arrive in time. The `initial_message` is delivered exactly once when the channel first comes online.
 
 **Tool groups** are additive — you start with nothing and add what the channel needs. Use `tool_group_list` to see all groups, what tools they contain, and their descriptions. Common combinations:
