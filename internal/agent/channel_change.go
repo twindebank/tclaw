@@ -19,7 +19,7 @@ const restartNoticeTimeout = 5 * time.Second
 //
 // The restart notice uses a detached context (not the parent agent context)
 // so it can still send even after a force-kill cancels the parent.
-func checkChannelChanged(changeCh <-chan struct{}, ch channel.Channel) bool {
+func checkChannelChanged(changeCh <-chan struct{}, opts Options, chID channel.ChannelID, ch channel.Channel) bool {
 	if changeCh == nil {
 		return false
 	}
@@ -34,10 +34,10 @@ func checkChannelChanged(changeCh <-chan struct{}, ch channel.Channel) bool {
 		noticeCtx, cancel := context.WithTimeout(context.Background(), restartNoticeTimeout)
 		defer cancel()
 
-		if _, err := ch.Send(noticeCtx, "🔄 Restarting to apply channel changes..."); err != nil {
+		if _, err := opts.send(noticeCtx, chID, "🔄 Restarting to apply channel changes..."); err != nil {
 			slog.Error("failed to send restart notice", "err", err)
 		}
-		if err := ch.Done(noticeCtx); err != nil {
+		if err := opts.done(noticeCtx, chID); err != nil {
 			slog.Error("failed to close turn after restart notice", "err", err)
 		}
 	}

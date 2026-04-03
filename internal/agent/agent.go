@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"tclaw/internal/channel"
+	"tclaw/internal/channel/outbox"
 	"tclaw/internal/claudecli"
 	"tclaw/internal/config"
 	"tclaw/internal/queue"
@@ -240,6 +241,12 @@ type Options struct {
 	// busy-channel awareness. May be nil if not needed.
 	Queue *queue.Queue
 
+	// Outbox manages asynchronous outbound message delivery. All Send/Edit/Done
+	// calls go through the Outbox instead of calling channel methods directly.
+	// This prevents the agent loop from blocking on slow channel I/O (e.g.
+	// Telegram API timeouts). May be nil for tests that don't need it.
+	Outbox *outbox.Outbox
+
 	// ResumeNotice is prepended to the first message's prompt (but not
 	// msg.Text) after a restart so the CLI sees the context warning
 	// while builtin command detection still operates on the raw user
@@ -400,10 +407,8 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				notification = fmt.Sprintf("👶 Event from child channel %s", msg.SourceInfo.ChildChannel)
 			}
 			if notification != "" {
-				if ch, ok := opts.channels()[msg.ChannelID]; ok {
-					if _, err := ch.Send(ctx, notification); err != nil {
-						slog.Error("failed to send source notification", "channel", msg.ChannelID, "err", err)
-					}
+				if _, err := opts.send(ctx, msg.ChannelID, notification); err != nil {
+					slog.Error("failed to send source notification", "channel", msg.ChannelID, "err", err)
 				}
 			}
 		}
@@ -425,13 +430,11 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				sendDenied(ctx, opts, msg.ChannelID)
 				continue
 			}
-			if ch, ok := opts.channels()[msg.ChannelID]; ok {
-				if _, err := ch.Send(ctx, "🗜️ Compacting conversation context..."); err != nil {
-					slog.Error("failed to send compact notice", "err", err)
-				}
-				if err := ch.Done(ctx); err != nil {
-					slog.Error("failed to close turn after compact notice", "err", err)
-				}
+			if _, err := opts.send(ctx, msg.ChannelID, "🗜️ Compacting conversation context..."); err != nil {
+				slog.Error("failed to send compact notice", "err", err)
+			}
+			if err := opts.done(ctx, msg.ChannelID); err != nil {
+				slog.Error("failed to close turn after compact notice", "err", err)
 			}
 			msg.Text = compactPrompt
 			// Fall through to handle() below.
@@ -445,14 +448,13 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				continue
 			}
 			fm.Cancel(msg.ChannelID)
-			ch, ok := opts.channels()[msg.ChannelID]
-			if ok {
-				if _, err := ch.Send(ctx, dynamicResetMenuPrompt(levels, ch.Markup())); err != nil {
+			if ch, ok := opts.channels()[msg.ChannelID]; ok {
+				if _, err := opts.send(ctx, msg.ChannelID, dynamicResetMenuPrompt(levels, ch.Markup())); err != nil {
 					slog.Error("failed to send reset menu", "err", err)
 				}
-				if err := ch.Done(ctx); err != nil {
-					slog.Error("failed to close turn after reset menu", "err", err)
-				}
+			}
+			if err := opts.done(ctx, msg.ChannelID); err != nil {
+				slog.Error("failed to close turn after reset menu", "err", err)
 			}
 			fm.StartReset(msg.ChannelID)
 			continue
@@ -469,7 +471,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			if result.RestartAgent != nil {
 				return result.RestartAgent
 			}
-			if err := ch.Done(ctx); err != nil {
+			if err := opts.done(ctx, msg.ChannelID); err != nil {
 				slog.Error("failed to close turn after reset step", "err", err)
 			}
 			continue
@@ -481,16 +483,15 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				sendDenied(ctx, opts, msg.ChannelID)
 				continue
 			}
-			ch, ok := opts.channels()[msg.ChannelID]
-			if ok {
-				if _, err := ch.Send(ctx, authPrompt(ch.Markup())); err != nil {
+			if ch, ok := opts.channels()[msg.ChannelID]; ok {
+				if _, err := opts.send(ctx, msg.ChannelID, authPrompt(ch.Markup())); err != nil {
 					slog.Error("failed to send auth prompt", "err", err)
 				} else {
 					fm.StartAuth(msg.ChannelID, channel.TaggedMessage{})
 				}
-				if err := ch.Done(ctx); err != nil {
-					slog.Error("failed to close turn after login prompt", "err", err)
-				}
+			}
+			if err := opts.done(ctx, msg.ChannelID); err != nil {
+				slog.Error("failed to close turn after login prompt", "err", err)
 			}
 			continue
 		}
@@ -499,12 +500,11 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				sendDenied(ctx, opts, msg.ChannelID)
 				continue
 			}
-			ch, ok := opts.channels()[msg.ChannelID]
-			if ok {
-				handleAuthStatus(ctx, opts, ch)
-				if err := ch.Done(ctx); err != nil {
-					slog.Error("failed to close turn after auth status", "err", err)
-				}
+			if ch, ok := opts.channels()[msg.ChannelID]; ok {
+				handleAuthStatus(ctx, opts, ch, msg.ChannelID)
+			}
+			if err := opts.done(ctx, msg.ChannelID); err != nil {
+				slog.Error("failed to close turn after auth status", "err", err)
 			}
 			continue
 		}
@@ -526,7 +526,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			}
 			// Don't close the turn while OAuth is running.
 			if f.Auth == nil || f.Auth.state != authOAuthActive {
-				if err := ch.Done(ctx); err != nil {
+				if err := opts.done(ctx, msg.ChannelID); err != nil {
 					slog.Error("failed to close turn after auth step", "err", err)
 				}
 			}
@@ -599,12 +599,10 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 					"attempt", attempt+1, "max_retries", rateLimitMaxRetries,
 					"delay", delay, "channel", msg.ChannelID)
 
-				if retryCh, ok := turnOpts.channels()[msg.ChannelID]; ok {
-					notice := fmt.Sprintf("⏳ Rate limited — retrying in %ds (attempt %d/%d)...",
-						int(delay.Seconds()), attempt+1, rateLimitMaxRetries)
-					if _, sendErr := retryCh.Send(turnCtx, notice); sendErr != nil {
-						slog.Error("failed to send retry notice", "err", sendErr)
-					}
+				notice := fmt.Sprintf("⏳ Rate limited — retrying in %ds (attempt %d/%d)...",
+					int(delay.Seconds()), attempt+1, rateLimitMaxRetries)
+				if _, sendErr := turnOpts.send(turnCtx, msg.ChannelID, notice); sendErr != nil {
+					slog.Error("failed to send retry notice", "err", sendErr)
 				}
 
 				select {
@@ -627,9 +625,8 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				if errors.Is(result.err, ErrAuthRequired) {
 					slog.Info("auth required, starting auth flow", "channel", msg.ChannelID)
 					fm.StartAuth(msg.ChannelID, msg)
-					ch, chOK := opts.channels()[msg.ChannelID]
-					if chOK {
-						if _, sendErr := ch.Send(ctx, authPrompt(ch.Markup())); sendErr != nil {
+					if ch, chOK := opts.channels()[msg.ChannelID]; chOK {
+						if _, sendErr := opts.send(ctx, msg.ChannelID, authPrompt(ch.Markup())); sendErr != nil {
 							slog.Error("failed to send auth prompt, discarding flow", "err", sendErr)
 							fm.Cancel(msg.ChannelID)
 							goto done
@@ -649,7 +646,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 						toolList := strings.Join(denied.Tools, ", ")
 						prompt := fmt.Sprintf("⚠️ %s was not available on this channel.\nReply %s to retry with %s enabled, or send any other message to continue.",
 							bold(m, toolList), bold(m, "approve"), bold(m, toolList))
-						if _, sendErr := approvalCh.Send(ctx, prompt); sendErr != nil {
+						if _, sendErr := opts.send(ctx, msg.ChannelID, prompt); sendErr != nil {
 							slog.Error("failed to send tool approval prompt", "err", sendErr)
 						}
 					}
@@ -661,11 +658,9 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 					// the channel so the user knows — especially important for
 					// scheduled turns where nobody is watching.
 					slog.Error("handle failed", "err", result.err)
-					if errCh, errChOK := opts.channels()[msg.ChannelID]; errChOK {
-						errText := "⚠️ Turn failed: " + result.err.Error()
-						if _, sendErr := errCh.Send(ctx, errText); sendErr != nil {
-							slog.Error("failed to send error notification", "err", sendErr)
-						}
+					errText := "⚠️ Turn failed: " + result.err.Error()
+					if _, sendErr := opts.send(ctx, msg.ChannelID, errText); sendErr != nil {
+						slog.Error("failed to send error notification", "err", sendErr)
 					}
 				}
 				if result.sessionID != "" && result.sessionID != sessionID {
@@ -696,46 +691,44 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 						}
 					}
 					// Acknowledge the queued message so the user knows it was received.
-					if queueCh, ok := opts.channels()[newMsg.ChannelID]; ok {
-						isUserMsg := newMsg.SourceInfo == nil || newMsg.SourceInfo.Source == channel.SourceUser
+					isUserMsg := newMsg.SourceInfo == nil || newMsg.SourceInfo.Source == channel.SourceUser
 
-						// User messages bypass the busy/cooldown check entirely, so
-						// never mention cooldown for them. Non-user messages wait
-						// until the TARGET channel is idle (per-channel cooldown).
-						var ackMsg string
-						if isUserMsg {
-							if newMsg.ChannelID == msg.ChannelID {
-								ackMsg = "📥 Queued — will process after the current turn finishes."
-							} else if busyCh, busyOK := opts.channels()[msg.ChannelID]; busyOK {
-								ackMsg = fmt.Sprintf("📥 Queued — agent is busy on **%s**. Will process once the current turn finishes.", busyCh.Info().Name)
-							} else {
-								ackMsg = "📥 Queued — will process after the current turn finishes."
-							}
+					// User messages bypass the busy/cooldown check entirely, so
+					// never mention cooldown for them. Non-user messages wait
+					// until the TARGET channel is idle (per-channel cooldown).
+					var ackMsg string
+					if isUserMsg {
+						if newMsg.ChannelID == msg.ChannelID {
+							ackMsg = "📥 Queued — will process after the current turn finishes."
+						} else if busyCh, busyOK := opts.channels()[msg.ChannelID]; busyOK {
+							ackMsg = fmt.Sprintf("📥 Queued — agent is busy on **%s**. Will process once the current turn finishes.", busyCh.Info().Name)
 						} else {
-							// Non-user message: cooldown applies on the TARGET channel,
-							// not the currently-busy channel. Only mention the cooldown
-							// when the target channel is the one currently active (where
-							// the cooldown is certain). For other channels, the target
-							// may or may not have its own cooldown — don't overclaim.
-							cooldown := int(channel.DefaultIdleTimeout.Minutes())
-							if newMsg.ChannelID == msg.ChannelID {
-								ackMsg = fmt.Sprintf("📥 Queued — will process after the current turn finishes (+ %dm cooldown).", cooldown)
-							} else if busyCh, busyOK := opts.channels()[msg.ChannelID]; busyOK {
-								ackMsg = fmt.Sprintf("📥 Queued — agent is busy on **%s**. Will process once the current turn finishes.", busyCh.Info().Name)
-							} else {
-								ackMsg = "📥 Queued — will process after the current turn finishes."
-							}
+							ackMsg = "📥 Queued — will process after the current turn finishes."
 						}
-						if _, sendErr := queueCh.Send(ctx, ackMsg); sendErr != nil {
-							slog.Error("failed to send queue acknowledgment", "channel", newMsg.ChannelID, "err", sendErr)
+					} else {
+						// Non-user message: cooldown applies on the TARGET channel,
+						// not the currently-busy channel. Only mention the cooldown
+						// when the target channel is the one currently active (where
+						// the cooldown is certain). For other channels, the target
+						// may or may not have its own cooldown — don't overclaim.
+						cooldown := int(channel.DefaultIdleTimeout.Minutes())
+						if newMsg.ChannelID == msg.ChannelID {
+							ackMsg = fmt.Sprintf("📥 Queued — will process after the current turn finishes (+ %dm cooldown).", cooldown)
+						} else if busyCh, busyOK := opts.channels()[msg.ChannelID]; busyOK {
+							ackMsg = fmt.Sprintf("📥 Queued — agent is busy on **%s**. Will process once the current turn finishes.", busyCh.Info().Name)
+						} else {
+							ackMsg = "📥 Queued — will process after the current turn finishes."
 						}
-						// Only call Done() if the queued message is on a different channel.
-						// Calling Done() on the active turn's channel (e.g. a socket) would
-						// close the connection mid-turn.
-						if newMsg.ChannelID != msg.ChannelID {
-							if doneErr := queueCh.Done(ctx); doneErr != nil {
-								slog.Error("failed to close turn after queue acknowledgment", "channel", newMsg.ChannelID, "err", doneErr)
-							}
+					}
+					if _, sendErr := opts.send(ctx, newMsg.ChannelID, ackMsg); sendErr != nil {
+						slog.Error("failed to send queue acknowledgment", "channel", newMsg.ChannelID, "err", sendErr)
+					}
+					// Only call Done() if the queued message is on a different channel.
+					// Calling Done() on the active turn's channel (e.g. a socket) would
+					// close the connection mid-turn.
+					if newMsg.ChannelID != msg.ChannelID {
+						if doneErr := opts.done(ctx, newMsg.ChannelID); doneErr != nil {
+							slog.Error("failed to close turn after queue acknowledgment", "channel", newMsg.ChannelID, "err", doneErr)
 						}
 					}
 				}
@@ -761,14 +754,12 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			}
 		}
 		idle.Reset()
-		ch, ok := opts.channels()[msg.ChannelID]
-		if ok {
-			if err := ch.Done(ctx); err != nil {
-				slog.Error("failed to close turn", "err", err)
-			}
+		if err := opts.done(ctx, msg.ChannelID); err != nil {
+			slog.Error("failed to close turn", "err", err)
 		}
 
-		if checkChannelChanged(opts.ChannelChangeCh, ch) {
+		ch, _ := opts.channels()[msg.ChannelID]
+		if checkChannelChanged(opts.ChannelChangeCh, opts, msg.ChannelID, ch) {
 			return ErrChannelChanged
 		}
 	}
@@ -841,16 +832,50 @@ const builtinDeniedMessage = "⛔ This command is not available on this channel.
 
 // sendDenied sends the denial message and closes the turn.
 func sendDenied(ctx context.Context, opts Options, channelID channel.ChannelID) {
-	ch, ok := opts.channels()[channelID]
-	if !ok {
-		return
-	}
-	if _, err := ch.Send(ctx, builtinDeniedMessage); err != nil {
+	if _, err := opts.send(ctx, channelID, builtinDeniedMessage); err != nil {
 		slog.Error("failed to send denied message", "err", err)
 	}
-	if err := ch.Done(ctx); err != nil {
+	if err := opts.done(ctx, channelID); err != nil {
 		slog.Error("failed to close turn after denied message", "err", err)
 	}
+}
+
+// send delivers a message via the outbox (non-blocking) or directly via the
+// channel if no outbox is configured (tests). Returns a MessageID for
+// subsequent edits and an enqueue error if applicable.
+func (opts Options) send(ctx context.Context, chID channel.ChannelID, text string) (channel.MessageID, error) {
+	if opts.Outbox != nil {
+		return opts.Outbox.Send(ctx, chID, text)
+	}
+	ch, ok := opts.channels()[chID]
+	if !ok {
+		return "", fmt.Errorf("unknown channel %q", chID)
+	}
+	return ch.Send(ctx, text)
+}
+
+// edit updates a previously sent message via the outbox or directly.
+func (opts Options) edit(ctx context.Context, chID channel.ChannelID, msgID channel.MessageID, text string) error {
+	if opts.Outbox != nil {
+		return opts.Outbox.Edit(ctx, chID, msgID, text)
+	}
+	ch, ok := opts.channels()[chID]
+	if !ok {
+		return fmt.Errorf("unknown channel %q", chID)
+	}
+	return ch.Edit(ctx, msgID, text)
+}
+
+// done signals end-of-turn via the outbox or directly.
+func (opts Options) done(ctx context.Context, chID channel.ChannelID) error {
+	if opts.Outbox != nil {
+		return opts.Outbox.Done(ctx, chID)
+	}
+	ch, ok := opts.channels()[chID]
+	if !ok {
+		return fmt.Errorf("unknown channel %q", chID)
+	}
+	return ch.Done(ctx)
 }
 
 func maxTurns(opts Options) int {

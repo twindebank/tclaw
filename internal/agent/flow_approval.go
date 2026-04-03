@@ -45,10 +45,10 @@ func handleToolApprovalFlow(
 
 	case "no", "n", "cancel":
 		fm.Complete(msg.ChannelID)
-		if _, err := ch.Send(ctx, "↩️ Tool approval cancelled."); err != nil {
+		if _, err := opts.send(ctx, msg.ChannelID, "↩️ Tool approval cancelled."); err != nil {
 			slog.Error("failed to send approval cancel", "err", err)
 		}
-		if err := ch.Done(ctx); err != nil {
+		if err := opts.done(ctx, msg.ChannelID); err != nil {
 			slog.Error("failed to close turn after approval cancel", "err", err)
 		}
 		return FlowResult{Handled: true}

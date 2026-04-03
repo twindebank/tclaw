@@ -51,7 +51,7 @@ func (m *mockChannel) Edit(_ context.Context, id channel.MessageID, text string)
 func TestWriteSplit(t *testing.T) {
 	t.Run("proactive split status", func(t *testing.T) {
 		ch := &mockChannel{}
-		tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
+		tw := newTestTurnWriter(ch)
 
 		// First write creates a new message.
 		if err := tw.writeSplit(phaseStatus, "start\n"); err != nil {
@@ -79,7 +79,7 @@ func TestWriteSplit(t *testing.T) {
 
 	t.Run("proactive split response", func(t *testing.T) {
 		ch := &mockChannel{}
-		tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
+		tw := newTestTurnWriter(ch)
 
 		if err := tw.writeSplit(phaseResponse, "start\n"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -103,7 +103,7 @@ func TestWriteSplit(t *testing.T) {
 
 	t.Run("edit failure recovery status", func(t *testing.T) {
 		ch := &mockChannel{}
-		tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
+		tw := newTestTurnWriter(ch)
 
 		// First write creates message.
 		if err := tw.writeSplit(phaseStatus, "hello"); err != nil {
@@ -130,7 +130,7 @@ func TestWriteSplit(t *testing.T) {
 
 	t.Run("edit failure recovery response", func(t *testing.T) {
 		ch := &mockChannel{}
-		tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
+		tw := newTestTurnWriter(ch)
 
 		// First write creates message.
 		if err := tw.writeSplit(phaseResponse, "hello"); err != nil {
@@ -155,7 +155,7 @@ func TestWriteSplit(t *testing.T) {
 
 	t.Run("response sealed after interleaved status", func(t *testing.T) {
 		ch := &mockChannel{}
-		tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
+		tw := newTestTurnWriter(ch)
 
 		// 1. Status write creates msg 1.
 		if err := tw.writeSplit(phaseStatus, "🤔 Thinking...\n"); err != nil {
@@ -209,7 +209,7 @@ func TestWriteSplit(t *testing.T) {
 
 	t.Run("truncates oversized status message", func(t *testing.T) {
 		ch := &mockChannel{}
-		tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
+		tw := newTestTurnWriter(ch)
 
 		// Write a single chunk that exceeds the telegram truncation limit.
 		oversized := strings.Repeat("x", telegramTruncateLen+500)
@@ -230,7 +230,7 @@ func TestWriteSplit(t *testing.T) {
 
 	t.Run("no split below threshold", func(t *testing.T) {
 		ch := &mockChannel{}
-		tw := &turnWriter{ch: ch, ctx: context.Background(), split: true}
+		tw := newTestTurnWriter(ch)
 
 		// Write many small chunks that stay under the limit.
 		for i := 0; i < 100; i++ {
@@ -247,6 +247,15 @@ func TestWriteSplit(t *testing.T) {
 			t.Fatalf("expected 99 edits, got %d", len(ch.edits))
 		}
 	})
+}
+
+const testChannelID = channel.ChannelID("test")
+
+func newTestTurnWriter(ch *mockChannel) *turnWriter {
+	opts := Options{
+		Channels: map[channel.ChannelID]channel.Channel{testChannelID: ch},
+	}
+	return &turnWriter{ch: ch, opts: opts, channelID: testChannelID, ctx: context.Background(), split: true}
 }
 
 func TestBuildEnv(t *testing.T) {

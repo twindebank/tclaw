@@ -65,9 +65,11 @@ const telegramTruncateLen = 3900
 // status and response content go to separate channel messages. In normal mode
 // everything goes to one message.
 type turnWriter struct {
-	ch    channel.Channel
-	ctx   context.Context
-	split bool // true for channels that support split messages (Telegram)
+	ch        channel.Channel   // read-side: Info, SplitStatusMessages, Markup, StatusWrap
+	opts      Options           // write-side: send/edit/done via outbox
+	channelID channel.ChannelID // target channel for outbox calls
+	ctx       context.Context
+	split     bool // true for channels that support split messages (Telegram)
 
 	// Normal mode: single message.
 	buf strings.Builder
@@ -116,14 +118,14 @@ func (tw *turnWriter) writeSingle(text string) error {
 	tw.buf.WriteString(text)
 	content := tw.statusSuffix(tw.buf.String())
 	if tw.id == "" {
-		id, err := tw.ch.Send(tw.ctx, content)
+		id, err := tw.opts.send(tw.ctx, tw.channelID, content)
 		if err != nil {
 			return fmt.Errorf("send: %w", err)
 		}
 		tw.id = id
 		return nil
 	}
-	if err := tw.ch.Edit(tw.ctx, tw.id, content); err != nil {
+	if err := tw.opts.edit(tw.ctx, tw.channelID, tw.id, content); err != nil {
 		return fmt.Errorf("edit: %w", err)
 	}
 	return nil
@@ -186,7 +188,7 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 		}
 
 		if tw.statusID == "" {
-			id, err := tw.ch.Send(tw.ctx, truncateForTelegram(content))
+			id, err := tw.opts.send(tw.ctx, tw.channelID, truncateForTelegram(content))
 			if err != nil {
 				// Status is informational — log and swallow.
 				slog.Warn("failed to send status message", "err", err)
@@ -202,7 +204,7 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 			return nil
 		}
 
-		if err := tw.ch.Edit(tw.ctx, tw.statusID, truncateForTelegram(content)); err != nil {
+		if err := tw.opts.edit(tw.ctx, tw.channelID, tw.statusID, truncateForTelegram(content)); err != nil {
 			if strings.Contains(err.Error(), "message is not modified") {
 				return nil
 			}
@@ -213,7 +215,7 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 			tw.statusBuf.WriteString(freshText)
 			tw.statusID = ""
 			recoveryContent := tw.statusSuffix(freshText)
-			id, err := tw.ch.Send(tw.ctx, truncateForTelegram(recoveryContent))
+			id, err := tw.opts.send(tw.ctx, tw.channelID, truncateForTelegram(recoveryContent))
 			if err != nil {
 				// Status is informational — log and swallow.
 				slog.Warn("failed to send replacement status message", "err", err)
@@ -248,7 +250,7 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 		}
 
 		if tw.respID == "" {
-			id, err := tw.ch.Send(tw.ctx, content)
+			id, err := tw.opts.send(tw.ctx, tw.channelID, content)
 			if err != nil {
 				return fmt.Errorf("send response: %w", err)
 			}
@@ -256,7 +258,7 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 			return nil
 		}
 
-		if err := tw.ch.Edit(tw.ctx, tw.respID, content); err != nil {
+		if err := tw.opts.edit(tw.ctx, tw.channelID, tw.respID, content); err != nil {
 			if strings.Contains(err.Error(), "message is not modified") {
 				return nil
 			}
@@ -265,7 +267,7 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 			tw.respBuf.Reset()
 			tw.respBuf.WriteString(text)
 			tw.respID = ""
-			id, err := tw.ch.Send(tw.ctx, text)
+			id, err := tw.opts.send(tw.ctx, tw.channelID, text)
 			if err != nil {
 				return fmt.Errorf("send replacement response: %w", err)
 			}
@@ -301,7 +303,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 
 	split := ch.SplitStatusMessages()
 
-	tw := &turnWriter{ch: ch, ctx: ctx, split: split, statusWrap: ch.StatusWrap()}
+	tw := &turnWriter{ch: ch, opts: opts, channelID: msg.ChannelID, ctx: ctx, split: split, statusWrap: ch.StatusWrap()}
 	thinkingMsg := "🤔 Thinking...\n"
 	if msg.SourceInfo != nil && msg.SourceInfo.Source == channel.SourceResume {
 		thinkingMsg = "🔄 Resuming interrupted turn...\n"

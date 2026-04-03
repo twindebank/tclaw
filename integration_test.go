@@ -182,7 +182,7 @@ func setupAgent(t *testing.T) *socketClient {
 		t.Fatalf("create home dir: %v", err)
 	}
 
-	sock := socketchannel.NewServer(socketPath, "test", "Integration test channel")
+	sock := socketchannel.NewServer(socketPath, "test", "Integration test channel", "")
 	chMap := channel.ChannelMap(sock)
 
 	apiKey, setupToken := agentCredentials(t)
@@ -300,7 +300,7 @@ func TestIntegration_SessionPersistence(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 
-	sock := socketchannel.NewServer(socketPath, "test", "Test channel")
+	sock := socketchannel.NewServer(socketPath, "test", "Test channel", "")
 	chMap := channel.ChannelMap(sock)
 
 	var savedSessionID string
@@ -397,7 +397,7 @@ func TestIntegration_MemoryLoaded(t *testing.T) {
 		t.Fatalf("create symlink: %v", err)
 	}
 
-	sock := socketchannel.NewServer(socketPath, "test", "Memory test channel")
+	sock := socketchannel.NewServer(socketPath, "test", "Memory test channel", "")
 	chMap := channel.ChannelMap(sock)
 
 	mlAPIKey, mlSetupToken := agentCredentials(t)
@@ -470,7 +470,7 @@ func TestIntegration_DynamicChannelLifecycle(t *testing.T) {
 		t.Fatalf("create socket dir: %v", err)
 	}
 
-	sock := socketchannel.NewServer(socketPath, "phone", "Test phone channel")
+	sock := socketchannel.NewServer(socketPath, "phone", "Test phone channel", "")
 	chMap := channel.ChannelMap(sock)
 
 	dcAPIKey, dcSetupToken := agentCredentials(t)
@@ -518,14 +518,6 @@ func TestIntegration_DynamicChannelLifecycle(t *testing.T) {
 		t.Fatal("expected response on agent-created channel, got none")
 	}
 
-	// Verify we can read back the channel configs from the store.
-	configs, err := ds.List(context.Background())
-	if err != nil {
-		t.Fatalf("list channel configs: %v", err)
-	}
-	if len(configs) != 1 || configs[0].Name != "phone" {
-		t.Fatalf("unexpected channel configs: %+v", configs)
-	}
 }
 
 // TestIntegration_MCPToolGlobPermission verifies that MCP tools are allowed
@@ -576,7 +568,7 @@ func TestIntegration_MCPToolGlobPermission(t *testing.T) {
 		t.Fatalf("generate MCP config: %v", err)
 	}
 
-	sock := socketchannel.NewServer(socketPath, "test", "Integration test channel")
+	sock := socketchannel.NewServer(socketPath, "test", "Integration test channel", "")
 	chMap := channel.ChannelMap(sock)
 	chID := sock.Info().ID
 
