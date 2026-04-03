@@ -70,6 +70,10 @@ type ChannelInfo struct {
 	Purpose     string // optional behavioral guidance for the agent on this channel
 	Source      string // "static" or "dynamic"
 
+	// Formatting contains channel-specific formatting instructions (e.g. "use HTML
+	// tags, not markdown"). Empty for channels that use standard markdown.
+	Formatting string
+
 	// OutboundLinks lists channels this channel can send messages to.
 	OutboundLinks []ChannelLinkInfo
 
