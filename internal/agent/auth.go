@@ -345,12 +345,12 @@ func ValidAPIKey(key string) bool {
 
 // handleAPIKeyEntry validates and persists an API key the user pasted.
 // Returns true on success.
-func handleAPIKeyEntry(ctx context.Context, opts Options, ch channel.Channel, key string) bool {
+func handleAPIKeyEntry(ctx context.Context, opts Options, ch channel.Channel, chID channel.ChannelID, key string) bool {
 	key = strings.TrimSpace(key)
 
 	if !ValidAPIKey(key) {
 		m := ch.Markup()
-		if _, err := ch.Send(ctx, "❌ Invalid key — must start with "+code(m, "sk-ant-")+" and be a valid length. Try again or type "+bold(m, "stop")+" to cancel."); err != nil {
+		if _, err := opts.send(ctx, chID, "❌ Invalid key — must start with "+code(m, "sk-ant-")+" and be a valid length. Try again or type "+bold(m, "stop")+" to cancel."); err != nil {
 			slog.Error("failed to send validation error", "err", err)
 		}
 		return false
@@ -358,30 +358,30 @@ func handleAPIKeyEntry(ctx context.Context, opts Options, ch channel.Channel, ke
 
 	if err := persistAPIKey(ctx, opts, key); err != nil {
 		slog.Error("failed to persist api key", "err", err)
-		if _, sendErr := ch.Send(ctx, "❌ Failed to save API key. Check server logs."); sendErr != nil {
+		if _, sendErr := opts.send(ctx, chID, "❌ Failed to save API key. Check server logs."); sendErr != nil {
 			slog.Error("failed to send persist error", "err", sendErr)
 		}
 		return false
 	}
 
-	if _, err := ch.Send(ctx, "✅ API key saved."); err != nil {
+	if _, err := opts.send(ctx, chID, "✅ API key saved."); err != nil {
 		slog.Error("failed to send api key confirmation", "err", err)
 	}
 	return true
 }
 
 // handleAuthStatus checks and reports the current authentication status.
-func handleAuthStatus(ctx context.Context, opts Options, ch channel.Channel) {
+func handleAuthStatus(ctx context.Context, opts Options, ch channel.Channel, chID channel.ChannelID) {
 	status, err := checkAuthStatus(ctx, opts)
 	if err != nil {
-		if _, sendErr := ch.Send(ctx, fmt.Sprintf("❌ Failed to check auth status: %v", err)); sendErr != nil {
+		if _, sendErr := opts.send(ctx, chID, fmt.Sprintf("❌ Failed to check auth status: %v", err)); sendErr != nil {
 			slog.Error("failed to send auth status error", "err", sendErr)
 		}
 		return
 	}
 
 	if !status.LoggedIn {
-		if _, sendErr := ch.Send(ctx, "🔒 Not logged in. Type "+bold(ch.Markup(), "login")+" to authenticate."); sendErr != nil {
+		if _, sendErr := opts.send(ctx, chID, "🔒 Not logged in. Type "+bold(ch.Markup(), "login")+" to authenticate."); sendErr != nil {
 			slog.Error("failed to send auth status", "err", sendErr)
 		}
 		return
@@ -390,7 +390,6 @@ func handleAuthStatus(ctx context.Context, opts Options, ch channel.Channel) {
 	m := ch.Markup()
 	var msg string
 	if status.Email != "" {
-		// Full profile available (API key or first-party with profile)
 		msg = fmt.Sprintf("🔓 Logged in as %s (%s, %s)\nAuth: %s | Provider: %s",
 			bold(m, status.Email), status.OrgName, status.SubscriptionType,
 			status.AuthMethod, status.APIProvider)
@@ -401,7 +400,7 @@ func handleAuthStatus(ctx context.Context, opts Options, ch channel.Channel) {
 	if opts.APIKey != "" {
 		msg += "\n⚠️ API key is configured — it takes precedence over OAuth."
 	}
-	if _, sendErr := ch.Send(ctx, msg); sendErr != nil {
+	if _, sendErr := opts.send(ctx, chID, msg); sendErr != nil {
 		slog.Error("failed to send auth status", "err", sendErr)
 	}
 }

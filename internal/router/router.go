@@ -21,6 +21,7 @@ import (
 	"tclaw/internal/channel"
 	channelall "tclaw/internal/channel/all"
 	"tclaw/internal/channel/channelpkg"
+	"tclaw/internal/channel/outbox"
 	"tclaw/internal/claudecli"
 	"tclaw/internal/config"
 	"tclaw/internal/credential"
@@ -328,6 +329,13 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	messageQueue := queue.New(queue.QueueParams{
 		Store:    s,
 		Activity: activityTracker,
+		Channels: channelSet.Snapshot,
+	})
+
+	// Outbound message queue — all Send/Edit/Done calls go through the outbox
+	// so the agent loop never blocks on channel I/O (e.g. Telegram API timeouts).
+	messageOutbox := outbox.New(outbox.Params{
+		Store:    s,
 		Channels: channelSet.Snapshot,
 	})
 
@@ -758,6 +766,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// Generate per-channel MCP config files for channels with scoped remote MCPs.
 		mcpConfigPaths := buildMCPConfigPaths(dynamicCtx, allChMap, remoteMCPMgr, mcpConfigDir, mcpAddr, mcpToken)
 
+		// Start the outbox for this iteration so delivery goroutines use
+		// the current channel set. Stop on iteration exit to persist state.
+		messageOutbox.Start(dynamicCtx)
+
 		// channelChangeNotify is closed when a channel change fires,
 		// telling the agent to finish its current turn then exit.
 		// Created per iteration because a closed channel can't be reused.
@@ -796,6 +808,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			ChannelsFunc: channelsFunc,
 			Sessions:     sessions,
 			Queue:        messageQueue,
+			Outbox:       messageOutbox,
 			OnSessionUpdate: func(chID channel.ChannelID, sessionID string) {
 				if saveErr := sessionStore.SetCurrent(ctx, channel.SessionKey(chID), sessionID); saveErr != nil {
 					slog.Error("failed to save session", "err", saveErr)
