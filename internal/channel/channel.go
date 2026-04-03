@@ -29,6 +29,27 @@ const (
 	MarkupHTML Markup = "html"
 )
 
+// FormattingInstructions returns agent-facing guidance for how to format
+// responses on a channel with this markup type. Included per-channel in the
+// system prompt so the agent adapts formatting to each channel's transport.
+func FormattingInstructions(m Markup) string {
+	switch m {
+	case MarkupHTML:
+		return "Format responses using Telegram HTML markup — Telegram does NOT support Markdown.\n" +
+			"Supported tags: <b>, <i>, <u>, <s>, <code>, <pre>, " +
+			"<pre><code class=\"language-python\">, <a href=\"url\">, " +
+			"<blockquote>, <blockquote expandable>, <tg-spoiler>.\n" +
+			"Use <b> for headings, <code>/<pre> for code, bullet characters (•, ▸) for lists. " +
+			"Keep messages concise — Telegram is typically mobile. " +
+			"Do NOT use markdown syntax (#, **, -) — it renders as literal text. " +
+			"Escape &, <, > as &amp;, &lt;, &gt;."
+	case MarkupMarkdown:
+		return ""
+	default:
+		return ""
+	}
+}
+
 const (
 	TypeSocket   ChannelType = "socket"
 	TypeStdio    ChannelType = "stdio"

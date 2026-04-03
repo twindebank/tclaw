@@ -35,7 +35,22 @@ var toolDefs = []mcp.ToolDef{
 			"Preferred flow: collect credentials via secret_form_request using keys " +
 			"\"telegram_client_api_id\" (integer) and \"telegram_client_api_hash\" (string), " +
 			"then call this tool with no arguments — it reads from the secret store automatically. " +
-			"Alternatively, pass api_id and api_hash directly (stored encrypted).",
+			"Alternatively, pass api_id and api_hash directly (stored encrypted).\n\n" +
+			"The telegram_client_* tools are for accessing the user's Telegram account outside of tclaw — " +
+			"reading personal chats, searching history, managing groups. Never use telegram_client tools to " +
+			"manage tclaw channels — use the generic channel_* tools instead.\n\n" +
+			"FULL AUTH FLOW (one-time setup):\n" +
+			"1. telegram_client_setup — store API credentials (collect via secret_form_request first, then call with no args)\n" +
+			"2. telegram_client_auth — sends OTP to the user's phone\n" +
+			"3. IMMEDIATELY call secret_form_request with key \"telegram_otp_code\" to collect the code via secure form — " +
+			"do NOT ask for it in chat. Sharing it directly in Telegram chat triggers a security block on the account\n" +
+			"4. Send the form URL and 6-digit verification code to the user. Make clear there are TWO separate codes: " +
+			"the tclaw form verification code (shown alongside the form URL, proves it's them), and the actual " +
+			"Telegram OTP they receive in their Telegram app in a separate chat. They enter the Telegram OTP into the form field\n" +
+			"5. secret_form_wait — blocks until submitted\n" +
+			"6. telegram_client_verify with no arguments — reads the code from the secret store automatically\n" +
+			"7. Optionally telegram_client_2fa if password is required\n\n" +
+			"Use telegram_client_status to check state at any time.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
