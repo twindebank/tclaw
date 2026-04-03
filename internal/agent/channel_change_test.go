@@ -12,19 +12,19 @@ import (
 
 func TestCheckChannelChanged(t *testing.T) {
 	t.Run("returns false when changeCh is nil", func(t *testing.T) {
-		require.False(t, checkChannelChanged(nil, nil))
+		require.False(t, checkChannelChanged(nil, Options{}, "", nil))
 	})
 
 	t.Run("returns false when changeCh is not closed", func(t *testing.T) {
 		ch := make(chan struct{})
-		require.False(t, checkChannelChanged(ch, nil))
+		require.False(t, checkChannelChanged(ch, Options{}, "", nil))
 	})
 
 	t.Run("returns true when changeCh is closed", func(t *testing.T) {
 		changeCh := make(chan struct{})
 		close(changeCh)
 
-		require.True(t, checkChannelChanged(changeCh, nil))
+		require.True(t, checkChannelChanged(changeCh, Options{}, "", nil))
 	})
 
 	t.Run("sends restart notice to channel", func(t *testing.T) {
@@ -32,7 +32,13 @@ func TestCheckChannelChanged(t *testing.T) {
 		close(changeCh)
 		mock := &mockChangeChannel{}
 
-		result := checkChannelChanged(changeCh, mock)
+		// Without outbox, opts.send falls through to direct channel call.
+		chID := channel.ChannelID("test")
+		opts := Options{
+			Channels: map[channel.ChannelID]channel.Channel{chID: mock},
+		}
+
+		result := checkChannelChanged(changeCh, opts, chID, mock)
 
 		require.True(t, result)
 		require.Len(t, mock.sends, 1)
@@ -48,12 +54,15 @@ func TestCheckChannelChanged(t *testing.T) {
 		close(changeCh)
 
 		mock := &mockChangeChannel{captureCtx: true}
+		chID := channel.ChannelID("test")
+		opts := Options{
+			Channels: map[channel.ChannelID]channel.Channel{chID: mock},
+		}
 
-		result := checkChannelChanged(changeCh, mock)
+		result := checkChannelChanged(changeCh, opts, chID, mock)
 
 		require.True(t, result)
 		require.Len(t, mock.sends, 1)
-		// sendCtxErr was captured inside Send, before the deferred cancel runs.
 		require.NoError(t, mock.sendCtxErr, "Send should receive a non-cancelled context")
 	})
 }

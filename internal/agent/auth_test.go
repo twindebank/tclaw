@@ -3,6 +3,8 @@ package agent
 import (
 	"strings"
 	"testing"
+
+	"tclaw/internal/channel"
 )
 
 func TestValidSetupToken(t *testing.T) {
@@ -45,7 +47,9 @@ func TestExtractSetupToken_ValidatesFormat(t *testing.T) {
 func TestHandleAPIKeyEntry_RejectsShortKeys(t *testing.T) {
 	// A key with correct prefix but too short should be rejected.
 	ch := &mockChannel{}
-	ok := handleAPIKeyEntry(nil, Options{}, ch, "sk-ant-short")
+	chID := channel.ChannelID("test")
+	opts := Options{Channels: map[channel.ChannelID]channel.Channel{chID: ch}}
+	ok := handleAPIKeyEntry(nil, opts, ch, chID, "sk-ant-short")
 	if ok {
 		t.Error("expected short API key to be rejected")
 	}
