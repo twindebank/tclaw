@@ -35,7 +35,13 @@ var infoToolDefs = []mcp.ToolDef{
 			"(returns CREDENTIALS_NEEDED if not yet stored). Call with application_id and " +
 			"private_key_pem to store them directly.\n\n" +
 			"Register for free at enablebanking.com: create an application, generate a self-signed " +
-			"certificate with OpenSSL, upload the public cert, and provide the app ID and private key PEM.",
+			"certificate with OpenSSL, upload the public cert, and provide the app ID and private key PEM.\n\n" +
+			"FULL SETUP FLOW: banking_set_credentials (this tool — app ID + private key) → banking_list_banks → " +
+			"banking_connect (sends auth URL to user) → banking_auth_wait → accounts are ready.\n\n" +
+			"USAGE: banking_list_accounts shows all connected accounts across all banks. " +
+			"banking_get_balance and banking_get_transactions work on individual account IDs from the list. " +
+			"Sessions expire after ~90 days — expired accounts are flagged in banking_list_accounts " +
+			"and need reconnecting via banking_connect.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
