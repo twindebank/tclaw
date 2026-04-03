@@ -23,7 +23,8 @@ var AllowedTags = map[string]bool{
 // Group 1: optional "/" for closing tags.
 // Group 2: tag name.
 // Group 3: rest of tag content (attributes, self-close slash, etc.).
-var htmlTagPattern = regexp.MustCompile(`<(/?)([a-zA-Z][a-zA-Z0-9-]*)((?:\s[^>]*)?)>`)
+// Includes underscore so tags like <quoted_message> are matched and stripped.
+var htmlTagPattern = regexp.MustCompile(`<(/?)([a-zA-Z][a-zA-Z0-9_-]*)((?:\s[^>]*)?)>`)
 
 // markdownBold matches **text** that the model emits despite being told to use HTML.
 var markdownBold = regexp.MustCompile(`\*\*(.+?)\*\*`)
@@ -39,7 +40,7 @@ var supportedTelegramTags = map[string]bool{
 }
 
 // htmlTagRe matches HTML-like opening and closing tags (used by EscapeUnsupportedTags).
-var htmlTagRe = regexp.MustCompile(`<(/?[a-zA-Z][a-zA-Z0-9-]*)(\s[^>]*)?>`)
+var htmlTagRe = regexp.MustCompile(`<(/?[a-zA-Z][a-zA-Z0-9_-]*)(\s[^>]*)?>`)
 
 // SanitizeHTML strips HTML tags not supported by Telegram's Bot API,
 // preserving their text content. Supported tags pass through unchanged.
@@ -141,6 +142,12 @@ func MarkdownToHTML(s string) string {
 	// Always escape unsupported tags — the model may include path-like strings
 	// such as <userDir> that Telegram's HTML parser rejects.
 	return EscapeUnsupportedTags(s)
+}
+
+// StripAllTags removes every HTML tag from s, preserving only text content.
+// Used as a last-resort fallback when Telegram rejects the formatted message.
+func StripAllTags(s string) string {
+	return htmlTagPattern.ReplaceAllString(s, "")
 }
 
 // TruncateSnippet returns the first maxLen characters of s, appending "…"

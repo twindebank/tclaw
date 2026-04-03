@@ -480,6 +480,10 @@ func isPermanentError(err error) bool {
 	if strings.Contains(msg, "bot was blocked") {
 		return true
 	}
+	// Malformed HTML/entities — retrying won't fix the markup.
+	if strings.Contains(msg, "can't parse entities") {
+		return true
+	}
 	return false
 }
 
