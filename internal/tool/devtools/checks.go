@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"tclaw/internal/libraries/credentialerror"
@@ -33,7 +34,22 @@ func devPRChecksDef() mcp.ToolDef {
 }
 
 type devPRChecksArgs struct {
-	PR int `json:"pr"`
+	// PR accepts both integer and quoted-string forms — Claude Code may pass either.
+	PR json.RawMessage `json:"pr"`
+}
+
+// parsePRNumber parses a PR number from a json.RawMessage that may be either a
+// JSON integer (83) or a JSON string ("83"), since tool callers may pass either form.
+func parsePRNumber(raw json.RawMessage) (int, error) {
+	var n int
+	if err := json.Unmarshal(raw, &n); err == nil {
+		return n, nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return strconv.Atoi(s)
+	}
+	return 0, fmt.Errorf("expected integer")
 }
 
 func devPRChecksHandler(deps Deps) mcp.ToolHandler {
@@ -42,7 +58,8 @@ func devPRChecksHandler(deps Deps) mcp.ToolHandler {
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
-		if a.PR <= 0 {
+		pr, err := parsePRNumber(a.PR)
+		if err != nil || pr <= 0 {
 			return nil, fmt.Errorf("pr must be a positive integer")
 		}
 
@@ -61,7 +78,7 @@ func devPRChecksHandler(deps Deps) mcp.ToolHandler {
 		// Run gh pr checks in the bare repo directory so gh can infer the repo.
 		// Falls back to the first available worktree if the bare repo doesn't exist yet.
 		repoDir := filepath.Join(deps.UserDir, "repo")
-		prStr := fmt.Sprintf("%d", a.PR)
+		prStr := fmt.Sprintf("%d", pr)
 
 		// Fetch PR state (open/merged/closed) separately — gh pr checks doesn't include it.
 		stateCmd := exec.Command("gh", "pr", "view", prStr, "--json", "state", "--jq", ".state")
@@ -90,7 +107,7 @@ func devPRChecksHandler(deps Deps) mcp.ToolHandler {
 		passing := !strings.Contains(raw, "fail") && !strings.Contains(raw, "✗")
 
 		result := map[string]any{
-			"pr":      a.PR,
+			"pr":      pr,
 			"state":   state, // "open", "merged", or "closed"
 			"passing": passing,
 			"output":  raw,
