@@ -228,12 +228,12 @@ func (n *notifier) poll(ctx context.Context, id notification.SubscriptionID, cre
 		n.saveCursor(ctx, id, cursor)
 	}
 
-	slog.Debug("gmail notifier: poll complete",
-		"subscription", id, "new_messages", len(newMessageIDs), "cursor", cursor)
-
 	if len(newMessageIDs) == 0 {
 		return cursor
 	}
+
+	slog.Debug("gmail notifier: poll complete",
+		"subscription", id, "new_messages", len(newMessageIDs), "cursor", cursor)
 
 	summaries := n.fetchMetadata(ctx, credSetID, newMessageIDs)
 	if len(summaries) == 0 {

@@ -77,8 +77,8 @@ func runServe() {
 		return
 	}
 
-	// 50000 lines covers ~1 week of typical log volume and is loaded from
-	// the persisted log file on startup so history survives deployments.
+	// 50000 lines is loaded from the persisted log file on startup so history
+	// survives deployments and restarts.
 	logBuf := logbuffer.New(50000)
 	logWriter := io.MultiWriter(os.Stderr, logBuf)
 	slog.SetDefault(slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{Level: slog.LevelDebug})))
