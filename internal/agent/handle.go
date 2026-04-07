@@ -351,81 +351,95 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	}
 
 	args := buildArgs(opts, sessionID, systemPrompt, promptText, allowed, disallowed, mcpConfigPath)
-	cmd := exec.CommandContext(ctx, "claude", args...)
-	// Send SIGTERM on context cancel instead of the default SIGKILL, giving
-	// the CLI and its Node.js child processes a chance to exit cleanly.
-	cmd.Cancel = func() error {
-		return cmd.Process.Signal(syscall.SIGTERM)
-	}
-	cmd.WaitDelay = 3 * time.Second
-	cmd.Env = buildEnv(opts)
+	env := buildEnv(opts)
 
-	// Set CWD to the memory directory so the agent's file operations
-	// (Read, Write, Edit, Bash) default to the sandboxed memory dir.
+	dir := opts.HomeDir
 	if opts.MemoryDir != "" {
-		cmd.Dir = opts.MemoryDir
-	} else if opts.HomeDir != "" {
-		cmd.Dir = opts.HomeDir
+		dir = opts.MemoryDir
 	}
 
-	// On Linux (deployed), wrap with bubblewrap so the subprocess can only
-	// see explicitly bound paths. Locally (macOS) this is a no-op.
-	if sandboxEnabled() {
-		readOnly := systemReadOnlyPaths
-		if mcpConfigPath != "" {
-			// The MCP config lives in mcp-config/ which is outside the user's
-			// home and memory dirs. Bind its parent directory read-only so
-			// the claude CLI can read --mcp-config.
-			readOnly = append(readOnly, filepath.Dir(mcpConfigPath))
+	var stdout io.ReadCloser
+	var waitFn func() error
+
+	if opts.CommandFunc != nil {
+		var err error
+		stdout, waitFn, err = opts.CommandFunc(ctx, args, env, dir)
+		if err != nil {
+			return "", fmt.Errorf("start cli: %w", err)
+		}
+	} else {
+		cmd := exec.CommandContext(ctx, "claude", args...)
+		// Send SIGTERM on context cancel instead of the default SIGKILL, giving
+		// the CLI and its Node.js child processes a chance to exit cleanly.
+		cmd.Cancel = func() error {
+			return cmd.Process.Signal(syscall.SIGTERM)
+		}
+		cmd.WaitDelay = 3 * time.Second
+		cmd.Env = env
+		cmd.Dir = dir
+
+		// On Linux (deployed), wrap with bubblewrap so the subprocess can only
+		// see explicitly bound paths. Locally (macOS) this is a no-op.
+		if sandboxEnabled() {
+			readOnly := systemReadOnlyPaths
+			if mcpConfigPath != "" {
+				// The MCP config lives in mcp-config/ which is outside the user's
+				// home and memory dirs. Bind its parent directory read-only so
+				// the claude CLI can read --mcp-config.
+				readOnly = append(readOnly, filepath.Dir(mcpConfigPath))
+			}
+
+			// Mount settings.json read-only to prevent prompt injection from
+			// creating malicious CLI hooks (SessionStart) via the agent's
+			// file access. The file is pre-seeded during seedUserMemory().
+			settingsPath := filepath.Join(opts.HomeDir, ".claude", "settings.json")
+			readOnlyOverlay := []string{settingsPath}
+
+			readWrite := []string{opts.MemoryDir, opts.HomeDir}
+			readWrite = append(readWrite, opts.AddDirs...)
+			paths := sandboxPaths{
+				ReadWrite:       readWrite,
+				ReadOnly:        readOnly,
+				ReadOnlyOverlay: readOnlyOverlay,
+			}
+			cmd = wrapWithSandbox(ctx, cmd, paths)
 		}
 
-		// Mount settings.json read-only to prevent prompt injection from
-		// creating malicious CLI hooks (SessionStart) via the agent's
-		// file access. The file is pre-seeded during seedUserMemory().
-		settingsPath := filepath.Join(opts.HomeDir, ".claude", "settings.json")
-		readOnlyOverlay := []string{settingsPath}
-
-		readWrite := []string{opts.MemoryDir, opts.HomeDir}
-		readWrite = append(readWrite, opts.AddDirs...)
-		paths := sandboxPaths{
-			ReadWrite:       readWrite,
-			ReadOnly:        readOnly,
-			ReadOnlyOverlay: readOnlyOverlay,
+		var err error
+		stdout, err = cmd.StdoutPipe()
+		if err != nil {
+			return "", fmt.Errorf("stdout pipe: %w", err)
 		}
-		cmd = wrapWithSandbox(ctx, cmd, paths)
-	}
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			return "", fmt.Errorf("stderr pipe: %w", err)
+		}
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return "", fmt.Errorf("stdout pipe: %w", err)
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return "", fmt.Errorf("stderr pipe: %w", err)
-	}
+		if err := cmd.Start(); err != nil {
+			return "", fmt.Errorf("start claude: %w", err)
+		}
 
-	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("start claude: %w", err)
+		// Raise the subprocess OOM score so the kernel kills it before tclaw.
+		markSubprocessOOMTarget(cmd)
+
+		// Drain stderr so the process doesn't block on it.
+		go func() {
+			data, _ := io.ReadAll(stderr)
+			if len(data) > 0 {
+				slog.Debug("claude stderr", "output", string(data))
+			}
+		}()
+
+		waitFn = cmd.Wait
 	}
 	cliStarted := time.Now()
-
-	// Raise the subprocess OOM score so the kernel kills it before tclaw.
-	markSubprocessOOMTarget(cmd)
-
-	// Drain stderr so the process doesn't block on it.
-	go func() {
-		data, _ := io.ReadAll(stderr)
-		if len(data) > 0 {
-			slog.Debug("claude stderr", "output", string(data))
-		}
-	}()
 
 	newSessionID, err := streamResponse(ctx, opts, tw, stdout, allowed, msg.ChannelID, cliStarted)
 	if err != nil {
 		return "", fmt.Errorf("stream response: %w", err)
 	}
 
-	if waitErr := cmd.Wait(); waitErr != nil {
+	if waitErr := waitFn(); waitErr != nil {
 		slog.Warn("claude exited with error", "err", waitErr)
 	}
 
