@@ -112,15 +112,36 @@ func New(p Params) *Outbox {
 }
 
 // Start begins background delivery goroutines and loads persisted state.
+// Safe to call multiple times (e.g. on each agent iteration) — stops
+// existing delivery goroutines before starting new ones.
 func (o *Outbox) Start(ctx context.Context) {
+	// Stop any delivery goroutines from a previous Start call. Without
+	// this, the old goroutines' defer close(cq.done) races with new
+	// goroutines using the same channelQueue, causing a double-close panic.
+	if o.cancel != nil {
+		o.cancel()
+		o.mu.Lock()
+		var dones []chan struct{}
+		for _, cq := range o.queues {
+			dones = append(dones, cq.done)
+		}
+		o.mu.Unlock()
+		for _, done := range dones {
+			<-done
+		}
+	}
+
 	o.ctx, o.cancel = context.WithCancel(ctx)
 
 	if err := o.loadPersisted(); err != nil {
 		slog.Error("outbox: failed to load persisted state", "error", err)
 	}
 
-	// Start delivery goroutines for any channels that have persisted ops.
+	// Reset done channels and start delivery goroutines.
 	o.mu.Lock()
+	for _, cq := range o.queues {
+		cq.done = make(chan struct{})
+	}
 	for chID := range o.queues {
 		o.startDelivery(chID)
 	}
