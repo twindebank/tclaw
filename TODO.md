@@ -12,6 +12,11 @@
 - [ ] Voice message transcription — Telegram sends voice notes as .ogg files which the agent can't read. Claude API has no native audio input (as of Mar 2026); use Groq Whisper API (generous free tier). Transcribe at ingest in the Telegram handler, inject as `[Voice message: "<transcript>"]` so the agent sees plain text with no changes needed downstream.
 - [ ] Token exhausted state — when Claude API limit is hit, record reset time in channel state. Scheduled jobs should be deferred until reset time (not silently dropped). On reset, prompt user whether to run deferred schedules or skip them. Normal inbound messages should be queued and replayed (or flagged as unactioned) when the limit resets so nothing is silently lost.
 
+## Token Optimisation
+- [ ] Auto-compact — track per-session context size (last turn's input tokens from ResultEvent), expose via `channel_read` tool, add `compact_channel` tool for programmatic compaction, set up 2am admin schedule to compact sessions above a threshold. Key design decision: use `LastTurnInputTokens` (the actual context window size on the most recent turn) as the compaction metric — not cumulative usage, which never resets and would re-trigger compaction every time.
+- [ ] `channel_read` tool — read a single channel's full config + session history (current + historical sessions with token stats and timestamps). Avoids forcing the agent to list all channels just to check one.
+- [ ] `compact_channel` tool — trigger compaction on any channel by injecting a "compact" message into the agent queue. Bypasses the link requirement of `channel_send` for admin use.
+
 ## Memory & Context
 - [x] System and agent memories — system prompt (--append-system-prompt) for identity/rules, CLAUDE.md for persistent per-user memory, seeded on first startup
 - [x] Custom MCPs can be built in — register Go-native MCP servers alongside the agent
