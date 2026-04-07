@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -246,6 +247,11 @@ type Options struct {
 	// This prevents the agent loop from blocking on slow channel I/O (e.g.
 	// Telegram API timeouts). May be nil for tests that don't need it.
 	Outbox *outbox.Outbox
+
+	// CommandFunc replaces subprocess creation for testing. Returns stdout
+	// to feed streamResponse, a wait function, and any start error.
+	// When nil, the real exec.CommandContext("claude", ...) is used.
+	CommandFunc func(ctx context.Context, args []string, env []string, dir string) (stdout io.ReadCloser, wait func() error, err error)
 
 	// ResumeNotice is prepended to the first message's prompt (but not
 	// msg.Text) after a restart so the CLI sees the context warning

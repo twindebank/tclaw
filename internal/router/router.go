@@ -730,17 +730,22 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 					if !ok {
 						return
 					}
-					// Record message arrival for activity tracking before
-					// forwarding to the agent, so IsBusy returns true
-					// as soon as the message enters the pipeline.
-					// Use channelSet (live) rather than the snapshot allChMap
-					// so hot-added channels are visible here too.
+					// Record message arrival for activity tracking so IsBusy
+					// returns true as soon as the message enters the pipeline.
+					// Only track user/resume messages here — non-user messages
+					// (schedule, cross-channel, notification) may be queued and
+					// processed later. Tracking them on arrival would reset the
+					// target channel's cooldown timer, blocking the message behind
+					// its own arrival. Non-user messages get tracked when they
+					// actually start processing (via OnTurnStart below).
 					if ch := channelSet.Lookup(msg.ChannelID); ch != nil {
 						source := channel.SourceUser
 						if msg.SourceInfo != nil {
 							source = msg.SourceInfo.Source
 						}
-						activityTracker.MessageReceivedFrom(ch.Info().Name, source)
+						if source == channel.SourceUser || source == channel.SourceResume {
+							activityTracker.MessageReceivedFrom(ch.Info().Name, source)
+						}
 					}
 					// Intercept messages that are responses to a pending channel_done
 					// confirmation. If the channel has PendingDone set (from a prior
@@ -816,6 +821,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			},
 			OnTurnStart: func(channelName string) {
 				activeChannelName.Store(&channelName)
+				activityTracker.MessageReceived(channelName)
 				activityTracker.TurnStarted(channelName)
 			},
 			OnTurnEnd: func(channelName string) {
