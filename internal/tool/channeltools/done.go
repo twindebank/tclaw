@@ -20,10 +20,14 @@ func channelDoneDef() mcp.ToolDef {
 		Description: "Tear down a channel — deletes platform resources (e.g. Telegram bot), " +
 			"removes channel from config, and cleans up secrets. " +
 			"Fails if platform teardown fails (no half-states).\n\n" +
-			"IMPORTANT: This tool uses an async confirmation flow. For channels with a user chat " +
-			"(e.g. Telegram), it sends a confirmation prompt and returns immediately with status " +
-			"\"awaiting_confirmation\". The teardown completes when the user replies \"yes\" — " +
-			"the router handles this without another agent turn. Any other reply cancels.\n\n" +
+			"IMPORTANT: This tool manages the entire confirmation flow. For channels with a user chat " +
+			"(e.g. Telegram), it sends a confirmation prompt to the user and returns immediately with " +
+			"status \"awaiting_confirmation\". The router then waits for the user's \"yes\" reply and " +
+			"completes teardown — no further agent turn is needed or expected.\n\n" +
+			"CRITICAL: After calling this tool, you MUST go completely silent. Do NOT send any messages " +
+			"(no \"awaiting your confirmation\", no \"channel closed\", nothing). Any message sent after " +
+			"this call may cause a double-message and interfere with teardown. The tool handles " +
+			"everything — your job is done the moment this call returns.\n\n" +
 			"REQUIRED: Before calling this, you MUST send all results to other channels via channel_send. " +
 			"The results_sent field is mandatory.",
 		InputSchema: json.RawMessage(`{
