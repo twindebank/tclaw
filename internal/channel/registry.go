@@ -67,6 +67,26 @@ func (r *Registry) NameExists(name string) bool {
 	return ok
 }
 
+// Remove deletes a single entry by name. Called immediately after a channel is
+// removed from config so the in-memory view stays consistent within the same
+// agent turn — without this, channel_list would still show the deleted channel
+// and channel_create with the same name would incorrectly return "already exists".
+func (r *Registry) Remove(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.byName[name]; !ok {
+		return
+	}
+	delete(r.byName, name)
+	filtered := make([]RegistryEntry, 0, len(r.entries)-1)
+	for _, e := range r.entries {
+		if e.Name != name {
+			filtered = append(filtered, e)
+		}
+	}
+	r.entries = filtered
+}
+
 // Links returns the outbound link map: source channel name → targets.
 func (r *Registry) Links() map[string][]Link {
 	r.mu.RLock()
