@@ -505,6 +505,12 @@ func isPermanentError(err error) bool {
 	if strings.Contains(msg, "can't parse entities") {
 		return true
 	}
+	// Invalid UTF-8 encoding in the message text — Telegram will always reject
+	// this regardless of how many times we retry. The transport layer sanitizes
+	// UTF-8 before sending, so reaching here means the sanitization was bypassed.
+	if strings.Contains(msg, "must be encoded in UTF-8") {
+		return true
+	}
 	return false
 }
 
