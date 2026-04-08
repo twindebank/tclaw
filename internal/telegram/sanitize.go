@@ -32,6 +32,17 @@ var markdownBold = regexp.MustCompile(`\*\*(.+?)\*\*`)
 // markdownInlineCode matches `text` (single backtick, not triple).
 var markdownInlineCode = regexp.MustCompile("(?s)`([^`]+)`")
 
+// markdownLink matches [text](url) — converted unconditionally since it doesn't
+// overlap with HTML tags the model might already be using.
+var markdownLink = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
+
+// markdownBullet matches a leading "- " or "* " bullet at the start of a line
+// (with optional leading whitespace).
+var markdownBullet = regexp.MustCompile(`(?m)^[ \t]*[-*] `)
+
+// markdownHeader matches ATX-style Markdown headings (# through ######).
+var markdownHeader = regexp.MustCompile(`(?m)^#{1,6} (.+)`)
+
 // supportedTelegramTags is used by EscapeUnsupportedTags for quick tag filtering.
 var supportedTelegramTags = map[string]bool{
 	"b": true, "i": true, "u": true, "s": true,
@@ -132,11 +143,23 @@ func EscapeUnsupportedTags(s string) string {
 // It also escapes any HTML-like tags that Telegram doesn't support so they
 // don't cause parse errors.
 func MarkdownToHTML(s string) string {
-	// Only convert markdown if no HTML tags are present — if the model
-	// followed the instructions we shouldn't double-convert.
+	// Always convert Markdown links — [text](url) does not overlap with HTML
+	// tags, so it is safe to convert unconditionally even in mixed responses.
+	s = markdownLink.ReplaceAllStringFunc(s, func(m string) string {
+		sub := markdownLink.FindStringSubmatch(m)
+		if sub == nil {
+			return m
+		}
+		return `<a href="` + sub[2] + `">` + sub[1] + `</a>`
+	})
+
+	// Only convert the remaining Markdown patterns if the model hasn't already
+	// used HTML — avoids double-converting responses that correctly use HTML.
 	if !strings.Contains(s, "<b>") && !strings.Contains(s, "<code>") && !strings.Contains(s, "<pre>") {
+		s = markdownHeader.ReplaceAllString(s, "<b>$1</b>")
 		s = markdownBold.ReplaceAllString(s, "<b>$1</b>")
 		s = markdownInlineCode.ReplaceAllString(s, "<code>$1</code>")
+		s = markdownBullet.ReplaceAllString(s, "• ")
 	}
 
 	// Always escape unsupported tags — the model may include path-like strings

@@ -77,6 +77,51 @@ func TestStripAllTags(t *testing.T) {
 	}
 }
 
+func TestMarkdownToHTML(t *testing.T) {
+	t.Run("converts markdown link", func(t *testing.T) {
+		require.Equal(t, `<a href="https://example.com">Example</a>`, telegram.MarkdownToHTML(`[Example](https://example.com)`))
+	})
+
+	t.Run("converts link even when HTML bold is present", func(t *testing.T) {
+		// Links must be converted unconditionally — the presence of <b> should not block them.
+		require.Equal(t, `<b>Title</b> <a href="https://example.com">link</a>`, telegram.MarkdownToHTML(`<b>Title</b> [link](https://example.com)`))
+	})
+
+	t.Run("converts bold when no HTML present", func(t *testing.T) {
+		require.Equal(t, "<b>bold</b>", telegram.MarkdownToHTML("**bold**"))
+	})
+
+	t.Run("skips bold conversion when HTML already present", func(t *testing.T) {
+		// Model used <b> correctly — don't double-convert.
+		require.Equal(t, "<b>title</b> **not converted**", telegram.MarkdownToHTML("<b>title</b> **not converted**"))
+	})
+
+	t.Run("converts inline code when no HTML present", func(t *testing.T) {
+		require.Equal(t, "<code>fmt.Println</code>", telegram.MarkdownToHTML("`fmt.Println`"))
+	})
+
+	t.Run("converts dash bullet points", func(t *testing.T) {
+		require.Equal(t, "• item one\n• item two", telegram.MarkdownToHTML("- item one\n- item two"))
+	})
+
+	t.Run("converts asterisk bullet points", func(t *testing.T) {
+		require.Equal(t, "• item", telegram.MarkdownToHTML("* item"))
+	})
+
+	t.Run("converts ATX heading to bold", func(t *testing.T) {
+		require.Equal(t, "<b>Restaurant Name</b>", telegram.MarkdownToHTML("## Restaurant Name"))
+	})
+
+	t.Run("real-world web search result with mixed markdown", func(t *testing.T) {
+		input := "## Soft Launch\n\n- Great food\n- [Book here](https://restaurant.com)\n\n**Highly recommended**"
+		got := telegram.MarkdownToHTML(input)
+		require.Contains(t, got, "<b>Soft Launch</b>")
+		require.Contains(t, got, "• Great food")
+		require.Contains(t, got, `<a href="https://restaurant.com">Book here</a>`)
+		require.Contains(t, got, "<b>Highly recommended</b>")
+	})
+}
+
 func TestTruncateSnippet(t *testing.T) {
 	tests := []struct {
 		name     string
