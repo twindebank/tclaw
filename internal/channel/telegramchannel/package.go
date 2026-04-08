@@ -126,7 +126,7 @@ func loadChatIDFromPlatformState(ctx context.Context, s store.Store, channelName
 	if err := json.Unmarshal(data, &rs); err != nil {
 		return 0, fmt.Errorf("parse runtime state: %w", err)
 	}
-	if rs.PlatformState.Type != "telegram" {
+	if channel.PlatformType(rs.PlatformState.Type) != channel.PlatformTelegram {
 		return 0, nil
 	}
 	if len(rs.PlatformState.Data) == 0 {

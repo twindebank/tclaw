@@ -3,7 +3,7 @@ SHELL_RC := $(HOME)/.zshrc
 DEV_MARKER := \# --- tclaw dev (do not edit) ---
 DEV_END    := \# --- end tclaw dev ---
 
-.PHONY: install install-dev uninstall
+.PHONY: install install-dev uninstall build test lint fmt check
 
 # Install compiled binaries to $GOPATH/bin.
 install:
@@ -23,6 +23,29 @@ install-dev:
 		echo "✓ installed tclaw shell function in $(SHELL_RC)"; \
 		echo "  run: source $(SHELL_RC)"; \
 	fi
+
+# Build all packages.
+build:
+	@go build ./...
+	@echo "✓ build passed"
+
+# Run all tests.
+test:
+	@go test ./...
+
+# Run static analysis.
+lint:
+	@go vet ./...
+	@echo "✓ vet passed"
+
+# Format all Go files.
+fmt:
+	@gofmt -l -w .
+	@echo "✓ formatted"
+
+# Run all checks (build + vet + test).
+check: build lint test
+	@echo "✓ all checks passed"
 
 # Remove everything — binaries and shell functions. Safe if either is missing.
 uninstall:
