@@ -6,6 +6,7 @@ package mcp
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -84,7 +85,12 @@ func (s *Server) Start(addr string) (string, error) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	s.srv = &http.Server{Handler: mux}
+	s.srv = &http.Server{
+		Handler:      mux,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  5 * time.Second,
+	}
 	s.running = true
 
 	go func() {
@@ -153,9 +159,11 @@ const maxRequestBodySize = 1 << 20
 // and batched arrays (required by the MCP protocol).
 func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 	// Validate bearer token to prevent unauthorized access from co-located processes.
+	// Uses constant-time comparison to prevent timing side-channel attacks.
 	if s.token != "" {
 		auth := r.Header.Get("Authorization")
-		if auth != "Bearer "+s.token {
+		expected := "Bearer " + s.token
+		if len(auth) != len(expected) || subtle.ConstantTimeCompare([]byte(auth), []byte(expected)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

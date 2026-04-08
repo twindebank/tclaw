@@ -105,9 +105,10 @@ func devDeployedHandler(deps Deps) mcp.ToolHandler {
 // fetchLiveVersion hits the running app's /version endpoint and returns the
 // commit hash. Returns empty string if the app URL is not configured or the
 // request fails — callers should fall back to the stored deployed commit.
-// defaultAppURL is the fallback when the store doesn't have an app URL
-// (e.g. when all deploys happened locally via `go run . deploy`).
-const defaultAppURL = "https://YOUR_APP.fly.dev"
+// defaultAppURL is empty — each deployment must configure its own app URL
+// via the store (set by `dev_start` or `go run . deploy`). Without it,
+// the /version endpoint check is skipped.
+const defaultAppURL = ""
 
 // fetchLiveVersion hits the running app's /version endpoint. Returns the
 // commit hash and nil on success. On failure, returns "" and the error —

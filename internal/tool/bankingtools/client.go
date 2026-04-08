@@ -175,7 +175,7 @@ func (c *Client) ListBanks(ctx context.Context, country string) (json.RawMessage
 
 // GetBalances returns balances for an account.
 func (c *Client) GetBalances(ctx context.Context, accountID string) (json.RawMessage, error) {
-	return c.doGet(ctx, "/accounts/"+accountID+"/balances", nil)
+	return c.doGet(ctx, "/accounts/"+url.PathEscape(accountID)+"/balances", nil)
 }
 
 // TransactionParams are optional filters for fetching transactions.
@@ -197,7 +197,7 @@ func (c *Client) GetTransactions(ctx context.Context, accountID string, params T
 	if params.ContinuationKey != "" {
 		query.Set("continuation_key", params.ContinuationKey)
 	}
-	return c.doGet(ctx, "/accounts/"+accountID+"/transactions", query)
+	return c.doGet(ctx, "/accounts/"+url.PathEscape(accountID)+"/transactions", query)
 }
 
 // doGet performs an authenticated GET request and returns the raw response body.
@@ -253,7 +253,8 @@ func (c *Client) doRequest(req *http.Request) (json.RawMessage, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	// Cap response body to 5 MiB to prevent memory exhaustion from oversized payloads.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 5<<20))
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}

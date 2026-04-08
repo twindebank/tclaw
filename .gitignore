@@ -5,6 +5,8 @@ fly.toml
 tmp/
 .idea/
 .claude/worktrees/
+.claude/settings.json
+.claude/settings.local.json
 
 # Compiled binaries
 /tclaw
