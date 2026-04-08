@@ -15,7 +15,7 @@ jobs:
       group: deploy
       cancel-in-progress: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # tclaw.yaml is gitignored — write it from the TCLAW_YAML GitHub secret
       # so the Dockerfile COPY finds it. This is a seed config for first boot
