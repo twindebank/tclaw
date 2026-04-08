@@ -90,5 +90,14 @@ The Fly VM runs at 256MB (free tier). tclaw itself uses ~15MB; the claude CLI (N
 | 512mb     | 350             | Current prod. Handles fresh sessions and heavy turns |
 | 1024mb    | 800             | No practical constraints |
 
-## CI (optional)
-GitHub Actions workflow at `.github/workflows/deploy.yml` — manual trigger only (`workflow_dispatch`). Needs `FLY_API_TOKEN` GitHub secret from `fly tokens create deploy -x 999999h`.
+## CI
+
+GitHub Actions deploys automatically on every push to main (`.github/workflows/deploy.yml`). Add `[no-deploy]` to the commit message to skip.
+
+Required GitHub configuration:
+
+| Type | Name | How to set |
+|------|------|-----------|
+| Variable | `FLY_APP_NAME` | `gh variable set FLY_APP_NAME --body "your-app"` |
+| Secret | `FLY_API_TOKEN` | `fly tokens create deploy -x 999999h`, then `gh secret set FLY_API_TOKEN` |
+| Secret | `TCLAW_YAML` | `gh secret set TCLAW_YAML < tclaw.yaml` (seed config for first boot only) |

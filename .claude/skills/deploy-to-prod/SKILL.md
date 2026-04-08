@@ -88,22 +88,51 @@ go run . deploy secrets
 
 This scans `tclaw.yaml` for `${secret:*}` references, reads each from the OS keychain, and pushes them to Fly.
 
-## 6. Deploy
+## 6. GitHub CI secrets and variables
+
+CI auto-deploys on every push to main. It needs three things set on the GitHub repo:
+
+```bash
+# Check what's already set
+gh variable list
+gh secret list
+```
+
+**Variable** (visible in logs):
+- `FLY_APP_NAME` — the Fly app name (e.g. `tclaw`)
+  ```bash
+  gh variable set FLY_APP_NAME --body "<app-name>"
+  ```
+
+**Secrets** (encrypted):
+- `FLY_API_TOKEN` — deploy token for Fly.io
+  ```bash
+  fly tokens create deploy -x 999999h -a <app-name>
+  gh secret set FLY_API_TOKEN
+  # paste the token when prompted
+  ```
+
+- `TCLAW_YAML` — seed config baked into the Docker image (first-boot only, never overwrites live config on the volume). `tclaw config push` updates this automatically, but for first deploy:
+  ```bash
+  gh secret set TCLAW_YAML < tclaw.yaml
+  ```
+
+## 7. Deploy
 
 ```bash
 go run . deploy
 ```
 
-This builds a Docker image locally and deploys it to Fly.
+This builds a Docker image locally and deploys it to Fly. Subsequent deploys happen automatically via CI on push to main.
 
-## 7. Verify
+## 8. Verify
 
 ```bash
 fly status -a <app-name>
 fly logs -a <app-name> --no-tail 2>/dev/null | tail -20
 ```
 
-## 8. Credential summary
+## 9. Credential summary
 
 After deployment, explain the three credential levels:
 
