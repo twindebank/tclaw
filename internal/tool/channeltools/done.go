@@ -136,6 +136,10 @@ func channelDoneHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("delete channel from config: %w", err)
 		}
 
+		// Update the in-memory registry immediately so channel_list and
+		// channel_create reflect the deletion within the current agent turn.
+		deps.Registry.Remove(a.ChannelName)
+
 		// Clean up runtime state, secret, and knowledge dir (best-effort).
 		if err := deps.RuntimeState.Delete(ctx, a.ChannelName); err != nil {
 			slog.Error("failed to delete runtime state during teardown", "channel", a.ChannelName, "err", err)

@@ -72,6 +72,12 @@ func channelDeleteHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("delete channel from config: %w", err)
 		}
 
+		// Update the in-memory registry immediately so channel_list and
+		// channel_create reflect the deletion within the current agent turn.
+		// The router also reloads the registry on restart, but without this
+		// the registry stays stale until then.
+		deps.Registry.Remove(a.Name)
+
 		// Clean up runtime state and secrets. Best-effort since the config
 		// entry is already removed — an orphaned secret is less harmful than
 		// telling the agent the delete failed.

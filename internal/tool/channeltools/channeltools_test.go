@@ -382,6 +382,38 @@ func TestChannelDelete(t *testing.T) {
 		require.Empty(t, token)
 	})
 
+	t.Run("updates registry immediately so channel_list reflects deletion in the same turn", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "phone", "description": "will be deleted", "type": "socket",
+		})
+		reloadRegistry(t, th)
+
+		callTool(t, th.handler, "channel_delete", map[string]any{"name": "phone"})
+
+		// Registry must be updated without calling reloadRegistry — the router
+		// does that on restart, but we need consistency within the same turn.
+		require.False(t, th.registry.NameExists("phone"), "deleted channel must not appear in registry until restart")
+	})
+
+	t.Run("allows recreating channel with same name in the same turn", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "phone", "description": "first", "type": "socket",
+		})
+		reloadRegistry(t, th)
+
+		callTool(t, th.handler, "channel_delete", map[string]any{"name": "phone"})
+
+		// channel_create must succeed without reloadRegistry in between.
+		result := callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "phone", "description": "recreated", "type": "socket",
+		})
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(result, &got))
+		require.Equal(t, "phone", got["name"])
+	})
+
 	t.Run("rejects nonexistent channel", func(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 
@@ -416,6 +448,25 @@ func TestChannelDone(t *testing.T) {
 		for _, ch := range channels {
 			require.NotEqual(t, "temp", ch.Name)
 		}
+	})
+
+	t.Run("updates registry immediately so channel_list reflects teardown in same turn", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name":        "temp",
+			"description": "Temporary channel",
+			"type":        "socket",
+		})
+		reloadRegistry(t, th)
+
+		callTool(t, th.handler, "channel_done", map[string]any{
+			"channel_name": "temp",
+			"results_sent": "No outbound links configured",
+		})
+
+		// Registry must be updated without calling reloadRegistry.
+		require.False(t, th.registry.NameExists("temp"), "torn-down channel must not appear in registry until restart")
 	})
 
 	t.Run("rejects nonexistent channel", func(t *testing.T) {
