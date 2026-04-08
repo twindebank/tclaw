@@ -1,5 +1,9 @@
 # tclaw
 
+[![CI](https://github.com/twindebank/tclaw/actions/workflows/ci.yml/badge.svg)](https://github.com/twindebank/tclaw/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/twindebank/tclaw)](https://goreportcard.com/report/github.com/twindebank/tclaw)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A self-hosted personal AI assistant that wraps the real `claude` CLI -- not an Agent SDK. This means you get everything Claude Code already has (Bash, file tools, web search, model switching, context compaction) without reimplementing any of it. tclaw adds multi-channel communication, per-channel tool groups, OAuth connections, scheduling, and a full MCP tool layer on top.
 
 Single Go binary. No containers required to run.

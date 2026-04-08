@@ -1,3 +1,5 @@
+// Package cli implements the tclaw command-line interface — subcommand dispatch
+// for serve, chat, deploy, config, init, secret, and oneshot.
 package cli
 
 import (

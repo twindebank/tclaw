@@ -1,3 +1,5 @@
+// Package telegram wraps the Telegram Bot API for long polling and webhook
+// registration. It handles bot lifecycle, message dispatch, and media downloads.
 package telegram
 
 import (

@@ -24,6 +24,10 @@ var socketPath string
 
 const defaultConfigPath = "tclaw.yaml"
 
+// channelTypeSocket matches channel.TypeSocket without importing the full
+// internal module — this binary deliberately avoids tclaw's dependency tree.
+const channelTypeSocket = "socket"
+
 // Styles
 var (
 	userStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
@@ -314,7 +318,7 @@ func discoverSockets(cfg *minimalConfig) []socketEntry {
 	var entries []socketEntry
 	for _, u := range cfg.Users {
 		for _, ch := range u.Channels {
-			if ch.Type != "socket" {
+			if ch.Type != channelTypeSocket {
 				continue
 			}
 			// Matches router.BuildChannels path derivation.
