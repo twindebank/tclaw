@@ -69,6 +69,9 @@ Documentation lives close to the code. Three layers, strictly separated:
 - **Logs**: `go run . deploy logs` (or `go run . logs`) to view recent production logs
 - Never deploy (`go run . deploy` or any deploy command) without the user explicitly asking to deploy. Committing code does not imply permission to deploy.
 
+## Debugging Production Issues
+- **When something goes wrong in prod, check the logs first** — `go run . logs` or `go run . deploy logs`. Don't speculate from code alone.
+
 ## Memory
 - When I say "add to memory" or "remember this", update THIS file (CLAUDE.md), not the ~/.claude/ memory directory
 - **NEVER use project-level memory** (`~/.claude/projects/.../memory/`) — all memory goes in THIS file
