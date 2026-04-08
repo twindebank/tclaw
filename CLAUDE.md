@@ -2,7 +2,6 @@
 
 ## Git Workflow
 - **NEVER use Graphite (`gt`) in this repo** — use plain `git` and `gh` only
-- **SSH key is in 1Password** — if `git push` fails with SSH auth errors, just wait and retry. Don't try workarounds (HTTPS, config changes). The user needs to be present to unlock.
 - **PR creation**: `git push -u origin HEAD` then `gh pr create`
 
 ## MANDATORY: Read Before Writing Any Code
@@ -69,9 +68,6 @@ Documentation lives close to the code. Three layers, strictly separated:
 - **Config sync**: `tclaw config push` pushes local config to remote Fly volume. `tclaw config pull` pulls remote to local. `tclaw config diff` shows differences.
 - **Logs**: `go run . deploy logs` (or `go run . logs`) to view recent production logs
 - Never deploy (`go run . deploy` or any deploy command) without the user explicitly asking to deploy. Committing code does not imply permission to deploy.
-
-## Related Projects
-- **nanoclaw** — similar project (TypeScript, Docker containers, Anthropic Agent SDK). Repo: `https://github.com/qwibitai/nanoclaw`. Clone to `/tmp/nanoclaw` when asked about it.
 
 ## Memory
 - When I say "add to memory" or "remember this", update THIS file (CLAUDE.md), not the ~/.claude/ memory directory

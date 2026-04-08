@@ -67,14 +67,14 @@ func lineStatusHandler(deps Deps) mcp.ToolHandler {
 
 		// Specific lines take priority over modes.
 		if a.Lines != "" {
-			return apiGet(ctx, deps, "/Line/"+a.Lines+"/Status", nil)
+			return apiGet(ctx, deps, "/Line/"+url.PathEscape(a.Lines)+"/Status", nil)
 		}
 
 		modes := a.Modes
 		if modes == "" {
 			modes = "tube"
 		}
-		return apiGet(ctx, deps, "/Line/Mode/"+modes+"/Status", nil)
+		return apiGet(ctx, deps, "/Line/Mode/"+url.PathEscape(modes)+"/Status", nil)
 	}
 }
 
@@ -138,7 +138,7 @@ func arrivalsHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("stop_id is required")
 		}
 
-		return apiGet(ctx, deps, "/StopPoint/"+a.StopID+"/Arrivals", nil)
+		return apiGet(ctx, deps, "/StopPoint/"+url.PathEscape(a.StopID)+"/Arrivals", nil)
 	}
 }
 
@@ -186,14 +186,14 @@ func disruptionsHandler(deps Deps) mcp.ToolHandler {
 		}
 
 		if a.Lines != "" {
-			return apiGet(ctx, deps, "/Line/"+a.Lines+"/Disruption", nil)
+			return apiGet(ctx, deps, "/Line/"+url.PathEscape(a.Lines)+"/Disruption", nil)
 		}
 
 		modes := a.Modes
 		if modes == "" {
 			modes = "tube"
 		}
-		return apiGet(ctx, deps, "/Line/Mode/"+modes+"/Disruption", nil)
+		return apiGet(ctx, deps, "/Line/Mode/"+url.PathEscape(modes)+"/Disruption", nil)
 	}
 }
 
@@ -212,7 +212,7 @@ func roadStatusHandler(deps Deps) mcp.ToolHandler {
 		}
 
 		if a.Roads != "" {
-			return apiGet(ctx, deps, "/Road/"+a.Roads+"/Status", nil)
+			return apiGet(ctx, deps, "/Road/"+url.PathEscape(a.Roads)+"/Status", nil)
 		}
 
 		return apiGet(ctx, deps, "/Road", nil)

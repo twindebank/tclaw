@@ -105,6 +105,6 @@ func getTransactionHandler(depsMap map[credential.CredentialSetID]Deps) mcp.Tool
 			return nil, err
 		}
 		query := url.Values{"expand[]": {"merchant"}}
-		return apiGet(ctx, deps, "/transactions/"+p.TransactionID, query)
+		return apiGet(ctx, deps, "/transactions/"+url.PathEscape(p.TransactionID), query)
 	}
 }

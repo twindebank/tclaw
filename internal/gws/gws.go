@@ -179,7 +179,7 @@ func Run(ctx context.Context, token string, cmd Command) (json.RawMessage, error
 
 	binary := FindBinary()
 	execCmd := exec.CommandContext(ctx, binary, args...)
-	execCmd.Env = append(os.Environ(), "GOOGLE_WORKSPACE_CLI_TOKEN="+token)
+	execCmd.Env = buildEnv(token)
 
 	output, err := execCmd.CombinedOutput()
 	if err != nil {
@@ -203,7 +203,7 @@ func RunRaw(ctx context.Context, token string, cmd Command) (string, error) {
 
 	binary := FindBinary()
 	execCmd := exec.CommandContext(ctx, binary, args...)
-	execCmd.Env = append(os.Environ(), "GOOGLE_WORKSPACE_CLI_TOKEN="+token)
+	execCmd.Env = buildEnv(token)
 
 	output, err := execCmd.CombinedOutput()
 	if err != nil {
@@ -212,6 +212,33 @@ func RunRaw(ctx context.Context, token string, cmd Command) (string, error) {
 	}
 
 	return string(output), nil
+}
+
+// allowedEnvPrefixes mirrors the agent subprocess allowlist — only these env
+// vars are forwarded to the gws CLI to avoid leaking secrets.
+var allowedGWSEnvPrefixes = []string{
+	"PATH", "TERM", "LANG", "LC_", "TMPDIR", "USER", "LOGNAME", "SHELL", "HOME", "XDG_", "TZ",
+}
+
+// buildEnv constructs a minimal environment for the gws subprocess using an
+// allowlist, plus the Google Workspace CLI token.
+func buildEnv(token string) []string {
+	var env []string
+	for _, kv := range os.Environ() {
+		key, _, _ := strings.Cut(kv, "=")
+		allowed := false
+		for _, prefix := range allowedGWSEnvPrefixes {
+			if key == prefix || strings.HasPrefix(key, prefix) {
+				allowed = true
+				break
+			}
+		}
+		if allowed {
+			env = append(env, kv)
+		}
+	}
+	env = append(env, "GOOGLE_WORKSPACE_CLI_TOKEN="+token)
+	return env
 }
 
 var (

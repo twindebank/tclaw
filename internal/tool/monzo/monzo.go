@@ -87,7 +87,8 @@ func apiGet(ctx context.Context, deps Deps, path string, query url.Values) (json
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	// Cap response body to 5 MiB to prevent memory exhaustion from oversized payloads.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 5<<20))
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
