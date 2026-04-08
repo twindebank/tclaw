@@ -98,6 +98,11 @@ See [SECURITY.md](SECURITY.md) for reporting vulnerabilities.
 |-------|---------|
 | `/quickstart` | Guided local setup -- checks prereqs, generates config, handles auth |
 | `/deploy-to-prod` | Guided Fly.io deployment -- generates prod config, creates app, deploys |
+| `/add-tool-package` | Scaffold a new MCP tool package with registration, definitions, and tests |
+| `/add-channel-type` | Scaffold a new channel type with transport, package, and registry entry |
+| `/troubleshoot` | Diagnose issues -- checks config, processes, logs, prerequisites |
+| `/status` | Quick overview of local server, deployment, and config state |
+| `/update` | Pull latest, rebuild, and optionally redeploy |
 
 ## License
 
