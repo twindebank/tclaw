@@ -137,6 +137,123 @@ func TestInterceptPendingDone(t *testing.T) {
 		require.False(t, state.PendingDone)
 	})
 
+	t.Run("accepts y as confirmation", func(t *testing.T) {
+		rs, ss, cw := setupDoneTest(t)
+
+		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
+			s.PendingDone = true
+			s.TeardownState = telegramchannel.NewTeardownState("tclaw_test_bot")
+		}))
+		require.NoError(t, ss.Set(context.Background(), channel.ChannelSecretKey("ephemeral"), "fake-token"))
+		require.NoError(t, cw.AddChannel(testUserID, config.Channel{
+			Type: channel.TypeTelegram, Name: "ephemeral", Description: "test",
+		}))
+
+		prov := &mockDoneProvisioner{}
+
+		consumed := interceptPendingDone(
+			context.Background(),
+			doneTaggedMsg("ephemeral-id", "y"),
+			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeTelegram),
+			rs, cw, testUserID, ss,
+			provLookup(channel.TypeTelegram, prov),
+			nil, "",
+		)
+
+		require.True(t, consumed)
+		require.True(t, prov.teardownCalled)
+	})
+
+	t.Run("accepts YES with whitespace and mixed case", func(t *testing.T) {
+		for _, input := range []string{"YES", " Yes ", "  y  ", "Y"} {
+			t.Run(input, func(t *testing.T) {
+				rs, ss, cw := setupDoneTest(t)
+
+				require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
+					s.PendingDone = true
+					s.TeardownState = telegramchannel.NewTeardownState("tclaw_test_bot")
+				}))
+				require.NoError(t, ss.Set(context.Background(), channel.ChannelSecretKey("ephemeral"), "fake-token"))
+				require.NoError(t, cw.AddChannel(testUserID, config.Channel{
+					Type: channel.TypeTelegram, Name: "ephemeral", Description: "test",
+				}))
+
+				consumed := interceptPendingDone(
+					context.Background(),
+					doneTaggedMsg("ephemeral-id", input),
+					doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeTelegram),
+					rs, cw, testUserID, ss,
+					provLookup(channel.TypeTelegram, &mockDoneProvisioner{}),
+					nil, "",
+				)
+
+				require.True(t, consumed, "input %q should be accepted as confirmation", input)
+			})
+		}
+	})
+
+	t.Run("rejects partial matches like yes please", func(t *testing.T) {
+		for _, input := range []string{"yes please", "yeah", "yep", "ok", "sure"} {
+			t.Run(input, func(t *testing.T) {
+				rs, _, cw := setupDoneTest(t)
+
+				require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
+					s.PendingDone = true
+				}))
+
+				consumed := interceptPendingDone(
+					context.Background(),
+					doneTaggedMsg("ephemeral-id", input),
+					doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeSocket),
+					rs, cw, testUserID, nil,
+					provLookup(channel.TypeSocket, &mockDoneProvisioner{}),
+					nil, "",
+				)
+
+				require.False(t, consumed, "input %q should NOT be accepted as confirmation", input)
+
+				// PendingDone should be cleared.
+				state, err := rs.Get(context.Background(), "ephemeral")
+				require.NoError(t, err)
+				require.False(t, state.PendingDone)
+			})
+		}
+	})
+
+	t.Run("cleans up knowledge dir on teardown", func(t *testing.T) {
+		rs, ss, cw := setupDoneTest(t)
+		memoryDir := t.TempDir()
+
+		// Seed a knowledge dir with content.
+		knowledgeDir := filepath.Join(memoryDir, "channels", "ephemeral")
+		require.NoError(t, os.MkdirAll(knowledgeDir, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(knowledgeDir, "CLAUDE.md"), []byte("test"), 0o600))
+
+		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
+			s.PendingDone = true
+			s.TeardownState = telegramchannel.NewTeardownState("tclaw_test_bot")
+		}))
+		require.NoError(t, ss.Set(context.Background(), channel.ChannelSecretKey("ephemeral"), "fake-token"))
+		require.NoError(t, cw.AddChannel(testUserID, config.Channel{
+			Type: channel.TypeTelegram, Name: "ephemeral", Description: "test",
+		}))
+
+		consumed := interceptPendingDone(
+			context.Background(),
+			doneTaggedMsg("ephemeral-id", "yes"),
+			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeTelegram),
+			rs, cw, testUserID, ss,
+			provLookup(channel.TypeTelegram, &mockDoneProvisioner{}),
+			nil, memoryDir,
+		)
+
+		require.True(t, consumed)
+
+		// Knowledge dir should be removed.
+		_, err := os.Stat(knowledgeDir)
+		require.True(t, os.IsNotExist(err), "knowledge dir should be deleted after teardown")
+	})
+
 	t.Run("does not delete config if teardown fails", func(t *testing.T) {
 		rs, ss, cw := setupDoneTest(t)
 
