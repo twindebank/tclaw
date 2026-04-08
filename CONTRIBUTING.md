@@ -2,24 +2,7 @@
 
 ## Development Setup
 
-```bash
-# Clone the repo
-git clone https://github.com/twindebank/tclaw.git
-cd tclaw
-
-# Install in dev mode (runs from source)
-make install-dev
-source ~/.zshrc
-
-# Interactive setup — creates config, checks prereqs, handles auth
-tclaw init
-
-# Start the server
-tclaw serve
-
-# In another terminal, connect the chat client
-tclaw chat
-```
+Follow the [Quick Start](README.md#quick-start) in the README to get a local instance running, then make your changes.
 
 ## Running Tests
 
@@ -34,7 +17,7 @@ See [docs/go-patterns.md](docs/go-patterns.md) for conventions on comments, erro
 Key points:
 
 - Comments explain "why" not "what"
-- Never ignore errors — handle or return them
+- Never ignore errors -- handle or return them
 - Use `require` from testify (not assert, not suites)
 - Prefer param structs over multiple parameters
 - Don't abbreviate names
