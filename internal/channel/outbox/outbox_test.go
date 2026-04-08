@@ -149,6 +149,34 @@ func TestOutbox(t *testing.T) {
 		require.Contains(t, texts, "next message", "subsequent message should still be delivered")
 	})
 
+	t.Run("utf8 encoding error is permanent", func(t *testing.T) {
+		rec, ob := setup(t)
+
+		rec.SetSendFunc(func(_ context.Context, text string) (channel.MessageID, error) {
+			if text == "bad encoding" {
+				return "", fmt.Errorf("telegram send: bad request, Bad Request: text must be encoded in UTF-8")
+			}
+			return "ok", nil
+		})
+
+		_, err := ob.Send(context.Background(), "ch1", "bad encoding")
+		require.NoError(t, err)
+		_, err = ob.Send(context.Background(), "ch1", "next message")
+		require.NoError(t, err)
+
+		require.NoError(t, ob.Flush(context.Background()))
+
+		calls := rec.Calls()
+		// "bad encoding" is attempted once and discarded; "next message" should still deliver.
+		require.True(t, len(calls) >= 2, "expected at least 2 calls, got %d", len(calls))
+
+		var texts []string
+		for _, c := range calls {
+			texts = append(texts, c.Text)
+		}
+		require.Contains(t, texts, "next message", "subsequent message should still be delivered after UTF-8 error")
+	})
+
 	t.Run("done waits for preceding ops", func(t *testing.T) {
 		rec, ob := setup(t)
 

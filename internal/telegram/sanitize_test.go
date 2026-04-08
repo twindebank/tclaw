@@ -122,6 +122,34 @@ func TestMarkdownToHTML(t *testing.T) {
 	})
 }
 
+func TestSanitizeUTF8(t *testing.T) {
+	t.Run("valid UTF-8 unchanged", func(t *testing.T) {
+		require.Equal(t, "hello world", telegram.SanitizeUTF8("hello world"))
+	})
+
+	t.Run("empty string unchanged", func(t *testing.T) {
+		require.Equal(t, "", telegram.SanitizeUTF8(""))
+	})
+
+	t.Run("invalid bytes stripped", func(t *testing.T) {
+		// Embed a raw invalid UTF-8 byte sequence in an otherwise valid string.
+		input := "hello\xff\xfeworld"
+		got := telegram.SanitizeUTF8(input)
+		require.Equal(t, "helloworld", got)
+	})
+
+	t.Run("valid unicode emoji unchanged", func(t *testing.T) {
+		require.Equal(t, "hello 🌍", telegram.SanitizeUTF8("hello 🌍"))
+	})
+
+	t.Run("mixed valid and invalid bytes", func(t *testing.T) {
+		// Only the invalid bytes are dropped; valid UTF-8 sequences are preserved.
+		input := "valid\x80text\xc0more"
+		got := telegram.SanitizeUTF8(input)
+		require.Equal(t, "validtextmore", got)
+	})
+}
+
 func TestTruncateSnippet(t *testing.T) {
 	tests := []struct {
 		name     string

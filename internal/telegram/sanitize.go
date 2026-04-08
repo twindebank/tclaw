@@ -173,6 +173,13 @@ func StripAllTags(s string) string {
 	return htmlTagPattern.ReplaceAllString(s, "")
 }
 
+// SanitizeUTF8 drops bytes that are not valid UTF-8. Telegram rejects messages
+// containing invalid byte sequences with a 400 error that will never succeed
+// on retry — dropping the offending bytes is preferable to losing the whole message.
+func SanitizeUTF8(s string) string {
+	return strings.ToValidUTF8(s, "")
+}
+
 // TruncateSnippet returns the first maxLen characters of s, appending "…"
 // if truncated. Newlines are collapsed to spaces for a compact single-line preview.
 func TruncateSnippet(s string, maxLen int) string {

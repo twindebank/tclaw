@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -298,6 +299,13 @@ func (t *Telegram) Send(ctx context.Context, text string) (channel.MessageID, er
 		}
 	}
 
+	// Telegram rejects messages containing invalid UTF-8 with a 400 error that
+	// will never succeed on retry. Drop invalid bytes rather than losing the message.
+	if !utf8.ValidString(text) {
+		slog.Warn("telegram send: stripping invalid UTF-8 bytes from outbound message", "channel", t.name)
+		text = tgsdk.SanitizeUTF8(text)
+	}
+
 	msg, err := b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:    chatID,
 		Text:      tgsdk.SanitizeHTML(tgsdk.MarkdownToHTML(text)),
@@ -335,6 +343,13 @@ func (t *Telegram) Edit(ctx context.Context, msgID channel.MessageID, text strin
 		if err != nil {
 			return fmt.Errorf("telegram edit (create bot): %w", err)
 		}
+	}
+
+	// Telegram rejects messages containing invalid UTF-8 with a 400 error that
+	// will never succeed on retry. Drop invalid bytes rather than losing the message.
+	if !utf8.ValidString(text) {
+		slog.Warn("telegram edit: stripping invalid UTF-8 bytes from outbound message", "channel", t.name)
+		text = tgsdk.SanitizeUTF8(text)
 	}
 
 	telegramMsgID, err := strconv.Atoi(string(msgID))
