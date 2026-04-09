@@ -98,6 +98,6 @@ Required GitHub configuration:
 
 | Type | Name | How to set |
 |------|------|-----------|
-| Variable | `FLY_APP_NAME` | `gh variable set FLY_APP_NAME --body "your-app"` |
+| Secret | `FLY_APP_NAME` | `gh secret set FLY_APP_NAME` — stored as a secret so GitHub masks the app name, URL, and registry in deploy logs |
 | Secret | `FLY_API_TOKEN` | `fly tokens create deploy -x 999999h`, then `gh secret set FLY_API_TOKEN` |
 | Secret | `TCLAW_YAML` | `gh secret set TCLAW_YAML < tclaw.yaml` (seed config for first boot only) |

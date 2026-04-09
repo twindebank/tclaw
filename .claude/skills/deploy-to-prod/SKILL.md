@@ -94,17 +94,16 @@ CI auto-deploys on every push to main. It needs three things set on the GitHub r
 
 ```bash
 # Check what's already set
-gh variable list
 gh secret list
 ```
 
-**Variable** (visible in logs):
-- `FLY_APP_NAME` — the Fly app name (e.g. `tclaw`)
+**Secrets** (encrypted, masked in logs):
+- `FLY_APP_NAME` — the Fly app name. Stored as a secret so GitHub masks it in deploy logs (prevents leaking the app URL, registry, monitoring dashboard, etc.)
   ```bash
-  gh variable set FLY_APP_NAME --body "<app-name>"
+  gh secret set FLY_APP_NAME
+  # paste the app name when prompted
   ```
 
-**Secrets** (encrypted):
 - `FLY_API_TOKEN` — deploy token for Fly.io
   ```bash
   fly tokens create deploy -x 999999h -a <app-name>
