@@ -67,6 +67,17 @@ func (r *Registry) NameExists(name string) bool {
 	return ok
 }
 
+// Add inserts a single entry. Called immediately after a channel is added to
+// config so the in-memory view stays consistent within the same agent turn —
+// without this, a second channel_create with the same name would bypass the
+// NameExists check and produce a duplicate in the config file.
+func (r *Registry) Add(entry RegistryEntry) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.entries = append(r.entries, entry)
+	r.byName[entry.Name] = entry
+}
+
 // Remove deletes a single entry by name. Called immediately after a channel is
 // removed from config so the in-memory view stays consistent within the same
 // agent turn — without this, channel_list would still show the deleted channel

@@ -274,6 +274,21 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("add channel to config: %w", err)
 		}
 
+		// Update the in-memory registry immediately so a second channel_create
+		// in the same turn sees this name as taken. Without this, the NameExists
+		// check above races with long provisioning (e.g. 20s BotFather flow).
+		deps.Registry.Add(channel.RegistryEntry{
+			Info: channel.Info{
+				Type:            ch.Type,
+				Name:            ch.Name,
+				Description:     ch.Description,
+				Purpose:         ch.Purpose,
+				DisallowedTools: ch.DisallowedTools,
+			},
+			Links:  ch.Links,
+			Parent: ch.Parent,
+		})
+
 		// Reconcile synchronously so the agent gets immediate feedback on
 		// whether provisioning succeeded or the channel needs manual setup.
 		rc, reconcileErr := reconciler.ReconcileOne(ctx, ch, deps.ReconcileParams)

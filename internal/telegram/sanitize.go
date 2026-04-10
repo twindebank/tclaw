@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"html"
 	"regexp"
 	"strings"
 )
@@ -32,9 +33,9 @@ var markdownBold = regexp.MustCompile(`\*\*(.+?)\*\*`)
 // markdownInlineCode matches `text` (single backtick, not triple).
 var markdownInlineCode = regexp.MustCompile("(?s)`([^`]+)`")
 
-// markdownLink matches [text](url) — converted unconditionally since it doesn't
-// overlap with HTML tags the model might already be using.
-var markdownLink = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
+// markdownLink matches [text](url) with support for one level of balanced
+// parentheses in the URL (common in Wikipedia, GitHub compare URLs, etc.).
+var markdownLink = regexp.MustCompile(`\[([^\]]+)\]\(([^()]*(?:\([^()]*\))*[^()]*)\)`)
 
 // markdownBullet matches a leading "- " or "* " bullet at the start of a line
 // (with optional leading whitespace).
@@ -150,7 +151,8 @@ func MarkdownToHTML(s string) string {
 		if sub == nil {
 			return m
 		}
-		return `<a href="` + sub[2] + `">` + sub[1] + `</a>`
+		// Escape & in the URL so bare ampersands don't break Telegram's HTML parser.
+		return `<a href="` + html.EscapeString(sub[2]) + `">` + sub[1] + `</a>`
 	})
 
 	// Only convert the remaining Markdown patterns if the model hasn't already

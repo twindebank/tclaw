@@ -877,7 +877,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			select {
 			case err = <-agentErr:
 				// Agent finished the turn and exited gracefully.
-			case <-time.After(30 * time.Second):
+			case <-time.After(2 * time.Minute):
 				// Safety timeout — force cancel if the turn is stuck.
 				slog.Warn("agent did not exit after channel change, forcing", "user", mu.cfg.ID)
 				cancel()
