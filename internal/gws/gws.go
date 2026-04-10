@@ -165,7 +165,11 @@ func (c Command) CLIArgs() ([]string, error) {
 // Raw() constructor where the caller provides pre-serialized JSON strings.
 func marshalMapOrRaw(m map[string]any) ([]byte, error) {
 	if raw, ok := m["__raw"]; ok && len(m) == 1 {
-		return []byte(raw.(string)), nil
+		str, isString := raw.(string)
+		if !isString {
+			return nil, fmt.Errorf("__raw value must be a string, got %T", raw)
+		}
+		return []byte(str), nil
 	}
 	return json.Marshal(m)
 }

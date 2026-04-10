@@ -86,10 +86,13 @@ func (s *Server) Start(addr string) (string, error) {
 	})
 
 	s.srv = &http.Server{
-		Handler:      mux,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  5 * time.Second,
+		Handler:     mux,
+		ReadTimeout: 30 * time.Second,
+		// No WriteTimeout — MCP tool calls (e.g. BotFather provisioning) can take
+		// 20+ seconds. A server-side write deadline kills the connection mid-call,
+		// causing the CLI to retry and create duplicates. The caller's context
+		// controls cancellation instead.
+		IdleTimeout: 30 * time.Second,
 	}
 	s.running = true
 

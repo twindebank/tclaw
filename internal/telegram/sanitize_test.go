@@ -112,6 +112,18 @@ func TestMarkdownToHTML(t *testing.T) {
 		require.Equal(t, "<b>Restaurant Name</b>", telegram.MarkdownToHTML("## Restaurant Name"))
 	})
 
+	t.Run("converts link with balanced parentheses in URL", func(t *testing.T) {
+		// Wikipedia-style URLs contain parentheses.
+		input := `[Shinjuku](https://en.wikipedia.org/wiki/Shinjuku_(ward))`
+		require.Equal(t, `<a href="https://en.wikipedia.org/wiki/Shinjuku_(ward)">Shinjuku</a>`, telegram.MarkdownToHTML(input))
+	})
+
+	t.Run("escapes ampersand in link URL", func(t *testing.T) {
+		// Bare & in href attributes breaks Telegram's HTML parser.
+		input := `[search](https://example.com/search?q=foo&page=2)`
+		require.Equal(t, `<a href="https://example.com/search?q=foo&amp;page=2">search</a>`, telegram.MarkdownToHTML(input))
+	})
+
 	t.Run("real-world web search result with mixed markdown", func(t *testing.T) {
 		input := "## Soft Launch\n\n- Great food\n- [Book here](https://restaurant.com)\n\n**Highly recommended**"
 		got := telegram.MarkdownToHTML(input)
