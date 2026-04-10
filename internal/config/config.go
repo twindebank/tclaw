@@ -320,6 +320,26 @@ func validate(cfg *Config) error {
 			return fmt.Errorf("user %q: no channels defined", u.ID)
 		}
 
+		// Deduplicate channels — a previous bug could leave duplicate entries in the
+		// config file, and crashing on startup makes it impossible to SSH in and fix.
+		{
+			deduped := make([]Channel, 0, len(u.Channels))
+			seen := make(map[string]bool, len(u.Channels))
+			for _, ch := range u.Channels {
+				if seen[ch.Name] {
+					slog.Warn("dropping duplicate channel from config",
+						"user", u.ID, "channel", ch.Name)
+					continue
+				}
+				seen[ch.Name] = true
+				deduped = append(deduped, ch)
+			}
+			if len(deduped) < len(u.Channels) {
+				cfg.Users[i].Channels = deduped
+				u = cfg.Users[i]
+			}
+		}
+
 		chNames := make(map[string]bool)
 		for j, ch := range u.Channels {
 			if ch.Name == "" {
