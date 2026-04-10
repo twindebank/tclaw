@@ -86,8 +86,10 @@ func TestValidate_DuplicateChannelName(t *testing.T) {
 		Description: "duplicate",
 	})
 	err := validate(cfg)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "duplicate name")
+	// Duplicates are silently dropped rather than causing a fatal error —
+	// crashing on startup makes it impossible to SSH in and fix the config.
+	require.NoError(t, err)
+	require.Len(t, cfg.Users[0].Channels, 1, "duplicate should be removed")
 }
 
 func TestValidate_EmptyChannelDescription(t *testing.T) {
