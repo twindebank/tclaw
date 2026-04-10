@@ -27,11 +27,20 @@ func NewWriter(path string, env Env) *Writer {
 }
 
 // AddChannel appends a channel to a user's channel list in the YAML file.
+// Returns an error if a channel with the same name already exists.
 func (w *Writer) AddChannel(userID user.ID, ch Channel) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
 	return w.mutate(func(channels *yaml.Node) error {
+		// Reject duplicates at the config level — even if the in-memory registry
+		// check passes, the on-disk config is the source of truth.
+		for _, existing := range channels.Content {
+			if nodeScalarValue(existing, "name") == ch.Name {
+				return fmt.Errorf("channel %q already exists in config", ch.Name)
+			}
+		}
+
 		node, err := marshalChannelToNode(ch)
 		if err != nil {
 			return fmt.Errorf("marshal channel: %w", err)
