@@ -43,3 +43,32 @@ func TestMarshalMapOrRaw(t *testing.T) {
 		require.Contains(t, string(got), `"other":"value"`)
 	})
 }
+
+func TestSplitShellArgs(t *testing.T) {
+	t.Run("simple command", func(t *testing.T) {
+		require.Equal(t, []string{"gmail", "users", "messages", "list"}, splitShellArgs("gmail users messages list"))
+	})
+
+	t.Run("double quoted body preserved", func(t *testing.T) {
+		got := splitShellArgs(`gmail +reply --message-id abc --body "Hi Renae, thanks for getting back"`)
+		require.Equal(t, []string{"gmail", "+reply", "--message-id", "abc", "--body", "Hi Renae, thanks for getting back"}, got)
+	})
+
+	t.Run("single quoted body preserved", func(t *testing.T) {
+		got := splitShellArgs(`gmail +reply --body 'Hello world, this is a test'`)
+		require.Equal(t, []string{"gmail", "+reply", "--body", "Hello world, this is a test"}, got)
+	})
+
+	t.Run("attachment flags", func(t *testing.T) {
+		got := splitShellArgs(`gmail +reply --message-id abc --body "hello" --attachment /tmp/file.jpg`)
+		require.Equal(t, []string{"gmail", "+reply", "--message-id", "abc", "--body", "hello", "--attachment", "/tmp/file.jpg"}, got)
+	})
+
+	t.Run("empty string", func(t *testing.T) {
+		require.Empty(t, splitShellArgs(""))
+	})
+
+	t.Run("extra whitespace collapsed", func(t *testing.T) {
+		require.Equal(t, []string{"a", "b", "c"}, splitShellArgs("  a   b   c  "))
+	})
+}

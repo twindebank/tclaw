@@ -121,11 +121,11 @@ func Schema(method string) Command {
 	}
 }
 
-// Raw constructs a command from a raw space-separated command string.
+// Raw constructs a command from a command string that may contain quoted arguments.
 // Used by the generic google_workspace tool.
 func Raw(command string, params, body string) Command {
 	cmd := Command{
-		Args: strings.Fields(command),
+		Args: splitShellArgs(command),
 	}
 	if params != "" {
 		cmd.Params = map[string]any{"__raw": params}
@@ -286,4 +286,39 @@ func FindBinary() string {
 		binaryPath = "gws"
 	})
 	return binaryPath
+}
+
+// splitShellArgs splits a command string into arguments, respecting double and
+// single quotes. Unquoted regions are split on whitespace. Quotes are stripped
+// from the result. This handles the common case where the agent passes:
+//
+//	gmail +reply --message-id abc --body "Hi Renae, thanks for..."
+//
+// Without this, strings.Fields would split the body into separate arguments.
+func splitShellArgs(s string) []string {
+	var args []string
+	var current strings.Builder
+	inDouble := false
+	inSingle := false
+
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case ch == '"' && !inSingle:
+			inDouble = !inDouble
+		case ch == '\'' && !inDouble:
+			inSingle = !inSingle
+		case ch == ' ' && !inDouble && !inSingle:
+			if current.Len() > 0 {
+				args = append(args, current.String())
+				current.Reset()
+			}
+		default:
+			current.WriteByte(ch)
+		}
+	}
+	if current.Len() > 0 {
+		args = append(args, current.String())
+	}
+	return args
 }
