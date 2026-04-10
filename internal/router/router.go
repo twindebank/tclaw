@@ -361,6 +361,12 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	go notificationManager.Run(ctx)
 
 	devStore := dev.NewStore(s)
+	// Seed the app URL so dev_deployed can hit /version without manual config.
+	if r.publicURL != "" {
+		if err := devStore.SetAppURL(ctx, r.publicURL); err != nil {
+			slog.Warn("failed to seed app URL in dev store", "err", err)
+		}
+	}
 	repoStore := repo.NewStore(s)
 	onboardingStore := onboarding.NewStore(s)
 
