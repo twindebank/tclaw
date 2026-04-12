@@ -32,11 +32,8 @@ func TestSummariseJourneyResponse(t *testing.T) {
 			]
 		}`)
 
-		result, err := summariseJourneyResponse(raw)
+		got, err := summariseJourneyResponse(raw)
 		require.NoError(t, err)
-
-		var got journeySummary
-		require.NoError(t, json.Unmarshal(result, &got))
 
 		require.Len(t, got.Journeys, 2)
 
@@ -60,11 +57,8 @@ func TestSummariseJourneyResponse(t *testing.T) {
 			]
 		}`)
 
-		result, err := summariseJourneyResponse(raw)
+		got, err := summariseJourneyResponse(raw)
 		require.NoError(t, err)
-
-		var got journeySummary
-		require.NoError(t, json.Unmarshal(result, &got))
 
 		require.Len(t, got.Journeys, 3)
 		require.Equal(t, 10, got.Journeys[0].DurationMinutes)
@@ -72,14 +66,8 @@ func TestSummariseJourneyResponse(t *testing.T) {
 	})
 
 	t.Run("returns empty journeys list when response has none", func(t *testing.T) {
-		raw := json.RawMessage(`{"journeys": []}`)
-
-		result, err := summariseJourneyResponse(raw)
+		got, err := summariseJourneyResponse(json.RawMessage(`{"journeys": []}`))
 		require.NoError(t, err)
-
-		var got journeySummary
-		require.NoError(t, json.Unmarshal(result, &got))
-
 		require.Empty(t, got.Journeys)
 	})
 
@@ -97,11 +85,8 @@ func TestSummariseJourneyResponse(t *testing.T) {
 			]
 		}`)
 
-		result, err := summariseJourneyResponse(raw)
+		got, err := summariseJourneyResponse(raw)
 		require.NoError(t, err)
-
-		var got journeySummary
-		require.NoError(t, json.Unmarshal(result, &got))
 
 		require.Len(t, got.Journeys, 1)
 		require.Equal(t, "short", got.Journeys[0].ArrivalTime)
