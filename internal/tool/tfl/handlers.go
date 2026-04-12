@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"os"
 
 	"tclaw/internal/mcp"
 )
@@ -116,7 +117,35 @@ func journeyHandler(deps Deps) mcp.ToolHandler {
 		}
 
 		path := "/Journey/JourneyResults/" + url.PathEscape(a.From) + "/to/" + url.PathEscape(a.To)
-		return apiGet(ctx, deps, path, query)
+		raw, err := apiGet(ctx, deps, path, query)
+		if err != nil {
+			return nil, err
+		}
+
+		summary, err := summariseJourneyResponse(raw)
+		if err != nil {
+			return nil, err
+		}
+
+		// Write the full response to a temp file so the agent can dig into details
+		// using Bash+jq without the raw JSON blowing up the context window.
+		tmpFile, tmpErr := os.CreateTemp("", "tfl_journey_*.json")
+		if tmpErr != nil {
+			slog.Warn("failed to create temp file for full TfL journey response", "err", tmpErr)
+		} else if _, writeErr := tmpFile.Write(raw); writeErr != nil {
+			slog.Warn("failed to write TfL journey response to temp file", "err", writeErr)
+			tmpFile.Close()
+		} else {
+			tmpFile.Close()
+			summary.FullDetailsPath = tmpFile.Name()
+			summary.FullDetailsNote = "Full TfL API response. Use Bash with jq to extract specific fields, e.g.: jq '.journeys[0].legs' " + tmpFile.Name()
+		}
+
+		result, err := json.Marshal(summary)
+		if err != nil {
+			return nil, fmt.Errorf("marshal journey summary: %w", err)
+		}
+		return json.RawMessage(result), nil
 	}
 }
 
@@ -217,4 +246,103 @@ func roadStatusHandler(deps Deps) mcp.ToolHandler {
 
 		return apiGet(ctx, deps, "/Road", nil)
 	}
+}
+
+// --- journey response summarisation ---
+
+// tflJourneyResponse is a minimal subset of the TfL journey planner API response,
+// containing only the fields needed for a useful summary.
+type tflJourneyResponse struct {
+	Journeys []tflJourney `json:"journeys"`
+}
+
+type tflJourney struct {
+	Duration        int      `json:"duration"`
+	ArrivalDateTime string   `json:"arrivalDateTime"`
+	Legs            []tflLeg `json:"legs"`
+}
+
+type tflLeg struct {
+	Duration    int            `json:"duration"`
+	Mode        tflLegMode     `json:"mode"`
+	Instruction tflInstruction `json:"instruction"`
+}
+
+type tflLegMode struct {
+	Name string `json:"name"`
+}
+
+type tflInstruction struct {
+	Summary string `json:"summary"`
+}
+
+// journeySummary is the compact output returned to the agent instead of the raw API response.
+type journeySummary struct {
+	Journeys []journeyOption `json:"journeys"`
+
+	// FullDetailsPath is the path to a temp file containing the full raw TfL API response.
+	// Use Bash+jq to extract specific fields without loading the whole file into context.
+	FullDetailsPath string `json:"full_details_path,omitempty"`
+
+	// FullDetailsNote provides a jq usage example for the full details file.
+	FullDetailsNote string `json:"full_details_note,omitempty"`
+}
+
+type journeyOption struct {
+	DurationMinutes int          `json:"duration_minutes"`
+	ArrivalTime     string       `json:"arrival_time"`
+	Legs            []legSummary `json:"legs"`
+}
+
+type legSummary struct {
+	Mode            string `json:"mode"`
+	Summary         string `json:"summary"`
+	DurationMinutes int    `json:"duration_minutes"`
+}
+
+// summariseJourneyResponse parses the raw TfL journey API response and returns
+// a compact summary of up to 3 journey options, each with total duration,
+// arrival time, and a per-leg breakdown (mode, instruction, duration).
+//
+// The raw response can exceed 100k characters — this trims it to only what the
+// agent needs to answer a journey planning query. The caller is responsible for
+// populating FullDetailsPath/FullDetailsNote and marshalling the result.
+func summariseJourneyResponse(raw json.RawMessage) (journeySummary, error) {
+	var resp tflJourneyResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return journeySummary{}, fmt.Errorf("parse journey response: %w", err)
+	}
+
+	journeys := resp.Journeys
+	if len(journeys) > 3 {
+		journeys = journeys[:3]
+	}
+
+	summary := journeySummary{
+		Journeys: make([]journeyOption, 0, len(journeys)),
+	}
+	for _, j := range journeys {
+		// Extract HH:MM from "2026-04-12T15:30:00" format — take chars 11–15.
+		arrivalTime := j.ArrivalDateTime
+		if len(arrivalTime) >= 16 {
+			arrivalTime = arrivalTime[11:16]
+		}
+
+		legs := make([]legSummary, 0, len(j.Legs))
+		for _, l := range j.Legs {
+			legs = append(legs, legSummary{
+				Mode:            l.Mode.Name,
+				Summary:         l.Instruction.Summary,
+				DurationMinutes: l.Duration,
+			})
+		}
+
+		summary.Journeys = append(summary.Journeys, journeyOption{
+			DurationMinutes: j.Duration,
+			ArrivalTime:     arrivalTime,
+			Legs:            legs,
+		})
+	}
+
+	return summary, nil
 }
