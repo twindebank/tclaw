@@ -102,7 +102,7 @@ func channelCreateDef() mcp.ToolDef {
 				},
 				"initial_message": {
 					"type": "string",
-					"description": "Message delivered to the new channel as its first inbound message. Fires exactly once."
+					"description": "Message delivered to the new channel as its first inbound message. Fires exactly once. Required for ephemeral channels."
 				},
 				"parent": {
 					"type": "string",
@@ -239,6 +239,12 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 
 		if a.Parent != "" && !deps.Registry.NameExists(a.Parent) {
 			return nil, fmt.Errorf("parent channel %q not found", a.Parent)
+		}
+
+		if a.Ephemeral && a.InitialMessage == "" {
+			// Ephemeral channels without an initial_message sit idle forever in
+			// webhook mode because DropPendingUpdates discards the auto-start /start.
+			return nil, fmt.Errorf("initial_message is required for ephemeral channels — without it the channel has no task and will sit idle")
 		}
 
 		// Build the idle timeout string for config.

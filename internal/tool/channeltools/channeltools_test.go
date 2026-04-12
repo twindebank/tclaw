@@ -203,6 +203,57 @@ func TestChannelCreate(t *testing.T) {
 		})
 		require.Contains(t, err.Error(), "already exists")
 	})
+
+	t.Run("ephemeral requires initial_message", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
+			"name":        "task-bot",
+			"description": "Ephemeral task channel",
+			"type":        "socket",
+			"ephemeral":   true,
+		})
+		require.Contains(t, err.Error(), "initial_message is required for ephemeral channels")
+	})
+
+	t.Run("ephemeral with initial_message succeeds", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		result := callTool(t, th.handler, "channel_create", map[string]any{
+			"name":            "task-bot",
+			"description":     "Ephemeral task channel",
+			"type":            "socket",
+			"ephemeral":       true,
+			"initial_message": "Book flights to Tokyo",
+		})
+
+		var created map[string]any
+		require.NoError(t, json.Unmarshal(result, &created))
+		require.Equal(t, "task-bot", created["name"])
+
+		channels, err := th.configWriter.ReadChannels(testUserID)
+		require.NoError(t, err)
+		for _, ch := range channels {
+			if ch.Name == "task-bot" {
+				require.True(t, ch.Ephemeral)
+				require.Equal(t, "Book flights to Tokyo", ch.InitialMessage)
+			}
+		}
+	})
+
+	t.Run("non-ephemeral allows missing initial_message", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		result := callTool(t, th.handler, "channel_create", map[string]any{
+			"name":        "persistent",
+			"description": "Normal channel",
+			"type":        "socket",
+		})
+
+		var created map[string]any
+		require.NoError(t, json.Unmarshal(result, &created))
+		require.Equal(t, "persistent", created["name"])
+	})
 }
 
 func TestChannelEdit(t *testing.T) {
@@ -523,7 +574,7 @@ func TestChannelDone(t *testing.T) {
 		// Create a channel in config, then seed runtime state with teardown info.
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "ephemeral-test", "description": "Ephemeral bot", "type": "telegram",
-			"allowed_users": []any{"123456789"}, "ephemeral": true,
+			"allowed_users": []any{"123456789"}, "ephemeral": true, "initial_message": "test task",
 		})
 		reloadRegistry(t, th.testHarness)
 
@@ -556,7 +607,7 @@ func TestChannelDone(t *testing.T) {
 
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "failing-ephemeral", "description": "Failing bot", "type": "telegram",
-			"allowed_users": []any{"123456789"}, "ephemeral": true,
+			"allowed_users": []any{"123456789"}, "ephemeral": true, "initial_message": "test task",
 		})
 		reloadRegistry(t, th.testHarness)
 
@@ -588,7 +639,7 @@ func TestChannelDone(t *testing.T) {
 
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "confirm-test", "description": "Confirm bot", "type": "telegram",
-			"allowed_users": []any{"123456789"}, "ephemeral": true,
+			"allowed_users": []any{"123456789"}, "ephemeral": true, "initial_message": "test task",
 		})
 		reloadRegistry(t, th.testHarness)
 
@@ -625,7 +676,7 @@ func TestChannelDone(t *testing.T) {
 
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "prompt-fail-test", "description": "Prompt fail bot", "type": "telegram",
-			"allowed_users": []any{"123456789"}, "ephemeral": true,
+			"allowed_users": []any{"123456789"}, "ephemeral": true, "initial_message": "test task",
 		})
 		reloadRegistry(t, th.testHarness)
 
