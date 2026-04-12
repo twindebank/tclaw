@@ -188,7 +188,7 @@ func readRemoteFile(ctx context.Context, path string) ([]byte, error) {
 
 func writeRemoteFile(ctx context.Context, path string, data []byte) error {
 	cmd := exec.CommandContext(ctx, "fly", "ssh", "console", "-a", flyApp, "-C",
-		fmt.Sprintf("cat > %s", path))
+		fmt.Sprintf("sh -c 'cat > %s'", path))
 	cmd.Stdin = bytes.NewReader(data)
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
