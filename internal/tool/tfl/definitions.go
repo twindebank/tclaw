@@ -50,9 +50,8 @@ var toolDefs = []mcp.ToolDef{
 	{
 		Name: ToolJourney,
 		Description: "Plan a journey using TfL. Accepts postcodes, station names, coordinates (lat,lon), or NaPTAN IDs " +
-			"as from/to locations. Returns route options with step-by-step directions, durations, and live departure times. " +
-			"Tip: departure/arrival points in the response include individualStopId — useful for finding the correct " +
-			"individual stop ID to pass to tfl_arrivals (group stop IDs return empty from tfl_arrivals).",
+			"as from/to locations. Returns up to 3 route options, each with total duration, arrival time, " +
+			"and a leg-by-leg breakdown (mode, instruction summary, duration in minutes).",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
