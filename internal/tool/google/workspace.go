@@ -14,7 +14,7 @@ type workspaceArgs struct {
 	CredentialSet string `json:"credential_set"`
 	Command       string `json:"command"`
 	Params        string `json:"params"`
-	Body          string `json:"body"`
+	JSON          string `json:"json"`
 }
 
 func workspaceHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandler {
@@ -33,6 +33,6 @@ func workspaceHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandl
 			return nil, fmt.Errorf("command is required (e.g. 'gmail users messages list')")
 		}
 
-		return runGWS(ctx, deps, gws.Raw(a.Command, a.Params, a.Body))
+		return runGWS(ctx, deps, gws.Raw(a.Command, a.Params, a.JSON))
 	}
 }
