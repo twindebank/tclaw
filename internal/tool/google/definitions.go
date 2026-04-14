@@ -267,7 +267,7 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 				"IMPORTANT: Never use with Gmail format=full — it returns huge HTML blobs that waste context. Use google_gmail_read instead. " +
 				"Calendar updates: use 'calendar events update' (full PUT), NOT 'calendar events patch' — patching date to dateTime causes a 400. " +
 				"For timezone in dateTime, use UTC offset in the ISO string (e.g. 2026-03-13T17:26:00+00:00), NOT a separate timeZone field. " +
-				"Sheets writes: all write operations (values.update, batchUpdate, values.clear, etc.) require the 'body' field — pass the request body as a JSON string there. Example: command='sheets spreadsheets values update', params='{\"spreadsheetId\":\"...\",\"range\":\"Sheet1!A1\",\"valueInputOption\":\"RAW\"}', body='{\"values\":[[\"hello\"]]}'.\n\n" +
+				"Sheets writes: all write operations (values.update, batchUpdate, values.clear, etc.) require the 'json' field — pass the request body as a JSON string there. Example: command='sheets spreadsheets values update', params='{\"spreadsheetId\":\"...\",\"range\":\"Sheet1!A1\",\"valueInputOption\":\"RAW\"}', json='{\"values\":[[\"hello\"]]}'.\n\n" +
 				"READING PDF ATTACHMENTS from Gmail:\n" +
 				"1. google_workspace with 'gmail users messages get', format=full — result is saved to a file (too large for context)\n" +
 				"2. Use node to parse the file and find attachment IDs: iterate payload.parts recursively, look for body.attachmentId and filename\n" +
@@ -290,7 +290,7 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 						"type": "string",
 						"description": "URL/query parameters as a JSON string, e.g. '{\"userId\": \"me\", \"maxResults\": 10}'. Passed as --params to gws."
 					},
-					"body": {
+					"json": {
 						"type": "string",
 						"description": "Request body as a JSON string for POST/PATCH/PUT operations. Passed as --json to gws."
 					}
