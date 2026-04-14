@@ -251,12 +251,10 @@ func calendarCreateHandler(depsMap map[credential.CredentialSetID]Deps) mcp.Tool
 			endDate := eventDate.AddDate(0, 0, 1).Format("2006-01-02")
 			eventBody["end"] = map[string]string{"date": endDate}
 		} else {
-			// Timed event: build RFC3339 dateTime with local UTC offset.
-			_, offset := time.Now().Zone()
-			offsetHours := offset / 3600
-			offsetMinutes := (offset % 3600) / 60
-			offsetStr := fmt.Sprintf("%+03d:%02d", offsetHours, abs(offsetMinutes))
-
+			// Timed event: pass a naive local datetime with the Europe/London timeZone field
+			// so Google Calendar resolves the correct UTC offset (handles BST/GMT transitions).
+			// Do NOT embed an offset in the dateTime string — the server runs in UTC so
+			// time.Now().Zone() would always return +00:00, shifting the event by 1h in BST.
 			startTime := a.StartTime
 			if startTime == "" {
 				return nil, fmt.Errorf("start_time is required for timed events (format: HH:MM)")
@@ -275,10 +273,12 @@ func calendarCreateHandler(depsMap map[credential.CredentialSetID]Deps) mcp.Tool
 			}
 
 			eventBody["start"] = map[string]string{
-				"dateTime": fmt.Sprintf("%sT%s:00%s", a.Date, startTime, offsetStr),
+				"dateTime": fmt.Sprintf("%sT%s:00", a.Date, startTime),
+				"timeZone": "Europe/London",
 			}
 			eventBody["end"] = map[string]string{
-				"dateTime": fmt.Sprintf("%sT%s:00%s", a.Date, endTime, offsetStr),
+				"dateTime": fmt.Sprintf("%sT%s:00", a.Date, endTime),
+				"timeZone": "Europe/London",
 			}
 		}
 
@@ -451,13 +451,6 @@ func extractEventSummary(event calendarEvent) calendarEventSummary {
 	}
 
 	return s
-}
-
-func abs(n int) int {
-	if n < 0 {
-		return -n
-	}
-	return n
 }
 
 // generateMeetRequestID returns a random UUID-format string used as the conferenceData
