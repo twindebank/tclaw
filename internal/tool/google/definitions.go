@@ -205,7 +205,7 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 			Description: "Create a calendar event with automatic duplicate detection. " +
 				"Checks for existing events with the same title on the same date before creating — " +
 				"if a duplicate is found, returns the existing event instead of creating a new one. " +
-				"For all-day events, provide only date. For timed events, provide date + start_time + end_time. " +
+				"For single-day all-day events, provide only date. For multi-day all-day events (e.g. hotel stays, trips), provide date + end_date — both in YYYY-MM-DD format, end_date is the inclusive last day. For timed events, provide date + start_time + end_time. " +
 				"Times use 24h format (HH:MM). The local timezone offset is applied automatically — do NOT include timezone info in times. " +
 				"Set add_meet=true to automatically attach a Google Meet video conference link. " +
 				"For complex operations (updating events, managing attendees, recurring rules), use google_workspace directly.",
@@ -223,7 +223,11 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 					},
 					"date": {
 						"type": "string",
-						"description": "Event date in YYYY-MM-DD format."
+						"description": "Event start date in YYYY-MM-DD format."
+					},
+					"end_date": {
+						"type": "string",
+						"description": "Inclusive end date for multi-day all-day events (YYYY-MM-DD). Only valid for all-day events (omit start_time/end_time). Must be after date. For single-day all-day events, omit this field."
 					},
 					"start_time": {
 						"type": "string",

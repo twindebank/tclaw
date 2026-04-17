@@ -175,11 +175,14 @@ type calendarCreateArgs struct {
 	CredentialSet string `json:"credential_set"`
 	Title         string `json:"title"`
 	Date          string `json:"date"`
-	StartTime     string `json:"start_time"`
-	EndTime       string `json:"end_time"`
-	Description   string `json:"description"`
-	Location      string `json:"location"`
-	CalendarID    string `json:"calendar_id"`
+	// EndDate is the inclusive last day of a multi-day all-day event (YYYY-MM-DD).
+	// When omitted, all-day events default to a single day.
+	EndDate   string `json:"end_date"`
+	StartTime string `json:"start_time"`
+	EndTime   string `json:"end_time"`
+	Description string `json:"description"`
+	Location    string `json:"location"`
+	CalendarID  string `json:"calendar_id"`
 
 	// AddMeet adds a Google Meet video conference link to the event.
 	AddMeet bool `json:"add_meet"`
@@ -247,8 +250,22 @@ func calendarCreateHandler(depsMap map[credential.CredentialSetID]Deps) mcp.Tool
 		if isAllDay {
 			// All-day event: use date (not dateTime).
 			eventBody["start"] = map[string]string{"date": a.Date}
-			// Google Calendar all-day end dates are exclusive, so add 1 day.
-			endDate := eventDate.AddDate(0, 0, 1).Format("2006-01-02")
+			// Google Calendar all-day end dates are exclusive.
+			var endDate string
+			if a.EndDate != "" {
+				// Multi-day all-day event: end_date is inclusive, so add 1 day for the exclusive API value.
+				endDateParsed, err := time.Parse("2006-01-02", a.EndDate)
+				if err != nil {
+					return nil, fmt.Errorf("invalid end_date format %q — use YYYY-MM-DD", a.EndDate)
+				}
+				if !endDateParsed.After(eventDate) {
+					return nil, fmt.Errorf("end_date %q must be after date %q", a.EndDate, a.Date)
+				}
+				endDate = endDateParsed.AddDate(0, 0, 1).Format("2006-01-02")
+			} else {
+				// Single-day event: end is the next day (exclusive).
+				endDate = eventDate.AddDate(0, 0, 1).Format("2006-01-02")
+			}
 			eventBody["end"] = map[string]string{"date": endDate}
 		} else {
 			// Timed event: pass a naive local datetime with the Europe/London timeZone field
