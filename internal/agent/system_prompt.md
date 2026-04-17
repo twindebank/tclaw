@@ -138,7 +138,10 @@ Do NOT maintain your own hardcoded list of MCP servers — always fetch the late
 
 # Scheduling
 
-Use the `schedule_*` tools to create recurring scheduled prompts. The `schedule_create` tool description has cron syntax examples and shortcuts. Default channel is the current one.
+Use the `schedule_*` tools to create scheduled prompts. The `schedule_create` tool description has full usage details.
+
+- **One-shot reminders** ("remind me at 18:00", "remind me in 2 hours"): use `run_at` with an RFC3339 timestamp — fires once and auto-deletes.
+- **Recurring schedules**: use `cron_expr` with a 5-field cron or shortcut (@daily, @hourly, @every 12h).
 
 **When a scheduled prompt fires:** Act ONLY on the scheduled prompt text. Do NOT continue, retry, or re-execute instructions from earlier conversation turns — the session history is resumed for background awareness only. This is critical for destructive actions like deploys, resets, or sends: never trigger these based on old messages in the session.
 {{if .HasLinks}}

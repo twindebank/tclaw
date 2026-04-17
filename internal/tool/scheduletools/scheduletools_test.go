@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"tclaw/internal/channel"
 	"tclaw/internal/libraries/store"
@@ -381,6 +382,76 @@ func TestScheduleEdit_UpdatesTimezone(t *testing.T) {
 		if got.Timezone != "" {
 			t.Fatalf("expected empty timezone after reset, got %q", got.Timezone)
 		}
+	})
+}
+
+func TestScheduleCreate_OneShot(t *testing.T) {
+	t.Run("creates one-shot with run_at", func(t *testing.T) {
+		h, schedStore := setup(t)
+
+		runAt := time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
+		result := callTool(t, h, "schedule_create", map[string]any{
+			"prompt":       "one-shot reminder",
+			"run_at":       runAt,
+			"channel_name": "desktop",
+		})
+
+		var createResult map[string]any
+		if err := json.Unmarshal(result, &createResult); err != nil {
+			t.Fatalf("unmarshal create result: %v", err)
+		}
+		if createResult["once"] != true {
+			t.Fatalf("expected once=true, got %v", createResult["once"])
+		}
+		if createResult["prompt"] != "one-shot reminder" {
+			t.Fatalf("expected prompt 'one-shot reminder', got %v", createResult["prompt"])
+		}
+
+		schedID := createResult["id"].(string)
+		got, err := schedStore.Get(context.Background(), schedule.ScheduleID(schedID))
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if !got.Once {
+			t.Fatal("expected Once=true in stored schedule")
+		}
+		if got.NextRunAt.IsZero() {
+			t.Fatal("expected NextRunAt to be set")
+		}
+		if got.CronExpr != "" {
+			t.Fatalf("expected empty CronExpr for one-shot, got %q", got.CronExpr)
+		}
+	})
+
+	t.Run("rejects run_at in the past", func(t *testing.T) {
+		h, _ := setup(t)
+
+		pastTime := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339)
+		callToolExpectError(t, h, "schedule_create", map[string]any{
+			"prompt":       "past reminder",
+			"run_at":       pastTime,
+			"channel_name": "desktop",
+		})
+	})
+
+	t.Run("rejects both run_at and cron_expr", func(t *testing.T) {
+		h, _ := setup(t)
+
+		callToolExpectError(t, h, "schedule_create", map[string]any{
+			"prompt":       "conflicting",
+			"run_at":       time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+			"cron_expr":    "0 9 * * *",
+			"channel_name": "desktop",
+		})
+	})
+
+	t.Run("rejects neither run_at nor cron_expr", func(t *testing.T) {
+		h, _ := setup(t)
+
+		callToolExpectError(t, h, "schedule_create", map[string]any{
+			"prompt":       "missing schedule",
+			"channel_name": "desktop",
+		})
 	})
 }
 
