@@ -182,6 +182,68 @@ func TestScheduler_ReloadPicksUpNewSchedules(t *testing.T) {
 	}
 }
 
+func TestScheduler_OneShotDeletesAfterFire(t *testing.T) {
+	s, err := store.NewFS(t.TempDir())
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	schedStore := schedule.NewStore(s)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	output := make(chan channel.TaggedMessage, 8)
+
+	testChannelID := channel.ChannelID("test-channel-id")
+	channelMap := map[channel.ChannelID]channel.Channel{
+		testChannelID: &fakeChannel{name: "desktop"},
+	}
+
+	scheduler := schedule.NewScheduler(schedule.SchedulerParams{
+		Store:  schedStore,
+		Output: output,
+		Channels: func() map[channel.ChannelID]channel.Channel {
+			return channelMap
+		},
+	})
+
+	sched := schedule.Schedule{
+		ID:          schedule.GenerateID(),
+		Prompt:      "one-shot",
+		ChannelName: "desktop",
+		Status:      schedule.StatusActive,
+		Once:        true,
+		CreatedAt:   time.Now(),
+		NextRunAt:   time.Now().Add(-1 * time.Second), // already due
+	}
+	if err := schedStore.Add(ctx, sched); err != nil {
+		t.Fatalf("add schedule: %v", err)
+	}
+
+	go scheduler.Run(ctx)
+
+	select {
+	case msg := <-output:
+		if msg.ChannelID != testChannelID {
+			t.Fatalf("expected channel ID %q, got %q", testChannelID, msg.ChannelID)
+		}
+		if msg.Text != "one-shot" {
+			t.Fatalf("expected text 'one-shot', got %q", msg.Text)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for one-shot message")
+	}
+
+	// One-shot schedule must be removed from the store after firing.
+	got, err := schedStore.Get(ctx, sched.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got != nil {
+		t.Fatal("expected one-shot schedule to be removed from store after firing")
+	}
+}
+
 // fakeChannel is a minimal Channel implementation for testing scheduler channel resolution.
 type fakeChannel struct {
 	name string

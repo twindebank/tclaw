@@ -137,15 +137,21 @@ func (s *Scheduler) fireReadySchedules(ctx context.Context) {
 			continue
 		}
 
-		// Update LastRunAt and NextRunAt before sending so the store is
-		// consistent by the time any consumer reads the fired message.
+		// Update the store before sending so it's consistent when the consumer reads the fired message.
+		// One-shot schedules are removed; recurring schedules have their run times updated.
 		fireTime := now
-		updateErr := s.store.Update(ctx, sched.ID, func(existing *Schedule) {
-			existing.LastRunAt = fireTime
-			existing.NextRunAt = s.computeNextRunFromTime(existing.CronExpr, fireTime, existing.Timezone)
-		})
-		if updateErr != nil {
-			slog.Error("scheduler: failed to update schedule after fire", "schedule", sched.ID, "err", updateErr)
+		if sched.Once {
+			if removeErr := s.store.Remove(ctx, sched.ID); removeErr != nil {
+				slog.Error("scheduler: failed to remove one-shot schedule after fire", "schedule", sched.ID, "err", removeErr)
+			}
+		} else {
+			updateErr := s.store.Update(ctx, sched.ID, func(existing *Schedule) {
+				existing.LastRunAt = fireTime
+				existing.NextRunAt = s.computeNextRunFromTime(existing.CronExpr, fireTime, existing.Timezone)
+			})
+			if updateErr != nil {
+				slog.Error("scheduler: failed to update schedule after fire", "schedule", sched.ID, "err", updateErr)
+			}
 		}
 
 		// Inject the prompt as a tagged message.
