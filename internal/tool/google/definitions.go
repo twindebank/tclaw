@@ -13,6 +13,7 @@ const (
 	ToolGmailList       = "google_gmail_list"
 	ToolGmailRead       = "google_gmail_read"
 	ToolGmailSend       = "google_gmail_send"
+	ToolGmailForward    = "google_gmail_forward"
 	ToolCalendarList    = "google_calendar_list"
 	ToolCalendarCreate  = "google_calendar_create"
 	ToolWorkspace       = "google_workspace"
@@ -22,7 +23,7 @@ const (
 // ToolNames returns all tool name constants in this package.
 func ToolNames() []string {
 	return []string{
-		ToolGmailList, ToolGmailRead, ToolGmailSend,
+		ToolGmailList, ToolGmailRead, ToolGmailSend, ToolGmailForward,
 		ToolCalendarList, ToolCalendarCreate,
 		ToolWorkspace, ToolWorkspaceSchema,
 	}
@@ -155,6 +156,46 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 			}`, connDescription, enumJSON)),
 		},
 		{
+			Name: ToolGmailForward,
+			Description: "Forward a Gmail message to new recipients with the complete original body. " +
+				"Fetches the full message and correctly handles HTML-only emails by converting them to plain text — " +
+				"unlike gws gmail +forward which truncates HTML-only emails to the Gmail snippet. " +
+				"Use this instead of google_workspace 'gmail +forward' whenever forwarding an email. " +
+				"Threading headers (In-Reply-To, References) are set automatically. " +
+				"The From address is set automatically from the authenticated Google account.",
+			InputSchema: json.RawMessage(fmt.Sprintf(`{
+				"type": "object",
+				"properties": {
+					"credential_set": {
+						"type": "string",
+						"description": %q,
+						"enum": %s
+					},
+					"message_id": {
+						"type": "string",
+						"description": "The Gmail message ID to forward (from google_gmail_list or google_gmail_read)."
+					},
+					"to": {
+						"type": "string",
+						"description": "Recipient email address(es), comma-separated for multiple."
+					},
+					"cc": {
+						"type": "string",
+						"description": "CC recipient(s), comma-separated."
+					},
+					"bcc": {
+						"type": "string",
+						"description": "BCC recipient(s), comma-separated."
+					},
+					"note": {
+						"type": "string",
+						"description": "Optional plain-text note to include above the forwarded message block."
+					}
+				},
+				"required": ["credential_set","message_id","to"]
+			}`, connDescription, enumJSON)),
+		},
+		{
 			Name: ToolCalendarList,
 			Description: "List calendar events with full details (title, time, attendees, location, meeting links). " +
 				"Returns a clean summary for each event — no need to parse raw API responses. " +
@@ -265,7 +306,8 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 				"Use google_workspace_schema to discover available methods and their parameters. " +
 				"gws also has built-in skills ('+' commands) for common workflows — run 'gws gmail --help' to see them. " +
 				"Key skills: 'gmail +triage' (unread summary), 'gmail +reply --message-id ID --body TEXT' (auto-threaded reply), " +
-				"'gmail +forward --message-id ID --to ADDR' (forward with attachments), 'gmail +send' (compose). " +
+				"'gmail +send' (compose). " +
+				"For forwarding, use google_gmail_forward instead — it fetches the full body and handles HTML-only emails correctly. " +
 				"Skills handle threading headers, MIME encoding, and attachments automatically. " +
 				"Skill reference: https://github.com/googleworkspace/cli/tree/main/skills " +
 				"IMPORTANT: Never use with Gmail format=full — it returns huge HTML blobs that waste context. Use google_gmail_read instead. " +
