@@ -27,17 +27,23 @@ const (
 	StatusPaused Status = "paused"
 )
 
-// Schedule defines a recurring prompt that fires on a cron expression.
+// Schedule defines a prompt that fires on a cron expression or at a specific time.
 type Schedule struct {
-	ID          ScheduleID `json:"id"`
-	CronExpr    string     `json:"cron_expr"`
-	Prompt      string     `json:"prompt"`
-	ChannelName string     `json:"channel_name"`
+	ID ScheduleID `json:"id"`
+
+	// CronExpr is the cron expression for recurring schedules. Empty for one-shot schedules.
+	CronExpr    string `json:"cron_expr,omitempty"`
+	Prompt      string `json:"prompt"`
+	ChannelName string `json:"channel_name"`
 
 	// Timezone is an IANA timezone name (e.g. "Europe/London", "America/New_York") that
 	// controls how the cron expression is evaluated. Empty means the system default.
-	Timezone  string    `json:"timezone,omitempty"`
-	Status    Status    `json:"status"`
+	Timezone string `json:"timezone,omitempty"`
+	Status   Status `json:"status"`
+
+	// Once marks this as a one-shot schedule. After firing, it is automatically removed.
+	Once bool `json:"once,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 	LastRunAt time.Time `json:"last_run_at,omitzero"`
 	NextRunAt time.Time `json:"next_run_at,omitzero"`
