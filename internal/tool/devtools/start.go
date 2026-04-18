@@ -143,13 +143,19 @@ func devStartHandler(deps Deps) mcp.ToolHandler {
 			slog.Warn("failed to configure git user in worktree", "worktree", worktreeDir, "err", err)
 		}
 
-		// Save session.
+		// Save session. CreatedByChannel ties the session to the calling
+		// channel so ephemeral cleanup can tear it down when the channel goes.
+		var activeChannel string
+		if deps.ActiveChannel != nil {
+			activeChannel = deps.ActiveChannel()
+		}
 		sess := dev.Session{
-			Branch:      branch,
-			WorktreeDir: worktreeDir,
-			RepoDir:     repoDir,
-			Status:      dev.SessionActive,
-			CreatedAt:   time.Now(),
+			Branch:           branch,
+			WorktreeDir:      worktreeDir,
+			RepoDir:          repoDir,
+			Status:           dev.SessionActive,
+			CreatedAt:        time.Now(),
+			CreatedByChannel: activeChannel,
 		}
 		if err := deps.Store.PutSession(ctx, sess); err != nil {
 			return nil, fmt.Errorf("save session: %w", err)

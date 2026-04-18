@@ -74,6 +74,37 @@ func (s *Store) DeleteSession(ctx context.Context, branch string) error {
 	return s.saveSessions(ctx, sessions)
 }
 
+// DeleteSessionsByChannel removes every session that was started from the
+// given channel and returns the deleted session records so the caller can
+// run any additional cleanup (e.g. removing worktree directories). A single
+// channel may own many dev sessions (one per branch / concurrent piece of
+// work), so this scans the full session map rather than looking up by name.
+// Returns an empty slice if channelName is empty or no sessions match.
+func (s *Store) DeleteSessionsByChannel(ctx context.Context, channelName string) ([]Session, error) {
+	if channelName == "" {
+		return nil, nil
+	}
+	sessions, err := s.ListSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var removed []Session
+	for branch, sess := range sessions {
+		if sess.CreatedByChannel != channelName {
+			continue
+		}
+		removed = append(removed, sess)
+		delete(sessions, branch)
+	}
+	if len(removed) == 0 {
+		return nil, nil
+	}
+	if err := s.saveSessions(ctx, sessions); err != nil {
+		return nil, err
+	}
+	return removed, nil
+}
+
 func (s *Store) saveSessions(ctx context.Context, sessions map[string]Session) error {
 	data, err := json.Marshal(sessions)
 	if err != nil {

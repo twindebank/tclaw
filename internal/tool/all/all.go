@@ -169,6 +169,7 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 			}
 			return fn(ctx, channelName, limit)
 		},
+		DevStore: p.DevStore,
 	}
 
 	reg := toolpkg.NewRegistry(
@@ -192,12 +193,13 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 			Callback:    p.Callback,
 		},
 		&devtools.Package{
-			Store:       p.DevStore,
-			LogBuffer:   p.LogBuffer,
-			SecretStore: p.SecretStore,
-			UserDir:     p.UserDir,
-			UserID:      p.UserID,
-			ConfigPath:  p.ConfigPath,
+			Store:         p.DevStore,
+			LogBuffer:     p.LogBuffer,
+			SecretStore:   p.SecretStore,
+			UserDir:       p.UserDir,
+			UserID:        p.UserID,
+			ConfigPath:    p.ConfigPath,
+			ActiveChannel: p.ActiveChannel,
 		},
 		&repotools.Package{
 			Store:       p.RepoStore,

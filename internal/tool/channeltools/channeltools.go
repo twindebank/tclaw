@@ -3,6 +3,7 @@ package channeltools
 import (
 	"tclaw/internal/channel"
 	"tclaw/internal/config"
+	"tclaw/internal/dev"
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/mcp"
 	"tclaw/internal/reconciler"
@@ -53,6 +54,11 @@ type Deps struct {
 
 	// ActiveChannel returns the name of the channel currently being processed.
 	ActiveChannel func() string
+
+	// DevStore is used by channel_delete to tear down any dev sessions that
+	// were started from the channel being deleted. May be nil in tests or in
+	// environments where dev tools aren't configured.
+	DevStore *dev.Store
 }
 
 // ToolNames returns all tool name constants in this package.

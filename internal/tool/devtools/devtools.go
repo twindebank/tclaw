@@ -36,6 +36,12 @@ type Deps struct {
 	// ConfigPath is the path to the active tclaw.yaml. Copied into deploy
 	// checkouts so remote Fly builds include the real config (it's gitignored).
 	ConfigPath string
+
+	// ActiveChannel returns the name of the channel currently being processed,
+	// or "" when no channel is active. Used by dev_start to tag the session so
+	// ephemeral cleanup can tear down sessions bound to an ephemeral channel.
+	// May be nil in tests or when called outside an agent turn.
+	ActiveChannel func() string
 }
 
 // RegisterTools adds dev workflow tools to the MCP handler.

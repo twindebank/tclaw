@@ -456,7 +456,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Ephemeral channel cleanup goroutine. Runs at user lifetime and
 	// periodically tears down ephemeral channels that have been idle past
 	// their timeout. Reads channel config each tick via the config writer.
-	go cleanupEphemeralChannels(ctx, mu.cfg.ID, configWriter, runtimeState, activityTracker, secretStore, provisioners, onChannelChange, messageQueue, channelSet.Snapshot)
+	go cleanupEphemeralChannels(ctx, mu.cfg.ID, configWriter, runtimeState, activityTracker, secretStore, provisioners, onChannelChange, messageQueue, channelSet.Snapshot, devStore)
 
 	// hotAddMsgs carries messages from channels added mid-session via hot-reload.
 	// Lives at user lifetime (like scheduleMsgs) so it outlives agent sessions.

@@ -12,6 +12,7 @@ import (
 	"tclaw/internal/channel"
 	"tclaw/internal/channel/telegramchannel"
 	"tclaw/internal/config"
+	"tclaw/internal/dev"
 	"tclaw/internal/libraries/store"
 	"tclaw/internal/queue"
 )
@@ -30,7 +31,7 @@ func TestCleanupOnce(t *testing.T) {
 
 		cleanupOnce(context.Background(), testUserID, h.configWriter, h.runtimeState,
 			h.tracker, h.secretStore, h.provisioners, h.onChannelChange,
-			h.lastLoggedError, h.messageQueue, h.channelsFunc)
+			h.lastLoggedError, h.messageQueue, h.channelsFunc, h.devStore)
 
 		channels, err := h.configWriter.ReadChannels(testUserID)
 		require.NoError(t, err)
@@ -62,7 +63,7 @@ func TestCleanupOnce(t *testing.T) {
 
 		cleanupOnce(context.Background(), testUserID, h.configWriter, h.runtimeState,
 			h.tracker, h.secretStore, h.provisioners, h.onChannelChange,
-			h.lastLoggedError, h.messageQueue, h.channelsFunc)
+			h.lastLoggedError, h.messageQueue, h.channelsFunc, h.devStore)
 
 		channels, err := h.configWriter.ReadChannels(testUserID)
 		require.NoError(t, err)
@@ -83,7 +84,7 @@ func TestCleanupOnce(t *testing.T) {
 
 		cleanupOnce(context.Background(), testUserID, h.configWriter, h.runtimeState,
 			h.tracker, h.secretStore, h.provisioners, h.onChannelChange,
-			h.lastLoggedError, h.messageQueue, h.channelsFunc)
+			h.lastLoggedError, h.messageQueue, h.channelsFunc, h.devStore)
 
 		channels, err := h.configWriter.ReadChannels(testUserID)
 		require.NoError(t, err)
@@ -108,7 +109,7 @@ func TestCleanupOnce(t *testing.T) {
 
 		cleanupOnce(context.Background(), testUserID, h.configWriter, h.runtimeState,
 			h.tracker, h.secretStore, h.provisioners, h.onChannelChange,
-			h.lastLoggedError, h.messageQueue, h.channelsFunc)
+			h.lastLoggedError, h.messageQueue, h.channelsFunc, h.devStore)
 
 		channels, err := h.configWriter.ReadChannels(testUserID)
 		require.NoError(t, err)
@@ -143,12 +144,85 @@ func TestCleanupOnce(t *testing.T) {
 
 		cleanupOnce(context.Background(), testUserID, h.configWriter, h.runtimeState,
 			h.tracker, h.secretStore, h.provisioners, h.onChannelChange,
-			h.lastLoggedError, h.messageQueue, h.channelsFunc)
+			h.lastLoggedError, h.messageQueue, h.channelsFunc, h.devStore)
 
 		require.True(t, prov.teardownCalled, "platform teardown should be called")
 		channels, err := h.configWriter.ReadChannels(testUserID)
 		require.NoError(t, err)
 		require.Empty(t, channels)
+	})
+
+	t.Run("cleans up associated dev sessions and leaves others alone", func(t *testing.T) {
+		h := setupEphemeralTest(t, config.Channel{
+			Name:                 "dev-scratch",
+			Type:                 channel.TypeSocket,
+			Ephemeral:            true,
+			EphemeralIdleTimeout: "1ms",
+		})
+
+		ctx := context.Background()
+
+		// Two sessions bound to dev-scratch, one to another channel, one unbound.
+		boundWT1 := writeFakeWorktree(t, "feature-a")
+		boundWT2 := writeFakeWorktree(t, "feature-b")
+		otherWT := writeFakeWorktree(t, "feature-c")
+		unboundWT := writeFakeWorktree(t, "feature-d")
+
+		require.NoError(t, h.devStore.PutSession(ctx, dev.Session{
+			Branch:           "feature-a",
+			WorktreeDir:      boundWT1,
+			Status:           dev.SessionActive,
+			CreatedAt:        time.Now(),
+			CreatedByChannel: "dev-scratch",
+		}))
+		require.NoError(t, h.devStore.PutSession(ctx, dev.Session{
+			Branch:           "feature-b",
+			WorktreeDir:      boundWT2,
+			Status:           dev.SessionActive,
+			CreatedAt:        time.Now(),
+			CreatedByChannel: "dev-scratch",
+		}))
+		require.NoError(t, h.devStore.PutSession(ctx, dev.Session{
+			Branch:           "feature-c",
+			WorktreeDir:      otherWT,
+			Status:           dev.SessionActive,
+			CreatedAt:        time.Now(),
+			CreatedByChannel: "assistant",
+		}))
+		require.NoError(t, h.devStore.PutSession(ctx, dev.Session{
+			Branch:      "feature-d",
+			WorktreeDir: unboundWT,
+			Status:      dev.SessionActive,
+			CreatedAt:   time.Now(),
+		}))
+
+		// Mark the channel idle.
+		h.tracker.MessageReceived("dev-scratch")
+		h.tracker.ForceLastMessageAt("dev-scratch", time.Now().Add(-time.Second))
+
+		cleanupOnce(ctx, testUserID, h.configWriter, h.runtimeState,
+			h.tracker, h.secretStore, h.provisioners, h.onChannelChange,
+			h.lastLoggedError, h.messageQueue, h.channelsFunc, h.devStore)
+
+		// Channel torn down.
+		channels, err := h.configWriter.ReadChannels(testUserID)
+		require.NoError(t, err)
+		require.Empty(t, channels)
+		require.True(t, h.changeCalled)
+
+		// Bound sessions removed, others kept.
+		sessions, err := h.devStore.ListSessions(ctx)
+		require.NoError(t, err)
+		require.NotContains(t, sessions, "feature-a")
+		require.NotContains(t, sessions, "feature-b")
+		require.Contains(t, sessions, "feature-c", "session bound to another channel must survive")
+		require.Contains(t, sessions, "feature-d", "unbound session must survive")
+
+		// Worktree dirs mirror session state.
+		requireMissing(t, boundWT1)
+		requireMissing(t, boundWT2)
+		requireExists(t, otherWT)
+		requireExists(t, unboundWT)
 	})
 
 	t.Run("skips non-ephemeral channels", func(t *testing.T) {
@@ -164,7 +238,7 @@ func TestCleanupOnce(t *testing.T) {
 
 		cleanupOnce(context.Background(), testUserID, h.configWriter, h.runtimeState,
 			h.tracker, h.secretStore, h.provisioners, h.onChannelChange,
-			h.lastLoggedError, h.messageQueue, h.channelsFunc)
+			h.lastLoggedError, h.messageQueue, h.channelsFunc, h.devStore)
 
 		channels, err := h.configWriter.ReadChannels(testUserID)
 		require.NoError(t, err)
@@ -185,6 +259,7 @@ type ephemeralTestHarness struct {
 	lastLoggedError map[string]string
 	messageQueue    *queue.Queue
 	channelsFunc    func() map[channel.ChannelID]channel.Channel
+	devStore        *dev.Store
 }
 
 func setupEphemeralTest(t *testing.T, ch config.Channel) *ephemeralTestHarness {
@@ -222,6 +297,7 @@ func setupEphemeralTest(t *testing.T, ch config.Channel) *ephemeralTestHarness {
 		lastLoggedError: make(map[string]string),
 		messageQueue:    q,
 		channelsFunc:    func() map[channel.ChannelID]channel.Channel { return nil },
+		devStore:        dev.NewStore(s),
 	}
 	h.onChannelChange = func() { h.changeCalled = true }
 	return h
@@ -253,4 +329,26 @@ func (m *mockEphemeralProvisioner) Notify(_ context.Context, _ string, _ string)
 }
 func (m *mockEphemeralProvisioner) PlatformResponseInfo(_ channel.TeardownState) map[string]any {
 	return nil
+}
+
+// writeFakeWorktree creates a directory under t.TempDir() to stand in for a
+// dev session's worktree. Tests assert the dir is removed when cleanup runs.
+func writeFakeWorktree(t *testing.T, branch string) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "worktrees", branch)
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "marker"), []byte("x"), 0o644))
+	return dir
+}
+
+func requireMissing(t *testing.T, path string) {
+	t.Helper()
+	_, err := os.Stat(path)
+	require.True(t, os.IsNotExist(err), "expected %s to be removed, got err=%v", path, err)
+}
+
+func requireExists(t *testing.T, path string) {
+	t.Helper()
+	_, err := os.Stat(path)
+	require.NoError(t, err, "expected %s to still exist", path)
 }

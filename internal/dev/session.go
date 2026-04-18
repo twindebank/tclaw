@@ -19,4 +19,10 @@ type Session struct {
 	RepoDir     string        `json:"repo_dir"`
 	Status      SessionStatus `json:"status"`
 	CreatedAt   time.Time     `json:"created_at"`
+
+	// CreatedByChannel is the name of the channel that invoked dev_start.
+	// Ephemeral channel cleanup uses this to delete sessions bound to an
+	// ephemeral channel when it's torn down; the field is empty when the
+	// session wasn't started from a specific channel (e.g. stdio / tests).
+	CreatedByChannel string `json:"created_by_channel,omitempty"`
 }

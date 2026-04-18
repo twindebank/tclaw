@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	"tclaw/internal/channel"
 	"tclaw/internal/config"
+	"tclaw/internal/dev"
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/queue"
 	"tclaw/internal/user"
@@ -32,6 +34,7 @@ func cleanupEphemeralChannels(
 	onChannelChange func(),
 	messageQueue *queue.Queue,
 	channelsFunc func() map[channel.ChannelID]channel.Channel,
+	devStore *dev.Store,
 ) {
 	ticker := time.NewTicker(ephemeralCheckInterval)
 	defer ticker.Stop()
@@ -43,7 +46,7 @@ func cleanupEphemeralChannels(
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			cleanupOnce(ctx, userID, configWriter, runtimeState, tracker, secretStore, provisioners, onChannelChange, lastLoggedError, messageQueue, channelsFunc)
+			cleanupOnce(ctx, userID, configWriter, runtimeState, tracker, secretStore, provisioners, onChannelChange, lastLoggedError, messageQueue, channelsFunc, devStore)
 		}
 	}
 }
@@ -60,6 +63,7 @@ func cleanupOnce(
 	lastLoggedError map[string]string,
 	messageQueue *queue.Queue,
 	channelsFunc func() map[channel.ChannelID]channel.Channel,
+	devStore *dev.Store,
 ) {
 	channels, err := configWriter.ReadChannels(userID)
 	if err != nil {
@@ -141,6 +145,10 @@ func cleanupOnce(
 				"channel", ch.Name, "err", deleteErr)
 		}
 
+		// Tear down any dev sessions bound to this channel. Best-effort —
+		// failure here shouldn't prevent the channel from being removed.
+		cleanupDevSessionsForChannel(ctx, devStore, ch.Name)
+
 		delete(lastLoggedError, ch.Name)
 		cleaned = true
 		slog.Info("ephemeral cleanup: channel torn down", "channel", ch.Name)
@@ -156,5 +164,36 @@ func cleanupOnce(
 
 	if cleaned && onChannelChange != nil {
 		onChannelChange()
+	}
+}
+
+// cleanupDevSessionsForChannel deletes every dev session bound to the given
+// channel and removes its worktree directory on disk. Best-effort: errors are
+// logged, never returned, since the channel itself has already been torn down
+// by the time we get here.
+func cleanupDevSessionsForChannel(ctx context.Context, devStore *dev.Store, channelName string) {
+	if devStore == nil || channelName == "" {
+		return
+	}
+	removed, err := devStore.DeleteSessionsByChannel(ctx, channelName)
+	if err != nil {
+		slog.Error("ephemeral cleanup: failed to delete dev sessions for channel",
+			"channel", channelName, "err", err)
+		return
+	}
+	for _, sess := range removed {
+		slog.Info("ephemeral cleanup: removed dev session bound to channel",
+			"channel", channelName, "branch", sess.Branch, "worktree", sess.WorktreeDir)
+		// Remove the worktree directory. This leaves a stale entry in the
+		// bare repo's worktree list (cleaned up by `git worktree prune` on
+		// the next dev_start), but removes the bulk of on-disk state.
+		if sess.WorktreeDir == "" {
+			continue
+		}
+		if removeErr := os.RemoveAll(sess.WorktreeDir); removeErr != nil {
+			slog.Error("ephemeral cleanup: failed to remove worktree dir",
+				"channel", channelName, "branch", sess.Branch,
+				"worktree", sess.WorktreeDir, "err", removeErr)
+		}
 	}
 }
