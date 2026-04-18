@@ -14,18 +14,26 @@ import (
 )
 
 const (
-	maxMCPNameLength = 64
-	maxMCPURLLength  = 2048
+	maxMCPNameLength     = 64
+	maxMCPURLLength      = 2048
+	maxHeaderNameLength  = 128
+	maxHeaderValueLength = 4096
+	maxHeaders           = 16
 )
 
-var mcpNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+var (
+	mcpNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+
+	// headerNamePattern matches RFC 7230 token chars (header field names).
+	headerNamePattern = regexp.MustCompile(`^[!#$%&'*+\-.^_` + "`" + `|~0-9A-Za-z]+$`)
+)
 
 const ToolRemoteMCPAdd = "remote_mcp_add"
 
 func remoteMCPAddDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name:        ToolRemoteMCPAdd,
-		Description: "Connect a remote MCP server by URL. Discovers OAuth requirements automatically. If OAuth is needed, returns an authorization URL the user must visit. After auth completes, the remote MCP's tools will be available on the next message turn.",
+		Description: "Connect a remote MCP server by URL. By default, discovers OAuth requirements automatically and returns an authorization URL if needed. For servers fronted by a non-OAuth auth layer (e.g. Cloudflare Access service tokens), pass skip_auth_discovery=true and headers={...} to attach static credentials — the headers are stored encrypted and sent on every request.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -40,6 +48,15 @@ func remoteMCPAddDef() mcp.ToolDef {
 				"channel": {
 					"type": "string",
 					"description": "Channel name to scope this remote MCP to. Its tools will only be available on this channel."
+				},
+				"skip_auth_discovery": {
+					"type": "boolean",
+					"description": "If true, skip OAuth discovery entirely. Use when the server uses a non-OAuth auth scheme — combine with 'headers' to attach the credentials."
+				},
+				"headers": {
+					"type": "object",
+					"description": "Static headers to send on every request (e.g. {\"CF-Access-Client-Id\": \"...\", \"CF-Access-Client-Secret\": \"...\"} for Cloudflare Access service tokens). Stored encrypted — treated as secrets. Requires skip_auth_discovery=true.",
+					"additionalProperties": {"type": "string"}
 				}
 			},
 			"required": ["url", "name", "channel"]
@@ -48,9 +65,11 @@ func remoteMCPAddDef() mcp.ToolDef {
 }
 
 type remoteMCPAddArgs struct {
-	URL     string `json:"url"`
-	Name    string `json:"name"`
-	Channel string `json:"channel"`
+	URL               string            `json:"url"`
+	Name              string            `json:"name"`
+	Channel           string            `json:"channel"`
+	SkipAuthDiscovery bool              `json:"skip_auth_discovery,omitempty"`
+	Headers           map[string]string `json:"headers,omitempty"`
 }
 
 func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
@@ -77,13 +96,41 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("channel is required — specify which channel this remote MCP's tools should be available on")
 		}
 
+		if len(a.Headers) > 0 {
+			if !a.SkipAuthDiscovery {
+				return nil, fmt.Errorf("headers require skip_auth_discovery=true — combining OAuth with static headers is not currently supported")
+			}
+			if err := validateHeaders(a.Headers); err != nil {
+				return nil, err
+			}
+		}
+
 		// Store the remote MCP entry.
 		entry, err := deps.Manager.AddRemoteMCP(ctx, a.Name, a.URL, a.Channel)
 		if err != nil {
 			return nil, fmt.Errorf("add remote mcp: %w", err)
 		}
 
-		slog.Info("discovering auth for remote MCP", "name", a.Name, "url", a.URL)
+		if a.SkipAuthDiscovery {
+			if len(a.Headers) > 0 {
+				authData := &remotemcpstore.RemoteMCPAuth{StaticHeaders: a.Headers}
+				if err := deps.Manager.SetRemoteMCPAuth(ctx, a.Name, authData); err != nil {
+					return nil, fmt.Errorf("store static headers: %w", err)
+				}
+			}
+			if updateErr := deps.ConfigUpdater(ctx); updateErr != nil {
+				return nil, fmt.Errorf("remote MCP %q added but config update failed — tools won't be available until next restart: %w", a.Name, updateErr)
+			}
+			result := map[string]any{
+				"name":    entry.Name,
+				"url":     redactURL(entry.URL),
+				"status":  "ready",
+				"message": fmt.Sprintf("Remote MCP %q added with %d static header(s) attached. Its tools will be available on the next message.", a.Name, len(a.Headers)),
+			}
+			return json.Marshal(result)
+		}
+
+		slog.Info("discovering auth for remote MCP", "name", a.Name, "host", parsed.Host)
 
 		// Discover whether OAuth is required.
 		authMeta, err := discovery.DiscoverAuth(ctx, a.URL)
@@ -183,4 +230,38 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 		}
 		return json.Marshal(result)
 	}
+}
+
+func validateHeaders(headers map[string]string) error {
+	if len(headers) > maxHeaders {
+		return fmt.Errorf("too many headers: max %d, got %d", maxHeaders, len(headers))
+	}
+	for name, value := range headers {
+		if name == "" || len(name) > maxHeaderNameLength || !headerNamePattern.MatchString(name) {
+			return fmt.Errorf("invalid header name %q: must be a valid HTTP field name under %d chars", name, maxHeaderNameLength)
+		}
+		if value == "" || len(value) > maxHeaderValueLength {
+			return fmt.Errorf("invalid header value for %q: must be non-empty and under %d chars", name, maxHeaderValueLength)
+		}
+		// Reject CR/LF and other control chars to prevent header injection.
+		for _, r := range value {
+			if r < 0x20 && r != '\t' {
+				return fmt.Errorf("invalid header value for %q: contains control character", name)
+			}
+			if r == 0x7f {
+				return fmt.Errorf("invalid header value for %q: contains DEL character", name)
+			}
+		}
+	}
+	return nil
+}
+
+// redactURL returns a URL suitable for logging — preserves scheme and host but
+// drops the path (which may contain a secret, e.g. ha-mcp's secret_path segment).
+func redactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "<redacted>"
+	}
+	return u.Scheme + "://" + u.Host
 }

@@ -21,9 +21,17 @@ type ConfigFile struct {
 
 // RemoteMCPEntry describes a remote MCP server to include in the config file.
 type RemoteMCPEntry struct {
-	Name        string // config key (e.g. "linear")
-	URL         string // MCP server URL
-	BearerToken string // optional — if non-empty, adds Authorization header
+	Name string // config key (e.g. "linear")
+	URL  string // MCP server URL
+
+	// BearerToken, if non-empty, sets the Authorization header.
+	BearerToken string
+
+	// ExtraHeaders are added verbatim to the request. Used for auth layers that
+	// need non-Bearer credentials (e.g. Cloudflare Access service tokens send
+	// CF-Access-Client-Id and CF-Access-Client-Secret). If a key collides with
+	// the Authorization header set by BearerToken, BearerToken wins.
+	ExtraHeaders map[string]string
 }
 
 // GenerateConfigFile writes an MCP config JSON file that Claude CLI can
@@ -72,10 +80,17 @@ func writeConfigFile(path string, localAddr string, localToken string, remotes [
 			Type: "http",
 			URL:  r.URL,
 		}
-		if r.BearerToken != "" {
-			entry.Headers = map[string]string{
-				"Authorization": "Bearer " + r.BearerToken,
+		if len(r.ExtraHeaders) > 0 {
+			entry.Headers = make(map[string]string, len(r.ExtraHeaders)+1)
+			for k, v := range r.ExtraHeaders {
+				entry.Headers[k] = v
 			}
+		}
+		if r.BearerToken != "" {
+			if entry.Headers == nil {
+				entry.Headers = make(map[string]string, 1)
+			}
+			entry.Headers["Authorization"] = "Bearer " + r.BearerToken
 		}
 		cfg.MCPServers[r.Name] = entry
 	}

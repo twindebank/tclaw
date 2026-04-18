@@ -14,31 +14,38 @@ import (
 )
 
 const (
-	remoteMCPsStoreKey    = "remote_mcps"
+	remoteMCPsStoreKey     = "remote_mcps"
 	remoteMCPAuthKeyPrefix = "remote_mcp/"
 )
 
 // RemoteMCP is a remote MCP server the user has connected.
 type RemoteMCP struct {
-	Name    string    `json:"name"`
-	URL     string    `json:"url"`
-	Channel string    `json:"channel"`
+	Name      string    `json:"name"`
+	URL       string    `json:"url"`
+	Channel   string    `json:"channel"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// RemoteMCPAuth holds OAuth credentials and registration for a remote MCP.
+// RemoteMCPAuth holds OAuth credentials and registration for a remote MCP,
+// plus any non-OAuth credentials such as Cloudflare Access service tokens.
 type RemoteMCPAuth struct {
-	AuthServerIssuer      string `json:"auth_server_issuer"`
-	AuthorizationEndpoint string `json:"authorization_endpoint"`
-	TokenEndpoint         string `json:"token_endpoint"`
+	AuthServerIssuer      string `json:"auth_server_issuer,omitempty"`
+	AuthorizationEndpoint string `json:"authorization_endpoint,omitempty"`
+	TokenEndpoint         string `json:"token_endpoint,omitempty"`
 	RegistrationEndpoint  string `json:"registration_endpoint,omitempty"`
 
-	ClientID     string `json:"client_id"`
+	ClientID     string `json:"client_id,omitempty"`
 	ClientSecret string `json:"client_secret,omitempty"`
 
-	AccessToken  string    `json:"access_token"`
+	AccessToken  string    `json:"access_token,omitempty"`
 	RefreshToken string    `json:"refresh_token,omitempty"`
 	TokenExpiry  time.Time `json:"token_expiry,omitempty"`
+
+	// StaticHeaders are sent verbatim on every request. Used for credentials
+	// that aren't OAuth Bearer tokens — e.g. Cloudflare Access service tokens
+	// (CF-Access-Client-Id / CF-Access-Client-Secret). Stored encrypted because
+	// they are secrets.
+	StaticHeaders map[string]string `json:"static_headers,omitempty"`
 }
 
 // TokenExpired reports whether the access token has expired (with 1-minute buffer).
