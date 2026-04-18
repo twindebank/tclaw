@@ -19,7 +19,7 @@ func TestOutbox(t *testing.T) {
 	t.Run("send edit done ordering", func(t *testing.T) {
 		rec, ob := setup(t)
 
-		id, err := ob.Send(context.Background(), "ch1", "hello")
+		id, err := ob.Send(context.Background(), "ch1", "hello", channel.SendOpts{})
 		require.NoError(t, err)
 		require.NotEmpty(t, id)
 
@@ -48,7 +48,7 @@ func TestOutbox(t *testing.T) {
 			return "real-42", nil
 		})
 
-		proxyID, err := ob.Send(context.Background(), "ch1", "msg")
+		proxyID, err := ob.Send(context.Background(), "ch1", "msg", channel.SendOpts{})
 		require.NoError(t, err)
 
 		err = ob.Edit(context.Background(), "ch1", proxyID, "updated")
@@ -73,7 +73,7 @@ func TestOutbox(t *testing.T) {
 			return "real-1", nil
 		})
 
-		proxyID, err := ob.Send(context.Background(), "ch1", "initial")
+		proxyID, err := ob.Send(context.Background(), "ch1", "initial", channel.SendOpts{})
 		require.NoError(t, err)
 
 		for i := range 50 {
@@ -109,7 +109,7 @@ func TestOutbox(t *testing.T) {
 			return "ok", nil
 		})
 
-		_, err := ob.Send(context.Background(), "ch1", "will retry")
+		_, err := ob.Send(context.Background(), "ch1", "will retry", channel.SendOpts{})
 		require.NoError(t, err)
 
 		// Flush waits for delivery to complete (including retries).
@@ -131,9 +131,9 @@ func TestOutbox(t *testing.T) {
 			return "ok", nil
 		})
 
-		_, err := ob.Send(context.Background(), "ch1", "blocked")
+		_, err := ob.Send(context.Background(), "ch1", "blocked", channel.SendOpts{})
 		require.NoError(t, err)
-		_, err = ob.Send(context.Background(), "ch1", "next message")
+		_, err = ob.Send(context.Background(), "ch1", "next message", channel.SendOpts{})
 		require.NoError(t, err)
 
 		require.NoError(t, ob.Flush(context.Background()))
@@ -159,9 +159,9 @@ func TestOutbox(t *testing.T) {
 			return "ok", nil
 		})
 
-		_, err := ob.Send(context.Background(), "ch1", "bad encoding")
+		_, err := ob.Send(context.Background(), "ch1", "bad encoding", channel.SendOpts{})
 		require.NoError(t, err)
-		_, err = ob.Send(context.Background(), "ch1", "next message")
+		_, err = ob.Send(context.Background(), "ch1", "next message", channel.SendOpts{})
 		require.NoError(t, err)
 
 		require.NoError(t, ob.Flush(context.Background()))
@@ -180,7 +180,7 @@ func TestOutbox(t *testing.T) {
 	t.Run("done waits for preceding ops", func(t *testing.T) {
 		rec, ob := setup(t)
 
-		_, err := ob.Send(context.Background(), "ch1", "msg")
+		_, err := ob.Send(context.Background(), "ch1", "msg", channel.SendOpts{})
 		require.NoError(t, err)
 		err = ob.Done(context.Background(), "ch1")
 		require.NoError(t, err)
@@ -207,7 +207,7 @@ func TestOutbox(t *testing.T) {
 		})
 		ob1.Start(ctx1)
 
-		_, err = ob1.Send(context.Background(), "ch1", "persisted msg")
+		_, err = ob1.Send(context.Background(), "ch1", "persisted msg", channel.SendOpts{})
 		require.NoError(t, err)
 
 		// Give a moment for persistence then shutdown.
@@ -246,7 +246,7 @@ func TestOutbox(t *testing.T) {
 			wg.Add(1)
 			go func(n int) {
 				defer wg.Done()
-				_, sendErr := ob.Send(context.Background(), "ch1", fmt.Sprintf("msg-%d", n))
+				_, sendErr := ob.Send(context.Background(), "ch1", fmt.Sprintf("msg-%d", n), channel.SendOpts{})
 				if sendErr != nil {
 					t.Errorf("send %d failed: %v", n, sendErr)
 				}
@@ -274,7 +274,7 @@ func TestOutbox(t *testing.T) {
 		})
 		ob.Start(ctx)
 
-		_, err = ob.Send(context.Background(), "ch1", "will be persisted")
+		_, err = ob.Send(context.Background(), "ch1", "will be persisted", channel.SendOpts{})
 		require.NoError(t, err)
 
 		// Cancel and wait for shutdown.
@@ -303,7 +303,7 @@ func TestOutbox(t *testing.T) {
 		})
 
 		for i := range 5 {
-			_, err := ob.Send(context.Background(), "ch1", fmt.Sprintf("msg-%d", i))
+			_, err := ob.Send(context.Background(), "ch1", fmt.Sprintf("msg-%d", i), channel.SendOpts{})
 			require.NoError(t, err)
 		}
 
@@ -328,7 +328,7 @@ func TestOutbox(t *testing.T) {
 		ob.Start(ctx)
 
 		// Send persists on enqueue, so it should fail.
-		_, err := ob.Send(context.Background(), "ch1", "should fail")
+		_, err := ob.Send(context.Background(), "ch1", "should fail", channel.SendOpts{})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "disk full")
 	})
@@ -411,7 +411,7 @@ func (r *recordingChannel) Info() channel.Info {
 
 func (r *recordingChannel) Messages(context.Context) <-chan string { return make(chan string) }
 
-func (r *recordingChannel) Send(ctx context.Context, text string) (channel.MessageID, error) {
+func (r *recordingChannel) Send(ctx context.Context, text string, _ channel.SendOpts) (channel.MessageID, error) {
 	r.mu.Lock()
 	sf := r.sendFunc
 	r.counter++
@@ -476,7 +476,7 @@ func (b *blockingChannel) Info() channel.Info {
 }
 
 func (b *blockingChannel) Messages(context.Context) <-chan string { return make(chan string) }
-func (b *blockingChannel) Send(ctx context.Context, _ string) (channel.MessageID, error) {
+func (b *blockingChannel) Send(ctx context.Context, _ string, _ channel.SendOpts) (channel.MessageID, error) {
 	<-ctx.Done()
 	return "", ctx.Err()
 }

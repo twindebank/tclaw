@@ -1003,7 +1003,7 @@ func sendLifecycleNotification(ctx context.Context, channels []channel.Channel, 
 		if !notify[ch.Info().Name] {
 			continue
 		}
-		if _, sendErr := ch.Send(ctx, message); sendErr != nil {
+		if _, sendErr := ch.Send(ctx, message, channel.SendOpts{}); sendErr != nil {
 			slog.Warn("failed to send lifecycle notification", "channel", ch.Info().Name, "err", sendErr)
 		}
 	}

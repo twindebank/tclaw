@@ -307,8 +307,10 @@ type mockChannel struct {
 func (c *mockChannel) Info() channel.Info {
 	return channel.Info{ID: c.id, Name: c.name}
 }
-func (c *mockChannel) Messages(_ context.Context) <-chan string                    { return nil }
-func (c *mockChannel) Send(_ context.Context, _ string) (channel.MessageID, error) { return "", nil }
+func (c *mockChannel) Messages(_ context.Context) <-chan string { return nil }
+func (c *mockChannel) Send(_ context.Context, _ string, _ channel.SendOpts) (channel.MessageID, error) {
+	return "", nil
+}
 func (c *mockChannel) Edit(_ context.Context, _ channel.MessageID, _ string) error { return nil }
 func (c *mockChannel) Done(_ context.Context) error                                { return nil }
 func (c *mockChannel) SplitStatusMessages() bool                                   { return false }

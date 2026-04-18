@@ -48,6 +48,11 @@ type Op struct {
 
 	Text string `json:"text"`
 
+	// Notify carries the SendOpts.Notify hint through the queue so the
+	// allowlist decision survives persistence and restart. Defaults to false
+	// (silent) on ops persisted before this field existed.
+	Notify bool `json:"notify,omitempty"`
+
 	// Seq is a monotonic counter used for edit coalescing — when multiple
 	// Edits target the same message, only the highest-Seq one is delivered.
 	Seq uint64 `json:"seq"`
@@ -150,7 +155,7 @@ func (o *Outbox) Start(ctx context.Context) {
 
 // Send enqueues a message for delivery. Returns a proxy MessageID immediately.
 // Returns an error only if the operation fails to enqueue (e.g. store write failure).
-func (o *Outbox) Send(ctx context.Context, chID channel.ChannelID, text string) (channel.MessageID, error) {
+func (o *Outbox) Send(ctx context.Context, chID channel.ChannelID, text string, opts channel.SendOpts) (channel.MessageID, error) {
 	proxyID := channel.MessageID(id.Generate("outbox"))
 
 	op := Op{
@@ -158,6 +163,7 @@ func (o *Outbox) Send(ctx context.Context, chID channel.ChannelID, text string) 
 		ChannelID: chID,
 		ProxyID:   proxyID,
 		Text:      text,
+		Notify:    opts.Notify,
 	}
 
 	if err := o.enqueue(chID, op, true); err != nil {
@@ -392,7 +398,7 @@ func (o *Outbox) deliver(chID channel.ChannelID, cq *channelQueue, op Op) {
 		switch op.Kind {
 		case OpSend:
 			var realID channel.MessageID
-			realID, err = ch.Send(o.ctx, op.Text)
+			realID, err = ch.Send(o.ctx, op.Text, channel.SendOpts{Notify: op.Notify})
 			if err == nil {
 				o.mu.Lock()
 				cq.proxyMap[op.ProxyID] = realID

@@ -42,7 +42,7 @@ func (s *Stdio) Messages(ctx context.Context) <-chan string {
 	return out
 }
 
-func (s *Stdio) Send(_ context.Context, text string) (channel.MessageID, error) {
+func (s *Stdio) Send(_ context.Context, text string, _ channel.SendOpts) (channel.MessageID, error) {
 	fmt.Print(text)
 	return "", nil
 }

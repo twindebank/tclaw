@@ -266,7 +266,7 @@ func (f *fakeChannel) Messages(ctx context.Context) <-chan string {
 	return ch
 }
 
-func (f *fakeChannel) Send(_ context.Context, _ string) (channel.MessageID, error) {
+func (f *fakeChannel) Send(_ context.Context, _ string, _ channel.SendOpts) (channel.MessageID, error) {
 	return "", nil
 }
 

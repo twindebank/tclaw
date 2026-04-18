@@ -141,7 +141,7 @@ func (c *stubResumeChannel) Info() channel.Info {
 	return channel.Info{ID: c.id, Name: string(c.id)}
 }
 func (c *stubResumeChannel) Messages(_ context.Context) <-chan string { return nil }
-func (c *stubResumeChannel) Send(_ context.Context, _ string) (channel.MessageID, error) {
+func (c *stubResumeChannel) Send(_ context.Context, _ string, _ channel.SendOpts) (channel.MessageID, error) {
 	return "", nil
 }
 func (c *stubResumeChannel) Edit(_ context.Context, _ channel.MessageID, _ string) error { return nil }

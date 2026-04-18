@@ -90,7 +90,7 @@ func (c *recordingChannel) Info() channel.Info {
 	return channel.Info{ID: c.id, Name: c.name}
 }
 func (c *recordingChannel) Messages(_ context.Context) <-chan string { return nil }
-func (c *recordingChannel) Send(_ context.Context, msg string) (channel.MessageID, error) {
+func (c *recordingChannel) Send(_ context.Context, msg string, _ channel.SendOpts) (channel.MessageID, error) {
 	c.sendCalled.Store(true)
 	c.lastMessage.Store(msg)
 	return "", nil

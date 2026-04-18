@@ -185,10 +185,12 @@ func (s *stubChannel) Info() channel.Info {
 	return channel.Info{ID: channel.ChannelID(s.name + "-id"), Name: s.name, Type: channel.TypeSocket}
 }
 
-func (s *stubChannel) Messages(context.Context) <-chan string                  { return make(chan string) }
-func (s *stubChannel) Send(context.Context, string) (channel.MessageID, error) { return "", nil }
-func (s *stubChannel) Edit(context.Context, channel.MessageID, string) error   { return nil }
-func (s *stubChannel) Done(context.Context) error                              { return nil }
-func (s *stubChannel) SplitStatusMessages() bool                               { return false }
-func (s *stubChannel) Markup() channel.Markup                                  { return channel.MarkupMarkdown }
-func (s *stubChannel) StatusWrap() channel.StatusWrap                          { return channel.StatusWrap{} }
+func (s *stubChannel) Messages(context.Context) <-chan string { return make(chan string) }
+func (s *stubChannel) Send(context.Context, string, channel.SendOpts) (channel.MessageID, error) {
+	return "", nil
+}
+func (s *stubChannel) Edit(context.Context, channel.MessageID, string) error { return nil }
+func (s *stubChannel) Done(context.Context) error                            { return nil }
+func (s *stubChannel) SplitStatusMessages() bool                             { return false }
+func (s *stubChannel) Markup() channel.Markup                                { return channel.MarkupMarkdown }
+func (s *stubChannel) StatusWrap() channel.StatusWrap                        { return channel.StatusWrap{} }
