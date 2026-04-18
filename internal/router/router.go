@@ -657,17 +657,18 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			slog.Error("failed to load persisted queue", "err", loadErr)
 		}
 
-		// If the agent was interrupted mid-turn (e.g. force-killed during a
-		// channel change), start immediately with a synthetic resume message
-		// instead of blocking for a new inbound message. Without this, the
-		// agent would never restart because no one sends it a message.
+		// Decide whether we already have enough reason to start the agent
+		// (resume marker or queued work waiting) or should block for a fresh
+		// live message. See determineStartupSignal for the rules.
+		decision := determineStartupSignal(ctx, messageQueue, allChMap)
 		var firstMsg channel.TaggedMessage
-		if resumeMsg := checkAutoResume(ctx, messageQueue, allChMap); resumeMsg != nil {
-			firstMsg = *resumeMsg
+		if decision.FirstMessage != nil {
+			firstMsg = *decision.FirstMessage
 		}
 
-		// If no auto-resume, wait for a message or shutdown.
-		if firstMsg.ChannelID == "" {
+		// StartNow covers both resume and persisted-queue cases. Only block
+		// on live inbound messages when there's literally nothing to do.
+		if !decision.StartNow {
 			select {
 			case <-ctx.Done():
 				cancelDynamic()
@@ -681,13 +682,20 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			}
 		}
 
-		slog.Info("message received, starting agent", "user", mu.cfg.ID, "channel", firstMsg.ChannelID)
-		if ch, ok := allChMap[firstMsg.ChannelID]; ok {
-			source := channel.SourceUser
-			if firstMsg.SourceInfo != nil {
-				source = firstMsg.SourceInfo.Source
+		if firstMsg.ChannelID == "" {
+			// Started for persisted queue work without a synthetic first
+			// message — the agent will call Queue.Next() which dequeues the
+			// persisted messages before reading from bridgeCh.
+			slog.Info("starting agent to drain persisted queue", "user", mu.cfg.ID, "queued", messageQueue.Len())
+		} else {
+			slog.Info("message received, starting agent", "user", mu.cfg.ID, "channel", firstMsg.ChannelID)
+			if ch, ok := allChMap[firstMsg.ChannelID]; ok {
+				source := channel.SourceUser
+				if firstMsg.SourceInfo != nil {
+					source = firstMsg.SourceInfo.Source
+				}
+				activityTracker.MessageReceivedFrom(ch.Info().Name, source)
 			}
-			activityTracker.MessageReceivedFrom(ch.Info().Name, source)
 		}
 
 		// On restarts (idle timeout, deploy, channel change), pass a resume
@@ -726,10 +734,15 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			}
 		}
 
-		// Bridge: re-emit the first message plus remaining merged messages
-		// into a channel that agent.RunWithMessages reads from.
+		// Bridge: re-emit the first message (if any) plus remaining merged
+		// messages into a channel that agent.RunWithMessages reads from.
+		// When started to drain persisted queue work, firstMsg is empty and
+		// we skip the pre-fill — the agent's Queue.Next() dequeues the
+		// persisted messages directly before reading from bridgeCh.
 		bridgeCh := make(chan channel.TaggedMessage, 1)
-		bridgeCh <- firstMsg
+		if firstMsg.ChannelID != "" {
+			bridgeCh <- firstMsg
+		}
 
 		bridgeDone := make(chan struct{})
 		go func() {
