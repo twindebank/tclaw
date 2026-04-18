@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"tclaw/internal/channel"
+	"tclaw/internal/dev"
 	"tclaw/internal/mcp"
 )
 
@@ -94,13 +95,53 @@ func channelDeleteHandler(deps Deps) mcp.ToolHandler {
 			}
 		}
 
+		// Tear down any dev sessions bound to this channel. Best-effort: the
+		// channel is already gone from config, so a session-store failure
+		// shouldn't block the tool call.
+		devSessionsRemoved := cleanupDevSessionsForChannel(ctx, deps.DevStore, a.Name)
+
 		if deps.OnChannelChange != nil {
 			deps.OnChannelChange()
 		}
 
-		return json.Marshal(map[string]string{
-			"name":    a.Name,
-			"message": fmt.Sprintf("Channel %q deleted. The agent will restart automatically.", a.Name),
+		message := fmt.Sprintf("Channel %q deleted. The agent will restart automatically.", a.Name)
+		if devSessionsRemoved > 0 {
+			message = fmt.Sprintf("Channel %q deleted (%d dev session(s) also cleaned up). The agent will restart automatically.",
+				a.Name, devSessionsRemoved)
+		}
+		return json.Marshal(map[string]any{
+			"name":                 a.Name,
+			"message":              message,
+			"dev_sessions_removed": devSessionsRemoved,
 		})
 	}
+}
+
+// cleanupDevSessionsForChannel deletes every dev session bound to channelName
+// and removes its worktree directory on disk. Best-effort: errors are logged,
+// never returned. Returns the number of sessions removed for use in the tool
+// response.
+func cleanupDevSessionsForChannel(ctx context.Context, devStore *dev.Store, channelName string) int {
+	if devStore == nil || channelName == "" {
+		return 0
+	}
+	removed, err := devStore.DeleteSessionsByChannel(ctx, channelName)
+	if err != nil {
+		slog.Error("channel_delete: failed to clean up dev sessions",
+			"channel", channelName, "err", err)
+		return 0
+	}
+	for _, sess := range removed {
+		slog.Info("channel_delete: removed dev session bound to channel",
+			"channel", channelName, "branch", sess.Branch, "worktree", sess.WorktreeDir)
+		if sess.WorktreeDir == "" {
+			continue
+		}
+		if removeErr := os.RemoveAll(sess.WorktreeDir); removeErr != nil {
+			slog.Error("channel_delete: failed to remove worktree dir",
+				"channel", channelName, "branch", sess.Branch,
+				"worktree", sess.WorktreeDir, "err", removeErr)
+		}
+	}
+	return len(removed)
 }

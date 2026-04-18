@@ -7,6 +7,7 @@ import (
 	"tclaw/internal/channel"
 	"tclaw/internal/claudecli"
 	"tclaw/internal/config"
+	"tclaw/internal/dev"
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/mcp"
 	"tclaw/internal/reconciler"
@@ -42,6 +43,10 @@ type Package struct {
 	// TelegramHistory reads Telegram message history for a channel. Nil if
 	// the Telegram Client API is not available.
 	TelegramHistory func(ctx context.Context, channelName string, limit int) (json.RawMessage, error)
+
+	// DevStore is used by channel_delete to tear down any dev sessions that
+	// were started from the channel being deleted.
+	DevStore *dev.Store
 }
 
 func (p *Package) Name() string { return "channel" }
@@ -116,6 +121,7 @@ func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationCont
 		ActivityTracker: p.ActivityTracker,
 		Provisioners:    p.Provisioners,
 		ActiveChannel:   p.ActiveChannel,
+		DevStore:        p.DevStore,
 	})
 
 	// Cross-channel send tools.

@@ -21,6 +21,11 @@ type Package struct {
 	UserDir     string
 	UserID      user.ID
 	ConfigPath  string
+
+	// ActiveChannel returns the channel name currently being processed. May be
+	// nil in tests. Threaded through to dev_start so sessions record which
+	// channel spawned them for ephemeral cleanup.
+	ActiveChannel func() string
 }
 
 func (p *Package) Name() string { return "dev" }
@@ -67,12 +72,13 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 
 func (p *Package) Register(handler *mcp.Handler, ctx toolpkg.RegistrationContext) error {
 	RegisterTools(handler, Deps{
-		Store:       p.Store,
-		SecretStore: p.SecretStore,
-		UserDir:     p.UserDir,
-		UserID:      p.UserID,
-		LogBuffer:   p.LogBuffer,
-		ConfigPath:  p.ConfigPath,
+		Store:         p.Store,
+		SecretStore:   p.SecretStore,
+		UserDir:       p.UserDir,
+		UserID:        p.UserID,
+		LogBuffer:     p.LogBuffer,
+		ConfigPath:    p.ConfigPath,
+		ActiveChannel: p.ActiveChannel,
 	})
 	return nil
 }
