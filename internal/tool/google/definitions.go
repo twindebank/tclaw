@@ -314,6 +314,14 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 				"Calendar updates: use 'calendar events update' (full PUT), NOT 'calendar events patch' — patching date to dateTime causes a 400. " +
 				"For timezone in dateTime, use UTC offset in the ISO string (e.g. 2026-03-13T17:26:00+00:00), NOT a separate timeZone field. " +
 				"Sheets writes: all write operations (values.update, batchUpdate, values.clear, etc.) require the 'json' field — pass the request body as a JSON string there. Example: command='sheets spreadsheets values update', params='{\"spreadsheetId\":\"...\",\"range\":\"Sheet1!A1\",\"valueInputOption\":\"RAW\"}', json='{\"values\":[[\"hello\"]]}'.\n\n" +
+				"SHEETS GOTCHAS:\n" +
+				"Checkboxes in Google Sheets Tables: do NOT use setDataValidation — it fails with 'not allowed on cells in typed columns' when the sheet uses a Table. " +
+				"Use updateCells with fields='dataValidation' instead (works even on typed columns). " +
+				"If cells show a validation error after adding checkbox format, they likely have stringValue 'TRUE'/'FALSE' instead of boolValue true/false — " +
+				"fix with a separate updateCells request with fields='userEnteredValue' and boolValue: true/false.\n" +
+				"Hyperlinks: set a hyperlink using textFormatRuns with a link object — NOT a =HYPERLINK() formula. " +
+				"Pass userEnteredValue (stringValue: display text) and textFormatRuns ([{startIndex:0, format:{link:{uri:\"...\"}}}]) with fields='userEnteredValue,textFormatRuns'. " +
+				"This matches how Google Sheets stores 'Insert Link' hyperlinks (the hyperlink field on the cell).\n\n" +
 				"READING PDF ATTACHMENTS from Gmail:\n" +
 				"1. google_workspace with 'gmail users messages get', format=full — result is saved to a file (too large for context)\n" +
 				"2. Use node to parse the file and find attachment IDs: iterate payload.parts recursively, look for body.attachmentId and filename\n" +
