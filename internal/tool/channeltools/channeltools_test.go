@@ -66,9 +66,10 @@ func TestChannelCreate(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 
 		result := callTool(t, th.handler, "channel_create", map[string]any{
-			"name":        "phone",
-			"description": "Mobile device",
-			"type":        "socket",
+			"name":            "phone",
+			"description":     "Mobile device",
+			"type":            "socket",
+			"initial_message": "Hello",
 		})
 
 		var created map[string]any
@@ -86,9 +87,10 @@ func TestChannelCreate(t *testing.T) {
 		th := setupHarness(t, config.EnvProd)
 
 		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
-			"name":        "phone",
-			"description": "Mobile device",
-			"type":        "socket",
+			"name":            "phone",
+			"description":     "Mobile device",
+			"type":            "socket",
+			"initial_message": "Hello",
 		})
 		require.Contains(t, err.Error(), "not allowed")
 	})
@@ -97,10 +99,11 @@ func TestChannelCreate(t *testing.T) {
 		th := setupHarnessWithProvisioner(t, config.EnvProd)
 
 		result := callTool(t, th.handler, "channel_create", map[string]any{
-			"name":          "mybot",
-			"description":   "Personal Telegram bot",
-			"type":          "telegram",
-			"allowed_users": []any{"123456789"},
+			"name":            "mybot",
+			"description":     "Personal Telegram bot",
+			"type":            "telegram",
+			"allowed_users":   []any{"123456789"},
+			"initial_message": "Hello — ready to help.",
 		})
 
 		var created map[string]any
@@ -131,10 +134,11 @@ func TestChannelCreate(t *testing.T) {
 		th.provisioner.provisionErr = fmt.Errorf("BotFather unreachable")
 
 		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
-			"name":          "mybot",
-			"description":   "Personal Telegram bot",
-			"type":          "telegram",
-			"allowed_users": []any{"123456789"},
+			"name":            "mybot",
+			"description":     "Personal Telegram bot",
+			"type":            "telegram",
+			"allowed_users":   []any{"123456789"},
+			"initial_message": "Hello",
 		})
 
 		// The tool should return the provisioning error, not silently succeed.
@@ -147,10 +151,11 @@ func TestChannelCreate(t *testing.T) {
 		th.provisioner.validateCreateErr = fmt.Errorf("description too long for Telegram channel: 62 characters, max 56")
 
 		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
-			"name":          "mybot",
-			"description":   "This description is way too long for the BotFather display name limit of 56 characters",
-			"type":          "telegram",
-			"allowed_users": []any{"123456789"},
+			"name":            "mybot",
+			"description":     "This description is way too long for the BotFather display name limit of 56 characters",
+			"type":            "telegram",
+			"allowed_users":   []any{"123456789"},
+			"initial_message": "Hello",
 		})
 
 		require.Contains(t, err.Error(), "description too long")
@@ -162,10 +167,11 @@ func TestChannelCreate(t *testing.T) {
 		// No provisioner and no bot token — creation must fail so the agent
 		// knows to prompt the user for Telegram Client API credentials.
 		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
-			"name":          "mybot",
-			"description":   "No provisioner",
-			"type":          "telegram",
-			"allowed_users": []any{"123456789"},
+			"name":            "mybot",
+			"description":     "No provisioner",
+			"type":            "telegram",
+			"allowed_users":   []any{"123456789"},
+			"initial_message": "Hello",
 		})
 
 		require.Contains(t, err.Error(), "auto-provisioning is unavailable")
@@ -177,9 +183,10 @@ func TestChannelCreate(t *testing.T) {
 
 		// "desktop" already exists in the registry.
 		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
-			"name":        "desktop",
-			"description": "conflicts with existing",
-			"type":        "socket",
+			"name":            "desktop",
+			"description":     "conflicts with existing",
+			"type":            "socket",
+			"initial_message": "Hello",
 		})
 		require.Contains(t, err.Error(), "already exists")
 	})
@@ -188,32 +195,22 @@ func TestChannelCreate(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 
 		callTool(t, th.handler, "channel_create", map[string]any{
-			"name":        "phone",
-			"description": "first",
-			"type":        "socket",
+			"name":            "phone",
+			"description":     "first",
+			"type":            "socket",
+			"initial_message": "Hello",
 		})
 
 		// Reload registry so it sees the newly-added channel.
 		reloadRegistry(t, th)
 
 		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
-			"name":        "phone",
-			"description": "duplicate",
-			"type":        "socket",
+			"name":            "phone",
+			"description":     "duplicate",
+			"type":            "socket",
+			"initial_message": "Hello",
 		})
 		require.Contains(t, err.Error(), "already exists")
-	})
-
-	t.Run("ephemeral requires initial_message", func(t *testing.T) {
-		th := setupHarness(t, config.EnvLocal)
-
-		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
-			"name":        "task-bot",
-			"description": "Ephemeral task channel",
-			"type":        "socket",
-			"ephemeral":   true,
-		})
-		require.Contains(t, err.Error(), "initial_message is required for ephemeral channels")
 	})
 
 	t.Run("ephemeral with initial_message succeeds", func(t *testing.T) {
@@ -241,18 +238,33 @@ func TestChannelCreate(t *testing.T) {
 		}
 	})
 
-	t.Run("non-ephemeral allows missing initial_message", func(t *testing.T) {
+	// Reproduces the homeassistant bug observed on 2026-04-18 at 09:50 UTC: a
+	// freshly provisioned Telegram channel with no initial_message boots
+	// completely silent — the auto-start /start gets discarded by
+	// DropPendingUpdates on webhook registration. Requiring initial_message
+	// for every channel forces a visible first turn and avoids the silent
+	// boot across transports.
+	t.Run("rejects missing initial_message for telegram", func(t *testing.T) {
+		th := setupHarnessWithProvisioner(t, config.EnvProd)
+
+		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
+			"name":          "homeassistant",
+			"description":   "Home Assistant automation",
+			"type":          "telegram",
+			"allowed_users": []any{"123456789"},
+		})
+		require.Contains(t, err.Error(), "initial_message is required")
+	})
+
+	t.Run("rejects missing initial_message for socket", func(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 
-		result := callTool(t, th.handler, "channel_create", map[string]any{
+		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
 			"name":        "persistent",
 			"description": "Normal channel",
 			"type":        "socket",
 		})
-
-		var created map[string]any
-		require.NoError(t, json.Unmarshal(result, &created))
-		require.Equal(t, "persistent", created["name"])
+		require.Contains(t, err.Error(), "initial_message is required")
 	})
 }
 
@@ -261,6 +273,7 @@ func TestChannelEdit(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "phone", "description": "Old description", "type": "socket",
+			"initial_message": "Hello",
 		})
 		reloadRegistry(t, th)
 
@@ -318,6 +331,7 @@ func TestChannelEdit(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "phone", "description": "Socket", "type": "socket",
+			"initial_message": "Hello",
 		})
 		reloadRegistry(t, th)
 
@@ -335,6 +349,7 @@ func TestChannelChangeCallback(t *testing.T) {
 
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "test", "description": "Test channel", "type": "socket",
+			"initial_message": "Hello",
 		})
 		require.Equal(t, 1, called)
 	})
@@ -345,6 +360,7 @@ func TestChannelChangeCallback(t *testing.T) {
 
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "test", "description": "Test channel", "type": "socket",
+			"initial_message": "Hello",
 		})
 		reloadRegistry(t, th)
 		called = 0
@@ -361,6 +377,7 @@ func TestChannelChangeCallback(t *testing.T) {
 
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "test", "description": "Test channel", "type": "socket",
+			"initial_message": "Hello",
 		})
 		reloadRegistry(t, th)
 		called = 0
@@ -373,6 +390,7 @@ func TestChannelChangeCallback(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "test", "description": "Test channel", "type": "socket",
+			"initial_message": "Hello",
 		})
 	})
 
@@ -383,6 +401,7 @@ func TestChannelChangeCallback(t *testing.T) {
 
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "hottest", "description": "Hot-add channel", "type": "socket",
+			"initial_message": "Hello",
 		})
 
 		// The new create handler calls OnChannelChange (not OnChannelAdded directly),
@@ -401,6 +420,7 @@ func TestChannelDelete(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "phone", "description": "will be deleted", "type": "socket",
+			"initial_message": "Hello",
 		})
 		reloadRegistry(t, th)
 
@@ -421,7 +441,7 @@ func TestChannelDelete(t *testing.T) {
 
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "mybot", "description": "Telegram bot", "type": "telegram",
-			"allowed_users": []any{"123456789"},
+			"allowed_users": []any{"123456789"}, "initial_message": "Hello",
 		})
 		reloadRegistry(t, th)
 
@@ -437,6 +457,7 @@ func TestChannelDelete(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "phone", "description": "will be deleted", "type": "socket",
+			"initial_message": "Hello",
 		})
 		reloadRegistry(t, th)
 
@@ -451,6 +472,7 @@ func TestChannelDelete(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "phone", "description": "first", "type": "socket",
+			"initial_message": "Hello",
 		})
 		reloadRegistry(t, th)
 
@@ -459,6 +481,7 @@ func TestChannelDelete(t *testing.T) {
 		// channel_create must succeed without reloadRegistry in between.
 		result := callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "phone", "description": "recreated", "type": "socket",
+			"initial_message": "Hello",
 		})
 		var got map[string]any
 		require.NoError(t, json.Unmarshal(result, &got))
@@ -478,9 +501,10 @@ func TestChannelDone(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 
 		callTool(t, th.handler, "channel_create", map[string]any{
-			"name":        "temp",
-			"description": "Temporary channel",
-			"type":        "socket",
+			"name":            "temp",
+			"description":     "Temporary channel",
+			"type":            "socket",
+			"initial_message": "Hello",
 		})
 		reloadRegistry(t, th)
 
@@ -505,9 +529,10 @@ func TestChannelDone(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 
 		callTool(t, th.handler, "channel_create", map[string]any{
-			"name":        "temp",
-			"description": "Temporary channel",
-			"type":        "socket",
+			"name":            "temp",
+			"description":     "Temporary channel",
+			"type":            "socket",
+			"initial_message": "Hello",
 		})
 		reloadRegistry(t, th)
 
@@ -552,9 +577,10 @@ func TestChannelDone(t *testing.T) {
 		th := setupHarnessWithActiveChannel(t, config.EnvLocal, "temp")
 
 		callTool(t, th.handler, "channel_create", map[string]any{
-			"name":        "temp",
-			"description": "Temporary channel",
-			"type":        "socket",
+			"name":            "temp",
+			"description":     "Temporary channel",
+			"type":            "socket",
+			"initial_message": "Hello",
 		})
 		reloadRegistry(t, th)
 
@@ -706,7 +732,7 @@ func TestChannelDeleteTeardown(t *testing.T) {
 
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "teardown-test", "description": "Bot to delete", "type": "telegram",
-			"allowed_users": []any{"123456789"},
+			"allowed_users": []any{"123456789"}, "initial_message": "Hello",
 		})
 		reloadRegistry(t, th.testHarness)
 
@@ -740,7 +766,7 @@ func TestChannelDeleteTeardown(t *testing.T) {
 
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "fail-delete", "description": "Bot that fails teardown", "type": "telegram",
-			"allowed_users": []any{"123456789"},
+			"allowed_users": []any{"123456789"}, "initial_message": "Hello",
 		})
 		reloadRegistry(t, th.testHarness)
 
@@ -769,6 +795,7 @@ func TestChannelDeleteTeardown(t *testing.T) {
 
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "no-teardown", "description": "Socket channel", "type": "socket",
+			"initial_message": "Hello",
 		})
 		reloadRegistry(t, th.testHarness)
 
@@ -793,14 +820,16 @@ func TestCreatableGroups(t *testing.T) {
 		// Create a channel with no creatable_groups.
 		callTool(t, th.handler, "channel_create", map[string]any{
 			"name": "monitor-chan", "description": "Monitor", "type": "socket",
+			"initial_message": "Hello",
 		})
 		reloadRegistry(t, th)
 
 		toolErr := callToolExpectError(t, th.handler, "channel_create", map[string]any{
-			"name":        "child",
-			"description": "Child channel",
-			"type":        "socket",
-			"tool_groups": []string{"core_tools"},
+			"name":            "child",
+			"description":     "Child channel",
+			"type":            "socket",
+			"tool_groups":     []string{"core_tools"},
+			"initial_message": "Hello",
 		})
 		require.Contains(t, toolErr.Error(), "not authorized to create")
 	})
@@ -814,14 +843,16 @@ func TestCreatableGroups(t *testing.T) {
 			"description":      "Monitor with delegation",
 			"type":             "socket",
 			"creatable_groups": []string{"core_tools", "channel_messaging"},
+			"initial_message":  "Hello",
 		})
 		reloadRegistry(t, th)
 
 		result := callTool(t, th.handler, "channel_create", map[string]any{
-			"name":        "child-ok",
-			"description": "Authorized child",
-			"type":        "socket",
-			"tool_groups": []string{"core_tools", "channel_messaging"},
+			"name":            "child-ok",
+			"description":     "Authorized child",
+			"type":            "socket",
+			"tool_groups":     []string{"core_tools", "channel_messaging"},
+			"initial_message": "Hello",
 		})
 
 		var got map[string]any
@@ -837,14 +868,16 @@ func TestCreatableGroups(t *testing.T) {
 			"description":      "Monitor with base only",
 			"type":             "socket",
 			"creatable_groups": []string{"core_tools"},
+			"initial_message":  "Hello",
 		})
 		reloadRegistry(t, th)
 
 		toolErr := callToolExpectError(t, th.handler, "channel_create", map[string]any{
-			"name":        "child-bad",
-			"description": "Unauthorized child",
-			"type":        "socket",
-			"tool_groups": []string{"core_tools", "dev_workflow"},
+			"name":            "child-bad",
+			"description":     "Unauthorized child",
+			"type":            "socket",
+			"tool_groups":     []string{"core_tools", "dev_workflow"},
+			"initial_message": "Hello",
 		})
 		require.Contains(t, toolErr.Error(), "not authorized to delegate tool group")
 		require.Contains(t, toolErr.Error(), "dev_workflow")

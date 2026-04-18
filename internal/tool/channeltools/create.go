@@ -34,7 +34,8 @@ func channelCreateDef() mcp.ToolDef {
 			"If auto-provisioning is not available, the channel is created with status 'needs_setup' " +
 			"and the agent guides the user through manual setup.\n\n" +
 			"Set ephemeral: true for channels that should auto-delete after idle timeout. " +
-			"Use initial_message to deliver a kick-off task to the new channel on first boot.",
+			"Use initial_message to deliver a kick-off task to the new channel on first boot. " +
+			"initial_message is REQUIRED for every new channel — without it the channel boots silent.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -102,7 +103,7 @@ func channelCreateDef() mcp.ToolDef {
 				},
 				"initial_message": {
 					"type": "string",
-					"description": "Message delivered to the new channel as its first inbound message. Fires exactly once. Required for ephemeral channels."
+					"description": "Message delivered to the new channel as its first inbound message. Fires exactly once. Required for every new channel — without it the channel boots silent (telegram bots drop the auto-start /start; ephemeral channels sit idle)."
 				},
 				"parent": {
 					"type": "string",
@@ -241,10 +242,13 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("parent channel %q not found", a.Parent)
 		}
 
-		if a.Ephemeral && a.InitialMessage == "" {
-			// Ephemeral channels without an initial_message sit idle forever in
-			// webhook mode because DropPendingUpdates discards the auto-start /start.
-			return nil, fmt.Errorf("initial_message is required for ephemeral channels — without it the channel has no task and will sit idle")
+		if a.InitialMessage == "" {
+			// Every new channel needs a kick-off message. Telegram bots boot
+			// silent otherwise (webhook mode drops the auto-start /start) and
+			// ephemeral channels sit idle until they're reaped. Even plain
+			// socket channels benefit from an explicit first turn so the user
+			// sees the new channel is alive.
+			return nil, fmt.Errorf("initial_message is required for all new channels — without it the new channel has nothing to say and the user sees no activity")
 		}
 
 		// Build the idle timeout string for config.
