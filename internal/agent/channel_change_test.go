@@ -84,7 +84,7 @@ func (m *mockChangeChannel) SplitStatusMessages() bool                { return f
 func (m *mockChangeChannel) Markup() channel.Markup                   { return channel.MarkupMarkdown }
 func (m *mockChangeChannel) StatusWrap() channel.StatusWrap           { return channel.StatusWrap{} }
 
-func (m *mockChangeChannel) Send(ctx context.Context, text string) (channel.MessageID, error) {
+func (m *mockChangeChannel) Send(ctx context.Context, text string, _ channel.SendOpts) (channel.MessageID, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sends = append(m.sends, text)

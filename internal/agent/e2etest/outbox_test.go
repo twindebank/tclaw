@@ -52,7 +52,7 @@ func TestOutbox(t *testing.T) {
 		ob.Start(ctx1)
 
 		// Send a message so there's a delivery goroutine and persisted state.
-		_, err = ob.Send(context.Background(), ch.Info().ID, "hello")
+		_, err = ob.Send(context.Background(), ch.Info().ID, "hello", channel.SendOpts{})
 		require.NoError(t, err)
 		ob.Flush(context.Background())
 
@@ -70,7 +70,7 @@ func TestOutbox(t *testing.T) {
 			defer cancel2()
 			ob.Start(ctx2)
 
-			_, err := ob.Send(context.Background(), ch.Info().ID, "world")
+			_, err := ob.Send(context.Background(), ch.Info().ID, "world", channel.SendOpts{})
 			require.NoError(t, err)
 			ob.Flush(context.Background())
 			ob.Stop()

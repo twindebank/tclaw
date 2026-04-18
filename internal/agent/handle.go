@@ -250,7 +250,7 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 		}
 
 		if tw.respID == "" {
-			id, err := tw.opts.send(tw.ctx, tw.channelID, content)
+			id, err := tw.opts.sendNotify(tw.ctx, tw.channelID, content)
 			if err != nil {
 				return fmt.Errorf("send response: %w", err)
 			}
@@ -267,7 +267,7 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 			tw.respBuf.Reset()
 			tw.respBuf.WriteString(text)
 			tw.respID = ""
-			id, err := tw.opts.send(tw.ctx, tw.channelID, text)
+			id, err := tw.opts.sendNotify(tw.ctx, tw.channelID, text)
 			if err != nil {
 				return fmt.Errorf("send replacement response: %w", err)
 			}

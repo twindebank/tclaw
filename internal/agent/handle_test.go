@@ -33,7 +33,7 @@ func (m *mockChannel) SplitStatusMessages() bool                { return true }
 func (m *mockChannel) Markup() channel.Markup                   { return channel.MarkupHTML }
 func (m *mockChannel) StatusWrap() channel.StatusWrap           { return channel.StatusWrap{} }
 
-func (m *mockChannel) Send(_ context.Context, text string) (channel.MessageID, error) {
+func (m *mockChannel) Send(_ context.Context, text string, _ channel.SendOpts) (channel.MessageID, error) {
 	m.nextID++
 	id := channel.MessageID(strings.Repeat("m", m.nextID))
 	m.sends = append(m.sends, text)

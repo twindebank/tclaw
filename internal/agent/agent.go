@@ -846,18 +846,29 @@ func sendDenied(ctx context.Context, opts Options, channelID channel.ChannelID) 
 	}
 }
 
-// send delivers a message via the outbox (non-blocking) or directly via the
-// channel if no outbox is configured (tests). Returns a MessageID for
-// subsequent edits and an enqueue error if applicable.
+// send delivers a silent message via the outbox (non-blocking) or directly via
+// the channel if no outbox is configured (tests). Used for status, thinking,
+// prompts, and lifecycle chatter that shouldn't ping the user.
 func (opts Options) send(ctx context.Context, chID channel.ChannelID, text string) (channel.MessageID, error) {
+	return opts.sendWithOpts(ctx, chID, text, channel.SendOpts{})
+}
+
+// sendNotify delivers a message that should trigger a user notification. Only
+// the final agent response text uses this — everything else stays silent via
+// send to keep the allowlist tight.
+func (opts Options) sendNotify(ctx context.Context, chID channel.ChannelID, text string) (channel.MessageID, error) {
+	return opts.sendWithOpts(ctx, chID, text, channel.SendOpts{Notify: true})
+}
+
+func (opts Options) sendWithOpts(ctx context.Context, chID channel.ChannelID, text string, sendOpts channel.SendOpts) (channel.MessageID, error) {
 	if opts.Outbox != nil {
-		return opts.Outbox.Send(ctx, chID, text)
+		return opts.Outbox.Send(ctx, chID, text, sendOpts)
 	}
 	ch, ok := opts.channels()[chID]
 	if !ok {
 		return "", fmt.Errorf("unknown channel %q", chID)
 	}
-	return ch.Send(ctx, text)
+	return ch.Send(ctx, text, sendOpts)
 }
 
 // edit updates a previously sent message via the outbox or directly.

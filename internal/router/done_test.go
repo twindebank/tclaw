@@ -338,7 +338,7 @@ type stubDoneChannel struct {
 
 func (s *stubDoneChannel) Info() channel.Info                       { return s.info }
 func (s *stubDoneChannel) Messages(_ context.Context) <-chan string { return nil }
-func (s *stubDoneChannel) Send(_ context.Context, _ string) (channel.MessageID, error) {
+func (s *stubDoneChannel) Send(_ context.Context, _ string, _ channel.SendOpts) (channel.MessageID, error) {
 	return "", nil
 }
 func (s *stubDoneChannel) Edit(_ context.Context, _ channel.MessageID, _ string) error { return nil }

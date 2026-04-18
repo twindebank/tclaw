@@ -140,6 +140,16 @@ type StatusWrap struct {
 	Close string // e.g. "</blockquote>"
 }
 
+// SendOpts carries per-send hints that transports may honor. The zero value
+// is silent — only actual agent response text should set Notify:true so
+// status, thinking, and lifecycle messages don't ping the user.
+type SendOpts struct {
+	// Notify asks the transport to trigger a user notification (sound,
+	// vibration, badge) for this message. Transports without a notion of
+	// notifications ignore it.
+	Notify bool
+}
+
 // Channel is the interface every transport must implement.
 type Channel interface {
 	// Info returns the channel's identity and transport type.
@@ -148,7 +158,7 @@ type Channel interface {
 	Messages(ctx context.Context) <-chan string
 	// Send delivers a chunk of response to the user and returns an
 	// identifier that can be passed to Edit to update the message.
-	Send(ctx context.Context, text string) (MessageID, error)
+	Send(ctx context.Context, text string, opts SendOpts) (MessageID, error)
 	// Edit replaces the content of a previously sent message.
 	Edit(ctx context.Context, id MessageID, text string) error
 	// Done signals the end of a response turn.

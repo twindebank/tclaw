@@ -81,7 +81,7 @@ func (s *stubChannel) Info() channel.Info {
 	return channel.Info{Type: s.channelType}
 }
 func (s *stubChannel) Messages(_ context.Context) <-chan string { return nil }
-func (s *stubChannel) Send(_ context.Context, _ string) (channel.MessageID, error) {
+func (s *stubChannel) Send(_ context.Context, _ string, _ channel.SendOpts) (channel.MessageID, error) {
 	return "", nil
 }
 func (s *stubChannel) Edit(_ context.Context, _ channel.MessageID, _ string) error { return nil }

@@ -16,9 +16,10 @@ import (
 
 // SendRecord captures a single Send() call to the channel.
 type SendRecord struct {
-	Text string
-	ID   channel.MessageID
-	At   time.Time
+	Text   string
+	ID     channel.MessageID
+	At     time.Time
+	Notify bool
 }
 
 // EditRecord captures a single Edit() call to the channel.
@@ -227,11 +228,11 @@ func (c *TestChannel) Messages(ctx context.Context) <-chan string {
 	return out
 }
 
-func (c *TestChannel) Send(_ context.Context, text string) (channel.MessageID, error) {
+func (c *TestChannel) Send(_ context.Context, text string, opts channel.SendOpts) (channel.MessageID, error) {
 	c.mu.Lock()
 	c.nextID++
 	id := channel.MessageID(fmt.Sprintf("msg-%d", c.nextID))
-	c.sends = append(c.sends, SendRecord{Text: text, ID: id, At: time.Now()})
+	c.sends = append(c.sends, SendRecord{Text: text, ID: id, At: time.Now(), Notify: opts.Notify})
 	c.mu.Unlock()
 
 	// Signal waiters non-blocking.

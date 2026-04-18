@@ -133,7 +133,7 @@ func (s *Server) Messages(ctx context.Context) <-chan string {
 	return out
 }
 
-func (s *Server) Send(_ context.Context, text string) (channel.MessageID, error) {
+func (s *Server) Send(_ context.Context, text string, _ channel.SendOpts) (channel.MessageID, error) {
 	s.mu.Lock()
 	conn := s.conn
 	msgID := channel.MessageID(id.Generate("message"))

@@ -62,7 +62,7 @@ func (o *Oneshot) Messages(ctx context.Context) <-chan string {
 	return out
 }
 
-func (o *Oneshot) Send(_ context.Context, text string) (channel.MessageID, error) {
+func (o *Oneshot) Send(_ context.Context, text string, _ channel.SendOpts) (channel.MessageID, error) {
 	n := o.msgCount.Add(1)
 	id := channel.MessageID(fmt.Sprintf("msg-%d", n))
 	if o.telegram {

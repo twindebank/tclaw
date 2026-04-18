@@ -280,7 +280,7 @@ func (t *Telegram) startWebhook(ctx context.Context, b *bot.Bot) {
 	slog.Info("telegram bot stopped", "channel", t.name)
 }
 
-func (t *Telegram) Send(ctx context.Context, text string) (channel.MessageID, error) {
+func (t *Telegram) Send(ctx context.Context, text string, opts channel.SendOpts) (channel.MessageID, error) {
 	t.mu.Lock()
 	chatID := t.currentChatID
 	b := t.bot
@@ -306,18 +306,24 @@ func (t *Telegram) Send(ctx context.Context, text string) (channel.MessageID, er
 		text = tgsdk.SanitizeUTF8(text)
 	}
 
+	// Allowlist: only messages explicitly marked Notify ring the user.
+	// Status, thinking, and lifecycle chatter land silently.
+	silent := !opts.Notify
+
 	msg, err := b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:    chatID,
-		Text:      tgsdk.SanitizeHTML(tgsdk.MarkdownToHTML(text)),
-		ParseMode: models.ParseModeHTML,
+		ChatID:              chatID,
+		Text:                tgsdk.SanitizeHTML(tgsdk.MarkdownToHTML(text)),
+		ParseMode:           models.ParseModeHTML,
+		DisableNotification: silent,
 	})
 	if err != nil && isHTMLParseError(err) {
 		// Malformed HTML — fall back to plain text so the message still reaches the user.
 		slog.Warn("telegram send: HTML parse error, falling back to plain text",
 			"channel", t.name, "error", err)
 		msg, err = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: chatID,
-			Text:   "⚠️ [formatting error — sent as plain text]\n\n" + tgsdk.StripAllTags(text),
+			ChatID:              chatID,
+			Text:                "⚠️ [formatting error — sent as plain text]\n\n" + tgsdk.StripAllTags(text),
+			DisableNotification: silent,
 		})
 	}
 	if err != nil {
