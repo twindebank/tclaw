@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"tclaw/internal/mcp"
+	"tclaw/internal/mcp/discovery"
+	"tclaw/internal/remotemcpstore"
 )
 
 const ToolRemoteMCPAuthWait = "remote_mcp_auth_wait"
@@ -45,12 +48,7 @@ func remoteMCPAuthWaitHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("check auth: %w", err)
 		}
 		if auth != nil && auth.AccessToken != "" {
-			result := map[string]string{
-				"name":    a.Name,
-				"status":  "authorized",
-				"message": fmt.Sprintf("Remote MCP %q is authorized. Its tools will be available on the next message.", a.Name),
-			}
-			return json.Marshal(result)
+			return finalizeAuthorized(ctx, deps, a.Name, auth)
 		}
 
 		// Poll until timeout or cancellation.
@@ -75,14 +73,59 @@ func remoteMCPAuthWaitHandler(deps Deps) mcp.ToolHandler {
 					return nil, fmt.Errorf("check auth: %w", err)
 				}
 				if auth != nil && auth.AccessToken != "" {
-					result := map[string]string{
-						"name":    a.Name,
-						"status":  "authorized",
-						"message": fmt.Sprintf("Remote MCP %q is now authorized! Its tools will be available on the next message.", a.Name),
-					}
-					return json.Marshal(result)
+					return finalizeAuthorized(ctx, deps, a.Name, auth)
 				}
 			}
 		}
 	}
+}
+
+// finalizeAuthorized fetches the tool list from the newly-authorized server
+// (using the freshly-issued bearer token) and persists it. The Claude CLI
+// can't expand MCP permission globs without this list, so tools/list MUST
+// happen post-auth for the OAuth path to produce a working registration.
+func finalizeAuthorized(ctx context.Context, deps Deps, name string, auth *remotemcpstore.RemoteMCPAuth) (json.RawMessage, error) {
+	entry, err := deps.Manager.GetRemoteMCP(ctx, name)
+	if err != nil {
+		return nil, fmt.Errorf("look up remote mcp %q: %w", name, err)
+	}
+	if entry == nil {
+		return nil, fmt.Errorf("remote mcp %q disappeared before finalisation", name)
+	}
+
+	if len(entry.ToolNames) == 0 {
+		headers := map[string]string{"Authorization": "Bearer " + auth.AccessToken}
+		toolNames, listErr := discovery.ListTools(ctx, entry.URL, headers, listToolsOpts(deps)...)
+		if listErr != nil {
+			// Auth worked but tool discovery didn't. Return the error — the
+			// registration is unusable without the tool list and the user
+			// can see what went wrong rather than silently having a broken
+			// MCP registered.
+			return nil, fmt.Errorf("authorized but failed to list tools: %w", listErr)
+		}
+		if len(toolNames) == 0 {
+			return nil, fmt.Errorf("remote MCP %q exposed no tools", name)
+		}
+		if err := deps.Manager.SetToolNames(ctx, name, toolNames); err != nil {
+			return nil, fmt.Errorf("persist tool names: %w", err)
+		}
+		slog.Info("captured tool names for authorised remote mcp", "name", name, "count", len(toolNames))
+	}
+
+	if deps.ConfigUpdater != nil {
+		if err := deps.ConfigUpdater(ctx); err != nil {
+			slog.Warn("config update after auth failed", "name", name, "err", err)
+		}
+	}
+	// Restart the agent so the CLI picks up the expanded tool allowlist.
+	if deps.OnChannelChange != nil {
+		deps.OnChannelChange()
+	}
+
+	result := map[string]string{
+		"name":    name,
+		"status":  "authorized",
+		"message": fmt.Sprintf("Remote MCP %q is authorized. Its tools will be available on the next message.", name),
+	}
+	return json.Marshal(result)
 }

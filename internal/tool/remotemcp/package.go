@@ -17,6 +17,12 @@ type Package struct {
 	Manager       *remotemcpstore.Manager
 	Callback      *oauth.CallbackServer
 	ConfigUpdater func(context.Context) error
+
+	// OnChannelChange is invoked after a remote MCP is added or removed so
+	// the router can restart the running agent — the Claude CLI reads the
+	// tool allowlist at process-start time only, so without a restart the
+	// new tools stay invisible until the next idle timeout.
+	OnChannelChange func()
 }
 
 func (p *Package) Name() string { return "remote_mcp" }
@@ -46,10 +52,11 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 
 func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationContext) error {
 	deps := Deps{
-		Manager:       p.Manager,
-		Callback:      p.Callback,
-		SecretStore:   regCtx.SecretStore,
-		ConfigUpdater: p.ConfigUpdater,
+		Manager:         p.Manager,
+		Callback:        p.Callback,
+		SecretStore:     regCtx.SecretStore,
+		ConfigUpdater:   p.ConfigUpdater,
+		OnChannelChange: p.OnChannelChange,
 	}
 
 	RegisterTools(handler, deps)

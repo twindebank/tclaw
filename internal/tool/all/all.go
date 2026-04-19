@@ -224,9 +224,10 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 			Store: p.ModelStore,
 		},
 		&remotemcp.Package{
-			Manager:       p.RemoteMCPManager,
-			Callback:      p.Callback,
-			ConfigUpdater: p.ConfigUpdater,
+			Manager:         p.RemoteMCPManager,
+			Callback:        p.Callback,
+			ConfigUpdater:   p.ConfigUpdater,
+			OnChannelChange: p.OnChannelChange,
 		},
 		&secretform.Package{
 			SecretStore:     p.SecretStore,

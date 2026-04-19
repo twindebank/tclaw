@@ -47,6 +47,11 @@ func remoteMCPRemoveHandler(deps Deps) mcp.ToolHandler {
 		if updateErr := deps.ConfigUpdater(ctx); updateErr != nil {
 			return nil, fmt.Errorf("remote MCP %q removed from storage but config update failed — tools may persist until restart: %w", a.Name, updateErr)
 		}
+		// Restart the agent so the CLI drops the now-stale tool allowlist
+		// entries for this server.
+		if deps.OnChannelChange != nil {
+			deps.OnChannelChange()
+		}
 
 		result := map[string]any{
 			"name":    a.Name,

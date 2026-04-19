@@ -292,14 +292,22 @@ func TestResetPermission(t *testing.T) {
 }
 
 func TestExpandMCPGlobs(t *testing.T) {
+	// MCPToolNames returns fully-qualified identifiers — mcp__<server>__<tool>
+	// for the local tclaw server and every registered remote MCP. The list
+	// below mixes both so tests cover the end-to-end property: globs expand
+	// across ALL known MCP servers, not just tclaw.
 	mcpTools := []string{
-		"channel_create", "channel_edit", "channel_delete", "channel_list",
-		"schedule_create", "schedule_list",
-		"google_workspace", "google_workspace_schema", "google_gmail_list",
-		"connection_add", "connection_list",
+		"mcp__tclaw__channel_create", "mcp__tclaw__channel_edit",
+		"mcp__tclaw__channel_delete", "mcp__tclaw__channel_list",
+		"mcp__tclaw__schedule_create", "mcp__tclaw__schedule_list",
+		"mcp__tclaw__google_workspace", "mcp__tclaw__google_workspace_schema",
+		"mcp__tclaw__google_gmail_list",
+		"mcp__tclaw__connection_add", "mcp__tclaw__connection_list",
+		"mcp__home-assistant__ha_state_get", "mcp__home-assistant__ha_service_call",
+		"mcp__home-assistant__ha_state_list",
 	}
 
-	t.Run("expands glob to matching MCP tools", func(t *testing.T) {
+	t.Run("expands tclaw channel glob", func(t *testing.T) {
 		tools := []claudecli.Tool{"mcp__tclaw__channel_*"}
 		got := expandMCPGlobs(tools, mcpTools)
 		if len(got) != 4 {
@@ -307,6 +315,19 @@ func TestExpandMCPGlobs(t *testing.T) {
 		}
 		for _, g := range got {
 			if !strings.HasPrefix(string(g), "mcp__tclaw__channel_") {
+				t.Errorf("unexpected tool %q", g)
+			}
+		}
+	})
+
+	t.Run("expands remote MCP glob", func(t *testing.T) {
+		tools := []claudecli.Tool{"mcp__home-assistant__*"}
+		got := expandMCPGlobs(tools, mcpTools)
+		if len(got) != 3 {
+			t.Fatalf("expected 3 home-assistant tools, got %d: %v", len(got), got)
+		}
+		for _, g := range got {
+			if !strings.HasPrefix(string(g), "mcp__home-assistant__") {
 				t.Errorf("unexpected tool %q", g)
 			}
 		}
@@ -331,11 +352,12 @@ func TestExpandMCPGlobs(t *testing.T) {
 		}
 	})
 
-	t.Run("mixed globs and explicit tools", func(t *testing.T) {
-		tools := []claudecli.Tool{"Bash", "mcp__tclaw__schedule_*", "WebSearch"}
+	t.Run("mixed globs across local and remote", func(t *testing.T) {
+		tools := []claudecli.Tool{"Bash", "mcp__tclaw__schedule_*", "mcp__home-assistant__*", "WebSearch"}
 		got := expandMCPGlobs(tools, mcpTools)
-		if len(got) != 4 {
-			t.Fatalf("expected 4 tools (Bash + 2 schedule + WebSearch), got %d: %v", len(got), got)
+		// Bash + 2 schedule + 3 ha + WebSearch = 7
+		if len(got) != 7 {
+			t.Fatalf("expected 7 tools (Bash + 2 schedule + 3 ha + WebSearch), got %d: %v", len(got), got)
 		}
 	})
 
@@ -344,6 +366,18 @@ func TestExpandMCPGlobs(t *testing.T) {
 		got := expandMCPGlobs(tools, mcpTools)
 		if len(got) != 1 || got[0] != "Bash*" {
 			t.Errorf("expected unmatched glob preserved, got: %v", got)
+		}
+	})
+
+	t.Run("unmatched MCP glob preserved when server has no known tools", func(t *testing.T) {
+		tools := []claudecli.Tool{"mcp__unknown-server__*"}
+		got := expandMCPGlobs(tools, mcpTools)
+		// No matches → raw glob kept. CLI won't match wildcards for MCP
+		// tools, so nothing on that server will actually be allowed. The
+		// registration code enforces we always have ToolNames, so in
+		// practice this branch only fires for misconfigured input.
+		if len(got) != 1 || got[0] != "mcp__unknown-server__*" {
+			t.Errorf("expected raw glob preserved, got: %v", got)
 		}
 	})
 

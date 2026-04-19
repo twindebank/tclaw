@@ -178,10 +178,12 @@ func runOneshot() {
 		Sessions:       make(map[channel.ChannelID]string),
 		AllowedTools:   []claudecli.Tool{claudecli.ToolRead, claudecli.ToolBash, "mcp__tclaw__*"},
 		MCPToolNames: func() []string {
+			// Fully-qualified names (mcp__tclaw__<name>) — oneshot doesn't
+			// support remote MCPs, so the local server is the whole list.
 			tools := mcpHandler.ListTools()
 			names := make([]string, len(tools))
 			for i, td := range tools {
-				names[i] = td.Name
+				names[i] = "mcp__tclaw__" + td.Name
 			}
 			return names
 		},
