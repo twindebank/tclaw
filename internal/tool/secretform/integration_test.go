@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -148,4 +149,177 @@ func TestCredentialErrorToFormFlow(t *testing.T) {
 	require.NoError(t, json.Unmarshal(result, &toolResp))
 	require.Equal(t, "ok", toolResp["status"])
 	require.Equal(t, "results for my-key-123", toolResp["data"])
+}
+
+// TestSecretFormWait_CLITimeoutCancellation reproduces the production bug
+// where the Claude CLI aborts MCP tool calls at ~60s. Before the fix,
+// secret_form_wait blocked until the 10-minute TTL and the CLI cancelled
+// it with "wait cancelled" — the user lost their form-fill mid-submit.
+//
+// After the fix, each wait call returns within ~45s with status
+// "still_waiting", and the agent loops without hitting the CLI timeout.
+func TestSecretFormWait_CLITimeoutCancellation(t *testing.T) {
+	// Drop the per-call window so this suite runs in milliseconds instead
+	// of the 45s production default. The behaviour under test (still_waiting
+	// before the CLI cancels, loop-and-complete, immediate unblock on
+	// submission) doesn't depend on the absolute duration.
+	const testWait = 200 * time.Millisecond
+	restore := secretform.SetMaxWaitPerCall(testWait)
+	t.Cleanup(restore)
+
+	t.Run("wait returns still_waiting before deadline", func(t *testing.T) {
+		h := setupWaitHarness(t)
+		form := createPendingForm(t, h.handler)
+
+		// Mirror the CLI's tool-call behavior: enforce an outer deadline
+		// that's comfortably longer than the per-call window.
+		outerDeadline := 2 * time.Second
+		ctx, cancel := context.WithTimeout(context.Background(), outerDeadline)
+		defer cancel()
+
+		start := time.Now()
+		waitArgs, _ := json.Marshal(map[string]any{"request_id": form.ID})
+		result, err := h.handler.Call(ctx, "secret_form_wait", waitArgs)
+		elapsed := time.Since(start)
+
+		require.NoError(t, err, "wait must NOT return an error within CLI deadline — got %v", err)
+		require.Less(t, elapsed, outerDeadline,
+			"wait must return before outer deadline; elapsed=%s deadline=%s", elapsed, outerDeadline)
+
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(result, &resp))
+		require.Equal(t, "still_waiting", resp["status"])
+		require.Equal(t, form.ID, resp["request_id"],
+			"response must echo request_id so the agent can loop")
+	})
+
+	t.Run("follow-up call returns submitted after form submission", func(t *testing.T) {
+		h := setupWaitHarness(t)
+		form := createPendingForm(t, h.handler)
+
+		// First wait returns still_waiting.
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		waitArgs, _ := json.Marshal(map[string]any{"request_id": form.ID})
+		result, err := h.handler.Call(ctx, "secret_form_wait", waitArgs)
+		require.NoError(t, err)
+
+		var firstResp map[string]any
+		require.NoError(t, json.Unmarshal(result, &firstResp))
+		require.Equal(t, "still_waiting", firstResp["status"])
+
+		// User submits the form between tclaw-side wait calls.
+		submitForm(t, h, form)
+
+		// Second wait call returns submitted immediately.
+		start := time.Now()
+		result, err = h.handler.Call(context.Background(), "secret_form_wait", waitArgs)
+		require.NoError(t, err)
+		require.Less(t, time.Since(start), 500*time.Millisecond,
+			"follow-up wait with already-submitted form must return immediately")
+
+		var secondResp map[string]any
+		require.NoError(t, json.Unmarshal(result, &secondResp))
+		require.Equal(t, "submitted", secondResp["status"])
+	})
+
+	t.Run("wait unblocks immediately if form is submitted during the window", func(t *testing.T) {
+		h := setupWaitHarness(t)
+		form := createPendingForm(t, h.handler)
+
+		// Submit the form shortly after the wait starts.
+		go func() {
+			time.Sleep(20 * time.Millisecond)
+			submitForm(t, h, form)
+		}()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		start := time.Now()
+		waitArgs, _ := json.Marshal(map[string]any{"request_id": form.ID})
+		result, err := h.handler.Call(ctx, "secret_form_wait", waitArgs)
+		elapsed := time.Since(start)
+
+		require.NoError(t, err)
+		require.Less(t, elapsed, 500*time.Millisecond,
+			"wait must unblock ~immediately when the form is submitted")
+
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(result, &resp))
+		require.Equal(t, "submitted", resp["status"])
+	})
+}
+
+// --- helpers ---
+
+type waitHarness struct {
+	handler *mcp.Handler
+	secrets *memorySecretStore
+	server  *httptest.Server
+}
+
+func setupWaitHarness(t *testing.T) *waitHarness {
+	t.Helper()
+	secrets := newMemorySecretStore()
+	handler := mcp.NewHandler()
+
+	var httpHandler http.Handler
+	var httpMu sync.Mutex
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		httpMu.Lock()
+		h := httpHandler
+		httpMu.Unlock()
+		if h != nil {
+			h.ServeHTTP(w, r)
+		} else {
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(ts.Close)
+
+	secretform.RegisterTools(handler, secretform.Deps{
+		SecretStore: secrets,
+		BaseURL:     ts.URL,
+		RegisterHandler: func(_ string, h http.Handler) {
+			httpMu.Lock()
+			httpHandler = h
+			httpMu.Unlock()
+		},
+	})
+	return &waitHarness{handler: handler, secrets: secrets, server: ts}
+}
+
+type pendingForm struct {
+	ID         string
+	VerifyCode string
+	URL        string
+}
+
+func createPendingForm(t *testing.T, handler *mcp.Handler) pendingForm {
+	t.Helper()
+	args, _ := json.Marshal(map[string]any{
+		"title": "Test",
+		"fields": []map[string]any{
+			{"key": "api_key", "label": "API Key"},
+		},
+	})
+	result, err := handler.Call(context.Background(), "secret_form_request", args)
+	require.NoError(t, err)
+	var resp map[string]string
+	require.NoError(t, json.Unmarshal(result, &resp))
+	require.NotEmpty(t, resp["request_id"])
+	require.NotEmpty(t, resp["verify_code"])
+	require.NotEmpty(t, resp["url"])
+	return pendingForm{ID: resp["request_id"], VerifyCode: resp["verify_code"], URL: resp["url"]}
+}
+
+func submitForm(t *testing.T, h *waitHarness, form pendingForm) {
+	t.Helper()
+	resp, err := http.PostForm(form.URL, url.Values{
+		"_verify_code": {form.VerifyCode},
+		"api_key":      {"test-value"},
+	})
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 }

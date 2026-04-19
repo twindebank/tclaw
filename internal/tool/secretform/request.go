@@ -133,7 +133,7 @@ func secretFormRequestHandler(deps Deps, pending *sync.Map) mcp.ToolHandler {
 			"request_id":  id,
 			"url":         deps.BaseURL + "/secret-form/" + id,
 			"verify_code": verifyCode,
-			"message":     "Send the URL AND the verification code to the user. They must enter the code on the form to submit it. Then call secret_form_wait with the request_id.",
+			"message":     "Send the URL AND the verification code to the user. They must enter the code on the form to submit it. Then call secret_form_wait with the request_id — if it returns status 'still_waiting', call it again with the same request_id (each call is capped at ~45s to stay under MCP tool-call timeouts).",
 		}
 		return json.Marshal(result)
 	}

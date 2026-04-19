@@ -29,6 +29,16 @@ const (
 	verifyCodeLen = 6
 )
 
+// maxWaitPerCall caps how long a single secret_form_wait call blocks. The
+// Claude CLI cancels MCP tool calls at ~60s by default; a longer wait gets
+// aborted with "wait cancelled" and the user loses their form-fill before
+// they could submit. Callers that want to wait longer must loop with the
+// same request_id — the tool returns status "still_waiting" when this
+// window elapses without a submission.
+//
+// Not a const so tests can drop it to sub-second via SetMaxWaitPerCall.
+var maxWaitPerCall = 45 * time.Second
+
 // ToolNames returns all tool name constants in this package.
 func ToolNames() []string {
 	return []string{ToolRequest, ToolWait}
@@ -108,6 +118,11 @@ type Deps struct {
 
 // RegisterTools adds the secret form tools to the MCP handler and registers
 // the HTTP endpoint for serving forms.
+//
+// TODO: persist pending forms to disk so they survive tclaw restarts.
+// Currently a restart between secret_form_request and submission drops the
+// form — the URL 404s and the user has to redo the flow. See TODO.md
+// "Persist pending secret forms across restarts" for the design.
 func RegisterTools(handler *mcp.Handler, deps Deps) {
 	pending := &sync.Map{}
 
