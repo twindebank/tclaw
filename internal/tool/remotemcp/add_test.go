@@ -3,6 +3,8 @@ package remotemcp_test
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -116,6 +118,44 @@ func TestRemoteMCPAdd_SkipAuthDiscoveryWithHeaders(t *testing.T) {
 			"headers":             map[string]string{"X-Foo": "ok\r\nX-Evil: injected"},
 		})
 		require.Contains(t, err.Error(), "control character")
+	})
+}
+
+func TestRemoteMCPAdd_SettingsJSON(t *testing.T) {
+	t.Run("adds mcp tool pattern to settings.json on success", func(t *testing.T) {
+		th := setupHarness(t)
+
+		_ = callTool(t, th.handler, "remote_mcp_add", map[string]any{
+			"name":                "home-assistant",
+			"url":                 "https://ha-mcp.example.com/mcp",
+			"channel":             "desktop",
+			"skip_auth_discovery": true,
+		})
+
+		allow := readSettingsAllow(t, th.homeDir)
+		require.Contains(t, allow, "mcp__home-assistant__*")
+	})
+
+	t.Run("is idempotent — calling add twice does not duplicate pattern", func(t *testing.T) {
+		th := setupHarness(t)
+
+		for range 2 {
+			_ = callTool(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "ha",
+				"url":                 "https://ha.example.com/mcp",
+				"channel":             "desktop",
+				"skip_auth_discovery": true,
+			})
+		}
+
+		allow := readSettingsAllow(t, th.homeDir)
+		var count int
+		for _, p := range allow {
+			if p == "mcp__ha__*" {
+				count++
+			}
+		}
+		require.Equal(t, 1, count, "pattern should appear exactly once")
 	})
 }
 
@@ -371,6 +411,7 @@ type testHarness struct {
 	manager     *remotemcpstore.Manager
 	secrets     *memorySecretStore
 	updateCount *int
+	homeDir     string
 }
 
 func setup(t *testing.T) (*mcp.Handler, *remotemcpstore.Manager, *int) {
@@ -385,19 +426,21 @@ func setupHarness(t *testing.T) *testHarness {
 
 	secrets := &memorySecretStore{data: map[string]string{}}
 	mgr := remotemcpstore.NewManager(s, secrets)
+	homeDir := t.TempDir()
 
 	updateCount := 0
 	handler := mcp.NewHandler()
 	remotemcp.RegisterTools(handler, remotemcp.Deps{
 		Manager:     mgr,
 		SecretStore: secrets,
+		HomeDir:     homeDir,
 		ConfigUpdater: func(_ context.Context) error {
 			updateCount++
 			return nil
 		},
 	})
 
-	return &testHarness{handler: handler, manager: mgr, secrets: secrets, updateCount: &updateCount}
+	return &testHarness{handler: handler, manager: mgr, secrets: secrets, updateCount: &updateCount, homeDir: homeDir}
 }
 
 func callTool(t *testing.T, h *mcp.Handler, name string, args any) json.RawMessage {
@@ -416,6 +459,19 @@ func callToolExpectError(t *testing.T, h *mcp.Handler, name string, args any) er
 	_, err = h.Call(context.Background(), name, argsJSON)
 	require.Error(t, err, "expected error from %s", name)
 	return err
+}
+
+func readSettingsAllow(t *testing.T, homeDir string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(homeDir, ".claude", "settings.json"))
+	require.NoError(t, err)
+	var top struct {
+		Permissions struct {
+			Allow []string `json:"allow"`
+		} `json:"permissions"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &top))
+	return top.Permissions.Allow
 }
 
 type memorySecretStore struct {

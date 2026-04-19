@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"regexp"
 
+	"tclaw/internal/claudesettings"
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/mcp"
 	"tclaw/internal/mcp/discovery"
@@ -161,6 +162,7 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 			if updateErr := deps.ConfigUpdater(ctx); updateErr != nil {
 				return nil, fmt.Errorf("remote MCP %q added but config update failed — tools won't be available until next restart: %w", a.Name, updateErr)
 			}
+			allowMCPTools(deps.HomeDir, a.Name)
 			result := buildAddResponse(entry, "ready",
 				fmt.Sprintf("Remote MCP %q added with %d static header(s) attached. Its tools will be available on the next message.", a.Name, len(mergedHeaders)))
 			return json.Marshal(result)
@@ -175,6 +177,7 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 			if updateErr := deps.ConfigUpdater(ctx); updateErr != nil {
 				return nil, fmt.Errorf("remote MCP %q added but config update failed — tools won't be available until next restart: %w", a.Name, updateErr)
 			}
+			allowMCPTools(deps.HomeDir, a.Name)
 			result := buildAddResponse(entry, "ready",
 				fmt.Sprintf("Remote MCP %q added (no auth or discovery failed). Its tools will be available on the next message.", a.Name))
 			return json.Marshal(result)
@@ -185,6 +188,7 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 			if updateErr := deps.ConfigUpdater(ctx); updateErr != nil {
 				return nil, fmt.Errorf("remote MCP %q added but config update failed — tools won't be available until next restart: %w", a.Name, updateErr)
 			}
+			allowMCPTools(deps.HomeDir, a.Name)
 			result := buildAddResponse(entry, "ready",
 				fmt.Sprintf("Remote MCP %q added (no auth required). Its tools will be available on the next message.", a.Name))
 			return json.Marshal(result)
@@ -235,6 +239,7 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 			clientReg:     reg,
 			manager:       deps.Manager,
 			configUpdater: deps.ConfigUpdater,
+			homeDir:       deps.HomeDir,
 			codeVerifier:  codeVerifier,
 			done:          make(chan struct{}),
 		}
@@ -385,6 +390,19 @@ func redactURL(raw string) string {
 		return "<redacted>"
 	}
 	return u.Scheme + "://" + u.Host
+}
+
+// allowMCPTools adds the mcp__<name>__* glob to the Claude Code settings.json
+// permissions.allow list. Failures are logged as warnings — the MCP is still
+// registered, so tools are available but may require per-call user approval.
+func allowMCPTools(homeDir, name string) {
+	if homeDir == "" {
+		return
+	}
+	if err := claudesettings.AddPermission(homeDir, "mcp__"+name+"__*"); err != nil {
+		slog.Warn("failed to add MCP tool pattern to settings.json — tools may require manual approval",
+			"name", name, "err", err)
+	}
 }
 
 // urlResponseFields returns the fields a tool response should include for a

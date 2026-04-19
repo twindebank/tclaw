@@ -23,6 +23,11 @@ type Deps struct {
 	// ConfigUpdater is called after a remote MCP is added or removed to
 	// regenerate the MCP config file. The next Claude turn picks up the change.
 	ConfigUpdater func(ctx context.Context) error
+
+	// HomeDir is the user's HOME directory (e.g. <base>/<userID>/home). Used
+	// to locate settings.json so that new MCP tool patterns are automatically
+	// added to the permissions.allow list on registration.
+	HomeDir string
 }
 
 // ToolNames returns all tool name constants in this package.

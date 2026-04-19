@@ -17,6 +17,10 @@ type Package struct {
 	Manager       *remotemcpstore.Manager
 	Callback      *oauth.CallbackServer
 	ConfigUpdater func(context.Context) error
+
+	// HomeDir is the user's HOME directory. Passed to Deps so that registered
+	// MCP tool patterns are added to settings.json automatically.
+	HomeDir string
 }
 
 func (p *Package) Name() string { return "remote_mcp" }
@@ -50,6 +54,7 @@ func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationCont
 		Callback:      p.Callback,
 		SecretStore:   regCtx.SecretStore,
 		ConfigUpdater: p.ConfigUpdater,
+		HomeDir:       p.HomeDir,
 	}
 
 	RegisterTools(handler, deps)

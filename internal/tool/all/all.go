@@ -227,6 +227,7 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 			Manager:       p.RemoteMCPManager,
 			Callback:      p.Callback,
 			ConfigUpdater: p.ConfigUpdater,
+			HomeDir:       p.HomeDir,
 		},
 		&secretform.Package{
 			SecretStore:     p.SecretStore,

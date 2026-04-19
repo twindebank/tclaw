@@ -19,10 +19,14 @@ type pendingRemoteMCPFlow struct {
 	clientReg     *discovery.ClientRegistration
 	manager       *remotemcpstore.Manager
 	configUpdater func(ctx context.Context) error
-	codeVerifier  string
-	done          chan struct{}
-	result        string
-	err           error
+
+	// homeDir is used to update settings.json after OAuth completes so the
+	// MCP tools are auto-allowed without requiring per-call user approval.
+	homeDir      string
+	codeVerifier string
+	done         chan struct{}
+	result       string
+	err          error
 }
 
 func (f *pendingRemoteMCPFlow) Complete(ctx context.Context, code string, callbackURL string) error {
@@ -55,6 +59,10 @@ func (f *pendingRemoteMCPFlow) Complete(ctx context.Context, code string, callba
 	if err := f.configUpdater(ctx); err != nil {
 		return fmt.Errorf("tokens stored but config update failed for %q — tools won't be available until restart: %w", f.name, err)
 	}
+
+	// Auto-allow the MCP tool pattern in settings.json so tool calls don't
+	// require per-call user approval.
+	allowMCPTools(f.homeDir, f.name)
 
 	f.result = fmt.Sprintf("Remote MCP %q authorized successfully", f.name)
 	close(f.done)
