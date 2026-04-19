@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
+	"tclaw/internal/claudesettings"
 	"tclaw/internal/mcp"
 )
 
@@ -46,6 +48,14 @@ func remoteMCPRemoveHandler(deps Deps) mcp.ToolHandler {
 		// deleted from storage but may still appear in config until restart.
 		if updateErr := deps.ConfigUpdater(ctx); updateErr != nil {
 			return nil, fmt.Errorf("remote MCP %q removed from storage but config update failed — tools may persist until restart: %w", a.Name, updateErr)
+		}
+
+		// Best-effort: remove the tool pattern from settings.json. Failure is
+		// non-fatal — the pattern becomes harmless once the MCP is unregistered.
+		if deps.HomeDir != "" {
+			if err := claudesettings.RemovePermission(deps.HomeDir, "mcp__"+a.Name+"__*"); err != nil {
+				slog.Warn("failed to remove MCP tool pattern from settings.json", "name", a.Name, "err", err)
+			}
 		}
 
 		result := map[string]any{
