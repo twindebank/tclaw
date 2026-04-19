@@ -33,6 +33,7 @@
 - [x] Tool permissions / 2FA — approve or deny tool calls via the chat channel (flow_approval.go)
 - [ ] Privileged sessions — temporary elevated permissions with a timeout (e.g. user grants write access for 30 min)
 - [ ] Permission matching rules — expressive rules for tool permissions based on provider, read/write, resource scope, etc.
+- [ ] Persist pending secret forms across restarts — pending `secret_form_request` entries currently live in `sync.Map` in RAM (`secretform.RegisterTools`), so a tclaw restart between request and submission drops the form (GET 404, wait returns "unknown request ID") and the user has to redo the entire flow. Back the map with `store.Store`: serialise `PendingRequest` (minus `Done` chan) per request ID, write-through on create + on submission (persist `Submitted: true` before `close(req.Done)` so a crash can't lose the signal), load all on startup, drop expired against `requestTTL`, reconstruct `Done` channels (pre-closed when `Submitted: true`). Needs e2e test that builds a request, simulates a restart by tearing down + rebuilding the handler against the same store, and asserts: (a) form URL still serves, (b) pre-restart submission surfaces as `submitted` post-restart, (c) post-restart submission works end-to-end.
 
 ## UX
 - [x] Split thinking and final message — separate thinking/tool-use status from response text into distinct messages (Telegram split mode)
