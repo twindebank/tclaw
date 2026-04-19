@@ -857,12 +857,25 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			MCPConfigPath:        mcpConfigPath,
 			MCPConfigPaths:       mcpConfigPaths,
 			// Live query so globs expand against tools registered mid-session
-			// (e.g. Google tools added after OAuth connection).
+			// (local MCP tools added after OAuth, remote MCPs added via
+			// remote_mcp_add). Returns FULLY-QUALIFIED names
+			// (mcp__<server>__<tool>) so expandMCPGlobs can use them
+			// directly without having to know the local-vs-remote split.
 			MCPToolNames: func() []string {
 				tools := mcpHandler.ListTools()
-				names := make([]string, len(tools))
-				for i, td := range tools {
-					names[i] = td.Name
+				names := make([]string, 0, len(tools))
+				for _, td := range tools {
+					names = append(names, "mcp__tclaw__"+td.Name)
+				}
+				mcps, err := remoteMCPMgr.ListRemoteMCPs(dynamicCtx)
+				if err != nil {
+					slog.Error("failed to list remote mcps for tool-name expansion", "err", err)
+					return names
+				}
+				for _, m := range mcps {
+					for _, tool := range m.ToolNames {
+						names = append(names, "mcp__"+m.Name+"__"+tool)
+					}
 				}
 				return names
 			},

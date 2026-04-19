@@ -2,6 +2,7 @@ package remotemcp
 
 import (
 	"context"
+	"net/http"
 
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/mcp"
@@ -23,6 +24,19 @@ type Deps struct {
 	// ConfigUpdater is called after a remote MCP is added or removed to
 	// regenerate the MCP config file. The next Claude turn picks up the change.
 	ConfigUpdater func(ctx context.Context) error
+
+	// OnChannelChange is fired after a successful add or remove so the
+	// router restarts the running agent. Without a restart the Claude CLI
+	// keeps its original tool allowlist and the new tools stay invisible
+	// until the next idle timeout. Optional — leaving it nil means the
+	// new MCP only becomes visible after a natural restart.
+	OnChannelChange func()
+
+	// HTTPClient overrides the HTTP client used for the MCP tools/list
+	// discovery at registration time. nil = use the default SSRF-safe
+	// client and validate the URL. Set in tests to point at a
+	// self-signed httptest.NewTLSServer on 127.0.0.1.
+	HTTPClient *http.Client
 }
 
 // ToolNames returns all tool name constants in this package.

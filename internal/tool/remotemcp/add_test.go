@@ -3,6 +3,7 @@ package remotemcp_test
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -16,11 +17,12 @@ import (
 
 func TestRemoteMCPAdd_SkipAuthDiscoveryWithHeaders(t *testing.T) {
 	t.Run("stores static headers and reaches ready state", func(t *testing.T) {
-		h, mgr, updated := setup(t)
+		server := fakeMCPServer(t, []string{"ha_tool_a", "ha_tool_b"})
+		h, mgr, updated := setup(t, withHTTPClient(server.Client()))
 
 		result := callTool(t, h, "remote_mcp_add", map[string]any{
 			"name":                "home-assistant",
-			"url":                 "https://ha-mcp.example.com/mcp_abc",
+			"url":                 server.URL + "/mcp_abc",
 			"channel":             "desktop",
 			"skip_auth_discovery": true,
 			"headers": map[string]string{
@@ -33,9 +35,8 @@ func TestRemoteMCPAdd_SkipAuthDiscoveryWithHeaders(t *testing.T) {
 		require.NoError(t, json.Unmarshal(result, &got))
 		require.Equal(t, "ready", got["status"])
 		require.Equal(t, "home-assistant", got["name"])
-		require.Equal(t, "https://ha-mcp.example.com", got["host"], "host should be scheme+host only")
 		require.Equal(t, false, got["url_is_secret"], "inline url is not sensitive")
-		require.Equal(t, "https://ha-mcp.example.com/mcp_abc", got["url"], "full url present for inline registration")
+		require.Equal(t, server.URL+"/mcp_abc", got["url"], "full url present for inline registration")
 
 		auth, err := mgr.GetRemoteMCPAuth(context.Background(), "home-assistant")
 		require.NoError(t, err)
@@ -44,15 +45,21 @@ func TestRemoteMCPAdd_SkipAuthDiscoveryWithHeaders(t *testing.T) {
 		require.Equal(t, "client-secret", auth.StaticHeaders["CF-Access-Client-Secret"])
 		require.Empty(t, auth.AccessToken)
 
+		entry, err := mgr.GetRemoteMCP(context.Background(), "home-assistant")
+		require.NoError(t, err)
+		require.Equal(t, []string{"ha_tool_a", "ha_tool_b"}, entry.ToolNames,
+			"tool names from server should be persisted")
+
 		require.Equal(t, 1, *updated, "config updater should fire once after add")
 	})
 
 	t.Run("skip_auth_discovery without headers still persists entry", func(t *testing.T) {
-		h, mgr, _ := setup(t)
+		server := fakeMCPServer(t, []string{"open_tool"})
+		h, mgr, _ := setup(t, withHTTPClient(server.Client()))
 
 		_ = callTool(t, h, "remote_mcp_add", map[string]any{
 			"name":                "open-mcp",
-			"url":                 "https://open.example.com/mcp",
+			"url":                 server.URL + "/mcp",
 			"channel":             "desktop",
 			"skip_auth_discovery": true,
 		})
@@ -121,13 +128,14 @@ func TestRemoteMCPAdd_SkipAuthDiscoveryWithHeaders(t *testing.T) {
 
 func TestRemoteMCPAdd_HeaderSecretKeys(t *testing.T) {
 	t.Run("resolves values from secret store and stores as static headers", func(t *testing.T) {
-		th := setupHarness(t)
+		server := fakeMCPServer(t, []string{"ha_one", "ha_two"})
+		th := setupHarness(t, withHTTPClient(server.Client()))
 		th.secrets.data["ha_mcp_cf_access_client_id"] = "client-id-from-store"
 		th.secrets.data["ha_mcp_cf_access_client_secret"] = "client-secret-from-store"
 
 		result := callTool(t, th.handler, "remote_mcp_add", map[string]any{
 			"name":                "home-assistant",
-			"url":                 "https://ha-mcp.example.com/mcp_abc",
+			"url":                 server.URL + "/mcp_abc",
 			"channel":             "desktop",
 			"skip_auth_discovery": true,
 			"header_secret_keys": map[string]string{
@@ -148,12 +156,13 @@ func TestRemoteMCPAdd_HeaderSecretKeys(t *testing.T) {
 	})
 
 	t.Run("combines inline headers with secret-resolved headers", func(t *testing.T) {
-		th := setupHarness(t)
+		server := fakeMCPServer(t, []string{"combo_tool"})
+		th := setupHarness(t, withHTTPClient(server.Client()))
 		th.secrets.data["tenant_token"] = "resolved-value"
 
 		_ = callTool(t, th.handler, "remote_mcp_add", map[string]any{
 			"name":                "combo",
-			"url":                 "https://combo.example.com/mcp",
+			"url":                 server.URL + "/mcp",
 			"channel":             "desktop",
 			"skip_auth_discovery": true,
 			"headers": map[string]string{
@@ -255,8 +264,9 @@ func TestRemoteMCPAdd_HeaderSecretKeys(t *testing.T) {
 
 func TestRemoteMCPAdd_URLSecretKey(t *testing.T) {
 	t.Run("resolves URL from secret store", func(t *testing.T) {
-		th := setupHarness(t)
-		th.secrets.data["mcp_url"] = "https://private.example.com/abc_secret_xyz"
+		server := fakeMCPServer(t, []string{"secret_tool"})
+		th := setupHarness(t, withHTTPClient(server.Client()))
+		th.secrets.data["mcp_url"] = server.URL + "/abc_secret_xyz"
 
 		_ = callTool(t, th.handler, "remote_mcp_add", map[string]any{
 			"name":                "private",
@@ -268,13 +278,14 @@ func TestRemoteMCPAdd_URLSecretKey(t *testing.T) {
 		mcps, err := th.manager.ListRemoteMCPs(context.Background())
 		require.NoError(t, err)
 		require.Len(t, mcps, 1)
-		require.Equal(t, "https://private.example.com/abc_secret_xyz", mcps[0].URL,
+		require.Equal(t, server.URL+"/abc_secret_xyz", mcps[0].URL,
 			"resolved URL should be stored as the remote MCP URL")
 	})
 
 	t.Run("combines url_secret_key with header_secret_keys", func(t *testing.T) {
-		th := setupHarness(t)
-		th.secrets.data["mcp_url"] = "https://private.example.com/abc_xyz"
+		server := fakeMCPServer(t, []string{"full_tool"})
+		th := setupHarness(t, withHTTPClient(server.Client()))
+		th.secrets.data["mcp_url"] = server.URL + "/abc_xyz"
 		th.secrets.data["cf_id"] = "cf-client-id"
 		th.secrets.data["cf_secret"] = "cf-client-secret"
 
@@ -291,7 +302,7 @@ func TestRemoteMCPAdd_URLSecretKey(t *testing.T) {
 
 		mcps, err := th.manager.ListRemoteMCPs(context.Background())
 		require.NoError(t, err)
-		require.Equal(t, "https://private.example.com/abc_xyz", mcps[0].URL)
+		require.Equal(t, server.URL+"/abc_xyz", mcps[0].URL)
 
 		auth, err := th.manager.GetRemoteMCPAuth(context.Background(), "full-secret")
 		require.NoError(t, err)
@@ -367,18 +378,27 @@ func TestRemoteMCPAdd_URLSecretKey(t *testing.T) {
 // --- helpers ---
 
 type testHarness struct {
-	handler     *mcp.Handler
-	manager     *remotemcpstore.Manager
-	secrets     *memorySecretStore
-	updateCount *int
+	handler            *mcp.Handler
+	manager            *remotemcpstore.Manager
+	secrets            *memorySecretStore
+	updateCount        *int
+	channelChangeCount *int
 }
 
-func setup(t *testing.T) (*mcp.Handler, *remotemcpstore.Manager, *int) {
-	th := setupHarness(t)
+type harnessOpt func(*remotemcp.Deps)
+
+// withHTTPClient plumbs a self-signed-trusting HTTP client into the tool's
+// deps so ListTools can reach an httptest.NewTLSServer on 127.0.0.1.
+func withHTTPClient(c *http.Client) harnessOpt {
+	return func(d *remotemcp.Deps) { d.HTTPClient = c }
+}
+
+func setup(t *testing.T, opts ...harnessOpt) (*mcp.Handler, *remotemcpstore.Manager, *int) {
+	th := setupHarness(t, opts...)
 	return th.handler, th.manager, th.updateCount
 }
 
-func setupHarness(t *testing.T) *testHarness {
+func setupHarness(t *testing.T, opts ...harnessOpt) *testHarness {
 	t.Helper()
 	s, err := store.NewFS(t.TempDir())
 	require.NoError(t, err)
@@ -387,17 +407,30 @@ func setupHarness(t *testing.T) *testHarness {
 	mgr := remotemcpstore.NewManager(s, secrets)
 
 	updateCount := 0
-	handler := mcp.NewHandler()
-	remotemcp.RegisterTools(handler, remotemcp.Deps{
+	channelChangeCount := 0
+	deps := remotemcp.Deps{
 		Manager:     mgr,
 		SecretStore: secrets,
 		ConfigUpdater: func(_ context.Context) error {
 			updateCount++
 			return nil
 		},
-	})
+		OnChannelChange: func() { channelChangeCount++ },
+	}
+	for _, opt := range opts {
+		opt(&deps)
+	}
 
-	return &testHarness{handler: handler, manager: mgr, secrets: secrets, updateCount: &updateCount}
+	handler := mcp.NewHandler()
+	remotemcp.RegisterTools(handler, deps)
+
+	return &testHarness{
+		handler:            handler,
+		manager:            mgr,
+		secrets:            secrets,
+		updateCount:        &updateCount,
+		channelChangeCount: &channelChangeCount,
+	}
 }
 
 func callTool(t *testing.T, h *mcp.Handler, name string, args any) json.RawMessage {

@@ -178,13 +178,16 @@ type Options struct {
 	// map fall back to MCPConfigPath.
 	MCPConfigPaths map[channel.ChannelID]string
 
-	// MCPToolNames returns the current list of tool names registered on
-	// the local MCP server (e.g. "channel_create", "schedule_list"). Called
-	// on every turn to expand glob patterns in AllowedTools/DisallowedTools
-	// into explicit names, since the Claude CLI's --allowedTools flag does
-	// not support wildcards for MCP tools.
-	// Must return live data — tools may be registered mid-session (e.g.
-	// Google tools after OAuth connection).
+	// MCPToolNames returns the full set of MCP tool names available to
+	// the agent as fully-qualified identifiers:
+	//   mcp__tclaw__<name>      for tools served by the local tclaw server
+	//   mcp__<server>__<name>   for tools served by a registered remote MCP
+	// Used to expand glob patterns in AllowedTools/DisallowedTools into
+	// explicit names, since the Claude CLI's --allowedTools flag does not
+	// support wildcards for MCP tools.
+	// Must return live data — local tools may be registered mid-session
+	// (e.g. Google tools after OAuth connection), and remote MCPs may be
+	// added via remote_mcp_add.
 	MCPToolNames func() []string
 
 	// SystemPrompt is appended to the default Claude system prompt via
@@ -927,21 +930,19 @@ func resolveToolsForChannel(opts Options, channelID channel.ChannelID) (allowed 
 
 // expandMCPGlobs replaces glob patterns (containing * or ?) in the tool list
 // with the matching MCP tool names. Non-glob entries are passed through as-is.
-// The Claude CLI's --allowedTools flag doesn't support wildcards for MCP tools,
-// so we expand "mcp__tclaw__channel_*" into "mcp__tclaw__channel_create",
+// The Claude CLI's --allowedTools flag doesn't support wildcards for MCP
+// tools, so we expand "mcp__tclaw__channel_*" into "mcp__tclaw__channel_create",
 // "mcp__tclaw__channel_edit", etc.
+//
+// mcpToolNames contains fully-qualified identifiers (mcp__<server>__<tool>)
+// for BOTH the local tclaw server and any registered remote MCPs — remote
+// tool names come from the tools/list handshake captured at
+// remote_mcp_add time. Without them, patterns like "mcp__home-assistant__*"
+// pass through unchanged and the CLI rejects every tool call.
 func expandMCPGlobs(tools []claudecli.Tool, mcpToolNames []string) []claudecli.Tool {
 	if len(mcpToolNames) == 0 {
 		return tools
 	}
-
-	// Build the set of fully-qualified MCP tool names (mcp__tclaw__<name>)
-	// that the CLI will see.
-	qualified := make([]string, len(mcpToolNames))
-	for i, name := range mcpToolNames {
-		qualified[i] = "mcp__tclaw__" + name
-	}
-
 	var out []claudecli.Tool
 	for _, t := range tools {
 		ts := string(t)
@@ -952,7 +953,7 @@ func expandMCPGlobs(tools []claudecli.Tool, mcpToolNames []string) []claudecli.T
 		}
 		// Expand the glob against known MCP tool names.
 		matched := false
-		for _, q := range qualified {
+		for _, q := range mcpToolNames {
 			if ok, _ := filepath.Match(ts, q); ok {
 				out = append(out, claudecli.Tool(q))
 				matched = true

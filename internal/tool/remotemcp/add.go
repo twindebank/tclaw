@@ -140,12 +140,30 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 			return nil, err
 		}
 
+		// For non-OAuth registrations (skip_auth_discovery), fetch the tool
+		// list up front. We need it for glob expansion at agent-start time —
+		// the Claude CLI's --allowedTools flag does not honour wildcards for
+		// MCP tools, so without an explicit list it refuses every tool call.
+		// Failing the add on an unreachable server is correct: it keeps the
+		// store clean and surfaces the real error to the user now, not later.
+		var toolNames []string
+		if a.SkipAuthDiscovery {
+			toolNames, err = discovery.ListTools(ctx, resolvedURL, mergedHeaders, listToolsOpts(deps)...)
+			if err != nil {
+				return nil, fmt.Errorf("failed to list tools from remote MCP %q: %w", a.Name, err)
+			}
+			if len(toolNames) == 0 {
+				return nil, fmt.Errorf("remote MCP %q exposed no tools", a.Name)
+			}
+		}
+
 		// Store the remote MCP entry.
 		entry, err := deps.Manager.AddRemoteMCP(ctx, remotemcpstore.AddRemoteMCPParams{
 			Name:         a.Name,
 			URL:          resolvedURL,
 			Channel:      a.Channel,
 			URLSensitive: a.URLSecretKey != "",
+			ToolNames:    toolNames,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("add remote mcp: %w", err)
@@ -161,8 +179,14 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 			if updateErr := deps.ConfigUpdater(ctx); updateErr != nil {
 				return nil, fmt.Errorf("remote MCP %q added but config update failed — tools won't be available until next restart: %w", a.Name, updateErr)
 			}
+			// Restart the agent so the CLI picks up the expanded tool
+			// allowlist. Without this the new tools stay invisible until
+			// idle timeout fires naturally.
+			if deps.OnChannelChange != nil {
+				deps.OnChannelChange()
+			}
 			result := buildAddResponse(entry, "ready",
-				fmt.Sprintf("Remote MCP %q added with %d static header(s) attached. Its tools will be available on the next message.", a.Name, len(mergedHeaders)))
+				fmt.Sprintf("Remote MCP %q added with %d tool(s) and %d static header(s) attached. Its tools will be available on the next message.", a.Name, len(toolNames), len(mergedHeaders)))
 			return json.Marshal(result)
 		}
 
@@ -180,13 +204,27 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 			return json.Marshal(result)
 		}
 
-		// No auth needed — just add it and update the config.
+		// No auth needed — fetch the tool list and update the config.
 		if authMeta == nil {
+			toolNames, listErr := discovery.ListTools(ctx, resolvedURL, nil)
+			if listErr != nil {
+				return nil, fmt.Errorf("failed to list tools from remote MCP %q: %w", a.Name, listErr)
+			}
+			if len(toolNames) == 0 {
+				return nil, fmt.Errorf("remote MCP %q exposed no tools", a.Name)
+			}
+			if setErr := deps.Manager.SetToolNames(ctx, a.Name, toolNames); setErr != nil {
+				return nil, fmt.Errorf("persist tool names: %w", setErr)
+			}
 			if updateErr := deps.ConfigUpdater(ctx); updateErr != nil {
 				return nil, fmt.Errorf("remote MCP %q added but config update failed — tools won't be available until next restart: %w", a.Name, updateErr)
 			}
+			entry.ToolNames = toolNames
+			if deps.OnChannelChange != nil {
+				deps.OnChannelChange()
+			}
 			result := buildAddResponse(entry, "ready",
-				fmt.Sprintf("Remote MCP %q added (no auth required). Its tools will be available on the next message.", a.Name))
+				fmt.Sprintf("Remote MCP %q added with %d tool(s). Its tools will be available on the next message.", a.Name, len(toolNames)))
 			return json.Marshal(result)
 		}
 
@@ -375,6 +413,16 @@ func validateHeaders(headers map[string]string) error {
 		}
 	}
 	return nil
+}
+
+// listToolsOpts translates Deps into functional options for
+// discovery.ListTools. Keeps the tool call site cluttered with a single
+// helper rather than conditional WithHTTPClient branches.
+func listToolsOpts(deps Deps) []discovery.ListToolsOption {
+	if deps.HTTPClient == nil {
+		return nil
+	}
+	return []discovery.ListToolsOption{discovery.WithHTTPClient(deps.HTTPClient)}
 }
 
 // redactURL returns a URL suitable for logging — preserves scheme and host but

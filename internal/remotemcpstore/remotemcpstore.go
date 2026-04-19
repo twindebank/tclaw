@@ -30,6 +30,13 @@ type RemoteMCP struct {
 	// responses). False for URLs passed inline, since those were already
 	// visible in the originating tool call.
 	URLSensitive bool `json:"url_sensitive,omitempty"`
+
+	// ToolNames is the list of tool names the remote MCP exposed at
+	// registration time. The Claude CLI's --allowedTools flag does not
+	// honour wildcards for MCP tools, so tclaw must expand glob patterns
+	// like `mcp__<server>__*` into explicit tool names at agent-start time.
+	// Without this list the CLI refuses every tool call on the server.
+	ToolNames []string `json:"tool_names,omitempty"`
 }
 
 // RemoteMCPAuth holds OAuth credentials and registration for a remote MCP,
@@ -111,6 +118,12 @@ type AddRemoteMCPParams struct {
 	// output show only scheme+host, not the full path. Set when the URL was
 	// registered via url_secret_key.
 	URLSensitive bool
+
+	// ToolNames is the list of tool names the remote MCP server exposed at
+	// registration time (discovered via MCP tools/list). Required — without
+	// it the Claude CLI can't expand the tool permission glob for this
+	// server and will refuse every tool call.
+	ToolNames []string
 }
 
 func (m *Manager) AddRemoteMCP(ctx context.Context, p AddRemoteMCPParams) (*RemoteMCP, error) {
@@ -129,6 +142,7 @@ func (m *Manager) AddRemoteMCP(ctx context.Context, p AddRemoteMCPParams) (*Remo
 		Channel:      p.Channel,
 		CreatedAt:    time.Now(),
 		URLSensitive: p.URLSensitive,
+		ToolNames:    p.ToolNames,
 	}
 	mcps = append(mcps, entry)
 	if err := m.saveRemoteMCPs(ctx, mcps); err != nil {
@@ -149,6 +163,28 @@ func (m *Manager) ListRemoteMCPsByChannel(ctx context.Context, channelName strin
 		}
 	}
 	return result, nil
+}
+
+// SetToolNames updates the stored tool-name list for an existing remote MCP.
+// Used by the OAuth and no-auth registration paths where tool discovery
+// happens after the entry has already been persisted.
+func (m *Manager) SetToolNames(ctx context.Context, name string, toolNames []string) error {
+	mcps, err := m.ListRemoteMCPs(ctx)
+	if err != nil {
+		return err
+	}
+	found := false
+	for i := range mcps {
+		if mcps[i].Name == name {
+			mcps[i].ToolNames = toolNames
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("remote mcp %q not found", name)
+	}
+	return m.saveRemoteMCPs(ctx, mcps)
 }
 
 func (m *Manager) RemoveRemoteMCP(ctx context.Context, name string) error {
