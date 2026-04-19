@@ -24,6 +24,12 @@ type RemoteMCP struct {
 	URL       string    `json:"url"`
 	Channel   string    `json:"channel"`
 	CreatedAt time.Time `json:"created_at"`
+
+	// URLSensitive is true if the URL was registered via url_secret_key and
+	// should be treated as a credential (not echoed to the agent in tool
+	// responses). False for URLs passed inline, since those were already
+	// visible in the originating tool call.
+	URLSensitive bool `json:"url_sensitive,omitempty"`
 }
 
 // RemoteMCPAuth holds OAuth credentials and registration for a remote MCP,
@@ -95,21 +101,34 @@ func (m *Manager) GetRemoteMCP(ctx context.Context, name string) (*RemoteMCP, er
 	return nil, nil
 }
 
-func (m *Manager) AddRemoteMCP(ctx context.Context, name, url, channel string) (*RemoteMCP, error) {
+// AddRemoteMCPParams configures a new remote MCP registration.
+type AddRemoteMCPParams struct {
+	Name    string
+	URL     string
+	Channel string
+
+	// URLSensitive marks the URL as a credential so tool responses and list
+	// output show only scheme+host, not the full path. Set when the URL was
+	// registered via url_secret_key.
+	URLSensitive bool
+}
+
+func (m *Manager) AddRemoteMCP(ctx context.Context, p AddRemoteMCPParams) (*RemoteMCP, error) {
 	mcps, err := m.ListRemoteMCPs(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for _, mcp := range mcps {
-		if mcp.Name == name {
-			return nil, fmt.Errorf("remote mcp %q already exists", name)
+		if mcp.Name == p.Name {
+			return nil, fmt.Errorf("remote mcp %q already exists", p.Name)
 		}
 	}
 	entry := RemoteMCP{
-		Name:      name,
-		URL:       url,
-		Channel:   channel,
-		CreatedAt: time.Now(),
+		Name:         p.Name,
+		URL:          p.URL,
+		Channel:      p.Channel,
+		CreatedAt:    time.Now(),
+		URLSensitive: p.URLSensitive,
 	}
 	mcps = append(mcps, entry)
 	if err := m.saveRemoteMCPs(ctx, mcps); err != nil {

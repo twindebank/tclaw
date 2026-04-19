@@ -3,6 +3,7 @@ package remotemcp
 import (
 	"context"
 
+	"tclaw/internal/libraries/secret"
 	"tclaw/internal/mcp"
 	"tclaw/internal/oauth"
 	"tclaw/internal/remotemcpstore"
@@ -12,6 +13,12 @@ import (
 type Deps struct {
 	Manager  *remotemcpstore.Manager
 	Callback *oauth.CallbackServer // nil if OAuth callback is not configured
+
+	// SecretStore resolves header values from keys passed via
+	// `header_secret_keys` on remote_mcp_add. Required for the secret-form
+	// flow where the agent collects Cloudflare Access (or similar)
+	// credentials via secret_form_request before registering the MCP.
+	SecretStore secret.Store
 
 	// ConfigUpdater is called after a remote MCP is added or removed to
 	// regenerate the MCP config file. The next Claude turn picks up the change.

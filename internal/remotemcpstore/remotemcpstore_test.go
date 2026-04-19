@@ -16,7 +16,7 @@ func TestManager_StaticHeadersRoundtrip(t *testing.T) {
 		mgr := newManager(t)
 		ctx := context.Background()
 
-		_, err := mgr.AddRemoteMCP(ctx, "ha", "https://ha-mcp.example.com/secret", "desktop")
+		_, err := mgr.AddRemoteMCP(ctx, remotemcpstore.AddRemoteMCPParams{Name: "ha", URL: "https://ha-mcp.example.com/secret", Channel: "desktop"})
 		require.NoError(t, err)
 
 		err = mgr.SetRemoteMCPAuth(ctx, "ha", &remotemcpstore.RemoteMCPAuth{
@@ -39,7 +39,7 @@ func TestManager_StaticHeadersRoundtrip(t *testing.T) {
 		mgr := newManager(t)
 		ctx := context.Background()
 
-		_, err := mgr.AddRemoteMCP(ctx, "ha", "https://ha-mcp.example.com/secret", "desktop")
+		_, err := mgr.AddRemoteMCP(ctx, remotemcpstore.AddRemoteMCPParams{Name: "ha", URL: "https://ha-mcp.example.com/secret", Channel: "desktop"})
 		require.NoError(t, err)
 		err = mgr.SetRemoteMCPAuth(ctx, "ha", &remotemcpstore.RemoteMCPAuth{
 			StaticHeaders: map[string]string{"X-Foo": "bar"},
@@ -61,9 +61,9 @@ func TestManager_StaticHeadersRoundtrip(t *testing.T) {
 		mgr := newManager(t)
 		ctx := context.Background()
 
-		_, err := mgr.AddRemoteMCP(ctx, "a", "https://a.example.com/x", "desktop")
+		_, err := mgr.AddRemoteMCP(ctx, remotemcpstore.AddRemoteMCPParams{Name: "a", URL: "https://a.example.com/x", Channel: "desktop"})
 		require.NoError(t, err)
-		_, err = mgr.AddRemoteMCP(ctx, "b", "https://b.example.com/y", "desktop")
+		_, err = mgr.AddRemoteMCP(ctx, remotemcpstore.AddRemoteMCPParams{Name: "b", URL: "https://b.example.com/y", Channel: "desktop"})
 		require.NoError(t, err)
 
 		require.NoError(t, mgr.SetRemoteMCPAuth(ctx, "a", &remotemcpstore.RemoteMCPAuth{

@@ -48,6 +48,7 @@ func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationCont
 	deps := Deps{
 		Manager:       p.Manager,
 		Callback:      p.Callback,
+		SecretStore:   regCtx.SecretStore,
 		ConfigUpdater: p.ConfigUpdater,
 	}
 

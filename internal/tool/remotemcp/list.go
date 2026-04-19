@@ -26,29 +26,22 @@ func remoteMCPListHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("list remote mcps: %w", err)
 		}
 
-		type mcpInfo struct {
-			Name     string `json:"name"`
-			URL      string `json:"url"`
-			Channel  string `json:"channel,omitempty"`
-			HasAuth  bool   `json:"has_auth"`
-			HasToken bool   `json:"has_token"`
-		}
-
-		result := make([]mcpInfo, 0, len(mcps))
+		// URL-handling contract matches remote_mcp_add: host always, full url
+		// only when URLSensitive is false. Agents shouldn't receive sensitive
+		// URLs via tool output — url_is_secret makes that state explicit.
+		result := make([]map[string]any, 0, len(mcps))
 		for _, m := range mcps {
-			auth, err := deps.Manager.GetRemoteMCPAuth(ctx, m.Name)
-			if err != nil {
-				slog.Warn("failed to get auth for remote MCP", "name", m.Name, "err", err)
+			auth, authErr := deps.Manager.GetRemoteMCPAuth(ctx, m.Name)
+			if authErr != nil {
+				slog.Warn("failed to get auth for remote MCP", "name", m.Name, "err", authErr)
 			}
-			info := mcpInfo{
-				Name:    m.Name,
-				URL:     m.URL,
-				Channel: m.Channel,
+			info := urlResponseFields(m.URL, m.URLSensitive)
+			info["name"] = m.Name
+			if m.Channel != "" {
+				info["channel"] = m.Channel
 			}
-			if auth != nil {
-				info.HasAuth = true
-				info.HasToken = auth.AccessToken != ""
-			}
+			info["has_auth"] = auth != nil
+			info["has_token"] = auth != nil && auth.AccessToken != ""
 			result = append(result, info)
 		}
 
