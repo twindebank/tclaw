@@ -153,8 +153,13 @@ func buildMCPConfigPaths(
 			if authErr != nil {
 				slog.Warn("failed to load remote mcp auth for channel config", "name", m.Name, "err", authErr)
 			}
-			if auth != nil && auth.AccessToken != "" {
-				entry.BearerToken = auth.AccessToken
+			if auth != nil {
+				if auth.AccessToken != "" {
+					entry.BearerToken = auth.AccessToken
+				}
+				if len(auth.StaticHeaders) > 0 {
+					entry.ExtraHeaders = auth.StaticHeaders
+				}
 			}
 			entries = append(entries, entry)
 		}
