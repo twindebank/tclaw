@@ -66,7 +66,7 @@ func TestNotifier_Subscribe(t *testing.T) {
 }
 
 func TestNotifier_Cancel(t *testing.T) {
-	t.Run("is idempotent and cleans up cursor", func(t *testing.T) {
+	t.Run("is idempotent and cleans up cursor and seen set", func(t *testing.T) {
 		n, s := setupNotifier(t)
 		ctx := context.Background()
 
@@ -77,8 +77,9 @@ func TestNotifier_Cancel(t *testing.T) {
 		}, &noopEmitter{})
 		require.NoError(t, err)
 
-		// Simulate a persisted cursor.
+		// Simulate a persisted cursor and seen set.
 		require.NoError(t, s.Set(ctx, cursorKey(result.Subscription.ID), []byte("99999")))
+		n.saveSeen(ctx, result.Subscription.ID, []string{"msg1", "msg2"})
 
 		result.Cancel()
 		result.Cancel()
@@ -88,6 +89,9 @@ func TestNotifier_Cancel(t *testing.T) {
 		data, err := s.Get(ctx, cursorKey(result.Subscription.ID))
 		require.NoError(t, err)
 		require.Empty(t, data)
+
+		// Seen set should be cleaned up.
+		require.Empty(t, n.loadSeen(ctx, result.Subscription.ID))
 	})
 }
 
@@ -161,6 +165,68 @@ func TestNotifier_CursorPersistence(t *testing.T) {
 	t.Run("load returns empty for missing key", func(t *testing.T) {
 		n, _ := setupNotifier(t)
 		require.Equal(t, "", n.loadCursor(context.Background(), "notif_nonexistent"))
+	})
+}
+
+func TestNotifier_SeenPersistence(t *testing.T) {
+	t.Run("save and load round-trip", func(t *testing.T) {
+		n, _ := setupNotifier(t)
+		ctx := context.Background()
+		id := notification.GenerateID()
+
+		n.saveSeen(ctx, id, []string{"msg1", "msg2", "msg3"})
+		require.Equal(t, []string{"msg1", "msg2", "msg3"}, n.loadSeen(ctx, id))
+	})
+
+	t.Run("load returns nil for missing key", func(t *testing.T) {
+		n, _ := setupNotifier(t)
+		require.Nil(t, n.loadSeen(context.Background(), "notif_nonexistent"))
+	})
+
+	t.Run("load returns nil for corrupt data", func(t *testing.T) {
+		n, s := setupNotifier(t)
+		ctx := context.Background()
+		id := notification.GenerateID()
+
+		require.NoError(t, s.Set(ctx, seenKey(id), []byte("not valid json")))
+		require.Nil(t, n.loadSeen(ctx, id))
+	})
+}
+
+func TestFilterSeen(t *testing.T) {
+	t.Run("returns all candidates when seen is empty", func(t *testing.T) {
+		fresh, dupes := filterSeen([]string{"a", "b", "c"}, nil)
+		require.Equal(t, []string{"a", "b", "c"}, fresh)
+		require.Equal(t, 0, dupes)
+	})
+
+	t.Run("filters out seen ids and preserves order", func(t *testing.T) {
+		fresh, dupes := filterSeen([]string{"a", "b", "c", "d"}, []string{"b", "d"})
+		require.Equal(t, []string{"a", "c"}, fresh)
+		require.Equal(t, 2, dupes)
+	})
+
+	t.Run("returns empty slice when all candidates are seen", func(t *testing.T) {
+		fresh, dupes := filterSeen([]string{"a", "b"}, []string{"a", "b", "c"})
+		require.Empty(t, fresh)
+		require.Equal(t, 2, dupes)
+	})
+}
+
+func TestAppendCapped(t *testing.T) {
+	t.Run("appends when under cap", func(t *testing.T) {
+		result := appendCapped([]string{"a", "b"}, []string{"c"}, 10)
+		require.Equal(t, []string{"a", "b", "c"}, result)
+	})
+
+	t.Run("trims oldest entries when over cap", func(t *testing.T) {
+		result := appendCapped([]string{"a", "b", "c"}, []string{"d", "e"}, 3)
+		require.Equal(t, []string{"c", "d", "e"}, result)
+	})
+
+	t.Run("trims input larger than cap", func(t *testing.T) {
+		result := appendCapped(nil, []string{"a", "b", "c", "d"}, 2)
+		require.Equal(t, []string{"c", "d"}, result)
 	})
 }
 
