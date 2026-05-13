@@ -42,25 +42,37 @@ type notifier struct {
 
 	mu      sync.Mutex
 	cancels map[notification.SubscriptionID]context.CancelFunc
+
+	// seenMu serializes the read-modify-write cycle on the per-credential
+	// seen set. Multiple subscriptions can run concurrently against the same
+	// Gmail account; without this lock, two pollers could both observe an
+	// empty seen set, fetch the same message, and emit two notifications.
+	seenMu    sync.Mutex
+	seenLocks map[string]*sync.Mutex
 }
 
 func newNotifier(depsMap func() map[credential.CredentialSetID]Deps, state store.Store) *notifier {
 	return &notifier{
-		depsMap: depsMap,
-		state:   state,
-		cancels: make(map[notification.SubscriptionID]context.CancelFunc),
+		depsMap:   depsMap,
+		state:     state,
+		cancels:   make(map[notification.SubscriptionID]context.CancelFunc),
+		seenLocks: make(map[string]*sync.Mutex),
 	}
 }
 
 // cursorKey returns the store key for a subscription's history cursor.
+// The cursor IS per-subscription because each subscription may have been
+// seeded at a different point in time.
 func cursorKey(id notification.SubscriptionID) string {
 	return "gmail_cursor/" + string(id)
 }
 
-// seenKey returns the store key for a subscription's rolling set of recently-
-// notified message IDs, used to silently suppress duplicate polling results.
-func seenKey(id notification.SubscriptionID) string {
-	return "gmail_seen/" + string(id)
+// seenKey returns the store key for the rolling set of recently-notified
+// message IDs for a credential set. Keyed by credential set (not subscription)
+// so multiple subscriptions watching the same Gmail account share dedupe
+// state — preventing parallel pollers from each emitting on the same message.
+func seenKey(credSetID string) string {
+	return "gmail_seen/" + credSetID
 }
 
 func (n *notifier) saveCursor(ctx context.Context, id notification.SubscriptionID, historyID string) {
@@ -83,37 +95,44 @@ func (n *notifier) deleteCursor(ctx context.Context, id notification.Subscriptio
 	}
 }
 
-// loadSeen returns the ordered list of recently-notified message IDs for this
-// subscription (oldest first). Returns an empty slice on first use or on
+// seenLock returns the mutex guarding the seen set for a credential set,
+// creating it on first use.
+func (n *notifier) seenLock(credSetID string) *sync.Mutex {
+	n.seenMu.Lock()
+	defer n.seenMu.Unlock()
+	m, ok := n.seenLocks[credSetID]
+	if !ok {
+		m = &sync.Mutex{}
+		n.seenLocks[credSetID] = m
+	}
+	return m
+}
+
+// loadSeen returns the ordered list of recently-notified message IDs for the
+// credential set (oldest first). Returns an empty slice on first use or on
 // decode failure — a missing/corrupt seen set should never block notifications.
-func (n *notifier) loadSeen(ctx context.Context, id notification.SubscriptionID) []string {
-	data, err := n.state.Get(ctx, seenKey(id))
+func (n *notifier) loadSeen(ctx context.Context, credSetID string) []string {
+	data, err := n.state.Get(ctx, seenKey(credSetID))
 	if err != nil || len(data) == 0 {
 		return nil
 	}
 	var ids []string
 	if err := json.Unmarshal(data, &ids); err != nil {
 		slog.Warn("gmail notifier: failed to decode seen set, starting fresh",
-			"subscription", id, "error", err)
+			"credential_set", credSetID, "error", err)
 		return nil
 	}
 	return ids
 }
 
-func (n *notifier) saveSeen(ctx context.Context, id notification.SubscriptionID, ids []string) {
+func (n *notifier) saveSeen(ctx context.Context, credSetID string, ids []string) {
 	data, err := json.Marshal(ids)
 	if err != nil {
-		slog.Error("gmail notifier: failed to encode seen set", "subscription", id, "error", err)
+		slog.Error("gmail notifier: failed to encode seen set", "credential_set", credSetID, "error", err)
 		return
 	}
-	if err := n.state.Set(ctx, seenKey(id), data); err != nil {
-		slog.Error("gmail notifier: failed to persist seen set", "subscription", id, "error", err)
-	}
-}
-
-func (n *notifier) deleteSeen(ctx context.Context, id notification.SubscriptionID) {
-	if err := n.state.Delete(ctx, seenKey(id)); err != nil {
-		slog.Warn("gmail notifier: failed to delete seen set", "subscription", id, "error", err)
+	if err := n.state.Set(ctx, seenKey(credSetID), data); err != nil {
+		slog.Error("gmail notifier: failed to persist seen set", "credential_set", credSetID, "error", err)
 	}
 }
 
@@ -195,8 +214,10 @@ func (n *notifier) Cancel(id notification.SubscriptionID) {
 		cancel()
 	}
 
+	// The seen set is intentionally NOT deleted here: it's keyed by credential
+	// set and may still be in use by other subscriptions watching the same
+	// account. Stale entries are bounded by maxSeenMessageIDs.
 	n.deleteCursor(context.Background(), id)
-	n.deleteSeen(context.Background(), id)
 }
 
 func (n *notifier) startPolling(ctx context.Context, id notification.SubscriptionID, config gmailPollConfig, emitter notification.Emitter) notification.CancelFunc {
@@ -279,15 +300,26 @@ func (n *notifier) poll(ctx context.Context, id notification.SubscriptionID, cre
 		return cursor
 	}
 
-	// Filter out message IDs we've already notified on in a previous poll.
-	// Gmail's history API can return overlapping results across polls, and
-	// the cursor isn't always sufficient on its own to prevent re-notification.
-	seen := n.loadSeen(ctx, id)
+	// Filter and mark seen under a per-credential lock so concurrent pollers
+	// for the same Gmail account can't both observe an empty seen set, fetch
+	// the same message, and both emit. The lock is released before emit so
+	// emitter latency doesn't serialize unrelated pollers.
+	lock := n.seenLock(credSetID)
+	lock.Lock()
+	seen := n.loadSeen(ctx, credSetID)
 	freshMessageIDs, duplicates := filterSeen(newMessageIDs, seen)
+	if len(freshMessageIDs) > 0 {
+		// Mark IDs as seen BEFORE emitting so a crash after emit doesn't
+		// cause a re-notification on restart, and parallel pollers see the
+		// fresh entries immediately.
+		n.saveSeen(ctx, credSetID, appendCapped(seen, freshMessageIDs, maxSeenMessageIDs))
+	}
+	lock.Unlock()
 
 	if duplicates > 0 {
 		slog.Debug("gmail notifier: suppressed duplicate messages",
-			"subscription", id, "duplicates", duplicates, "fresh", len(freshMessageIDs))
+			"subscription", id, "credential_set", credSetID,
+			"duplicates", duplicates, "fresh", len(freshMessageIDs))
 	}
 
 	if len(freshMessageIDs) == 0 {
@@ -301,11 +333,6 @@ func (n *notifier) poll(ctx context.Context, id notification.SubscriptionID, cre
 	if len(summaries) == 0 {
 		return cursor
 	}
-
-	// Mark these IDs as seen before emitting so a crash after emit doesn't
-	// cause a re-notification on restart. A crash before emit is acceptable —
-	// the cursor stays unchanged and the next poll will retry.
-	n.saveSeen(ctx, id, appendCapped(seen, freshMessageIDs, maxSeenMessageIDs))
 
 	text := formatNewEmailNotification(summaries)
 	if err := emitter.Emit(ctx, notification.Notification{

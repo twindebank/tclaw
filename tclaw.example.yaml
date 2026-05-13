@@ -73,3 +73,16 @@ local:
         #   telegram:
         #     token: ${secret:TELEGRAM_BOT_TOKEN}
         #     allowed_users: [123456789]  # your Telegram user ID
+
+        # claude_session_timeout caps how long a Claude CLI session can sit
+        # idle before the next message starts fresh — useful for high-volume
+        # notification channels (email, alerts) where every message would
+        # otherwise compound into the same context window forever.
+        # - type: telegram
+        #   name: email
+        #   description: Inbound email assistant
+        #   claude_session_timeout: 10m
+        #   tool_groups:
+        #     - core_tools
+        #     - gsuite_read
+        #     - notifications
