@@ -3,6 +3,7 @@ package channel_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -83,16 +84,81 @@ func TestSessionStore(t *testing.T) {
 		require.Len(t, records, 2)
 	})
 
-	t.Run("idempotent set", func(t *testing.T) {
+	t.Run("idempotent set bumps last_used_at", func(t *testing.T) {
 		s := setupSessionStore(t)
 		ctx := context.Background()
 
 		require.NoError(t, s.SetCurrent(ctx, "admin", "session-1"))
+		firstRecords, err := s.List(ctx, "admin")
+		require.NoError(t, err)
+		require.Len(t, firstRecords, 1)
+		firstLastUsed := firstRecords[0].LastUsedAt
+		require.False(t, firstLastUsed.IsZero())
+
+		time.Sleep(2 * time.Millisecond)
 		require.NoError(t, s.SetCurrent(ctx, "admin", "session-1"))
 
 		records, err := s.List(ctx, "admin")
 		require.NoError(t, err)
 		require.Len(t, records, 1)
+		require.True(t, records[0].LastUsedAt.After(firstLastUsed),
+			"last_used_at should advance on repeated SetCurrent for the same session")
+	})
+
+	t.Run("CurrentWithin returns session when fresh", func(t *testing.T) {
+		s := setupSessionStore(t)
+		ctx := context.Background()
+
+		require.NoError(t, s.SetCurrent(ctx, "admin", "session-1"))
+
+		sid, err := s.CurrentWithin(ctx, "admin", time.Hour)
+		require.NoError(t, err)
+		require.Equal(t, "session-1", sid)
+	})
+
+	t.Run("CurrentWithin returns empty when stale", func(t *testing.T) {
+		s := setupSessionStore(t)
+		ctx := context.Background()
+
+		require.NoError(t, s.SetCurrent(ctx, "admin", "session-1"))
+
+		// Force the record to look old by rewriting its LastUsedAt in the past.
+		records, err := s.List(ctx, "admin")
+		require.NoError(t, err)
+		require.Len(t, records, 1)
+		records[0].LastUsedAt = time.Now().Add(-time.Hour)
+		// Round-trip via saveRecords helper — use SetCurrent for a brand-new
+		// session-2 first, then re-write to exercise the path. Easier: just
+		// inspect the duration check by passing a maxAge of 1ns.
+		_ = records
+
+		// Anything older than 1ns is stale.
+		sid, err := s.CurrentWithin(ctx, "admin", time.Nanosecond)
+		require.NoError(t, err)
+		require.Equal(t, "", sid)
+	})
+
+	t.Run("CurrentWithin treats zero maxAge as no expiry", func(t *testing.T) {
+		s := setupSessionStore(t)
+		ctx := context.Background()
+
+		require.NoError(t, s.SetCurrent(ctx, "admin", "session-1"))
+
+		sid, err := s.CurrentWithin(ctx, "admin", 0)
+		require.NoError(t, err)
+		require.Equal(t, "session-1", sid)
+	})
+
+	t.Run("CurrentWithin returns empty for cleared session", func(t *testing.T) {
+		s := setupSessionStore(t)
+		ctx := context.Background()
+
+		require.NoError(t, s.SetCurrent(ctx, "admin", "session-1"))
+		require.NoError(t, s.SetCurrent(ctx, "admin", ""))
+
+		sid, err := s.CurrentWithin(ctx, "admin", time.Hour)
+		require.NoError(t, err)
+		require.Equal(t, "", sid)
 	})
 
 	t.Run("independent channels", func(t *testing.T) {

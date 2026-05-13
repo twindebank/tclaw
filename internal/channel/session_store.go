@@ -17,9 +17,23 @@ type SessionRecord struct {
 	SessionID string    `json:"session_id"`
 	StartedAt time.Time `json:"started_at"`
 
+	// LastUsedAt is bumped on every turn that uses this session. CurrentWithin
+	// reads it to decide whether the session has gone stale. Zero on legacy
+	// records — callers must treat zero as "use StartedAt instead".
+	LastUsedAt time.Time `json:"last_used_at,omitempty"`
+
 	// Cleared is true when the session was explicitly reset (e.g. user typed "reset").
 	// The record is kept for history but Current() skips it.
 	Cleared bool `json:"cleared,omitempty"`
+}
+
+// lastActivity returns the most recent activity timestamp for a record,
+// falling back to StartedAt for legacy records that pre-date LastUsedAt.
+func (r SessionRecord) lastActivity() time.Time {
+	if !r.LastUsedAt.IsZero() {
+		return r.LastUsedAt
+	}
+	return r.StartedAt
 }
 
 // SessionStore tracks all session IDs per channel over time, replacing the
@@ -62,8 +76,8 @@ func (s *SessionStore) Current(ctx context.Context, channelKey string) (string, 
 
 // SetCurrent updates the current session for a channel. If sessionID is empty,
 // the current session is marked as cleared (session reset) but history is
-// preserved. If sessionID is non-empty and differs from the current, a new
-// record is appended.
+// preserved. If sessionID matches the current, LastUsedAt is bumped so
+// CurrentWithin sees the activity. If sessionID is new, a record is appended.
 func (s *SessionStore) SetCurrent(ctx context.Context, channelKey string, sessionID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -73,6 +87,7 @@ func (s *SessionStore) SetCurrent(ctx context.Context, channelKey string, sessio
 		return err
 	}
 
+	now := time.Now().UTC()
 	if sessionID == "" {
 		// Session reset — mark the latest non-cleared record as cleared.
 		for i := len(records) - 1; i >= 0; i-- {
@@ -82,20 +97,46 @@ func (s *SessionStore) SetCurrent(ctx context.Context, channelKey string, sessio
 			}
 		}
 	} else {
-		// New session — skip if already the latest.
+		// Bump LastUsedAt if the session matches the current entry, otherwise
+		// append a new record. Both paths mark the session as active "now",
+		// which is what CurrentWithin keys off.
 		if len(records) > 0 {
-			last := records[len(records)-1]
+			last := &records[len(records)-1]
 			if last.SessionID == sessionID && !last.Cleared {
-				return nil
+				last.LastUsedAt = now
+				return s.save(ctx, channelKey, records)
 			}
 		}
 		records = append(records, SessionRecord{
-			SessionID: sessionID,
-			StartedAt: time.Now().UTC(),
+			SessionID:  sessionID,
+			StartedAt:  now,
+			LastUsedAt: now,
 		})
 	}
 
 	return s.save(ctx, channelKey, records)
+}
+
+// CurrentWithin returns the current session ID, or "" if the session's last
+// activity is older than maxAge. A maxAge of zero disables the staleness
+// check (equivalent to Current). The session record is not modified — only
+// SetCurrent advances LastUsedAt.
+func (s *SessionStore) CurrentWithin(ctx context.Context, channelKey string, maxAge time.Duration) (string, error) {
+	records, err := s.List(ctx, channelKey)
+	if err != nil {
+		return "", err
+	}
+	if len(records) == 0 {
+		return "", nil
+	}
+	last := records[len(records)-1]
+	if last.Cleared {
+		return "", nil
+	}
+	if maxAge > 0 && time.Since(last.lastActivity()) > maxAge {
+		return "", nil
+	}
+	return last.SessionID, nil
 }
 
 // List returns all session records for a channel in chronological order.
@@ -131,7 +172,8 @@ func (s *SessionStore) load(ctx context.Context, channelKey string) ([]SessionRe
 		return nil, nil
 	}
 	slog.Info("migrating legacy session format", "channel_key", channelKey, "session_id", sid)
-	records := []SessionRecord{{SessionID: sid, StartedAt: time.Now().UTC()}}
+	now := time.Now().UTC()
+	records := []SessionRecord{{SessionID: sid, StartedAt: now, LastUsedAt: now}}
 	if saveErr := s.save(ctx, channelKey, records); saveErr != nil {
 		slog.Warn("failed to save migrated session", "channel_key", channelKey, "err", saveErr)
 	}

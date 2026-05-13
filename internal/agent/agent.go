@@ -148,11 +148,20 @@ type Options struct {
 
 	// Sessions maps channel IDs to their last-known CLI session IDs.
 	// Loaded by the caller (e.g. router) from persistent storage.
+	// Only consulted when SessionResolver is nil.
 	Sessions map[channel.ChannelID]string
 
-	// OnSessionUpdate is called when a channel's session ID changes.
-	// The caller (e.g. router) uses this to persist session state.
-	// May be nil if persistence is not needed.
+	// SessionResolver returns the active session ID for a channel, or ""
+	// to force a fresh CLI session. When set, it replaces the Sessions map
+	// lookup. The router uses it to enforce per-channel idle timeouts so a
+	// channel that hasn't been touched recently starts the next turn cleanly,
+	// keeping the context window bounded.
+	SessionResolver func(chID channel.ChannelID) string
+
+	// OnSessionUpdate is called after every successful turn with the active
+	// session ID (whether it changed or not). The router uses it to persist
+	// the session and to mark the session as recently used so SessionResolver
+	// sees the activity.
 	OnSessionUpdate func(chID channel.ChannelID, sessionID string)
 
 	// AllowedTools are auto-approved without prompting (e.g. ToolRead, ToolBash.Scoped("git *")).
@@ -275,6 +284,17 @@ func (opts Options) channels() map[channel.ChannelID]channel.Channel {
 		return opts.ChannelsFunc()
 	}
 	return opts.Channels
+}
+
+// lookupSession returns the session ID to resume for a channel. When the
+// caller provides a SessionResolver, it owns the decision (and can force a
+// fresh session by returning ""). Otherwise we fall back to the local sessions
+// map seeded from Options.Sessions plus in-process updates.
+func lookupSession(opts Options, sessions map[channel.ChannelID]string, chID channel.ChannelID) string {
+	if opts.SessionResolver != nil {
+		return opts.SessionResolver(chID)
+	}
+	return sessions[chID]
 }
 
 // Run reads messages from all channels and responds until ctx is cancelled.
@@ -561,7 +581,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			}
 		}
 
-		sessionID := sessions[msg.ChannelID]
+		sessionID := lookupSession(opts, sessions, msg.ChannelID)
 		turnCtx, cancelTurn := context.WithCancel(ctx)
 
 		if opts.OnTurnStart != nil {
@@ -672,9 +692,14 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 						slog.Error("failed to send error notification", "err", sendErr)
 					}
 				}
-				if result.sessionID != "" && result.sessionID != sessionID {
-					slog.Info("session started", "channel", msg.ChannelID, "session_id", result.sessionID)
+				if result.sessionID != "" {
+					if result.sessionID != sessionID {
+						slog.Info("session started", "channel", msg.ChannelID, "session_id", result.sessionID)
+					}
 					sessions[msg.ChannelID] = result.sessionID
+					// Call on every successful turn so the persistence layer
+					// can bump the session's last-used timestamp — that's
+					// what SessionResolver's idle-timeout check keys off.
 					if opts.OnSessionUpdate != nil {
 						opts.OnSessionUpdate(msg.ChannelID, result.sessionID)
 					}

@@ -66,32 +66,48 @@ func TestNotifier_Subscribe(t *testing.T) {
 }
 
 func TestNotifier_Cancel(t *testing.T) {
-	t.Run("is idempotent and cleans up cursor and seen set", func(t *testing.T) {
+	t.Run("is idempotent and cleans up the cursor", func(t *testing.T) {
 		n, s := setupNotifier(t)
 		ctx := context.Background()
 
 		result, err := n.Subscribe(ctx, notification.SubscribeParams{
-			TypeName:    TypeNewEmail,
-			ChannelName: "main",
-			Scope:       notification.ScopePersistent,
+			TypeName:        TypeNewEmail,
+			ChannelName:     "main",
+			Scope:           notification.ScopePersistent,
+			CredentialSetID: "google/work",
 		}, &noopEmitter{})
 		require.NoError(t, err)
 
-		// Simulate a persisted cursor and seen set.
 		require.NoError(t, s.Set(ctx, cursorKey(result.Subscription.ID), []byte("99999")))
-		n.saveSeen(ctx, result.Subscription.ID, []string{"msg1", "msg2"})
 
 		result.Cancel()
 		result.Cancel()
 		n.Cancel(result.Subscription.ID)
 
-		// Cursor should be cleaned up.
 		data, err := s.Get(ctx, cursorKey(result.Subscription.ID))
 		require.NoError(t, err)
 		require.Empty(t, data)
+	})
 
-		// Seen set should be cleaned up.
-		require.Empty(t, n.loadSeen(ctx, result.Subscription.ID))
+	t.Run("preserves seen set so sibling subscriptions keep dedupe state", func(t *testing.T) {
+		// The seen set is shared across all subscriptions for a credential set,
+		// so cancelling one subscription must not wipe it out.
+		n, _ := setupNotifier(t)
+		ctx := context.Background()
+
+		result, err := n.Subscribe(ctx, notification.SubscribeParams{
+			TypeName:        TypeNewEmail,
+			ChannelName:     "main",
+			Scope:           notification.ScopeCredential,
+			CredentialSetID: "google/work",
+		}, &noopEmitter{})
+		require.NoError(t, err)
+
+		n.saveSeen(ctx, "google/work", []string{"msg1", "msg2"})
+
+		n.Cancel(result.Subscription.ID)
+
+		require.Equal(t, []string{"msg1", "msg2"}, n.loadSeen(ctx, "google/work"))
 	})
 }
 
@@ -172,24 +188,35 @@ func TestNotifier_SeenPersistence(t *testing.T) {
 	t.Run("save and load round-trip", func(t *testing.T) {
 		n, _ := setupNotifier(t)
 		ctx := context.Background()
-		id := notification.GenerateID()
 
-		n.saveSeen(ctx, id, []string{"msg1", "msg2", "msg3"})
-		require.Equal(t, []string{"msg1", "msg2", "msg3"}, n.loadSeen(ctx, id))
+		n.saveSeen(ctx, "google/work", []string{"msg1", "msg2", "msg3"})
+		require.Equal(t, []string{"msg1", "msg2", "msg3"}, n.loadSeen(ctx, "google/work"))
 	})
 
 	t.Run("load returns nil for missing key", func(t *testing.T) {
 		n, _ := setupNotifier(t)
-		require.Nil(t, n.loadSeen(context.Background(), "notif_nonexistent"))
+		require.Nil(t, n.loadSeen(context.Background(), "google/missing"))
 	})
 
 	t.Run("load returns nil for corrupt data", func(t *testing.T) {
 		n, s := setupNotifier(t)
 		ctx := context.Background()
-		id := notification.GenerateID()
 
-		require.NoError(t, s.Set(ctx, seenKey(id), []byte("not valid json")))
-		require.Nil(t, n.loadSeen(ctx, id))
+		require.NoError(t, s.Set(ctx, seenKey("google/work"), []byte("not valid json")))
+		require.Nil(t, n.loadSeen(ctx, "google/work"))
+	})
+
+	t.Run("subscriptions sharing a credential set share dedupe state", func(t *testing.T) {
+		n, _ := setupNotifier(t)
+		ctx := context.Background()
+
+		// Two distinct subscription IDs targeting the same credential set.
+		credSet := "google/work"
+		n.saveSeen(ctx, credSet, []string{"msgA"})
+
+		// A second poller for a different subscription against the same
+		// credential set sees the seen entries through the same key.
+		require.Equal(t, []string{"msgA"}, n.loadSeen(ctx, credSet))
 	})
 }
 

@@ -175,6 +175,13 @@ type Channel struct {
 	// CreatedAt is the RFC3339 timestamp of when this channel was created by
 	// a tool. Empty for hand-written channels.
 	CreatedAt string `yaml:"created_at,omitempty"`
+
+	// ClaudeSessionTimeout caps how long a Claude CLI session can sit idle
+	// before the next incoming message starts a fresh one (no --resume),
+	// keeping the context window bounded on long-lived channels like email.
+	// Parsed as a Go duration string (e.g. "10m", "1h"). Empty or zero means
+	// "no timeout — sessions live until explicitly reset".
+	ClaudeSessionTimeout string `yaml:"claude_session_timeout,omitempty"`
 }
 
 // ChannelLink is a config alias for channel.Link with YAML tags.
@@ -371,6 +378,12 @@ func validate(cfg *Config) error {
 			if ch.EphemeralIdleTimeout != "" {
 				if _, err := time.ParseDuration(ch.EphemeralIdleTimeout); err != nil {
 					return fmt.Errorf("user %q channel %q: invalid ephemeral_idle_timeout %q: %w", u.ID, ch.Name, ch.EphemeralIdleTimeout, err)
+				}
+			}
+
+			if ch.ClaudeSessionTimeout != "" {
+				if _, err := time.ParseDuration(ch.ClaudeSessionTimeout); err != nil {
+					return fmt.Errorf("user %q channel %q: invalid claude_session_timeout %q: %w", u.ID, ch.Name, ch.ClaudeSessionTimeout, err)
 				}
 			}
 

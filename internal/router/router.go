@@ -722,10 +722,36 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// to keep the projects directory lean and CLI startup fast.
 		cleanupStaleSessions(ctx, sessionStore, stores.Session, dirs.Sessions, homeDir)
 
-		// Load sessions from store for each channel.
+		// Map channels with a configured claude_session_timeout to their duration.
+		// Empty/zero means "no timeout — session lives until explicit reset".
+		claudeSessionTimeouts := make(map[channel.ChannelID]time.Duration, len(currentUserCfg.Channels))
+		for _, chCfg := range currentUserCfg.Channels {
+			if chCfg.ClaudeSessionTimeout == "" {
+				continue
+			}
+			timeout, parseErr := time.ParseDuration(chCfg.ClaudeSessionTimeout)
+			if parseErr != nil {
+				// Config validation should have caught this — log and skip.
+				slog.Error("invalid claude_session_timeout, ignoring",
+					"channel", chCfg.Name, "value", chCfg.ClaudeSessionTimeout, "err", parseErr)
+				continue
+			}
+			for chID, ch := range allChMap {
+				if ch.Info().Name == chCfg.Name {
+					claudeSessionTimeouts[chID] = timeout
+					break
+				}
+			}
+		}
+
+		// Load sessions from store for each channel, respecting the per-channel
+		// claude_session_timeout. The Sessions map is the fallback path when
+		// SessionResolver isn't consulted (tests); the live resolver below is
+		// what governs production behaviour.
 		sessions := make(map[channel.ChannelID]string)
 		for chID := range allChMap {
-			sid, loadErr := sessionStore.Current(ctx, channel.SessionKey(chID))
+			timeout := claudeSessionTimeouts[chID]
+			sid, loadErr := sessionStore.CurrentWithin(ctx, channel.SessionKey(chID), timeout)
 			if loadErr != nil {
 				slog.Warn("failed to load session, starting fresh", "channel", chID, "err", loadErr)
 			}
@@ -836,8 +862,17 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			// are reachable by the agent without restarting.
 			ChannelsFunc: channelsFunc,
 			Sessions:     sessions,
-			Queue:        messageQueue,
-			Outbox:       messageOutbox,
+			SessionResolver: func(chID channel.ChannelID) string {
+				timeout := claudeSessionTimeouts[chID]
+				sid, err := sessionStore.CurrentWithin(ctx, channel.SessionKey(chID), timeout)
+				if err != nil {
+					slog.Warn("failed to resolve session, starting fresh", "channel", chID, "err", err)
+					return ""
+				}
+				return sid
+			},
+			Queue:  messageQueue,
+			Outbox: messageOutbox,
 			OnSessionUpdate: func(chID channel.ChannelID, sessionID string) {
 				if saveErr := sessionStore.SetCurrent(ctx, channel.SessionKey(chID), sessionID); saveErr != nil {
 					slog.Error("failed to save session", "err", saveErr)
