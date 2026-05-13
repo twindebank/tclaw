@@ -244,6 +244,110 @@ func TestScheduler_OneShotDeletesAfterFire(t *testing.T) {
 	}
 }
 
+func TestScheduler_AdvancesPastUnresolvableChannel(t *testing.T) {
+	// Regression: a schedule pointing at a deleted channel used to cause the
+	// scheduler to tight-spin (NextRunAt never advanced, computeNextRun kept
+	// returning a past timestamp, fireReadySchedules logged "cannot resolve
+	// channel" every microsecond). 75k log lines in one day from this path.
+
+	t.Run("recurring schedule advances NextRunAt", func(t *testing.T) {
+		s, err := store.NewFS(t.TempDir())
+		if err != nil {
+			t.Fatalf("create store: %v", err)
+		}
+
+		schedStore := schedule.NewStore(s)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		output := make(chan channel.TaggedMessage, 8)
+		// No channels available — the schedule's "gone-channel" target will fail to resolve.
+		scheduler := schedule.NewScheduler(schedule.SchedulerParams{
+			Store:    schedStore,
+			Output:   output,
+			Channels: func() map[channel.ChannelID]channel.Channel { return nil },
+		})
+
+		due := time.Now().Add(-1 * time.Second)
+		sched := schedule.Schedule{
+			ID:          schedule.GenerateID(),
+			CronExpr:    "* * * * *", // every minute
+			Prompt:      "lost message",
+			ChannelName: "gone-channel",
+			Status:      schedule.StatusActive,
+			CreatedAt:   time.Now(),
+			NextRunAt:   due,
+		}
+		if err := schedStore.Add(ctx, sched); err != nil {
+			t.Fatalf("add schedule: %v", err)
+		}
+
+		go scheduler.Run(ctx)
+
+		// Poll the store: NextRunAt must move into the future so the scheduler
+		// stops re-firing immediately. Give it a generous window — the first
+		// fire happens almost instantly because NextRunAt is already in the past.
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			got, getErr := schedStore.Get(ctx, sched.ID)
+			if getErr != nil {
+				t.Fatalf("get: %v", getErr)
+			}
+			if got != nil && got.NextRunAt.After(time.Now()) {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatal("expected NextRunAt to advance past now after failed channel resolve")
+	})
+
+	t.Run("one-shot schedule is removed", func(t *testing.T) {
+		s, err := store.NewFS(t.TempDir())
+		if err != nil {
+			t.Fatalf("create store: %v", err)
+		}
+
+		schedStore := schedule.NewStore(s)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		output := make(chan channel.TaggedMessage, 8)
+		scheduler := schedule.NewScheduler(schedule.SchedulerParams{
+			Store:    schedStore,
+			Output:   output,
+			Channels: func() map[channel.ChannelID]channel.Channel { return nil },
+		})
+
+		sched := schedule.Schedule{
+			ID:          schedule.GenerateID(),
+			Prompt:      "one-shot to nowhere",
+			ChannelName: "gone-channel",
+			Status:      schedule.StatusActive,
+			Once:        true,
+			CreatedAt:   time.Now(),
+			NextRunAt:   time.Now().Add(-1 * time.Second),
+		}
+		if err := schedStore.Add(ctx, sched); err != nil {
+			t.Fatalf("add schedule: %v", err)
+		}
+
+		go scheduler.Run(ctx)
+
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			got, getErr := schedStore.Get(ctx, sched.ID)
+			if getErr != nil {
+				t.Fatalf("get: %v", getErr)
+			}
+			if got == nil {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatal("expected undeliverable one-shot schedule to be removed from store")
+	})
+}
+
 // fakeChannel is a minimal Channel implementation for testing scheduler channel resolution.
 type fakeChannel struct {
 	name string

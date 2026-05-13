@@ -35,6 +35,12 @@ type Config struct {
 	// Sessions pre-seeds session IDs per channel.
 	Sessions map[string]string
 
+	// SessionResolver, when set, replaces the per-turn session lookup —
+	// tests use it to drive the idle-timeout path (return "" to force a
+	// fresh session even though Sessions seeded one). Receives the channel
+	// name, not the opaque ID, so test code can reason about channel names.
+	SessionResolver func(channelName string) string
+
 	// SystemPrompt sets the base system prompt.
 	SystemPrompt string
 
@@ -202,9 +208,25 @@ func NewHarness(t *testing.T, cfg Config) *Harness {
 		h.ob = ob
 	}
 
+	var sessionResolver func(channel.ChannelID) string
+	if cfg.SessionResolver != nil {
+		nameByID := make(map[channel.ChannelID]string, len(channels))
+		for name, tc := range channels {
+			nameByID[tc.Info().ID] = name
+		}
+		sessionResolver = func(chID channel.ChannelID) string {
+			name, ok := nameByID[chID]
+			if !ok {
+				return ""
+			}
+			return cfg.SessionResolver(name)
+		}
+	}
+
 	h.opts = agent.Options{
 		Channels:             channelMap,
 		Sessions:             sessions,
+		SessionResolver:      sessionResolver,
 		SystemPrompt:         cfg.SystemPrompt,
 		Debug:                cfg.Debug,
 		AllowedTools:         cfg.AllowedTools,

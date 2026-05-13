@@ -177,6 +177,35 @@ func TestOutbox(t *testing.T) {
 		require.Contains(t, texts, "next message", "subsequent message should still be delivered after UTF-8 error")
 	})
 
+	t.Run("message-too-long is permanent", func(t *testing.T) {
+		// Regression: 571 retries logged in two days from a Telegram caption
+		// over the API cap. Retrying the same oversize payload never succeeds.
+		rec, ob := setup(t)
+		var attempts int
+		rec.SetSendFunc(func(_ context.Context, text string) (channel.MessageID, error) {
+			if text == "huge" {
+				attempts++
+				return "", fmt.Errorf("telegram send: bad request, Bad Request: message is too long")
+			}
+			return "ok", nil
+		})
+
+		_, err := ob.Send(context.Background(), "ch1", "huge", channel.SendOpts{})
+		require.NoError(t, err)
+		_, err = ob.Send(context.Background(), "ch1", "next message", channel.SendOpts{})
+		require.NoError(t, err)
+
+		require.NoError(t, ob.Flush(context.Background()))
+
+		require.Equal(t, 1, attempts, "message-too-long should be discarded after one attempt, not retried")
+
+		var texts []string
+		for _, c := range rec.Calls() {
+			texts = append(texts, c.Text)
+		}
+		require.Contains(t, texts, "next message", "subsequent message should still deliver")
+	})
+
 	t.Run("done waits for preceding ops", func(t *testing.T) {
 		rec, ob := setup(t)
 

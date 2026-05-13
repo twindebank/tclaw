@@ -517,6 +517,12 @@ func isPermanentError(err error) bool {
 	if strings.Contains(msg, "must be encoded in UTF-8") {
 		return true
 	}
+	// "message is too long" — retrying the same oversize payload won't shrink
+	// it. The transport already truncates aggressively before send/edit, so
+	// reaching here means the caller assembled something past the API cap.
+	if strings.Contains(msg, "message is too long") {
+		return true
+	}
 	return false
 }
 
