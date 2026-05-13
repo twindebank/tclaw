@@ -11,8 +11,10 @@ const ToolChannelList = "channel_list"
 
 func channelListDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        ToolChannelList,
-		Description: "List all channels. Shows name, type, description, and tool permissions.",
+		Name: ToolChannelList,
+		Description: "List all channels. Shows name, type, description, and tool permissions. " +
+			"Use channel_read to inspect a specific channel's full config (claude_session_timeout, " +
+			"ephemeral settings, initial_message, links, etc.).",
 		InputSchema: json.RawMessage(`{"type": "object", "properties": {}}`),
 	}
 }

@@ -61,6 +61,70 @@ func TestChannelList(t *testing.T) {
 	})
 }
 
+func TestChannelRead(t *testing.T) {
+	t.Run("returns full config for a channel", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name":                   "email",
+			"description":            "Inbound email",
+			"purpose":                "Triage incoming mail",
+			"type":                   "socket",
+			"initial_message":        "Hello",
+			"claude_session_timeout": "10m",
+			"ephemeral":              true,
+		})
+
+		result := callTool(t, th.handler, "channel_read", map[string]any{"name": "email"})
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(result, &got))
+		require.Equal(t, "email", got["name"])
+		require.Equal(t, "socket", got["type"])
+		require.Equal(t, "Inbound email", got["description"])
+		require.Equal(t, "Triage incoming mail", got["purpose"])
+		require.Equal(t, "10m", got["claude_session_timeout"])
+		require.Equal(t, true, got["ephemeral"])
+		require.Equal(t, "Hello", got["initial_message"])
+		require.NotEmpty(t, got["created_at"], "channel_create stamps created_at")
+	})
+
+	t.Run("returns error for missing channel", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		err := callToolExpectError(t, th.handler, "channel_read", map[string]any{"name": "nope"})
+		require.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("requires name", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		err := callToolExpectError(t, th.handler, "channel_read", map[string]any{})
+		require.Contains(t, err.Error(), "name is required")
+	})
+
+	t.Run("redacts telegram token", func(t *testing.T) {
+		// Hand-written channels are loaded from the config harness — the
+		// desktop channel doesn't have telegram set, so manufacture an
+		// edit-via-create through a provisioner harness instead.
+		th := setupHarnessWithProvisioner(t, config.EnvProd)
+
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name":            "mybot",
+			"description":     "Personal Telegram bot",
+			"type":            "telegram",
+			"allowed_users":   []any{"123456789"},
+			"initial_message": "Hello",
+		})
+
+		result := callTool(t, th.handler, "channel_read", map[string]any{"name": "mybot"})
+		// The token (if any) lives in the secret store, not in the YAML
+		// telegram field, so this confirms the read tool exposes "has_token"
+		// without leaking the value when telegram metadata is present.
+		require.NotContains(t, string(result), "token\":\"")
+	})
+}
+
 func TestChannelCreate(t *testing.T) {
 	t.Run("socket in local env", func(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)

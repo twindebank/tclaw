@@ -64,7 +64,7 @@ type Deps struct {
 // ToolNames returns all tool name constants in this package.
 func ToolNames() []string {
 	return []string{
-		ToolChannelList, ToolChannelCreate, ToolChannelEdit, ToolChannelDelete,
+		ToolChannelList, ToolChannelRead, ToolChannelCreate, ToolChannelEdit, ToolChannelDelete,
 		ToolChannelIsBusy, ToolChannelDone, ToolChannelNotify,
 		ToolChannelSend, ToolChannelTranscript, ToolList, ToolGroupList,
 	}
@@ -73,6 +73,7 @@ func ToolNames() []string {
 // RegisterTools adds channel management tools to the MCP handler.
 func RegisterTools(handler *mcp.Handler, deps Deps) {
 	handler.Register(channelListDef(), channelListHandler(deps))
+	handler.Register(channelReadDef(), channelReadHandler(deps))
 	handler.Register(channelCreateDef(), channelCreateHandler(deps))
 	handler.Register(channelEditDef(), channelEditHandler(deps))
 	handler.Register(channelDeleteDef(), channelDeleteHandler(deps))
