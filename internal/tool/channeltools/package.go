@@ -68,6 +68,7 @@ func (p *Package) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
 			"mcp__tclaw__channel_delete",
 			"mcp__tclaw__channel_edit",
 			"mcp__tclaw__channel_list",
+			"mcp__tclaw__channel_read",
 			"mcp__tclaw__channel_notify",
 			"mcp__tclaw__channel_done",
 			"mcp__tclaw__channel_is_busy",
