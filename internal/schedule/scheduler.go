@@ -134,6 +134,12 @@ func (s *Scheduler) fireReadySchedules(ctx context.Context) {
 		if !ok {
 			slog.Warn("scheduler: cannot resolve channel for schedule, skipping",
 				"schedule", sched.ID, "channel_name", sched.ChannelName)
+			// Advance the schedule even on resolve failure so the outer loop
+			// doesn't tight-spin re-checking a perpetually-due schedule. For
+			// one-shots that means dropping it (the target is gone, the
+			// prompt can't be delivered); for recurring schedules we skip to
+			// the next cron tick and try again.
+			s.advanceAfterFailedResolve(ctx, sched, now)
 			continue
 		}
 
@@ -176,6 +182,27 @@ func (s *Scheduler) fireReadySchedules(ctx context.Context) {
 				return
 			}
 		}
+	}
+}
+
+// advanceAfterFailedResolve moves a schedule past a fire attempt that couldn't
+// be delivered (target channel missing). Without this the scheduler tight-spins
+// on the same overdue schedule — we have history of >75k log lines in a single
+// day from this exact path.
+func (s *Scheduler) advanceAfterFailedResolve(ctx context.Context, sched Schedule, now time.Time) {
+	if sched.Once {
+		if err := s.store.Remove(ctx, sched.ID); err != nil {
+			slog.Error("scheduler: failed to drop one-shot schedule with missing channel",
+				"schedule", sched.ID, "channel_name", sched.ChannelName, "err", err)
+		}
+		return
+	}
+	err := s.store.Update(ctx, sched.ID, func(existing *Schedule) {
+		existing.NextRunAt = s.computeNextRunFromTime(existing.CronExpr, now, existing.Timezone)
+	})
+	if err != nil {
+		slog.Error("scheduler: failed to advance schedule after missing channel",
+			"schedule", sched.ID, "channel_name", sched.ChannelName, "err", err)
 	}
 }
 

@@ -297,6 +297,26 @@ func lookupSession(opts Options, sessions map[channel.ChannelID]string, chID cha
 	return sessions[chID]
 }
 
+// freshSessionNotice is the user-visible message sent when a turn starts on
+// a brand-new CLI session because the previous one aged out. Exported as a
+// package var so tests can match on it without duplicating the string.
+const freshSessionNotice = "🆕 Idle timeout reached — starting a fresh Claude session for this message."
+
+// notifyFreshSessionIfTimedOut sends a user-visible notice when the resolver
+// drops a known-good session (timeout) so it's clear the next reply starts
+// from a blank context. The local sessions entry is cleared on detection so
+// retries within the same turn don't re-send the notice.
+func notifyFreshSessionIfTimedOut(ctx context.Context, opts Options, sessions map[channel.ChannelID]string, chID channel.ChannelID, resolvedSessionID string) {
+	prior := sessions[chID]
+	if prior == "" || resolvedSessionID != "" {
+		return
+	}
+	if _, err := opts.send(ctx, chID, freshSessionNotice); err != nil {
+		slog.Error("failed to send fresh-session notice", "channel", chID, "err", err)
+	}
+	delete(sessions, chID)
+}
+
 // Run reads messages from all channels and responds until ctx is cancelled.
 // Each channel gets its own Claude session for full isolation.
 // Sending "stop" interrupts the active turn. Other messages queue behind it.
@@ -582,6 +602,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		}
 
 		sessionID := lookupSession(opts, sessions, msg.ChannelID)
+		notifyFreshSessionIfTimedOut(ctx, opts, sessions, msg.ChannelID, sessionID)
 		turnCtx, cancelTurn := context.WithCancel(ctx)
 
 		if opts.OnTurnStart != nil {
