@@ -255,10 +255,34 @@ func (t *Telegram) startWebhook(ctx context.Context, b *bot.Bot) {
 	// Register the HTTP handler at the same path the router told Telegram to POST to.
 	t.opts.RegisterHandler(t.opts.WebhookPath, b.WebhookHandler())
 
-	// Tell Telegram to send updates to our webhook URL.
-	// SecretToken tells Telegram to include this value in the
-	// X-Telegram-Bot-Api-Secret-Token header on every webhook POST.
-	ok, err := b.SetWebhook(ctx, &bot.SetWebhookParams{
+	if !t.registerWebhook(ctx, b) {
+		// Webhook never registered — the bot would receive no updates.
+		// Logged inside registerWebhook; bail out so we don't leave a
+		// silently-dead bot consuming the goroutine.
+		return
+	}
+
+	// StartWebhook processes updates from the internal channel (fed by WebhookHandler).
+	// It blocks until ctx is cancelled.
+	slog.Debug("telegram bot starting (webhook)", "channel", t.name)
+	b.StartWebhook(ctx)
+	slog.Info("telegram bot stopped", "channel", t.name)
+}
+
+// webhookSetupRetries bounds how long we'll keep retrying setWebhook on a
+// rate-limit response. With backoff capped at 30s, this works out to a few
+// minutes of patience — enough to ride out a deploy storm where every channel
+// re-registers its webhook simultaneously, without hanging forever if the
+// upstream stays broken.
+const webhookSetupRetries = 6
+
+// registerWebhook calls SetWebhook with retry-after-aware retries so a deploy
+// that re-registers every channel in parallel doesn't permanently disable bots
+// that lose the rate-limit race. Returns true once Telegram has accepted the
+// webhook (or the context is cancelled — in which case the bot is going away
+// anyway).
+func (t *Telegram) registerWebhook(ctx context.Context, b *bot.Bot) bool {
+	params := &bot.SetWebhookParams{
 		URL:                t.opts.WebhookURL,
 		DropPendingUpdates: true,
 		SecretToken:        t.webhookSecret,
@@ -266,18 +290,39 @@ func (t *Telegram) startWebhook(ctx context.Context, b *bot.Bot) {
 		// causes many idle keep-alive connections that count toward Fly's
 		// concurrency limit. We process messages sequentially anyway.
 		MaxConnections: 1,
-	})
-	if err != nil {
-		slog.Error("failed to set telegram webhook", "err", err, "channel", t.name, "url", t.opts.WebhookURL)
-		return
 	}
-	slog.Debug("telegram webhook registered", "channel", t.name, "url", t.opts.WebhookURL, "ok", ok)
 
-	// StartWebhook processes updates from the internal channel (fed by WebhookHandler).
-	// It blocks until ctx is cancelled.
-	slog.Debug("telegram bot starting (webhook)", "channel", t.name)
-	b.StartWebhook(ctx)
-	slog.Info("telegram bot stopped", "channel", t.name)
+	for attempt := 0; attempt < webhookSetupRetries; attempt++ {
+		ok, err := b.SetWebhook(ctx, params)
+		if err == nil {
+			slog.Debug("telegram webhook registered",
+				"channel", t.name, "url", t.opts.WebhookURL, "ok", ok)
+			return true
+		}
+
+		tooMany, isRateLimit := err.(*bot.TooManyRequestsError)
+		if !isRateLimit {
+			slog.Error("failed to set telegram webhook",
+				"err", err, "channel", t.name, "url", t.opts.WebhookURL)
+			return false
+		}
+		retryAfter := 2 * time.Second
+		if tooMany.RetryAfter > 0 {
+			retryAfter = time.Duration(tooMany.RetryAfter) * time.Second
+		}
+
+		slog.Warn("telegram webhook rate-limited, retrying",
+			"channel", t.name, "attempt", attempt+1, "retry_after", retryAfter)
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(retryAfter):
+		}
+	}
+
+	slog.Error("failed to set telegram webhook: exhausted rate-limit retries",
+		"channel", t.name, "url", t.opts.WebhookURL, "attempts", webhookSetupRetries)
+	return false
 }
 
 func (t *Telegram) Send(ctx context.Context, text string, opts channel.SendOpts) (channel.MessageID, error) {

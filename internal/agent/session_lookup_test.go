@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -37,5 +38,40 @@ func TestLookupSession(t *testing.T) {
 		}
 		got := lookupSession(opts, sessions, "ch")
 		require.Equal(t, "", got)
+	})
+}
+
+func TestNotifyFreshSessionIfTimedOut(t *testing.T) {
+	t.Run("sends notice when prior session is dropped by resolver", func(t *testing.T) {
+		ch := &mockChannel{info: channel.Info{ID: "test-ch", Name: "test", Type: channel.TypeSocket}}
+		opts := Options{Channels: map[channel.ChannelID]channel.Channel{"test-ch": ch}}
+		sessions := map[channel.ChannelID]string{"test-ch": "old-sess"}
+
+		notifyFreshSessionIfTimedOut(context.Background(), opts, sessions, "test-ch", "")
+
+		require.Equal(t, []string{freshSessionNotice}, ch.sends)
+		_, stillCached := sessions["test-ch"]
+		require.False(t, stillCached, "local sessions entry should be cleared so retries don't resend")
+	})
+
+	t.Run("silent when no prior session existed", func(t *testing.T) {
+		ch := &mockChannel{info: channel.Info{ID: "test-ch", Name: "test", Type: channel.TypeSocket}}
+		opts := Options{Channels: map[channel.ChannelID]channel.Channel{"test-ch": ch}}
+		sessions := map[channel.ChannelID]string{}
+
+		notifyFreshSessionIfTimedOut(context.Background(), opts, sessions, "test-ch", "")
+
+		require.Empty(t, ch.sends)
+	})
+
+	t.Run("silent when resolver returned a session", func(t *testing.T) {
+		ch := &mockChannel{info: channel.Info{ID: "test-ch", Name: "test", Type: channel.TypeSocket}}
+		opts := Options{Channels: map[channel.ChannelID]channel.Channel{"test-ch": ch}}
+		sessions := map[channel.ChannelID]string{"test-ch": "old-sess"}
+
+		notifyFreshSessionIfTimedOut(context.Background(), opts, sessions, "test-ch", "live-sess")
+
+		require.Empty(t, ch.sends)
+		require.Equal(t, "old-sess", sessions["test-ch"], "session should not be cleared when resolver kept it alive")
 	})
 }
