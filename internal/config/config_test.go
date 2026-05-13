@@ -133,3 +133,25 @@ func TestValidate_TelegramValid(t *testing.T) {
 	err := validate(cfg)
 	require.NoError(t, err)
 }
+
+func TestValidate_ClaudeSessionTimeout(t *testing.T) {
+	t.Run("accepts valid duration", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Channels[0].ClaudeSessionTimeout = "10m"
+		require.NoError(t, validate(cfg))
+	})
+
+	t.Run("accepts empty (no timeout)", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Channels[0].ClaudeSessionTimeout = ""
+		require.NoError(t, validate(cfg))
+	})
+
+	t.Run("rejects unparseable duration", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Channels[0].ClaudeSessionTimeout = "not a duration"
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid claude_session_timeout")
+	})
+}

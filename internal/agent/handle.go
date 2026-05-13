@@ -436,10 +436,21 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 
 	newSessionID, err := streamResponse(ctx, opts, tw, stdout, allowed, msg.ChannelID, cliStarted)
 	if err != nil {
+		// Reap the subprocess before bailing — otherwise it lingers as a zombie
+		// until fly's init catches it, and the next turn can race against the
+		// previous one's bwrap teardown.
+		_ = waitFn()
 		return "", fmt.Errorf("stream response: %w", err)
 	}
 
-	if waitErr := waitFn(); waitErr != nil {
+	waitErr := waitFn()
+	switch {
+	case waitErr == nil:
+	case ctx.Err() != nil:
+		// Context was cancelled (user typed "stop", idle timeout, deploy). The
+		// SIGTERM→SIGKILL cleanup chain is expected here, not a real failure.
+		slog.Debug("claude exited after context cancel", "err", waitErr)
+	default:
 		slog.Warn("claude exited with error", "err", waitErr)
 	}
 
