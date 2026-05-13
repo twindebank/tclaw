@@ -266,6 +266,51 @@ func TestChannelCreate(t *testing.T) {
 		})
 		require.Contains(t, err.Error(), "initial_message is required")
 	})
+
+	t.Run("accepts and persists claude_session_timeout", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name":                   "email",
+			"description":            "Inbound email",
+			"type":                   "socket",
+			"initial_message":        "Hello",
+			"claude_session_timeout": "10m",
+		})
+
+		channels, err := th.configWriter.ReadChannels(testUserID)
+		require.NoError(t, err)
+		var found *config.Channel
+		for i, ch := range channels {
+			if ch.Name == "email" {
+				found = &channels[i]
+				break
+			}
+		}
+		require.NotNil(t, found)
+		require.Equal(t, "10m", found.ClaudeSessionTimeout)
+	})
+
+	t.Run("rejects malformed claude_session_timeout", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
+			"name":                   "email",
+			"description":            "Inbound email",
+			"type":                   "socket",
+			"initial_message":        "Hello",
+			"claude_session_timeout": "ten minutes",
+		})
+		require.Contains(t, err.Error(), "claude_session_timeout")
+		require.Contains(t, err.Error(), "expected Go duration")
+
+		// Config must not have been written when validation fails.
+		channels, listErr := th.configWriter.ReadChannels(testUserID)
+		require.NoError(t, listErr)
+		for _, ch := range channels {
+			require.NotEqual(t, "email", ch.Name, "malformed timeout should have aborted channel creation")
+		}
+	})
 }
 
 func TestChannelEdit(t *testing.T) {
@@ -339,6 +384,73 @@ func TestChannelEdit(t *testing.T) {
 			"name": "phone",
 		})
 		require.Contains(t, err.Error(), "at least one")
+	})
+
+	t.Run("updates claude_session_timeout", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "email", "description": "email", "type": "socket",
+			"initial_message": "Hello",
+		})
+		reloadRegistry(t, th)
+
+		callTool(t, th.handler, "channel_edit", map[string]any{
+			"name":                   "email",
+			"claude_session_timeout": "5m",
+		})
+
+		channels, err := th.configWriter.ReadChannels(testUserID)
+		require.NoError(t, err)
+		var found *config.Channel
+		for i, ch := range channels {
+			if ch.Name == "email" {
+				found = &channels[i]
+				break
+			}
+		}
+		require.NotNil(t, found)
+		require.Equal(t, "5m", found.ClaudeSessionTimeout)
+	})
+
+	t.Run("clears claude_session_timeout when explicitly empty", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "email", "description": "email", "type": "socket",
+			"initial_message":        "Hello",
+			"claude_session_timeout": "10m",
+		})
+		reloadRegistry(t, th)
+
+		callTool(t, th.handler, "channel_edit", map[string]any{
+			"name":                   "email",
+			"claude_session_timeout": "",
+		})
+
+		channels, err := th.configWriter.ReadChannels(testUserID)
+		require.NoError(t, err)
+		for _, ch := range channels {
+			if ch.Name == "email" {
+				require.Equal(t, "", ch.ClaudeSessionTimeout)
+				return
+			}
+		}
+		t.Fatal("email channel not found in config")
+	})
+
+	t.Run("rejects malformed claude_session_timeout", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "email", "description": "email", "type": "socket",
+			"initial_message": "Hello",
+		})
+		reloadRegistry(t, th)
+
+		err := callToolExpectError(t, th.handler, "channel_edit", map[string]any{
+			"name":                   "email",
+			"claude_session_timeout": "not a duration",
+		})
+		require.Contains(t, err.Error(), "claude_session_timeout")
+		require.Contains(t, err.Error(), "expected Go duration")
 	})
 }
 
