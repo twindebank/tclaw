@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"tclaw/internal/channel"
 	"tclaw/internal/config"
@@ -72,6 +73,10 @@ func channelEditDef() mcp.ToolDef {
 				"parent": {
 					"type": "string",
 					"description": "Parent channel name. Pass empty string to clear."
+				},
+				"claude_session_timeout": {
+					"type": "string",
+					"description": "Idle window before a fresh Claude CLI session is started on the next inbound message. Go duration string (e.g. '10m', '1h'). Pass empty string to clear (sessions never time out)."
 				}
 			},
 			"required": ["name"]
@@ -80,16 +85,17 @@ func channelEditDef() mcp.ToolDef {
 }
 
 type channelEditArgs struct {
-	Name            string          `json:"name"`
-	Description     string          `json:"description"`
-	Purpose         *string         `json:"purpose"`
-	AllowedUsers    *[]string       `json:"allowed_users"`
-	ToolGroups      []string        `json:"tool_groups"`
-	AllowedTools    []string        `json:"allowed_tools"`
-	DisallowedTools []string        `json:"disallowed_tools"`
-	CreatableGroups *[]string       `json:"creatable_groups"`
-	Links           *[]channel.Link `json:"links"`
-	Parent          *string         `json:"parent"`
+	Name                 string          `json:"name"`
+	Description          string          `json:"description"`
+	Purpose              *string         `json:"purpose"`
+	AllowedUsers         *[]string       `json:"allowed_users"`
+	ToolGroups           []string        `json:"tool_groups"`
+	AllowedTools         []string        `json:"allowed_tools"`
+	DisallowedTools      []string        `json:"disallowed_tools"`
+	CreatableGroups      *[]string       `json:"creatable_groups"`
+	Links                *[]channel.Link `json:"links"`
+	Parent               *string         `json:"parent"`
+	ClaudeSessionTimeout *string         `json:"claude_session_timeout"`
 }
 
 func channelEditHandler(deps Deps) mcp.ToolHandler {
@@ -101,9 +107,17 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 
 		hasChange := a.Description != "" || a.Purpose != nil || a.AllowedUsers != nil ||
 			a.ToolGroups != nil || a.AllowedTools != nil || a.DisallowedTools != nil ||
-			a.CreatableGroups != nil || a.Links != nil || a.Parent != nil
+			a.CreatableGroups != nil || a.Links != nil || a.Parent != nil ||
+			a.ClaudeSessionTimeout != nil
 		if !hasChange {
 			return nil, fmt.Errorf("at least one field to update must be provided")
+		}
+
+		// Validate the timeout up front so we don't write a config that fails to reload.
+		if a.ClaudeSessionTimeout != nil && *a.ClaudeSessionTimeout != "" {
+			if _, err := time.ParseDuration(*a.ClaudeSessionTimeout); err != nil {
+				return nil, fmt.Errorf("claude_session_timeout %q: %w (expected Go duration like '10m', '1h')", *a.ClaudeSessionTimeout, err)
+			}
 		}
 
 		if !deps.Registry.NameExists(a.Name) {
@@ -184,6 +198,9 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 			}
 			if a.Parent != nil {
 				ch.Parent = *a.Parent
+			}
+			if a.ClaudeSessionTimeout != nil {
+				ch.ClaudeSessionTimeout = *a.ClaudeSessionTimeout
 			}
 		}); err != nil {
 			return nil, fmt.Errorf("edit channel: %w", err)

@@ -69,6 +69,10 @@ func channelCreateDef() mcp.ToolDef {
 					"type": "integer",
 					"description": "Hours before an idle ephemeral channel is cleaned up. Defaults to 24."
 				},
+				"claude_session_timeout": {
+					"type": "string",
+					"description": "Optional Go duration string (e.g. '10m', '1h'). When the channel sits idle longer than this, the next inbound message starts a fresh Claude CLI session instead of resuming the previous one — useful for high-volume notification channels like email where every message would otherwise pile into the same context window. Empty or omitted means 'never time out — sessions persist until explicit reset'."
+				},
 				"tool_groups": {
 					"type": "array",
 					"items": {"type": "string"},
@@ -122,6 +126,7 @@ type channelCreateArgs struct {
 	Type                      string         `json:"type"`
 	Ephemeral                 bool           `json:"ephemeral"`
 	EphemeralIdleTimeoutHours int            `json:"ephemeral_idle_timeout_hours"`
+	ClaudeSessionTimeout      string         `json:"claude_session_timeout"`
 	ToolGroups                []string       `json:"tool_groups"`
 	AllowedTools              []string       `json:"allowed_tools"`
 	DisallowedTools           []string       `json:"disallowed_tools"`
@@ -261,6 +266,14 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			idleTimeoutStr = timeout.String()
 		}
 
+		// Validate claude_session_timeout up front so we don't write a config
+		// that subsequently fails to reload.
+		if a.ClaudeSessionTimeout != "" {
+			if _, err := time.ParseDuration(a.ClaudeSessionTimeout); err != nil {
+				return nil, fmt.Errorf("claude_session_timeout %q: %w (expected Go duration like '10m', '1h')", a.ClaudeSessionTimeout, err)
+			}
+		}
+
 		// Build the config channel entry. Provisioning happens synchronously via
 		// ReconcileOne below so the agent gets immediate feedback.
 		ch := config.Channel{
@@ -275,6 +288,7 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			Links:                a.Links,
 			Ephemeral:            a.Ephemeral,
 			EphemeralIdleTimeout: idleTimeoutStr,
+			ClaudeSessionTimeout: a.ClaudeSessionTimeout,
 			InitialMessage:       a.InitialMessage,
 			Parent:               a.Parent,
 			CreatedAt:            time.Now().Format(time.RFC3339),
