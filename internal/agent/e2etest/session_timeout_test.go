@@ -16,8 +16,8 @@ func TestSessionTimeout(t *testing.T) {
 		h := NewHarness(t, Config{
 			CommandFunc: Respond("ok"),
 			Sessions:    map[string]string{"main": "stale-from-yesterday"},
-			SessionResolver: func(name string) string {
-				return ""
+			SessionResolver: func(name string) (string, bool) {
+				return "", true
 			},
 		})
 
@@ -42,8 +42,8 @@ func TestSessionTimeout(t *testing.T) {
 		h := NewHarness(t, Config{
 			CommandFunc: Respond("ok"),
 			Sessions:    map[string]string{"main": "still-warm"},
-			SessionResolver: func(name string) string {
-				return "still-warm"
+			SessionResolver: func(name string) (string, bool) {
+				return "still-warm", false
 			},
 		})
 

@@ -39,7 +39,10 @@ type Config struct {
 	// tests use it to drive the idle-timeout path (return "" to force a
 	// fresh session even though Sessions seeded one). Receives the channel
 	// name, not the opaque ID, so test code can reason about channel names.
-	SessionResolver func(channelName string) string
+	// The second return value is the timedOut signal: set to true to model
+	// a TTL-expired stored session (so the agent emits the fresh-session
+	// notice even when the in-memory cache was wiped).
+	SessionResolver func(channelName string) (sessionID string, timedOut bool)
 
 	// SystemPrompt sets the base system prompt.
 	SystemPrompt string
@@ -208,16 +211,16 @@ func NewHarness(t *testing.T, cfg Config) *Harness {
 		h.ob = ob
 	}
 
-	var sessionResolver func(channel.ChannelID) string
+	var sessionResolver func(channel.ChannelID) (string, bool)
 	if cfg.SessionResolver != nil {
 		nameByID := make(map[channel.ChannelID]string, len(channels))
 		for name, tc := range channels {
 			nameByID[tc.Info().ID] = name
 		}
-		sessionResolver = func(chID channel.ChannelID) string {
+		sessionResolver = func(chID channel.ChannelID) (string, bool) {
 			name, ok := nameByID[chID]
 			if !ok {
-				return ""
+				return "", false
 			}
 			return cfg.SessionResolver(name)
 		}
