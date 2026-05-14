@@ -862,14 +862,14 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			// are reachable by the agent without restarting.
 			ChannelsFunc: channelsFunc,
 			Sessions:     sessions,
-			SessionResolver: func(chID channel.ChannelID) string {
+			SessionResolver: func(chID channel.ChannelID) (string, bool) {
 				timeout := claudeSessionTimeouts[chID]
-				sid, err := sessionStore.CurrentWithin(ctx, channel.SessionKey(chID), timeout)
+				sid, timedOut, err := sessionStore.CurrentWithinDetailed(ctx, channel.SessionKey(chID), timeout)
 				if err != nil {
 					slog.Warn("failed to resolve session, starting fresh", "channel", chID, "err", err)
-					return ""
+					return "", false
 				}
-				return sid
+				return sid, timedOut
 			},
 			Queue:  messageQueue,
 			Outbox: messageOutbox,

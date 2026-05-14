@@ -122,21 +122,32 @@ func (s *SessionStore) SetCurrent(ctx context.Context, channelKey string, sessio
 // check (equivalent to Current). The session record is not modified — only
 // SetCurrent advances LastUsedAt.
 func (s *SessionStore) CurrentWithin(ctx context.Context, channelKey string, maxAge time.Duration) (string, error) {
+	sid, _, err := s.CurrentWithinDetailed(ctx, channelKey, maxAge)
+	return sid, err
+}
+
+// CurrentWithinDetailed behaves like CurrentWithin but also reports whether
+// the empty return is due to a prior session aging past maxAge (timedOut=true)
+// vs no eligible session ever existing (timedOut=false). Callers that need to
+// emit a user-visible "fresh session" notice key off this signal — it survives
+// router restarts that rebuild the in-memory cache, which a sessions-map
+// presence check does not.
+func (s *SessionStore) CurrentWithinDetailed(ctx context.Context, channelKey string, maxAge time.Duration) (sessionID string, timedOut bool, err error) {
 	records, err := s.List(ctx, channelKey)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if len(records) == 0 {
-		return "", nil
+		return "", false, nil
 	}
 	last := records[len(records)-1]
 	if last.Cleared {
-		return "", nil
+		return "", false, nil
 	}
 	if maxAge > 0 && time.Since(last.lastActivity()) > maxAge {
-		return "", nil
+		return "", true, nil
 	}
-	return last.SessionID, nil
+	return last.SessionID, false, nil
 }
 
 // List returns all session records for a channel in chronological order.

@@ -155,8 +155,11 @@ type Options struct {
 	// to force a fresh CLI session. When set, it replaces the Sessions map
 	// lookup. The router uses it to enforce per-channel idle timeouts so a
 	// channel that hasn't been touched recently starts the next turn cleanly,
-	// keeping the context window bounded.
-	SessionResolver func(chID channel.ChannelID) string
+	// keeping the context window bounded. The second return value is true iff
+	// the empty session ID is due to a stored session aging past its TTL —
+	// the agent uses it to emit a user-visible fresh-session notice even when
+	// the in-memory sessions cache was wiped (e.g. after a router restart).
+	SessionResolver func(chID channel.ChannelID) (sessionID string, timedOut bool)
 
 	// OnSessionUpdate is called after every successful turn with the active
 	// session ID (whether it changed or not). The router uses it to persist
@@ -286,15 +289,16 @@ func (opts Options) channels() map[channel.ChannelID]channel.Channel {
 	return opts.Channels
 }
 
-// lookupSession returns the session ID to resume for a channel. When the
-// caller provides a SessionResolver, it owns the decision (and can force a
-// fresh session by returning ""). Otherwise we fall back to the local sessions
-// map seeded from Options.Sessions plus in-process updates.
-func lookupSession(opts Options, sessions map[channel.ChannelID]string, chID channel.ChannelID) string {
+// lookupSession returns the session ID to resume for a channel and a flag
+// indicating whether the empty return is due to TTL expiry. When the caller
+// provides a SessionResolver, it owns the decision; otherwise we fall back to
+// the local sessions map (which can't detect timeouts — timedOut is always
+// false on this path).
+func lookupSession(opts Options, sessions map[channel.ChannelID]string, chID channel.ChannelID) (sessionID string, timedOut bool) {
 	if opts.SessionResolver != nil {
 		return opts.SessionResolver(chID)
 	}
-	return sessions[chID]
+	return sessions[chID], false
 }
 
 // freshSessionNotice is the user-visible message sent when a turn starts on
@@ -304,11 +308,15 @@ const freshSessionNotice = "🆕 Idle timeout reached — starting a fresh Claud
 
 // notifyFreshSessionIfTimedOut sends a user-visible notice when the resolver
 // drops a known-good session (timeout) so it's clear the next reply starts
-// from a blank context. The local sessions entry is cleared on detection so
-// retries within the same turn don't re-send the notice.
-func notifyFreshSessionIfTimedOut(ctx context.Context, opts Options, sessions map[channel.ChannelID]string, chID channel.ChannelID, resolvedSessionID string) {
-	prior := sessions[chID]
-	if prior == "" || resolvedSessionID != "" {
+// from a blank context. Fires when either the resolver explicitly reports
+// timedOut (survives router-restart cache wipes) or the legacy in-memory
+// cache had a session that's now being dropped. The local sessions entry is
+// cleared on detection so retries within the same turn don't re-send.
+func notifyFreshSessionIfTimedOut(ctx context.Context, opts Options, sessions map[channel.ChannelID]string, chID channel.ChannelID, resolvedSessionID string, timedOut bool) {
+	if resolvedSessionID != "" {
+		return
+	}
+	if !timedOut && sessions[chID] == "" {
 		return
 	}
 	if _, err := opts.send(ctx, chID, freshSessionNotice); err != nil {
@@ -601,8 +609,8 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			}
 		}
 
-		sessionID := lookupSession(opts, sessions, msg.ChannelID)
-		notifyFreshSessionIfTimedOut(ctx, opts, sessions, msg.ChannelID, sessionID)
+		sessionID, sessionTimedOut := lookupSession(opts, sessions, msg.ChannelID)
+		notifyFreshSessionIfTimedOut(ctx, opts, sessions, msg.ChannelID, sessionID, sessionTimedOut)
 		turnCtx, cancelTurn := context.WithCancel(ctx)
 
 		if opts.OnTurnStart != nil {
