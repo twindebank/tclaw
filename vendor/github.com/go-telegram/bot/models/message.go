@@ -87,6 +87,7 @@ type Message struct {
 	SenderChat                    *Chat                          `json:"sender_chat,omitempty"`
 	SenderBoostCount              int                            `json:"sender_boost_count,omitempty"`
 	SenderBusinessBot             *User                          `json:"sender_business_bot,omitempty"`
+	SenderTag                     string                         `json:"sender_tag,omitempty"`
 	Date                          int                            `json:"date"`
 	BusinessConnectionID          string                         `json:"business_connection_id,omitempty"`
 	Chat                          Chat                           `json:"chat"`
@@ -179,11 +180,19 @@ type Message struct {
 	SuggestedPostDeclined         *SuggestedPostDeclined         `json:"suggested_post_declined,omitempty"`
 	SuggestedPostPaid             *SuggestedPostPaid             `json:"suggested_post_paid,omitempty"`
 	SuggestedPostRefunded         *SuggestedPostRefunded         `json:"suggested_post_refunded,omitempty"`
-	VoiceChatScheduled            *VoiceChatScheduled            `json:"voice_chat_scheduled,omitempty"`
-	VoiceChatStarted              *VoiceChatStarted              `json:"voice_chat_started,omitempty"`
-	VoiceChatEnded                *VoiceChatEnded                `json:"voice_chat_ended,omitempty"`
-	VoiceChatParticipantsInvited  *VoiceChatParticipantsInvited  `json:"voice_chat_participants_invited,omitempty"`
+	VideoChatScheduled            *VideoChatScheduled            `json:"video_chat_scheduled,omitempty"`
+	VideoChatStarted              *VideoChatStarted              `json:"video_chat_started,omitempty"`
+	VideoChatEnded                *VideoChatEnded                `json:"video_chat_ended,omitempty"`
+	VideoChatParticipantsInvited  *VideoChatParticipantsInvited  `json:"video_chat_participants_invited,omitempty"`
 	WebAppData                    *WebAppData                    `json:"web_app_data,omitempty"`
+	ManagedBotCreated             *ManagedBotCreated             `json:"managed_bot_created,omitempty"`
+	PollOptionAdded               *PollOptionAdded               `json:"poll_option_added,omitempty"`
+	PollOptionDeleted             *PollOptionDeleted             `json:"poll_option_deleted,omitempty"`
+	GuestBotCallerUser            *User                          `json:"guest_bot_caller_user,omitempty"`
+	GuestBotCallerChat            *Chat                          `json:"guest_bot_caller_chat,omitempty"`
+	GuestQueryID                  string                         `json:"guest_query_id,omitempty"`
+	ReplyToPollOptionID           string                         `json:"reply_to_poll_option_id,omitempty"`
+	LivePhoto                     *LivePhoto                     `json:"live_photo,omitempty"`
 	ReplyMarkup                   *InlineKeyboardMarkup          `json:"reply_markup,omitempty"`
 }
 
