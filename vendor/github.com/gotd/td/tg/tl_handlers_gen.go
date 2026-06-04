@@ -1640,6 +1640,36 @@ func (u UpdateDispatcher) OnChatParticipantRank(handler ChatParticipantRankHandl
 	}
 }
 
+// ManagedBotHandler is a ManagedBot event handler.
+type ManagedBotHandler func(ctx context.Context, e Entities, update *UpdateManagedBot) error
+
+// OnManagedBot sets ManagedBot handler.
+func (u UpdateDispatcher) OnManagedBot(handler ManagedBotHandler) {
+	u.handlers[UpdateManagedBotTypeID] = func(ctx context.Context, e Entities, update UpdateClass) error {
+		return handler(ctx, e, update.(*UpdateManagedBot))
+	}
+}
+
+// BotGuestChatQueryHandler is a BotGuestChatQuery event handler.
+type BotGuestChatQueryHandler func(ctx context.Context, e Entities, update *UpdateBotGuestChatQuery) error
+
+// OnBotGuestChatQuery sets BotGuestChatQuery handler.
+func (u UpdateDispatcher) OnBotGuestChatQuery(handler BotGuestChatQueryHandler) {
+	u.handlers[UpdateBotGuestChatQueryTypeID] = func(ctx context.Context, e Entities, update UpdateClass) error {
+		return handler(ctx, e, update.(*UpdateBotGuestChatQuery))
+	}
+}
+
+// AiComposeTonesHandler is a AiComposeTones event handler.
+type AiComposeTonesHandler func(ctx context.Context, e Entities, update *UpdateAiComposeTones) error
+
+// OnAiComposeTones sets AiComposeTones handler.
+func (u UpdateDispatcher) OnAiComposeTones(handler AiComposeTonesHandler) {
+	u.handlers[UpdateAiComposeTonesTypeID] = func(ctx context.Context, e Entities, update UpdateClass) error {
+		return handler(ctx, e, update.(*UpdateAiComposeTones))
+	}
+}
+
 // OnFallback sets fallback handler.
 func (u *UpdateDispatcher) OnFallback(handler Handler) {
 	u.fallback = handler
