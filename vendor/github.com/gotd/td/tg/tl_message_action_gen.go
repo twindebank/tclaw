@@ -4231,7 +4231,10 @@ func (m *MessageActionGeoProximityReached) GetDistance() (value int) {
 }
 
 // MessageActionGroupCall represents TL type `messageActionGroupCall#7a0d7f42`.
-// The group call has ended
+// A video chat/livestream¹ was started or terminated.
+//
+// Links:
+//  1. https://core.telegram.org/api/group-calls#video-chats-livestreams
 //
 // See https://core.telegram.org/constructor/messageActionGroupCall for reference.
 type MessageActionGroupCall struct {
@@ -4242,7 +4245,7 @@ type MessageActionGroupCall struct {
 	Flags bin.Fields
 	// Group call
 	Call InputGroupCallClass
-	// Group call duration
+	// Duration of the group call in seconds, for terminated calls.
 	//
 	// Use SetDuration and GetDuration helpers.
 	Duration int
@@ -4440,7 +4443,10 @@ func (m *MessageActionGroupCall) GetDuration() (value int, ok bool) {
 }
 
 // MessageActionInviteToGroupCall represents TL type `messageActionInviteToGroupCall#502f92f7`.
-// A set of users was invited to the group call
+// A set of users was invited to a group call¹.
+//
+// Links:
+//  1. https://core.telegram.org/api/group-calls
 //
 // See https://core.telegram.org/constructor/messageActionInviteToGroupCall for reference.
 type MessageActionInviteToGroupCall struct {
@@ -4831,13 +4837,16 @@ func (m *MessageActionSetMessagesTTL) GetAutoSettingFrom() (value int64, ok bool
 }
 
 // MessageActionGroupCallScheduled represents TL type `messageActionGroupCallScheduled#b3a07661`.
-// A group call was scheduled
+// A video chat/livestream¹ was scheduled.
+//
+// Links:
+//  1. https://core.telegram.org/api/group-calls#video-chats-livestreams
 //
 // See https://core.telegram.org/constructor/messageActionGroupCallScheduled for reference.
 type MessageActionGroupCallScheduled struct {
 	// The group call
 	Call InputGroupCallClass
-	// When is this group call scheduled to start
+	// When is the group call scheduled to start
 	ScheduleDate int
 }
 
@@ -5581,7 +5590,7 @@ type MessageActionGiftPremium struct {
 	// Links:
 	//  1) https://core.telegram.org/bots/payments/currencies.json
 	Amount int64
-	// Days field of MessageActionGiftPremium.
+	// Duration of the gifted Telegram Premium subscription, in days.
 	Days int
 	// If the gift was bought using a cryptocurrency, the cryptocurrency name.
 	//
@@ -7140,7 +7149,7 @@ type MessageActionGiftCode struct {
 	//
 	// Use SetBoostPeer and GetBoostPeer helpers.
 	BoostPeer PeerClass
-	// Days field of MessageActionGiftCode.
+	// Duration of the gifted Telegram Premium subscription, in days.
 	Days int
 	// Slug of the Telegram Premium giftcode link¹
 	//
@@ -9430,7 +9439,10 @@ type MessageActionStarGift struct {
 	// Links:
 	//  1) https://core.telegram.org/api/gifts#prepaying-for-someone-elses-upgrade
 	UpgradeSeparate bool
-	// AuctionAcquired field of MessageActionStarGift.
+	// If set, this gift was acquired in a collectible gifts auction »¹.
+	//
+	// Links:
+	//  1) https://core.telegram.org/api/auctions
 	AuctionAcquired bool
 	// Info about the gift
 	Gift StarGiftClass
@@ -10486,11 +10498,20 @@ type MessageActionStarGiftUnique struct {
 	Refunded bool
 	// The sender has pre-paid for the upgrade of this gift to a collectible gift.
 	PrepaidUpgrade bool
-	// Assigned field of MessageActionStarGiftUnique.
+	// This collectible gift was assigned from the TON blockchain »¹.
+	//
+	// Links:
+	//  1) https://core.telegram.org/api/gifts#withdraw-a-collectible-gift-to-the-ton-blockchain
 	Assigned bool
-	// FromOffer field of MessageActionStarGiftUnique.
+	// This collectible gift was transferred after a purchase offer »¹ was accepted.
+	//
+	// Links:
+	//  1) https://core.telegram.org/api/gifts#collectible-gift-purchase-offers
 	FromOffer bool
-	// Craft field of MessageActionStarGiftUnique.
+	// This collectible gift was obtained by crafting »¹.
+	//
+	// Links:
+	//  1) https://core.telegram.org/api/gifts#crafting-collectible-gifts
 	Craft bool
 	// The collectible gift.
 	Gift StarGiftClass
@@ -10545,11 +10566,20 @@ type MessageActionStarGiftUnique struct {
 	//
 	// Use SetCanResellAt and GetCanResellAt helpers.
 	CanResellAt int
-	// DropOriginalDetailsStars field of MessageActionStarGiftUnique.
+	// If set, the starGiftAttributeOriginalDetails¹ attribute of this gift may be removed
+	// by paying the specified amount of stars, see here »² for the full flow.
+	//
+	// Links:
+	//  1) https://core.telegram.org/constructor/starGiftAttributeOriginalDetails
+	//  2) https://core.telegram.org/api/gifts#dropping-the-original-details-of-an-upgraded-gift
 	//
 	// Use SetDropOriginalDetailsStars and GetDropOriginalDetailsStars helpers.
 	DropOriginalDetailsStars int64
-	// CanCraftAt field of MessageActionStarGiftUnique.
+	// If set, this gift can be used for crafting »¹ only starting from the specified
+	// unixtime.
+	//
+	// Links:
+	//  1) https://core.telegram.org/api/gifts#crafting-collectible-gifts
 	//
 	// Use SetCanCraftAt and GetCanCraftAt helpers.
 	CanCraftAt int
@@ -13488,10 +13518,16 @@ func (m *MessageActionGiftTon) GetTransactionID() (value string, ok bool) {
 }
 
 // MessageActionSuggestBirthday represents TL type `messageActionSuggestBirthday#2c8f2a25`.
+// A new birthday was suggested using users.suggestBirthday¹, see here »² for more
+// info on birthdays in the API.
+//
+// Links:
+//  1. https://core.telegram.org/method/users.suggestBirthday
+//  2. https://core.telegram.org/api/profile#birthday
 //
 // See https://core.telegram.org/constructor/messageActionSuggestBirthday for reference.
 type MessageActionSuggestBirthday struct {
-	// Birthday field of MessageActionSuggestBirthday.
+	// The suggested birthday.
 	Birthday Birthday
 }
 
@@ -13622,20 +13658,29 @@ func (m *MessageActionSuggestBirthday) GetBirthday() (value Birthday) {
 }
 
 // MessageActionStarGiftPurchaseOffer represents TL type `messageActionStarGiftPurchaseOffer#774278d4`.
+// Contains an offer to purchase a collectible gift »¹, see here »² for the full flow.
+//
+// Links:
+//  1. https://core.telegram.org/api/gifts#collectible-gift-purchase-offers
+//  2. https://core.telegram.org/api/gifts#collectible-gift-purchase-offers
 //
 // See https://core.telegram.org/constructor/messageActionStarGiftPurchaseOffer for reference.
 type MessageActionStarGiftPurchaseOffer struct {
-	// Flags field of MessageActionStarGiftPurchaseOffer.
+	// Flags, see TL conditional fields¹
+	//
+	// Links:
+	//  1) https://core.telegram.org/mtproto/TL-combinators#conditional-fields
 	Flags bin.Fields
-	// Accepted field of MessageActionStarGiftPurchaseOffer.
+	// If set, the gift owner accepted this offer.
 	Accepted bool
-	// Declined field of MessageActionStarGiftPurchaseOffer.
+	// If set, the gift owner declined this offer.
 	Declined bool
-	// Gift field of MessageActionStarGiftPurchaseOffer.
+	// The collectible gift the offer is about.
 	Gift StarGiftClass
-	// Price field of MessageActionStarGiftPurchaseOffer.
+	// Offered price.
 	Price StarsAmountClass
-	// ExpiresAt field of MessageActionStarGiftPurchaseOffer.
+	// Offer expiration date (UNIX timestamp): if the owner doesn't act before this date, the
+	// offer will expire and the buyer will be refunded automatically.
 	ExpiresAt int
 }
 
@@ -13908,16 +13953,30 @@ func (m *MessageActionStarGiftPurchaseOffer) GetExpiresAt() (value int) {
 }
 
 // MessageActionStarGiftPurchaseOfferDeclined represents TL type `messageActionStarGiftPurchaseOfferDeclined#73ada76b`.
+// A collectible gift purchase offer »¹ was declined, or the offer expired, see here
+// »² for the full flow.
+//
+// Links:
+//  1. https://core.telegram.org/api/gifts#collectible-gift-purchase-offers
+//  2. https://core.telegram.org/api/gifts#collectible-gift-purchase-offers
 //
 // See https://core.telegram.org/constructor/messageActionStarGiftPurchaseOfferDeclined for reference.
 type MessageActionStarGiftPurchaseOfferDeclined struct {
-	// Flags field of MessageActionStarGiftPurchaseOfferDeclined.
+	// Flags, see TL conditional fields¹
+	//
+	// Links:
+	//  1) https://core.telegram.org/mtproto/TL-combinators#conditional-fields
 	Flags bin.Fields
-	// Expired field of MessageActionStarGiftPurchaseOfferDeclined.
+	// If set, the owner didn't act before the messageActionStarGiftPurchaseOffer¹
+	// expires_at deadline and the offer expired automatically; otherwise, the owner
+	// explicitly declined the offer.
+	//
+	// Links:
+	//  1) https://core.telegram.org/constructor/messageActionStarGiftPurchaseOffer
 	Expired bool
-	// Gift field of MessageActionStarGiftPurchaseOfferDeclined.
+	// The collectible gift the declined or expired offer was about.
 	Gift StarGiftClass
-	// Price field of MessageActionStarGiftPurchaseOfferDeclined.
+	// Offered price that is refunded automatically to the buyer.
 	Price StarsAmountClass
 }
 
@@ -14132,10 +14191,18 @@ func (m *MessageActionStarGiftPurchaseOfferDeclined) GetPrice() (value StarsAmou
 }
 
 // MessageActionNewCreatorPending represents TL type `messageActionNewCreatorPending#b07ed085`.
+// Service message: emitted to a supergroup when the group/channel creator leaves the
+// group »¹, indicating that ownership transfer is pending. The new_creator_id user
+// will become the new owner after 7 days if the old owner does not rejoin.
+// Sent from the user ID of the old owner.
+//
+// Links:
+//  1. https://core.telegram.org/api/channel#leaving-groups-channels
 //
 // See https://core.telegram.org/constructor/messageActionNewCreatorPending for reference.
 type MessageActionNewCreatorPending struct {
-	// NewCreatorID field of MessageActionNewCreatorPending.
+	// The ID of the user who will become the new owner of the group/channel after 7 days if
+	// the old owner does not rejoin.
 	NewCreatorID int64
 }
 
@@ -14266,10 +14333,17 @@ func (m *MessageActionNewCreatorPending) GetNewCreatorID() (value int64) {
 }
 
 // MessageActionChangeCreator represents TL type `messageActionChangeCreator#e188503b`.
+// Service message: emitted to a supergroup when ownership transfer completes after the
+// old owner left the group »¹ (7 days after the old owner left without rejoining),
+// indicating that ownership has been transferred to a new owner.
+// Sent from the user ID of the old owner.
+//
+// Links:
+//  1. https://core.telegram.org/api/channel#leaving-groups-channels
 //
 // See https://core.telegram.org/constructor/messageActionChangeCreator for reference.
 type MessageActionChangeCreator struct {
-	// NewCreatorID field of MessageActionChangeCreator.
+	// The ID of the user who became the new owner of the group/channel.
 	NewCreatorID int64
 }
 
@@ -14400,12 +14474,20 @@ func (m *MessageActionChangeCreator) GetNewCreatorID() (value int64) {
 }
 
 // MessageActionNoForwardsToggle represents TL type `messageActionNoForwardsToggle#bf7d6572`.
+// Emitted only in private chats when enabling or disabling content protection »¹.
+//
+// Links:
+//  1. https://core.telegram.org/api/content-protection#for-users
 //
 // See https://core.telegram.org/constructor/messageActionNoForwardsToggle for reference.
 type MessageActionNoForwardsToggle struct {
-	// PrevValue field of MessageActionNoForwardsToggle.
+	// Previous protection status (if true, the chat was protected). May be equal to
+	// new_value when replying to requests, see here »¹ for more info on the full flow.
+	//
+	// Links:
+	//  1) https://core.telegram.org/api/content-protection#for-users
 	PrevValue bool
-	// NewValue field of MessageActionNoForwardsToggle.
+	// New protection status.
 	NewValue bool
 }
 
@@ -14561,16 +14643,25 @@ func (m *MessageActionNoForwardsToggle) GetNewValue() (value bool) {
 }
 
 // MessageActionNoForwardsRequest represents TL type `messageActionNoForwardsRequest#3e2793ba`.
+// Emitted only in private chats if the other side requested to disable content
+// protection »¹.
+//
+// Links:
+//  1. https://core.telegram.org/api/content-protection#for-users
 //
 // See https://core.telegram.org/constructor/messageActionNoForwardsRequest for reference.
 type MessageActionNoForwardsRequest struct {
-	// Flags field of MessageActionNoForwardsRequest.
+	// Flags, see TL conditional fields¹
+	//
+	// Links:
+	//  1) https://core.telegram.org/mtproto/TL-combinators#conditional-fields
 	Flags bin.Fields
-	// Expired field of MessageActionNoForwardsRequest.
+	// If set, this request was accepted or rejected by the other user and thus cannot be
+	// used anymore.
 	Expired bool
-	// PrevValue field of MessageActionNoForwardsRequest.
+	// Previous protection status.
 	PrevValue bool
-	// NewValue field of MessageActionNoForwardsRequest.
+	// New requested protection status.
 	NewValue bool
 }
 
@@ -14774,6 +14865,418 @@ func (m *MessageActionNoForwardsRequest) GetNewValue() (value bool) {
 	return m.NewValue
 }
 
+// MessageActionPollAppendAnswer represents TL type `messageActionPollAppendAnswer#9da1cd6c`.
+//
+// See https://core.telegram.org/constructor/messageActionPollAppendAnswer for reference.
+type MessageActionPollAppendAnswer struct {
+	// Answer field of MessageActionPollAppendAnswer.
+	Answer PollAnswerClass
+}
+
+// MessageActionPollAppendAnswerTypeID is TL type id of MessageActionPollAppendAnswer.
+const MessageActionPollAppendAnswerTypeID = 0x9da1cd6c
+
+// construct implements constructor of MessageActionClass.
+func (m MessageActionPollAppendAnswer) construct() MessageActionClass { return &m }
+
+// Ensuring interfaces in compile-time for MessageActionPollAppendAnswer.
+var (
+	_ bin.Encoder     = &MessageActionPollAppendAnswer{}
+	_ bin.Decoder     = &MessageActionPollAppendAnswer{}
+	_ bin.BareEncoder = &MessageActionPollAppendAnswer{}
+	_ bin.BareDecoder = &MessageActionPollAppendAnswer{}
+
+	_ MessageActionClass = &MessageActionPollAppendAnswer{}
+)
+
+func (m *MessageActionPollAppendAnswer) Zero() bool {
+	if m == nil {
+		return true
+	}
+	if !(m.Answer == nil) {
+		return false
+	}
+
+	return true
+}
+
+// String implements fmt.Stringer.
+func (m *MessageActionPollAppendAnswer) String() string {
+	if m == nil {
+		return "MessageActionPollAppendAnswer(nil)"
+	}
+	type Alias MessageActionPollAppendAnswer
+	return fmt.Sprintf("MessageActionPollAppendAnswer%+v", Alias(*m))
+}
+
+// FillFrom fills MessageActionPollAppendAnswer from given interface.
+func (m *MessageActionPollAppendAnswer) FillFrom(from interface {
+	GetAnswer() (value PollAnswerClass)
+}) {
+	m.Answer = from.GetAnswer()
+}
+
+// TypeID returns type id in TL schema.
+//
+// See https://core.telegram.org/mtproto/TL-tl#remarks.
+func (*MessageActionPollAppendAnswer) TypeID() uint32 {
+	return MessageActionPollAppendAnswerTypeID
+}
+
+// TypeName returns name of type in TL schema.
+func (*MessageActionPollAppendAnswer) TypeName() string {
+	return "messageActionPollAppendAnswer"
+}
+
+// TypeInfo returns info about TL type.
+func (m *MessageActionPollAppendAnswer) TypeInfo() tdp.Type {
+	typ := tdp.Type{
+		Name: "messageActionPollAppendAnswer",
+		ID:   MessageActionPollAppendAnswerTypeID,
+	}
+	if m == nil {
+		typ.Null = true
+		return typ
+	}
+	typ.Fields = []tdp.Field{
+		{
+			Name:       "Answer",
+			SchemaName: "answer",
+		},
+	}
+	return typ
+}
+
+// Encode implements bin.Encoder.
+func (m *MessageActionPollAppendAnswer) Encode(b *bin.Buffer) error {
+	if m == nil {
+		return fmt.Errorf("can't encode messageActionPollAppendAnswer#9da1cd6c as nil")
+	}
+	b.PutID(MessageActionPollAppendAnswerTypeID)
+	return m.EncodeBare(b)
+}
+
+// EncodeBare implements bin.BareEncoder.
+func (m *MessageActionPollAppendAnswer) EncodeBare(b *bin.Buffer) error {
+	if m == nil {
+		return fmt.Errorf("can't encode messageActionPollAppendAnswer#9da1cd6c as nil")
+	}
+	if m.Answer == nil {
+		return fmt.Errorf("unable to encode messageActionPollAppendAnswer#9da1cd6c: field answer is nil")
+	}
+	if err := m.Answer.Encode(b); err != nil {
+		return fmt.Errorf("unable to encode messageActionPollAppendAnswer#9da1cd6c: field answer: %w", err)
+	}
+	return nil
+}
+
+// Decode implements bin.Decoder.
+func (m *MessageActionPollAppendAnswer) Decode(b *bin.Buffer) error {
+	if m == nil {
+		return fmt.Errorf("can't decode messageActionPollAppendAnswer#9da1cd6c to nil")
+	}
+	if err := b.ConsumeID(MessageActionPollAppendAnswerTypeID); err != nil {
+		return fmt.Errorf("unable to decode messageActionPollAppendAnswer#9da1cd6c: %w", err)
+	}
+	return m.DecodeBare(b)
+}
+
+// DecodeBare implements bin.BareDecoder.
+func (m *MessageActionPollAppendAnswer) DecodeBare(b *bin.Buffer) error {
+	if m == nil {
+		return fmt.Errorf("can't decode messageActionPollAppendAnswer#9da1cd6c to nil")
+	}
+	{
+		value, err := DecodePollAnswer(b)
+		if err != nil {
+			return fmt.Errorf("unable to decode messageActionPollAppendAnswer#9da1cd6c: field answer: %w", err)
+		}
+		m.Answer = value
+	}
+	return nil
+}
+
+// GetAnswer returns value of Answer field.
+func (m *MessageActionPollAppendAnswer) GetAnswer() (value PollAnswerClass) {
+	if m == nil {
+		return
+	}
+	return m.Answer
+}
+
+// MessageActionPollDeleteAnswer represents TL type `messageActionPollDeleteAnswer#399674dc`.
+//
+// See https://core.telegram.org/constructor/messageActionPollDeleteAnswer for reference.
+type MessageActionPollDeleteAnswer struct {
+	// Answer field of MessageActionPollDeleteAnswer.
+	Answer PollAnswerClass
+}
+
+// MessageActionPollDeleteAnswerTypeID is TL type id of MessageActionPollDeleteAnswer.
+const MessageActionPollDeleteAnswerTypeID = 0x399674dc
+
+// construct implements constructor of MessageActionClass.
+func (m MessageActionPollDeleteAnswer) construct() MessageActionClass { return &m }
+
+// Ensuring interfaces in compile-time for MessageActionPollDeleteAnswer.
+var (
+	_ bin.Encoder     = &MessageActionPollDeleteAnswer{}
+	_ bin.Decoder     = &MessageActionPollDeleteAnswer{}
+	_ bin.BareEncoder = &MessageActionPollDeleteAnswer{}
+	_ bin.BareDecoder = &MessageActionPollDeleteAnswer{}
+
+	_ MessageActionClass = &MessageActionPollDeleteAnswer{}
+)
+
+func (m *MessageActionPollDeleteAnswer) Zero() bool {
+	if m == nil {
+		return true
+	}
+	if !(m.Answer == nil) {
+		return false
+	}
+
+	return true
+}
+
+// String implements fmt.Stringer.
+func (m *MessageActionPollDeleteAnswer) String() string {
+	if m == nil {
+		return "MessageActionPollDeleteAnswer(nil)"
+	}
+	type Alias MessageActionPollDeleteAnswer
+	return fmt.Sprintf("MessageActionPollDeleteAnswer%+v", Alias(*m))
+}
+
+// FillFrom fills MessageActionPollDeleteAnswer from given interface.
+func (m *MessageActionPollDeleteAnswer) FillFrom(from interface {
+	GetAnswer() (value PollAnswerClass)
+}) {
+	m.Answer = from.GetAnswer()
+}
+
+// TypeID returns type id in TL schema.
+//
+// See https://core.telegram.org/mtproto/TL-tl#remarks.
+func (*MessageActionPollDeleteAnswer) TypeID() uint32 {
+	return MessageActionPollDeleteAnswerTypeID
+}
+
+// TypeName returns name of type in TL schema.
+func (*MessageActionPollDeleteAnswer) TypeName() string {
+	return "messageActionPollDeleteAnswer"
+}
+
+// TypeInfo returns info about TL type.
+func (m *MessageActionPollDeleteAnswer) TypeInfo() tdp.Type {
+	typ := tdp.Type{
+		Name: "messageActionPollDeleteAnswer",
+		ID:   MessageActionPollDeleteAnswerTypeID,
+	}
+	if m == nil {
+		typ.Null = true
+		return typ
+	}
+	typ.Fields = []tdp.Field{
+		{
+			Name:       "Answer",
+			SchemaName: "answer",
+		},
+	}
+	return typ
+}
+
+// Encode implements bin.Encoder.
+func (m *MessageActionPollDeleteAnswer) Encode(b *bin.Buffer) error {
+	if m == nil {
+		return fmt.Errorf("can't encode messageActionPollDeleteAnswer#399674dc as nil")
+	}
+	b.PutID(MessageActionPollDeleteAnswerTypeID)
+	return m.EncodeBare(b)
+}
+
+// EncodeBare implements bin.BareEncoder.
+func (m *MessageActionPollDeleteAnswer) EncodeBare(b *bin.Buffer) error {
+	if m == nil {
+		return fmt.Errorf("can't encode messageActionPollDeleteAnswer#399674dc as nil")
+	}
+	if m.Answer == nil {
+		return fmt.Errorf("unable to encode messageActionPollDeleteAnswer#399674dc: field answer is nil")
+	}
+	if err := m.Answer.Encode(b); err != nil {
+		return fmt.Errorf("unable to encode messageActionPollDeleteAnswer#399674dc: field answer: %w", err)
+	}
+	return nil
+}
+
+// Decode implements bin.Decoder.
+func (m *MessageActionPollDeleteAnswer) Decode(b *bin.Buffer) error {
+	if m == nil {
+		return fmt.Errorf("can't decode messageActionPollDeleteAnswer#399674dc to nil")
+	}
+	if err := b.ConsumeID(MessageActionPollDeleteAnswerTypeID); err != nil {
+		return fmt.Errorf("unable to decode messageActionPollDeleteAnswer#399674dc: %w", err)
+	}
+	return m.DecodeBare(b)
+}
+
+// DecodeBare implements bin.BareDecoder.
+func (m *MessageActionPollDeleteAnswer) DecodeBare(b *bin.Buffer) error {
+	if m == nil {
+		return fmt.Errorf("can't decode messageActionPollDeleteAnswer#399674dc to nil")
+	}
+	{
+		value, err := DecodePollAnswer(b)
+		if err != nil {
+			return fmt.Errorf("unable to decode messageActionPollDeleteAnswer#399674dc: field answer: %w", err)
+		}
+		m.Answer = value
+	}
+	return nil
+}
+
+// GetAnswer returns value of Answer field.
+func (m *MessageActionPollDeleteAnswer) GetAnswer() (value PollAnswerClass) {
+	if m == nil {
+		return
+	}
+	return m.Answer
+}
+
+// MessageActionManagedBotCreated represents TL type `messageActionManagedBotCreated#16605e3e`.
+//
+// See https://core.telegram.org/constructor/messageActionManagedBotCreated for reference.
+type MessageActionManagedBotCreated struct {
+	// BotID field of MessageActionManagedBotCreated.
+	BotID int64
+}
+
+// MessageActionManagedBotCreatedTypeID is TL type id of MessageActionManagedBotCreated.
+const MessageActionManagedBotCreatedTypeID = 0x16605e3e
+
+// construct implements constructor of MessageActionClass.
+func (m MessageActionManagedBotCreated) construct() MessageActionClass { return &m }
+
+// Ensuring interfaces in compile-time for MessageActionManagedBotCreated.
+var (
+	_ bin.Encoder     = &MessageActionManagedBotCreated{}
+	_ bin.Decoder     = &MessageActionManagedBotCreated{}
+	_ bin.BareEncoder = &MessageActionManagedBotCreated{}
+	_ bin.BareDecoder = &MessageActionManagedBotCreated{}
+
+	_ MessageActionClass = &MessageActionManagedBotCreated{}
+)
+
+func (m *MessageActionManagedBotCreated) Zero() bool {
+	if m == nil {
+		return true
+	}
+	if !(m.BotID == 0) {
+		return false
+	}
+
+	return true
+}
+
+// String implements fmt.Stringer.
+func (m *MessageActionManagedBotCreated) String() string {
+	if m == nil {
+		return "MessageActionManagedBotCreated(nil)"
+	}
+	type Alias MessageActionManagedBotCreated
+	return fmt.Sprintf("MessageActionManagedBotCreated%+v", Alias(*m))
+}
+
+// FillFrom fills MessageActionManagedBotCreated from given interface.
+func (m *MessageActionManagedBotCreated) FillFrom(from interface {
+	GetBotID() (value int64)
+}) {
+	m.BotID = from.GetBotID()
+}
+
+// TypeID returns type id in TL schema.
+//
+// See https://core.telegram.org/mtproto/TL-tl#remarks.
+func (*MessageActionManagedBotCreated) TypeID() uint32 {
+	return MessageActionManagedBotCreatedTypeID
+}
+
+// TypeName returns name of type in TL schema.
+func (*MessageActionManagedBotCreated) TypeName() string {
+	return "messageActionManagedBotCreated"
+}
+
+// TypeInfo returns info about TL type.
+func (m *MessageActionManagedBotCreated) TypeInfo() tdp.Type {
+	typ := tdp.Type{
+		Name: "messageActionManagedBotCreated",
+		ID:   MessageActionManagedBotCreatedTypeID,
+	}
+	if m == nil {
+		typ.Null = true
+		return typ
+	}
+	typ.Fields = []tdp.Field{
+		{
+			Name:       "BotID",
+			SchemaName: "bot_id",
+		},
+	}
+	return typ
+}
+
+// Encode implements bin.Encoder.
+func (m *MessageActionManagedBotCreated) Encode(b *bin.Buffer) error {
+	if m == nil {
+		return fmt.Errorf("can't encode messageActionManagedBotCreated#16605e3e as nil")
+	}
+	b.PutID(MessageActionManagedBotCreatedTypeID)
+	return m.EncodeBare(b)
+}
+
+// EncodeBare implements bin.BareEncoder.
+func (m *MessageActionManagedBotCreated) EncodeBare(b *bin.Buffer) error {
+	if m == nil {
+		return fmt.Errorf("can't encode messageActionManagedBotCreated#16605e3e as nil")
+	}
+	b.PutLong(m.BotID)
+	return nil
+}
+
+// Decode implements bin.Decoder.
+func (m *MessageActionManagedBotCreated) Decode(b *bin.Buffer) error {
+	if m == nil {
+		return fmt.Errorf("can't decode messageActionManagedBotCreated#16605e3e to nil")
+	}
+	if err := b.ConsumeID(MessageActionManagedBotCreatedTypeID); err != nil {
+		return fmt.Errorf("unable to decode messageActionManagedBotCreated#16605e3e: %w", err)
+	}
+	return m.DecodeBare(b)
+}
+
+// DecodeBare implements bin.BareDecoder.
+func (m *MessageActionManagedBotCreated) DecodeBare(b *bin.Buffer) error {
+	if m == nil {
+		return fmt.Errorf("can't decode messageActionManagedBotCreated#16605e3e to nil")
+	}
+	{
+		value, err := b.Long()
+		if err != nil {
+			return fmt.Errorf("unable to decode messageActionManagedBotCreated#16605e3e: field bot_id: %w", err)
+		}
+		m.BotID = value
+	}
+	return nil
+}
+
+// GetBotID returns value of BotID field.
+func (m *MessageActionManagedBotCreated) GetBotID() (value int64) {
+	if m == nil {
+		return
+	}
+	return m.BotID
+}
+
 // MessageActionClassName is schema name of MessageActionClass.
 const MessageActionClassName = "MessageAction"
 
@@ -14846,6 +15349,9 @@ const MessageActionClassName = "MessageAction"
 //   - [MessageActionChangeCreator]
 //   - [MessageActionNoForwardsToggle]
 //   - [MessageActionNoForwardsRequest]
+//   - [MessageActionPollAppendAnswer]
+//   - [MessageActionPollDeleteAnswer]
+//   - [MessageActionManagedBotCreated]
 //
 // Example:
 //
@@ -14918,6 +15424,9 @@ const MessageActionClassName = "MessageAction"
 //	case *tg.MessageActionChangeCreator: // messageActionChangeCreator#e188503b
 //	case *tg.MessageActionNoForwardsToggle: // messageActionNoForwardsToggle#bf7d6572
 //	case *tg.MessageActionNoForwardsRequest: // messageActionNoForwardsRequest#3e2793ba
+//	case *tg.MessageActionPollAppendAnswer: // messageActionPollAppendAnswer#9da1cd6c
+//	case *tg.MessageActionPollDeleteAnswer: // messageActionPollDeleteAnswer#399674dc
+//	case *tg.MessageActionManagedBotCreated: // messageActionManagedBotCreated#16605e3e
 //	default: panic(v)
 //	}
 type MessageActionClass interface {
@@ -15390,6 +15899,27 @@ func DecodeMessageAction(buf *bin.Buffer) (MessageActionClass, error) {
 	case MessageActionNoForwardsRequestTypeID:
 		// Decoding messageActionNoForwardsRequest#3e2793ba.
 		v := MessageActionNoForwardsRequest{}
+		if err := v.Decode(buf); err != nil {
+			return nil, fmt.Errorf("unable to decode MessageActionClass: %w", err)
+		}
+		return &v, nil
+	case MessageActionPollAppendAnswerTypeID:
+		// Decoding messageActionPollAppendAnswer#9da1cd6c.
+		v := MessageActionPollAppendAnswer{}
+		if err := v.Decode(buf); err != nil {
+			return nil, fmt.Errorf("unable to decode MessageActionClass: %w", err)
+		}
+		return &v, nil
+	case MessageActionPollDeleteAnswerTypeID:
+		// Decoding messageActionPollDeleteAnswer#399674dc.
+		v := MessageActionPollDeleteAnswer{}
+		if err := v.Decode(buf); err != nil {
+			return nil, fmt.Errorf("unable to decode MessageActionClass: %w", err)
+		}
+		return &v, nil
+	case MessageActionManagedBotCreatedTypeID:
+		// Decoding messageActionManagedBotCreated#16605e3e.
+		v := MessageActionManagedBotCreated{}
 		if err := v.Decode(buf); err != nil {
 			return nil, fmt.Errorf("unable to decode MessageActionClass: %w", err)
 		}
