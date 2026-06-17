@@ -7,7 +7,8 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
+
+	"github.com/gotd/log"
 
 	"github.com/gotd/td/clock"
 	"github.com/gotd/td/crypto"
@@ -58,13 +59,32 @@ type Options struct {
 	ReconnectionBackoff func() backoff.BackOff
 	// OnDead will be called on connection dead.
 	OnDead func(error)
+	// OnConnectionState is called when the primary connection state changes:
+	// on every (re)connect start, on successful initialization and on
+	// connection loss. Connection death details are reported via OnDead.
+	//
+	// Called synchronously from connection lifecycle, so the callback must
+	// not block.
+	OnConnectionState func(ConnectionState)
 	// MigrationTimeout configures migration timeout.
 	MigrationTimeout time.Duration
 
 	// Random is random source. Defaults to crypto.
 	Random io.Reader
-	// Logger is instance of zap.Logger. No logs by default.
-	Logger *zap.Logger
+	// Logger is the structured logger. No logs by default.
+	//
+	// Use github.com/gotd/log/logzap to bridge a *zap.Logger:
+	//
+	//	import (
+	//		"go.uber.org/zap"
+	//		"github.com/gotd/log/logzap"
+	//	)
+	//
+	//	zapLog, _ := zap.NewProduction()
+	//	opts := telegram.Options{
+	//		Logger: logzap.New(zapLog),
+	//	}
+	Logger log.Logger
 	// SessionStorage will be used to load and save session data.
 	// NB: Very sensitive data, save with care.
 	SessionStorage SessionStorage
@@ -135,7 +155,7 @@ func (opt *Options) setDefaults() {
 		opt.Random = crypto.DefaultRand()
 	}
 	if opt.Logger == nil {
-		opt.Logger = zap.NewNop()
+		opt.Logger = log.Nop
 	}
 	if opt.DC == 0 {
 		opt.DC = 2

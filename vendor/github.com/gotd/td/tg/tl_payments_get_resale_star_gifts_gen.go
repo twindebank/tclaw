@@ -54,8 +54,19 @@ type PaymentsGetResaleStarGiftsRequest struct {
 	SortByPrice bool
 	// Sort gifts by number (ascending).
 	SortByNum bool
-	// ForCraft field of PaymentsGetResaleStarGiftsRequest.
+	// Only return collectible gifts that can be bought and used for crafting »¹; render
+	// each returned gift's starGiftUnique².craft_chance_permille as its crafting success
+	// contribution.
+	//
+	// Links:
+	//  1) https://core.telegram.org/api/gifts#crafting-collectible-gifts
+	//  2) https://core.telegram.org/constructor/starGiftUnique
 	ForCraft bool
+	// Only return gifts that can be bought using Stars¹.
+	//
+	// Links:
+	//  1) https://core.telegram.org/api/stars
+	StarsOnly bool
 	// If a previous call to the method was made and payments.resaleStarGifts¹
 	// attributes_hash was set, pass it here to avoid returning any results if they haven't
 	// changed. Otherwise, set this flag and pass 0 to return payments.resaleStarGifts²
@@ -117,6 +128,9 @@ func (g *PaymentsGetResaleStarGiftsRequest) Zero() bool {
 	if !(g.ForCraft == false) {
 		return false
 	}
+	if !(g.StarsOnly == false) {
+		return false
+	}
 	if !(g.AttributesHash == 0) {
 		return false
 	}
@@ -150,6 +164,7 @@ func (g *PaymentsGetResaleStarGiftsRequest) FillFrom(from interface {
 	GetSortByPrice() (value bool)
 	GetSortByNum() (value bool)
 	GetForCraft() (value bool)
+	GetStarsOnly() (value bool)
 	GetAttributesHash() (value int64, ok bool)
 	GetGiftID() (value int64)
 	GetAttributes() (value []StarGiftAttributeIDClass, ok bool)
@@ -159,6 +174,7 @@ func (g *PaymentsGetResaleStarGiftsRequest) FillFrom(from interface {
 	g.SortByPrice = from.GetSortByPrice()
 	g.SortByNum = from.GetSortByNum()
 	g.ForCraft = from.GetForCraft()
+	g.StarsOnly = from.GetStarsOnly()
 	if val, ok := from.GetAttributesHash(); ok {
 		g.AttributesHash = val
 	}
@@ -211,6 +227,11 @@ func (g *PaymentsGetResaleStarGiftsRequest) TypeInfo() tdp.Type {
 			Null:       !g.Flags.Has(4),
 		},
 		{
+			Name:       "StarsOnly",
+			SchemaName: "stars_only",
+			Null:       !g.Flags.Has(5),
+		},
+		{
 			Name:       "AttributesHash",
 			SchemaName: "attributes_hash",
 			Null:       !g.Flags.Has(0),
@@ -246,6 +267,9 @@ func (g *PaymentsGetResaleStarGiftsRequest) SetFlags() {
 	}
 	if !(g.ForCraft == false) {
 		g.Flags.Set(4)
+	}
+	if !(g.StarsOnly == false) {
+		g.Flags.Set(5)
 	}
 	if !(g.AttributesHash == 0) {
 		g.Flags.Set(0)
@@ -317,6 +341,7 @@ func (g *PaymentsGetResaleStarGiftsRequest) DecodeBare(b *bin.Buffer) error {
 	g.SortByPrice = g.Flags.Has(1)
 	g.SortByNum = g.Flags.Has(2)
 	g.ForCraft = g.Flags.Has(4)
+	g.StarsOnly = g.Flags.Has(5)
 	if g.Flags.Has(0) {
 		value, err := b.Long()
 		if err != nil {
@@ -422,6 +447,25 @@ func (g *PaymentsGetResaleStarGiftsRequest) GetForCraft() (value bool) {
 	return g.Flags.Has(4)
 }
 
+// SetStarsOnly sets value of StarsOnly conditional field.
+func (g *PaymentsGetResaleStarGiftsRequest) SetStarsOnly(value bool) {
+	if value {
+		g.Flags.Set(5)
+		g.StarsOnly = true
+	} else {
+		g.Flags.Unset(5)
+		g.StarsOnly = false
+	}
+}
+
+// GetStarsOnly returns value of StarsOnly conditional field.
+func (g *PaymentsGetResaleStarGiftsRequest) GetStarsOnly() (value bool) {
+	if g == nil {
+		return
+	}
+	return g.Flags.Has(5)
+}
+
 // SetAttributesHash sets value of AttributesHash conditional field.
 func (g *PaymentsGetResaleStarGiftsRequest) SetAttributesHash(value int64) {
 	g.Flags.Set(0)
@@ -504,6 +548,7 @@ func (g *PaymentsGetResaleStarGiftsRequest) MapAttributes() (value StarGiftAttri
 //
 // Possible errors:
 //
+//	400 STARGIFT_ATTRIBUTE_INVALID:
 //	400 STARGIFT_INVALID: The passed gift is invalid.
 //
 // See https://core.telegram.org/method/payments.getResaleStarGifts for reference.

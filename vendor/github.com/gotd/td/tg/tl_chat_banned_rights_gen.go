@@ -90,22 +90,22 @@ type ChatBannedRights struct {
 	// Links:
 	//  1) https://core.telegram.org/api/channel
 	SendPolls bool
-	// If set, does not allow any user to change the description of a supergroup/chat¹
+	// If set, does not allow a user to change the description of a supergroup/chat¹
 	//
 	// Links:
 	//  1) https://core.telegram.org/api/channel
 	ChangeInfo bool
-	// If set, does not allow any user to invite users in a supergroup/chat¹
+	// If set, does not allow a user to invite users in a supergroup/chat¹
 	//
 	// Links:
 	//  1) https://core.telegram.org/api/channel
 	InviteUsers bool
-	// If set, does not allow any user to pin messages in a supergroup/chat¹
+	// If set, does not allow a user to pin messages in a supergroup/chat¹
 	//
 	// Links:
 	//  1) https://core.telegram.org/api/channel
 	PinMessages bool
-	// If set, does not allow any user to create, delete or modify forum topics »¹.
+	// If set, does not allow a user to create, delete or modify forum topics »¹.
 	//
 	// Links:
 	//  1) https://core.telegram.org/api/forum#forum-topics
@@ -147,6 +147,8 @@ type ChatBannedRights struct {
 	SendPlain bool
 	// EditRank field of ChatBannedRights.
 	EditRank bool
+	// SendReactions field of ChatBannedRights.
+	SendReactions bool
 	// Validity of said permissions (it is considered forever any value less then 30 seconds
 	// or more then 366 days).
 	UntilDate int
@@ -233,6 +235,9 @@ func (c *ChatBannedRights) Zero() bool {
 	if !(c.EditRank == false) {
 		return false
 	}
+	if !(c.SendReactions == false) {
+		return false
+	}
 	if !(c.UntilDate == 0) {
 		return false
 	}
@@ -272,6 +277,7 @@ func (c *ChatBannedRights) FillFrom(from interface {
 	GetSendDocs() (value bool)
 	GetSendPlain() (value bool)
 	GetEditRank() (value bool)
+	GetSendReactions() (value bool)
 	GetUntilDate() (value int)
 }) {
 	c.ViewMessages = from.GetViewMessages()
@@ -295,6 +301,7 @@ func (c *ChatBannedRights) FillFrom(from interface {
 	c.SendDocs = from.GetSendDocs()
 	c.SendPlain = from.GetSendPlain()
 	c.EditRank = from.GetEditRank()
+	c.SendReactions = from.GetSendReactions()
 	c.UntilDate = from.GetUntilDate()
 }
 
@@ -427,6 +434,11 @@ func (c *ChatBannedRights) TypeInfo() tdp.Type {
 			Null:       !c.Flags.Has(26),
 		},
 		{
+			Name:       "SendReactions",
+			SchemaName: "send_reactions",
+			Null:       !c.Flags.Has(27),
+		},
+		{
 			Name:       "UntilDate",
 			SchemaName: "until_date",
 		},
@@ -499,6 +511,9 @@ func (c *ChatBannedRights) SetFlags() {
 	if !(c.EditRank == false) {
 		c.Flags.Set(26)
 	}
+	if !(c.SendReactions == false) {
+		c.Flags.Set(27)
+	}
 }
 
 // Encode implements bin.Encoder.
@@ -565,6 +580,7 @@ func (c *ChatBannedRights) DecodeBare(b *bin.Buffer) error {
 	c.SendDocs = c.Flags.Has(24)
 	c.SendPlain = c.Flags.Has(25)
 	c.EditRank = c.Flags.Has(26)
+	c.SendReactions = c.Flags.Has(27)
 	{
 		value, err := b.Int()
 		if err != nil {
@@ -972,6 +988,25 @@ func (c *ChatBannedRights) GetEditRank() (value bool) {
 		return
 	}
 	return c.Flags.Has(26)
+}
+
+// SetSendReactions sets value of SendReactions conditional field.
+func (c *ChatBannedRights) SetSendReactions(value bool) {
+	if value {
+		c.Flags.Set(27)
+		c.SendReactions = true
+	} else {
+		c.Flags.Unset(27)
+		c.SendReactions = false
+	}
+}
+
+// GetSendReactions returns value of SendReactions conditional field.
+func (c *ChatBannedRights) GetSendReactions() (value bool) {
+	if c == nil {
+		return
+	}
+	return c.Flags.Has(27)
 }
 
 // GetUntilDate returns value of UntilDate field.

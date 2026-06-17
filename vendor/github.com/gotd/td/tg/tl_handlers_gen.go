@@ -1640,6 +1640,76 @@ func (u UpdateDispatcher) OnChatParticipantRank(handler ChatParticipantRankHandl
 	}
 }
 
+// ManagedBotHandler is a ManagedBot event handler.
+type ManagedBotHandler func(ctx context.Context, e Entities, update *UpdateManagedBot) error
+
+// OnManagedBot sets ManagedBot handler.
+func (u UpdateDispatcher) OnManagedBot(handler ManagedBotHandler) {
+	u.handlers[UpdateManagedBotTypeID] = func(ctx context.Context, e Entities, update UpdateClass) error {
+		return handler(ctx, e, update.(*UpdateManagedBot))
+	}
+}
+
+// BotGuestChatQueryHandler is a BotGuestChatQuery event handler.
+type BotGuestChatQueryHandler func(ctx context.Context, e Entities, update *UpdateBotGuestChatQuery) error
+
+// OnBotGuestChatQuery sets BotGuestChatQuery handler.
+func (u UpdateDispatcher) OnBotGuestChatQuery(handler BotGuestChatQueryHandler) {
+	u.handlers[UpdateBotGuestChatQueryTypeID] = func(ctx context.Context, e Entities, update UpdateClass) error {
+		return handler(ctx, e, update.(*UpdateBotGuestChatQuery))
+	}
+}
+
+// AiComposeTonesHandler is a AiComposeTones event handler.
+type AiComposeTonesHandler func(ctx context.Context, e Entities, update *UpdateAiComposeTones) error
+
+// OnAiComposeTones sets AiComposeTones handler.
+func (u UpdateDispatcher) OnAiComposeTones(handler AiComposeTonesHandler) {
+	u.handlers[UpdateAiComposeTonesTypeID] = func(ctx context.Context, e Entities, update UpdateClass) error {
+		return handler(ctx, e, update.(*UpdateAiComposeTones))
+	}
+}
+
+// JoinChatWebViewDecisionHandler is a JoinChatWebViewDecision event handler.
+type JoinChatWebViewDecisionHandler func(ctx context.Context, e Entities, update *UpdateJoinChatWebViewDecision) error
+
+// OnJoinChatWebViewDecision sets JoinChatWebViewDecision handler.
+func (u UpdateDispatcher) OnJoinChatWebViewDecision(handler JoinChatWebViewDecisionHandler) {
+	u.handlers[UpdateJoinChatWebViewDecisionTypeID] = func(ctx context.Context, e Entities, update UpdateClass) error {
+		return handler(ctx, e, update.(*UpdateJoinChatWebViewDecision))
+	}
+}
+
+// NewBotConnectionHandler is a NewBotConnection event handler.
+type NewBotConnectionHandler func(ctx context.Context, e Entities, update *UpdateNewBotConnection) error
+
+// OnNewBotConnection sets NewBotConnection handler.
+func (u UpdateDispatcher) OnNewBotConnection(handler NewBotConnectionHandler) {
+	u.handlers[UpdateNewBotConnectionTypeID] = func(ctx context.Context, e Entities, update UpdateClass) error {
+		return handler(ctx, e, update.(*UpdateNewBotConnection))
+	}
+}
+
+// WebBrowserSettingsHandler is a WebBrowserSettings event handler.
+type WebBrowserSettingsHandler func(ctx context.Context, e Entities, update *UpdateWebBrowserSettings) error
+
+// OnWebBrowserSettings sets WebBrowserSettings handler.
+func (u UpdateDispatcher) OnWebBrowserSettings(handler WebBrowserSettingsHandler) {
+	u.handlers[UpdateWebBrowserSettingsTypeID] = func(ctx context.Context, e Entities, update UpdateClass) error {
+		return handler(ctx, e, update.(*UpdateWebBrowserSettings))
+	}
+}
+
+// WebBrowserExceptionHandler is a WebBrowserException event handler.
+type WebBrowserExceptionHandler func(ctx context.Context, e Entities, update *UpdateWebBrowserException) error
+
+// OnWebBrowserException sets WebBrowserException handler.
+func (u UpdateDispatcher) OnWebBrowserException(handler WebBrowserExceptionHandler) {
+	u.handlers[UpdateWebBrowserExceptionTypeID] = func(ctx context.Context, e Entities, update UpdateClass) error {
+		return handler(ctx, e, update.(*UpdateWebBrowserException))
+	}
+}
+
 // OnFallback sets fallback handler.
 func (u *UpdateDispatcher) OnFallback(handler Handler) {
 	u.fallback = handler
