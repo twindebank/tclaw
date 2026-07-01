@@ -198,6 +198,45 @@ func TestSessionStore(t *testing.T) {
 		require.Len(t, records, 1)
 		require.Equal(t, "legacy-session-id", records[0].SessionID)
 	})
+
+	t.Run("ignores an invalid stored session id so the next turn starts fresh", func(t *testing.T) {
+		fs, err := store.NewFS(t.TempDir())
+		require.NoError(t, err)
+		ctx := context.Background()
+
+		// New-format record carrying a bad "null" session id (as seen in prod).
+		require.NoError(t, fs.Set(ctx, "assistant", []byte(`[{"session_id":"null","started_at":"2026-07-01T22:10:24Z","last_used_at":"2026-07-01T22:10:51Z"}]`)))
+
+		s := channel.NewSessionStore(fs)
+		sid, err := s.Current(ctx, "assistant")
+		require.NoError(t, err)
+		require.Equal(t, "", sid, "a null session id must never be resumed")
+	})
+
+	t.Run("does not migrate a legacy null session id", func(t *testing.T) {
+		fs, err := store.NewFS(t.TempDir())
+		require.NoError(t, err)
+		ctx := context.Background()
+		require.NoError(t, fs.Set(ctx, "admin", []byte("null")))
+
+		s := channel.NewSessionStore(fs)
+		sid, err := s.Current(ctx, "admin")
+		require.NoError(t, err)
+		require.Equal(t, "", sid)
+	})
+
+	t.Run("refuses to persist an invalid session id over a good one", func(t *testing.T) {
+		s := setupSessionStore(t)
+		ctx := context.Background()
+
+		require.NoError(t, s.SetCurrent(ctx, "assistant", "sess-good"))
+		// A CLI that emits a null session id must not overwrite the good one.
+		require.NoError(t, s.SetCurrent(ctx, "assistant", "null"))
+
+		sid, err := s.Current(ctx, "assistant")
+		require.NoError(t, err)
+		require.Equal(t, "sess-good", sid)
+	})
 }
 
 func TestSessionKey(t *testing.T) {

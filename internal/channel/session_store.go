@@ -71,6 +71,10 @@ func (s *SessionStore) Current(ctx context.Context, channelKey string) (string, 
 	if last.Cleared {
 		return "", nil
 	}
+	if !validSessionID(last.SessionID) {
+		slog.Warn("ignoring invalid stored session id", "channel_key", channelKey, "session_id", last.SessionID)
+		return "", nil
+	}
 	return last.SessionID, nil
 }
 
@@ -81,6 +85,14 @@ func (s *SessionStore) Current(ctx context.Context, channelKey string) (string, 
 func (s *SessionStore) SetCurrent(ctx context.Context, channelKey string, sessionID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// A non-empty but invalid ID (e.g. "null" from a CLI that emitted a null
+	// session) must never be persisted — it would break --resume next turn.
+	// Empty is allowed: it signals a session reset (handled below).
+	if sessionID != "" && !validSessionID(sessionID) {
+		slog.Warn("refusing to persist invalid session id", "channel_key", channelKey, "session_id", sessionID)
+		return nil
+	}
 
 	records, err := s.load(ctx, channelKey)
 	if err != nil {
@@ -144,6 +156,13 @@ func (s *SessionStore) CurrentWithinDetailed(ctx context.Context, channelKey str
 	if last.Cleared {
 		return "", false, nil
 	}
+	if !validSessionID(last.SessionID) {
+		// A malformed stored ID (e.g. a legacy "null" record) must never reach
+		// --resume. Treat it as no current session so the next turn starts fresh,
+		// which overwrites the bad record with a valid session ID.
+		slog.Warn("ignoring invalid stored session id", "channel_key", channelKey, "session_id", last.SessionID)
+		return "", false, nil
+	}
 	if maxAge > 0 && time.Since(last.lastActivity()) > maxAge {
 		return "", true, nil
 	}
@@ -203,9 +222,16 @@ func (s *SessionStore) save(ctx context.Context, channelKey string, records []Se
 }
 
 // validSessionID checks that a session ID is non-empty, reasonable length,
-// and contains no control characters.
+// contains no control characters, and isn't a serialization artifact.
 func validSessionID(sid string) bool {
 	if sid == "" || len(sid) > 256 {
+		return false
+	}
+	// Reject values that are clearly a null/undefined serialized to text rather
+	// than a real session ID — the claude CLI rejects `--resume null`, which
+	// would fail every turn on the channel until the session is cleared.
+	switch strings.ToLower(sid) {
+	case "null", "undefined", "<nil>", "nil":
 		return false
 	}
 	for _, r := range sid {
