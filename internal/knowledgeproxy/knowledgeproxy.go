@@ -198,6 +198,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "auth unavailable", http.StatusBadGateway)
 		return
 	}
+	// Guard against a stray newline/whitespace in the stored secret — a trailing
+	// newline corrupts the Authorization header and yields a 401 from GitHub.
+	token = strings.TrimSpace(token)
 	if token == "" {
 		slog.Error("knowledge proxy: no github token available")
 		http.Error(w, "auth unavailable", http.StatusBadGateway)
