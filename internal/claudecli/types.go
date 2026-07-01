@@ -14,13 +14,22 @@ const (
 	PermissionPlan        PermissionMode = "plan"              // read-only, can't execute anything
 	PermissionDontAsk     PermissionMode = "dontAsk"           // auto-approves allowed tools, skips others
 	PermissionBypass      PermissionMode = "bypassPermissions" // auto-approves everything, ignores allowed list
+
+	// PermissionAuto delegates each tool call to a model classifier that
+	// auto-approves low-risk actions and gates risky ones (mass deletes, secret
+	// exfiltration, prompt-injection patterns). A safer middle ground than
+	// bypassPermissions. See https://www.anthropic.com/engineering/claude-code-auto-mode.
+	PermissionAuto PermissionMode = "auto"
 )
 
 // Model identifies a Claude model for the CLI.
 type Model string
 
 const (
-	// Claude 4.6 family (latest)
+	// Claude 4.8 family (latest)
+	ModelOpus48 Model = "claude-opus-4-8"
+
+	// Claude 4.6 family
 	ModelOpus46   Model = "claude-opus-4-6"
 	ModelSonnet46 Model = "claude-sonnet-4-6"
 
@@ -59,6 +68,7 @@ func (m Model) ShortName() string {
 
 // modelShortNames maps model identifiers to short display names.
 var modelShortNames = map[Model]string{
+	ModelOpus48:     "opus-4.8",
 	ModelOpus46:     "opus-4.6",
 	ModelSonnet46:   "sonnet-4.6",
 	ModelHaiku45:    "haiku-4.5",
@@ -140,6 +150,7 @@ func (t Tool) Scoped(pattern string) Tool {
 
 // validModels is the set of known model identifiers.
 var validModels = map[Model]bool{
+	ModelOpus48: true,
 	ModelOpus46: true, ModelSonnet46: true,
 	ModelHaiku45: true,
 	ModelOpus4:   true, ModelSonnet4: true,
@@ -167,6 +178,7 @@ var validPermissionModes = map[PermissionMode]bool{
 	PermissionPlan:        true,
 	PermissionDontAsk:     true,
 	PermissionBypass:      true,
+	PermissionAuto:        true,
 }
 
 // ValidPermissionMode reports whether p is a known permission mode.

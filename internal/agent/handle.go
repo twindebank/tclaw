@@ -338,6 +338,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	systemPrompt := opts.SystemPrompt + contextSection
 
 	allowed, disallowed := resolveToolsForChannel(opts, msg.ChannelID)
+	model := resolveModelForChannel(opts, msg.ChannelID)
 	mcpConfigPath := resolveMCPConfigPath(opts, msg.ChannelID)
 	if opts.Debug {
 		slog.Debug("resolved channel tools", "channel", msg.ChannelID,
@@ -350,7 +351,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		promptText = opts.ResumeNotice + promptText
 	}
 
-	args := buildArgs(opts, sessionID, systemPrompt, promptText, allowed, disallowed, mcpConfigPath)
+	args := buildArgs(opts, model, sessionID, systemPrompt, promptText, allowed, disallowed, mcpConfigPath)
 	env := buildEnv(opts)
 
 	dir := opts.HomeDir

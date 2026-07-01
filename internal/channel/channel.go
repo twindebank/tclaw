@@ -66,6 +66,11 @@ type Info struct {
 	Description string // explains the channel's device/context (e.g. "Desktop workstation", "Phone")
 	Purpose     string // optional behavioral guidance for the agent on this channel
 
+	// Model overrides the user-level model for turns on this channel. Empty
+	// means inherit (runtime override, then user-level model). Uses string
+	// (not claudecli.Model) to avoid a circular dependency.
+	Model string
+
 	// AllowedTools is the resolved set of tools this channel can use.
 	// Populated at creation time from tool_groups, role presets, or explicit lists.
 	// Uses []string (not []claudecli.Tool) to avoid circular dependency.

@@ -100,6 +100,28 @@ func TestValidate_EmptyChannelDescription(t *testing.T) {
 	require.Contains(t, err.Error(), "missing description")
 }
 
+func TestValidate_ChannelModel(t *testing.T) {
+	t.Run("known model is accepted", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Channels[0].Model = "claude-opus-4-8"
+		require.NoError(t, validate(cfg))
+	})
+
+	t.Run("unknown model is rejected", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Channels[0].Model = "claude-opus-9-9"
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unknown model")
+	})
+
+	t.Run("empty model is accepted (inherits user-level)", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Channels[0].Model = ""
+		require.NoError(t, validate(cfg))
+	})
+}
+
 func TestValidate_MissingChannelType(t *testing.T) {
 	cfg := validConfig()
 	cfg.Users[0].Channels[0].Type = ""

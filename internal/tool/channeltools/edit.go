@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"tclaw/internal/channel"
+	"tclaw/internal/claudecli"
 	"tclaw/internal/config"
 	"tclaw/internal/mcp"
 	"tclaw/internal/toolgroup"
@@ -32,6 +33,10 @@ func channelEditDef() mcp.ToolDef {
 				"purpose": {
 					"type": "string",
 					"description": "Behavioral guidance for the agent on this channel. Pass empty string to clear."
+				},
+				"model": {
+					"type": "string",
+					"description": "Model to pin for this channel (e.g. 'claude-opus-4-8', 'claude-sonnet-4-6'). Pass empty string to clear and inherit the user-level model."
 				},
 				"allowed_users": {
 					"type": "array",
@@ -88,6 +93,7 @@ type channelEditArgs struct {
 	Name                 string          `json:"name"`
 	Description          string          `json:"description"`
 	Purpose              *string         `json:"purpose"`
+	Model                *string         `json:"model"`
 	AllowedUsers         *[]string       `json:"allowed_users"`
 	ToolGroups           []string        `json:"tool_groups"`
 	AllowedTools         []string        `json:"allowed_tools"`
@@ -105,12 +111,17 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
-		hasChange := a.Description != "" || a.Purpose != nil || a.AllowedUsers != nil ||
+		hasChange := a.Description != "" || a.Purpose != nil || a.Model != nil || a.AllowedUsers != nil ||
 			a.ToolGroups != nil || a.AllowedTools != nil || a.DisallowedTools != nil ||
 			a.CreatableGroups != nil || a.Links != nil || a.Parent != nil ||
 			a.ClaudeSessionTimeout != nil
 		if !hasChange {
 			return nil, fmt.Errorf("at least one field to update must be provided")
+		}
+
+		// Validate the model up front so we don't write a config that fails to reload.
+		if a.Model != nil && *a.Model != "" && !claudecli.ValidModel(claudecli.Model(*a.Model)) {
+			return nil, fmt.Errorf("unknown model %q (known: %v)", *a.Model, claudecli.ValidModels())
 		}
 
 		// Validate the timeout up front so we don't write a config that fails to reload.
@@ -176,6 +187,9 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 			}
 			if a.Purpose != nil {
 				ch.Purpose = *a.Purpose
+			}
+			if a.Model != nil {
+				ch.Model = claudecli.Model(*a.Model)
 			}
 			if len(toolGroups) > 0 {
 				ch.ToolGroups = toolGroups
