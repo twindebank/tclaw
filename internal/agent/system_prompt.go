@@ -137,6 +137,10 @@ them from here using @filename.md syntax. The CLI will auto-load referenced file
 Use subfiles for knowledge that's only relevant in certain contexts — this keeps
 the main memory file concise and avoids bloating every conversation with niche details.
 
+If a personal knowledge base is mounted at ../knowledge (you'll have a "knowledge"
+skill), keep this file for operational and behavioural memory only — durable facts,
+notes, and references belong in the knowledge base, not here.
+
 ## User Preferences
 (none yet)
 

@@ -9,6 +9,32 @@
 - Seed config baked into image at `/etc/tclaw/tclaw.yaml`; copied to persistent volume (`/data/tclaw.yaml`) on first boot. Runtime config lives on the volume so agent mutations survive redeploys.
 - Subprocess sandboxing via bubblewrap (mount namespace isolation per user)
 
+## Personal Knowledge Base
+
+A user can mount a git-backed markdown vault as the agent's durable knowledge store. The agent reads
+it on demand and writes new knowledge back with raw git (pull / commit / push). Enable it per-user in
+`tclaw.yaml`:
+
+```yaml
+users:
+  - id: alice
+    # Let the agent run git against the vault. Scoped so only git is auto-approved.
+    allowed_tools: ["Bash(git *)", "Read", "Edit", "Write"]
+    knowledge:
+      repo: owner/knowledge-base   # owner/repo shorthand or full HTTPS URL
+      branch: main                            # optional, defaults to main
+      commit_name: My Name                    # optional git identity for agent commits
+      commit_email: me@users.noreply.github.com
+```
+
+How it works:
+- On boot, tclaw clones the vault to `<user>/knowledge/` and mounts it `--add-dir` (writable in the sandbox).
+- Auth reuses the existing `github_token` secret. The PAT **must have write scope** on the vault
+  (repotools only needs read). Pushes are authenticated by a per-user localhost git-auth proxy, so the
+  token never enters the agent subprocess — see architecture docs (Security Model).
+- Guidance (vault conventions, git workflow) is seeded as a `knowledge` skill in the user's
+  `home/.claude/skills/`; the agent loads it on demand.
+
 ## Secret Management
 - Secrets stored locally in OS keychain via `tclaw secret set NAME value`
 - `tclaw deploy secrets` scans `tclaw.yaml` for `${secret:NAME}` refs across all environments, reads each from keychain, pushes to Fly in one call

@@ -15,6 +15,7 @@ type UserDirs struct {
 	Base      string // root for this user (e.g. /data/tclaw/alice)
 	Home      string // Claude Code's territory (HOME env var)
 	Memory    string // agent's sandboxed memory (CWD + --add-dir)
+	Knowledge string // git clone of the personal knowledge base (--add-dir writable)
 	State     string // tclaw persistent data (not mounted in sandbox)
 	Sessions  string // Claude CLI session IDs per channel
 	Secrets   string // encrypted credentials
@@ -28,6 +29,7 @@ func NewUserDirs(baseDir string, userID string) UserDirs {
 		Base:      userDir,
 		Home:      filepath.Join(userDir, "home"),
 		Memory:    filepath.Join(userDir, "memory"),
+		Knowledge: filepath.Join(userDir, "knowledge"),
 		State:     filepath.Join(userDir, "state"),
 		Sessions:  filepath.Join(userDir, "sessions"),
 		Secrets:   filepath.Join(userDir, "secrets"),

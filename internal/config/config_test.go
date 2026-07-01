@@ -155,3 +155,34 @@ func TestValidate_ClaudeSessionTimeout(t *testing.T) {
 		require.Contains(t, err.Error(), "invalid claude_session_timeout")
 	})
 }
+
+func TestValidate_Knowledge(t *testing.T) {
+	t.Run("expands owner/repo shorthand and defaults the branch", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Knowledge = &KnowledgeConfig{Repo: "owner/knowledge-base"}
+		require.NoError(t, validate(cfg))
+
+		require.Equal(t, "https://github.com/owner/knowledge-base", cfg.Users[0].Knowledge.Repo)
+		require.Equal(t, "main", cfg.Users[0].Knowledge.Branch)
+	})
+
+	t.Run("leaves an explicit URL and branch untouched", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Knowledge = &KnowledgeConfig{
+			Repo:   "https://github.com/owner/knowledge-base.git",
+			Branch: "trunk",
+		}
+		require.NoError(t, validate(cfg))
+
+		require.Equal(t, "https://github.com/owner/knowledge-base.git", cfg.Users[0].Knowledge.Repo)
+		require.Equal(t, "trunk", cfg.Users[0].Knowledge.Branch)
+	})
+
+	t.Run("rejects an empty repo", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Knowledge = &KnowledgeConfig{Repo: "  "}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "repo is required")
+	})
+}

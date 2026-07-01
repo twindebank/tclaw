@@ -222,6 +222,27 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		r.mu.Unlock()
 	}()
 
+	// Personal knowledge base: start the per-user git-auth proxy and provision the
+	// vault clone. The proxy injects the GitHub token server-side, so the agent can
+	// pull/push via raw git without the token entering its subprocess. Failures are
+	// logged, not fatal — the user session continues without the knowledge base.
+	if kc := mu.cfg.Knowledge; kc != nil {
+		if knowledgeProxy, kpErr := startKnowledgeProxy(mu.cfg.ID, kc, secretStore); kpErr != nil {
+			slog.Error("failed to start knowledge proxy", "user", mu.cfg.ID, "err", kpErr)
+		} else {
+			defer knowledgeProxy.Stop(context.Background())
+			if provErr := provisionKnowledgeClone(knowledgeProvisionParams{
+				Dir:         dirs.Knowledge,
+				RemoteURL:   knowledgeProxy.RemoteURL(),
+				Branch:      kc.Branch,
+				CommitName:  kc.CommitName,
+				CommitEmail: kc.CommitEmail,
+			}); provErr != nil {
+				slog.Error("failed to provision knowledge clone", "user", mu.cfg.ID, "err", provErr)
+			}
+		}
+	}
+
 	// buildRemoteMCPEntries loads remote MCPs and their auth tokens from
 	// the connection manager and returns config entries for the MCP config file.
 	buildRemoteMCPEntries := func(ctx context.Context) []mcp.RemoteMCPEntry {
@@ -502,6 +523,12 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// This is idempotent — only writes if the file/link doesn't exist — and
 		// ensures re-seeding after a reset that clears these files.
 		seedUserMemory(mu.cfg.ID, memoryDir, homeDir)
+
+		// Re-seed the knowledge skill each iteration (idempotent overwrite) so a
+		// reset that cleared home/.claude/ is repaired before the next agent spawn.
+		if mu.cfg.Knowledge != nil {
+			seedKnowledgeSkill(mu.cfg.ID, homeDir, dirs.Knowledge)
+		}
 
 		// Regenerate the MCP config on each iteration. ResetAll clears
 		// mcp-config/, so the file must be recreated before the next agent spawn.

@@ -88,6 +88,13 @@ func BuildIterationPrompt(ctx context.Context, params PromptParams) IterationPro
 	}
 	addDirs := []string{worktreesDir, reposDir}
 
+	// Mount the personal knowledge base as a writable dir when it's been
+	// provisioned (the clone only exists for users with knowledge configured).
+	knowledgeDir := filepath.Join(params.UserDir, "knowledge")
+	if _, statErr := os.Stat(knowledgeDir); statErr == nil {
+		addDirs = append(addDirs, knowledgeDir)
+	}
+
 	devSessions, devErr := params.DevStore.ListSessions(ctx)
 	if devErr != nil {
 		slog.Error("failed to list dev sessions", "err", devErr)
