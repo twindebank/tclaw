@@ -97,9 +97,12 @@ func NewServer(cfg Config) (*Server, error) {
 			req.URL.Host = upstream.Host
 			req.Host = upstream.Host
 			// Replace any credentials git may have attached with the server-side
-			// token, so the agent never needs (or sees) real credentials.
+			// token. Git-over-HTTPS to GitHub uses HTTP Basic auth (the token as
+			// the username, empty password) — the same scheme repotools relies on
+			// via https://<token>@github.com. The REST "Authorization: token …"
+			// scheme is NOT accepted by the git smart-HTTP endpoints.
 			if token, ok := req.Context().Value(tokenContextKey{}).(string); ok && token != "" {
-				req.Header.Set("Authorization", "token "+token)
+				req.SetBasicAuth(token, "")
 			}
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
