@@ -27,7 +27,8 @@ func TestServer_ForwardsAndInjectsAuth(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 		require.Equal(t, "upstream-ok", string(body))
-		require.Equal(t, "token s3cret", seen.header("Authorization"))
+		// Git-over-HTTPS uses HTTP Basic auth with the token as the username.
+		require.Equal(t, "s3cret", seen.authUser())
 		require.Equal(t, "/owner/knowledge-base.git/info/refs", seen.path())
 		require.Equal(t, "git-upload-pack", seen.query("service"))
 		// The token must never appear in what the agent-facing side receives.
@@ -128,10 +129,11 @@ func staticToken(tok string) knowledgeproxy.TokenSource {
 
 // requestRecorder captures the last request the upstream received.
 type requestRecorder struct {
-	mu     sync.Mutex
-	header http.Header
-	url    string
-	query  map[string][]string
+	mu        sync.Mutex
+	header    http.Header
+	url       string
+	query     map[string][]string
+	basicUser string
 }
 
 func (r *requestRecorder) record(req *http.Request) {
@@ -140,6 +142,7 @@ func (r *requestRecorder) record(req *http.Request) {
 	r.header = req.Header.Clone()
 	r.url = req.URL.Path
 	r.query = req.URL.Query()
+	r.basicUser, _, _ = req.BasicAuth()
 }
 
 // wrap around the recorder to expose typed getters used in assertions.
@@ -166,14 +169,20 @@ func (v recorderView) query(k string) string {
 	return ""
 }
 
+func (v recorderView) authUser() string {
+	v.r.mu.Lock()
+	defer v.r.mu.Unlock()
+	return v.r.basicUser
+}
+
 func newUpstream(t *testing.T) (*httptest.Server, recorderView) {
 	t.Helper()
 	rec := &requestRecorder{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec.record(r)
 		// Echo a fixed body — never the token — so tests can assert passthrough.
-		if strings.Contains(r.Header.Get("Authorization"), "tok") ||
-			strings.Contains(r.Header.Get("Authorization"), "s3cret") {
+		// Git-over-HTTPS sends the token as the HTTP Basic username.
+		if user, _, ok := r.BasicAuth(); ok && user != "" {
 			io.WriteString(w, "upstream-ok")
 			return
 		}
