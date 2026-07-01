@@ -846,6 +846,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// and tool groups. Groups are resolved with channel context (connections, remote MCPs).
 		channelToolOverrides := buildChannelToolOverrides(allChMap, registry, dynamicCtx, mu.cfg, remoteMCPMgr, credMgr)
 
+		// Per-channel model overrides, keyed by channel ID (empty for channels
+		// that inherit the user-level model).
+		channelModels := buildChannelModels(allChMap, registry)
+
 		// Generate per-channel MCP config files for channels with scoped remote MCPs.
 		mcpConfigPaths := buildMCPConfigPaths(dynamicCtx, allChMap, remoteMCPMgr, mcpConfigDir, mcpAddr, mcpToken)
 
@@ -862,8 +866,11 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			PermissionMode: mu.cfg.PermissionMode,
 			Model:          mu.cfg.Model,
 			ModelFunc: func() claudecli.Model {
-				return modeltools.LoadModel(s, mu.cfg.Model)
+				// Raw runtime override (empty when unset) so the agent can layer
+				// per-channel models beneath it. See resolveModelForChannel.
+				return modeltools.LoadOverride(s)
 			},
+			ChannelModels: channelModels,
 			MaxTurns:  mu.cfg.MaxTurns,
 			Debug:     mu.cfg.Debug,
 			APIKey:    mu.cfg.APIKey,

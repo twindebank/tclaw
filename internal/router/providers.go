@@ -68,6 +68,7 @@ func buildRegistryEntries(configChannels []config.Channel) []channel.RegistryEnt
 				Name:            cc.Name,
 				Description:     cc.Description,
 				Purpose:         cc.Purpose,
+				Model:           string(cc.Model),
 				AllowedTools:    resolveConfigChannelTools(cc),
 				DisallowedTools: cc.DisallowedTools,
 				CreatableGroups: toolGroupsToStrings(cc.CreatableGroups),

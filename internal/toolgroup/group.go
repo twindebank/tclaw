@@ -11,6 +11,7 @@ import "tclaw/internal/claudecli"
 type ToolGroup string
 
 const (
+	GroupAllTools          ToolGroup = "all_tools"
 	GroupCoreTools         ToolGroup = "core_tools"
 	GroupAllBuiltins       ToolGroup = "all_builtins"
 	GroupSafeBuiltins      ToolGroup = "safe_builtins"
@@ -38,6 +39,7 @@ type GroupInfo struct {
 // AllGroups returns info about all available tool groups.
 func AllGroups() []GroupInfo {
 	return []GroupInfo{
+		{GroupAllTools, "Full permissions: every CLI tool, all built-in commands, and all MCP tools (mcp__*) — current and future. New tools are picked up automatically. For trusted channels that should never be tool-gated."},
 		{GroupCoreTools, "Bash shell, file operations (read/write/edit/glob/grep), web access (fetch/search), and model management. The foundation most channels need."},
 		{GroupAllBuiltins, "All built-in commands: stop, compact, login, auth, and all reset levels (session/memories/project/everything)."},
 		{GroupSafeBuiltins, "Safe built-in commands only: stop, compact, session reset, memories reset. No project/everything reset or auth commands."},
@@ -103,11 +105,39 @@ var cliToolsAll = []claudecli.Tool{
 	claudecli.ToolEnterWorktree, claudecli.ToolListMcpResources, claudecli.ToolReadMcpResource,
 }
 
+// allBuiltins is every built-in command. BuiltinReset acts as a wildcard for
+// all reset sub-levels (session/memories/project/everything).
+var allBuiltins = []claudecli.Tool{
+	claudecli.BuiltinStop,
+	claudecli.BuiltinCompact,
+	claudecli.BuiltinLogin,
+	claudecli.BuiltinAuth,
+	claudecli.BuiltinReset,
+}
+
+// mcpToolsAll matches every MCP tool on any server (tclaw and remote). The glob
+// is expanded against the live tool list at turn time, so tools added by future
+// packages or remote MCP connections are included automatically.
+const mcpToolsAll claudecli.Tool = "mcp__*"
+
+// allToolsGroup grants full permissions: every CLI tool, every builtin, and
+// every MCP tool. Assembled from the same building blocks as the narrower
+// groups so it can never drift out of sync as new tools are added.
+var allToolsGroup = func() []claudecli.Tool {
+	tools := make([]claudecli.Tool, 0, len(cliToolsAll)+len(allBuiltins)+1)
+	tools = append(tools, cliToolsAll...)
+	tools = append(tools, allBuiltins...)
+	tools = append(tools, mcpToolsAll)
+	return tools
+}()
+
 // groupTools maps each tool group to its constituent tools. Static entries
 // (CLI tools, builtins) are defined here. MCP tool patterns are added at
 // startup by SetPackageTools() from the tool package registry — packages
 // declare their own group membership via GroupTools().
 var groupTools = map[ToolGroup][]claudecli.Tool{
+	GroupAllTools: allToolsGroup,
+
 	GroupCoreTools: {
 		claudecli.ToolBash,
 		claudecli.ToolRead, claudecli.ToolEdit, claudecli.ToolWrite,
@@ -115,13 +145,7 @@ var groupTools = map[ToolGroup][]claudecli.Tool{
 		claudecli.ToolWebFetch, claudecli.ToolWebSearch,
 	},
 
-	GroupAllBuiltins: {
-		claudecli.BuiltinStop,
-		claudecli.BuiltinCompact,
-		claudecli.BuiltinLogin,
-		claudecli.BuiltinAuth,
-		claudecli.BuiltinReset,
-	},
+	GroupAllBuiltins: allBuiltins,
 
 	GroupSafeBuiltins: {
 		claudecli.BuiltinStop,
