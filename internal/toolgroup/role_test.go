@@ -61,6 +61,27 @@ func TestToolGroups(t *testing.T) {
 		require.Contains(t, write, MCPToolGoogleAll)
 	})
 
+	t.Run("all_tools grants CLI tools, builtins, and every MCP tool", func(t *testing.T) {
+		tools := GroupTools(GroupAllTools)
+		// Every CLI tool.
+		require.Contains(t, tools, claudecli.ToolBash)
+		require.Contains(t, tools, claudecli.ToolAgent)
+		// Every builtin (reset wildcard covers the sub-levels).
+		require.Contains(t, tools, claudecli.BuiltinLogin)
+		require.Contains(t, tools, claudecli.BuiltinReset)
+		// A single MCP wildcard so current and future MCP tools are all included
+		// without listing each one — this is what makes the group future-proof.
+		require.Contains(t, tools, claudecli.Tool("mcp__*"))
+	})
+
+	t.Run("all_builtins and all_tools share the builtin set", func(t *testing.T) {
+		builtins := GroupTools(GroupAllBuiltins)
+		all := GroupTools(GroupAllTools)
+		for _, b := range builtins {
+			require.Contains(t, all, b, "all_tools should include every builtin")
+		}
+	})
+
 	t.Run("ResolveGroups deduplicates", func(t *testing.T) {
 		// channel_ops and channel_send both include channel_done.
 		tools := ResolveGroups([]ToolGroup{GroupChannelManagement, GroupChannelMessaging})

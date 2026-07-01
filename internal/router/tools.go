@@ -80,6 +80,24 @@ func buildChannelToolOverrides(
 	return overrides
 }
 
+// buildChannelModels maps each channel ID to its configured per-channel model
+// override. Channels without a model are omitted so the agent falls back to the
+// runtime override or user-level model.
+func buildChannelModels(
+	allChMap map[channel.ChannelID]channel.Channel,
+	registry *channel.Registry,
+) map[channel.ChannelID]claudecli.Model {
+	models := make(map[channel.ChannelID]claudecli.Model)
+	for chID, ch := range allChMap {
+		entry := registry.ByName(ch.Info().Name)
+		if entry == nil || entry.Model == "" {
+			continue
+		}
+		models[chID] = claudecli.Model(entry.Model)
+	}
+	return models
+}
+
 // buildChannelContext constructs the ChannelContext for role resolution by
 // looking up which provider connections and remote MCPs are scoped to this
 // channel.

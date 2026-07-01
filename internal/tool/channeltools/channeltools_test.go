@@ -159,6 +159,41 @@ func TestChannelCreate(t *testing.T) {
 		require.Contains(t, err.Error(), "not allowed")
 	})
 
+	t.Run("model is persisted to config", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name":            "phone",
+			"description":     "Mobile device",
+			"type":            "socket",
+			"model":           "claude-opus-4-8",
+			"initial_message": "Hello",
+		})
+
+		channels, err := th.configWriter.ReadChannels(testUserID)
+		require.NoError(t, err)
+		var got string
+		for _, ch := range channels {
+			if ch.Name == "phone" {
+				got = string(ch.Model)
+			}
+		}
+		require.Equal(t, "claude-opus-4-8", got)
+	})
+
+	t.Run("rejects unknown model", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
+			"name":            "phone",
+			"description":     "Mobile device",
+			"type":            "socket",
+			"model":           "claude-opus-9-9",
+			"initial_message": "Hello",
+		})
+		require.Contains(t, err.Error(), "unknown model")
+	})
+
 	t.Run("telegram provisions synchronously", func(t *testing.T) {
 		th := setupHarnessWithProvisioner(t, config.EnvProd)
 
@@ -402,6 +437,43 @@ func TestChannelEdit(t *testing.T) {
 			}
 		}
 		require.True(t, found)
+	})
+
+	t.Run("updates and clears model", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "phone", "description": "Socket", "type": "socket",
+			"initial_message": "Hello",
+		})
+		reloadRegistry(t, th)
+
+		callTool(t, th.handler, "channel_edit", map[string]any{
+			"name":  "phone",
+			"model": "claude-opus-4-8",
+		})
+		require.Equal(t, "claude-opus-4-8", readChannelModel(t, th, "phone"))
+
+		// Empty string clears the override so the channel inherits again.
+		callTool(t, th.handler, "channel_edit", map[string]any{
+			"name":  "phone",
+			"model": "",
+		})
+		require.Equal(t, "", readChannelModel(t, th, "phone"))
+	})
+
+	t.Run("rejects unknown model", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "phone", "description": "Socket", "type": "socket",
+			"initial_message": "Hello",
+		})
+		reloadRegistry(t, th)
+
+		err := callToolExpectError(t, th.handler, "channel_edit", map[string]any{
+			"name":  "phone",
+			"model": "claude-opus-9-9",
+		})
+		require.Contains(t, err.Error(), "unknown model")
 	})
 
 	t.Run("edits hand-written channel", func(t *testing.T) {
@@ -1263,6 +1335,19 @@ func reloadRegistry(t *testing.T, th testHarness) {
 		})
 	}
 	th.registry.Reload(entries)
+}
+
+func readChannelModel(t *testing.T, th testHarness, name string) string {
+	t.Helper()
+	channels, err := th.configWriter.ReadChannels(testUserID)
+	require.NoError(t, err)
+	for _, ch := range channels {
+		if ch.Name == name {
+			return string(ch.Model)
+		}
+	}
+	require.Failf(t, "channel not found", "no channel %q in config", name)
+	return ""
 }
 
 func callTool(t *testing.T, h *mcp.Handler, name string, args any) json.RawMessage {

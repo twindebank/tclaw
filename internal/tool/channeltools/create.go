@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"tclaw/internal/channel"
+	"tclaw/internal/claudecli"
 	"tclaw/internal/config"
 	"tclaw/internal/mcp"
 	"tclaw/internal/reconciler"
@@ -50,6 +51,10 @@ func channelCreateDef() mcp.ToolDef {
 				"purpose": {
 					"type": "string",
 					"description": "Optional behavioral guidance for the agent on this channel. Defines what kind of work the channel is for and how the agent should behave (e.g. 'Day-to-day personal tasks: email, calendar, travel. No dev work.'). Persisted in the system prompt."
+				},
+				"model": {
+					"type": "string",
+					"description": "Optional model to pin for this channel (e.g. 'claude-opus-4-8', 'claude-sonnet-4-6'). Omit to inherit the user-level model. Pick a capable model for complex/orchestration channels and a lighter one for high-volume monitoring."
 				},
 				"type": {
 					"type": "string",
@@ -123,6 +128,7 @@ type channelCreateArgs struct {
 	Name                      string         `json:"name"`
 	Description               string         `json:"description"`
 	Purpose                   string         `json:"purpose"`
+	Model                     string         `json:"model"`
 	Type                      string         `json:"type"`
 	Ephemeral                 bool           `json:"ephemeral"`
 	EphemeralIdleTimeoutHours int            `json:"ephemeral_idle_timeout_hours"`
@@ -152,6 +158,9 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 		}
 		if a.Description == "" || len(a.Description) > maxChannelDescriptionLength {
 			return nil, fmt.Errorf("description is required and must be under %d characters", maxChannelDescriptionLength)
+		}
+		if a.Model != "" && !claudecli.ValidModel(claudecli.Model(a.Model)) {
+			return nil, fmt.Errorf("unknown model %q (known: %v)", a.Model, claudecli.ValidModels())
 		}
 
 		channelType := channel.ChannelType(a.Type)
@@ -281,6 +290,7 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			Name:                 a.Name,
 			Description:          a.Description,
 			Purpose:              a.Purpose,
+			Model:                claudecli.Model(a.Model),
 			ToolGroups:           toolGroups,
 			AllowedTools:         a.AllowedTools,
 			DisallowedTools:      a.DisallowedTools,
@@ -307,6 +317,7 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 				Name:            ch.Name,
 				Description:     ch.Description,
 				Purpose:         ch.Purpose,
+				Model:           string(ch.Model),
 				DisallowedTools: ch.DisallowedTools,
 			},
 			Links:  ch.Links,

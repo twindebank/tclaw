@@ -163,6 +163,12 @@ type Channel struct {
 	// tells the agent what kind of work this channel is for and how to behave.
 	Purpose string `yaml:"purpose,omitempty"`
 
+	// Model overrides the user-level model for turns on this channel. Empty
+	// means "inherit" — fall back to a runtime override (set via the model
+	// tools) or the user-level model, in that order. Lets each channel pin its
+	// own model (e.g. Opus for admin work, Sonnet for lightweight monitoring).
+	Model claudecli.Model `yaml:"model,omitempty"`
+
 	// Telegram holds Telegram-specific channel config.
 	// Non-nil when Type is "telegram".
 	Telegram *TelegramChannelConfig `yaml:"telegram,omitempty"`
@@ -415,6 +421,10 @@ func validate(cfg *Config) error {
 
 			if ch.Description == "" {
 				return fmt.Errorf("user %q channel %q: missing description", u.ID, ch.Name)
+			}
+
+			if ch.Model != "" && !claudecli.ValidModel(ch.Model) {
+				return fmt.Errorf("user %q channel %q: unknown model %q (known: %v)", u.ID, ch.Name, ch.Model, claudecli.ValidModels())
 			}
 
 			for k, t := range ch.AllowedTools {

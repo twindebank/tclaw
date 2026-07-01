@@ -104,10 +104,15 @@ type Options struct {
 	PermissionMode claudecli.PermissionMode
 	Model          claudecli.Model
 
-	// ModelFunc returns the current model to use, checked each turn.
-	// Takes precedence over Model when set. Allows runtime model changes
-	// via MCP tools without restarting the agent.
+	// ModelFunc returns the runtime model override, checked each turn. Returns
+	// empty when no override is set. Takes precedence over both ChannelModels
+	// and Model. Allows runtime model changes via MCP tools without restarting.
 	ModelFunc func() claudecli.Model
+
+	// ChannelModels maps channel IDs to a per-channel model override. Applied
+	// when ModelFunc returns empty, before falling back to Model. Lets each
+	// channel pin its own model from config.
+	ChannelModels map[channel.ChannelID]claudecli.Model
 
 	// MaxTurns limits agentic turns per invocation. Defaults to defaultMaxTurns.
 	MaxTurns int
@@ -959,6 +964,22 @@ func maxTurns(opts Options) int {
 	return defaultMaxTurns
 }
 
+// resolveModelForChannel returns the model to use for a turn on the given
+// channel. Precedence: runtime override (ModelFunc) → per-channel model
+// (ChannelModels) → user-level model (Model). Empty means no --model flag,
+// letting the CLI choose.
+func resolveModelForChannel(opts Options, channelID channel.ChannelID) claudecli.Model {
+	if opts.ModelFunc != nil {
+		if override := opts.ModelFunc(); override != "" {
+			return override
+		}
+	}
+	if m := opts.ChannelModels[channelID]; m != "" {
+		return m
+	}
+	return opts.Model
+}
+
 // resolveToolsForChannel returns the allowed and disallowed tool lists for a
 // specific channel. If the channel has overrides, they replace the user-level
 // lists entirely. Builtin tools (builtin__*) are filtered out since the CLI
@@ -1042,7 +1063,7 @@ func resolveMCPConfigPath(opts Options, channelID channel.ChannelID) string {
 	return opts.MCPConfigPath
 }
 
-func buildArgs(opts Options, sessionID string, systemPrompt string, prompt string, allowed []claudecli.Tool, disallowed []claudecli.Tool, mcpConfigPath string) []string {
+func buildArgs(opts Options, model claudecli.Model, sessionID string, systemPrompt string, prompt string, allowed []claudecli.Tool, disallowed []claudecli.Tool, mcpConfigPath string) []string {
 	args := []string{
 		"--output-format", "stream-json",
 		"--verbose",
@@ -1056,12 +1077,6 @@ func buildArgs(opts Options, sessionID string, systemPrompt string, prompt strin
 	}
 	if opts.PermissionMode != "" {
 		args = append(args, "--permission-mode", string(opts.PermissionMode))
-	}
-	model := opts.Model
-	if opts.ModelFunc != nil {
-		if m := opts.ModelFunc(); m != "" {
-			model = m
-		}
 	}
 	if model != "" {
 		args = append(args, "--model", string(model))
