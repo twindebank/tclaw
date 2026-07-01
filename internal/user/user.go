@@ -27,4 +27,17 @@ type Config struct {
 	// TelegramUserID is the user's Telegram user ID from config. Used by the
 	// Telegram provisioner for auto-start and notification delivery.
 	TelegramUserID string
+
+	// Knowledge configures the personal knowledge base, or nil if the user
+	// has none.
+	Knowledge *Knowledge
+}
+
+// Knowledge holds the resolved personal knowledge base settings for a user.
+// Repo is a full clone URL; Branch defaults are applied during config load.
+type Knowledge struct {
+	Repo        string
+	Branch      string
+	CommitName  string
+	CommitEmail string
 }

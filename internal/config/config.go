@@ -92,6 +92,10 @@ type User struct {
 	DisallowedTools []claudecli.Tool `yaml:"disallowed_tools"`
 	SystemPrompt    string           `yaml:"system_prompt"`
 
+	// Knowledge, when set, mounts a git-backed personal knowledge base that the
+	// agent reads from and writes to as its durable knowledge store.
+	Knowledge *KnowledgeConfig `yaml:"knowledge,omitempty"`
+
 	// Telegram holds the user's Telegram identity. All Telegram channels
 	// for this user inherit these settings.
 	Telegram *UserTelegramConfig `yaml:"telegram,omitempty"`
@@ -104,6 +108,47 @@ type UserTelegramConfig struct {
 	// UserID is the Telegram user ID. All Telegram channels for this user
 	// restrict access to this ID.
 	UserID string `yaml:"user_id"`
+}
+
+// KnowledgeConfig configures the personal knowledge base integration. The vault
+// is cloned per-user and exposed to the agent as a writable git repo; pushes are
+// authenticated server-side (see internal/knowledgeproxy) so the token never
+// reaches the agent subprocess. Auth reuses the shared "github_token" secret.
+type KnowledgeConfig struct {
+	// Repo is the vault repository. Accepts "owner/repo" shorthand (expanded to
+	// https://github.com/owner/repo) or a full HTTPS URL.
+	Repo string `yaml:"repo"`
+
+	// Branch is the branch the agent reads and pushes to. Defaults to "main".
+	Branch string `yaml:"branch,omitempty"`
+
+	// CommitName and CommitEmail set the git identity used for agent commits.
+	// Optional; a tclaw noreply identity is used when empty.
+	CommitName  string `yaml:"commit_name,omitempty"`
+	CommitEmail string `yaml:"commit_email,omitempty"`
+}
+
+// normalize fills defaults and expands "owner/repo" shorthand into a full HTTPS
+// URL. Mutates the receiver in place.
+func (k *KnowledgeConfig) normalize() error {
+	if strings.TrimSpace(k.Repo) == "" {
+		return fmt.Errorf("repo is required")
+	}
+	if k.Branch == "" {
+		k.Branch = "main"
+	}
+	k.Repo = normalizeRepoURL(k.Repo)
+	return nil
+}
+
+// normalizeRepoURL expands an "owner/repo" shorthand to a github.com HTTPS URL,
+// leaving explicit http(s) URLs untouched.
+func normalizeRepoURL(repo string) string {
+	repo = strings.TrimSpace(repo)
+	if strings.HasPrefix(repo, "http://") || strings.HasPrefix(repo, "https://") {
+		return repo
+	}
+	return "https://github.com/" + strings.TrimSuffix(strings.TrimPrefix(repo, "/"), "/")
 }
 
 // Channel defines a channel attached to a user.
@@ -320,6 +365,14 @@ func validate(cfg *Config) error {
 		for j, t := range u.DisallowedTools {
 			if !claudecli.ValidTool(t) {
 				return fmt.Errorf("user %q disallowed_tools[%d]: unknown tool %q", u.ID, j, t)
+			}
+		}
+
+		// Knowledge is a pointer shared with cfg.Users[i], so normalizing through
+		// u.Knowledge also updates the stored config.
+		if u.Knowledge != nil {
+			if err := u.Knowledge.normalize(); err != nil {
+				return fmt.Errorf("user %q knowledge: %w", u.ID, err)
 			}
 		}
 
@@ -559,6 +612,15 @@ func (u *User) ToUserConfig() user.Config {
 	if u.Telegram != nil {
 		tgUserID = u.Telegram.UserID
 	}
+	var knowledge *user.Knowledge
+	if u.Knowledge != nil {
+		knowledge = &user.Knowledge{
+			Repo:        u.Knowledge.Repo,
+			Branch:      u.Knowledge.Branch,
+			CommitName:  u.Knowledge.CommitName,
+			CommitEmail: u.Knowledge.CommitEmail,
+		}
+	}
 	return user.Config{
 		ID:              u.ID,
 		APIKey:          u.APIKey,
@@ -570,5 +632,6 @@ func (u *User) ToUserConfig() user.Config {
 		Debug:           u.Debug,
 		SystemPrompt:    u.SystemPrompt,
 		TelegramUserID:  tgUserID,
+		Knowledge:       knowledge,
 	}
 }
