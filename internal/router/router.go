@@ -676,6 +676,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		addDirs := promptResult.AddDirs
 		worktreesDir := filepath.Join(userDir, "worktrees")
 		reposDir := filepath.Join(userDir, "repos")
+		knowledgeDir := dirs.Knowledge
 
 		// Load persisted queue state (queued messages + interrupted marker)
 		// before checking auto-resume. Without this, checkAutoResume sees an
@@ -873,7 +874,12 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				// Read from the dev store each turn so worktrees created
 				// mid-session (via dev_start) are immediately accessible.
 				// Always include the parent worktrees dir so bwrap can bind it.
+				// This replaces the static AddDirs (see handle.go), so it must
+				// also carry the knowledge-base clone when it's provisioned.
 				dirs := []string{worktreesDir, reposDir}
+				if _, statErr := os.Stat(knowledgeDir); statErr == nil {
+					dirs = append(dirs, knowledgeDir)
+				}
 				sessions, err := devStore.ListSessions(ctx)
 				if err != nil {
 					slog.Error("failed to list dev sessions for add-dirs", "err", err)
