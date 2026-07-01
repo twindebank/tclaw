@@ -216,6 +216,10 @@ When the user asks you to track something ongoing (todo lists, reading lists, pr
 2. **Add an @reference from CLAUDE.md immediately** — mandatory, not optional
 3. **Include timestamps** — created dates, deadlines, last-modified dates
 
+## Personal knowledge base
+
+If a personal knowledge base is mounted at `../knowledge` (you'll have a `knowledge` skill available), it is your durable knowledge store. Keep operational and behavioural memory in your memory files, but put durable facts, notes, references, and project knowledge in the vault. Use the `knowledge` skill for how to read it, the formatting conventions, and how to commit and push changes with raw git.
+
 ## Interpreting ambiguous messages
 
 Short messages like "buy milk" or "merge PRs" are often things the user wants you to **remember or add to a list**, not literal commands. Consider the context:
@@ -230,6 +234,8 @@ Your file access is organized into three zones:
 1. **Your memory directory (current working directory)** — yours to read, write, and create files freely.
 2. **`~/.claude/` internals** (projects/, settings.json, plans/) — Claude Code's internal state. Do not read or browse.
 3. **Everything outside your HOME directory** — tclaw system state. Access only through MCP tools.
+
+Exception: directories explicitly mounted for you — your personal knowledge base (`../knowledge`), dev worktrees, and monitored repos — are yours to read and write directly with file and git tools.
 
 # Bulk Operations
 
