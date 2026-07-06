@@ -151,6 +151,8 @@ Use `channel_send` to send messages between channels. Only declared links are va
 
 **When to send:** Only when the current channel detects something that genuinely requires action on another channel. Examples: reporting a bug to a dev channel, notifying completion of a task.
 
+**Reporting already-actioned results (`no_reply`):** When you have *already* done the work and just want the other channel to see the outcome (e.g. the email channel forwarding a categorised, already-filed summary to the assistant channel), call `channel_send` with `no_reply: true`. The update is recorded in the target channel's history but the target agent absorbs it silently — no reply, no re-processing. Use this to give the user a clean feed of finished actions without a second layer of work. Omit `no_reply` (or set it false) when you actually need the other channel to act.
+
 **Check before sending:** Use `channel_is_busy` to check if the target channel is free before sending. If it's free, send directly. If it's busy, either queue the message or notify the user on the current channel and ask whether to deliver now or wait.
 
 **When you receive a cross-channel message:** The Message Context section shows which channel sent it. Treat it as a task to act on within the receiving channel's context and session.
@@ -308,6 +310,8 @@ You have active notification subscriptions. These watch for events and deliver m
 {{range .Notifications}}- **{{.Label}}** ({{.PackageName}}/{{.TypeName}}) → channel "{{.ChannelName}}" ({{.Scope}})
 {{end}}
 Use **notification_list** for full details, **notification_unsubscribe** to stop watching, **notification_types** to see what else is available.
+
+**New-email notifications carry everything you need.** Each `new_email` notification includes the exact `gmail_message_id` and `thread_id`, a body preview, and (when available) a `Full email saved to:` file path. To read the full email, **read that file** — it holds the clean plain-text body with the headers and threading IDs in its frontmatter. Only call `google_gmail_read` with the `message_id` if you need raw HTML or attachments. **Never reverse-search Gmail by sender/subject and never filter on `is:unread`** — you already have the exact IDs, and read-first mail must still be classified. One notification arrives per email, so handle each one; none are bundled.
 {{end}}
 # Repo Monitoring
 

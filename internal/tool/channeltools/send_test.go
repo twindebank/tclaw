@@ -26,11 +26,13 @@ func TestChannelSend(t *testing.T) {
 			"message":      "found a bug in the gmail tool",
 		})
 
-		var rsp map[string]string
+		var rsp map[string]any
 		require.NoError(t, json.Unmarshal(result, &rsp))
 		require.Equal(t, "sent", rsp["status"])
 		require.Equal(t, "assistant", rsp["from"])
 		require.Equal(t, "dev", rsp["to"])
+		// Omitting no_reply defaults to a normal, reply-required message.
+		require.Equal(t, false, rsp["no_reply"])
 
 		// Verify the message was injected into the output channel.
 		select {
@@ -40,6 +42,33 @@ func TestChannelSend(t *testing.T) {
 			require.NotNil(t, msg.SourceInfo)
 			require.Equal(t, channel.SourceChannel, msg.SourceInfo.Source)
 			require.Equal(t, "assistant", msg.SourceInfo.FromChannel)
+			require.False(t, msg.SourceInfo.NoReply)
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for cross-channel message")
+		}
+	})
+
+	t.Run("no_reply marks the message as informational", func(t *testing.T) {
+		h, output := setupSend(t, "email", map[string][]channel.Link{
+			"email": {{Target: "assistant", Description: "report actioned email"}},
+		})
+
+		result := callTool(t, h, "channel_send", map[string]any{
+			"from_channel": "email",
+			"to_channel":   "assistant",
+			"message":      "Filed receipt from Amazon under expenses.",
+			"no_reply":     true,
+		})
+
+		var rsp map[string]any
+		require.NoError(t, json.Unmarshal(result, &rsp))
+		require.Equal(t, true, rsp["no_reply"])
+
+		select {
+		case msg := <-output:
+			require.NotNil(t, msg.SourceInfo)
+			require.Equal(t, channel.SourceChannel, msg.SourceInfo.Source)
+			require.True(t, msg.SourceInfo.NoReply)
 		case <-time.After(time.Second):
 			t.Fatal("timed out waiting for cross-channel message")
 		}
