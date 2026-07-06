@@ -35,6 +35,7 @@ import (
 	"tclaw/internal/onboarding"
 	"tclaw/internal/queue"
 	"tclaw/internal/reconciler"
+	"tclaw/internal/remotemcpproxy"
 	"tclaw/internal/remotemcpstore"
 	"tclaw/internal/repo"
 	"tclaw/internal/schedule"
@@ -222,6 +223,21 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		r.mu.Unlock()
 	}()
 
+	// Remote-MCP auth proxy: fronts every connected remote MCP server on localhost
+	// and injects each server's credentials server-side, so tokens never enter the
+	// sandbox-readable --mcp-config. Same rationale as the knowledge proxy for git.
+	remoteMCPProxy, err := remotemcpproxy.NewServer(remotemcpproxy.Config{Store: remoteMCPMgr})
+	if err != nil {
+		slog.Error("failed to create remote mcp proxy", "user", mu.cfg.ID, "err", err)
+		return
+	}
+	proxyToken := remoteMCPProxy.Token()
+	if _, startErr := remoteMCPProxy.Start("127.0.0.1:0"); startErr != nil {
+		slog.Error("failed to start remote mcp proxy", "user", mu.cfg.ID, "err", startErr)
+		return
+	}
+	defer remoteMCPProxy.Stop(context.Background())
+
 	// Personal knowledge base: start the per-user git-auth proxy and provision the
 	// vault clone. The proxy injects the GitHub token server-side, so the agent can
 	// pull/push via raw git without the token entering its subprocess. Failures are
@@ -243,32 +259,16 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		}
 	}
 
-	// buildRemoteMCPEntries loads remote MCPs and their auth tokens from
-	// the connection manager and returns config entries for the MCP config file.
+	// buildRemoteMCPEntries lists the connected remote MCPs and returns config
+	// entries pointing at the auth proxy. Credentials are injected by the proxy
+	// at request time, so none are read (or written to the config) here.
 	buildRemoteMCPEntries := func(ctx context.Context) []mcp.RemoteMCPEntry {
 		mcps, listErr := remoteMCPMgr.ListRemoteMCPs(ctx)
 		if listErr != nil {
 			slog.Error("failed to list remote mcps for config", "err", listErr)
 			return nil
 		}
-		var entries []mcp.RemoteMCPEntry
-		for _, m := range mcps {
-			entry := mcp.RemoteMCPEntry{Name: m.Name, URL: m.URL}
-			auth, authErr := remoteMCPMgr.GetRemoteMCPAuth(ctx, m.Name)
-			if authErr != nil {
-				slog.Warn("failed to load remote mcp auth", "name", m.Name, "err", authErr)
-			}
-			if auth != nil {
-				if auth.AccessToken != "" {
-					entry.BearerToken = auth.AccessToken
-				}
-				if len(auth.StaticHeaders) > 0 {
-					entry.ExtraHeaders = auth.StaticHeaders
-				}
-			}
-			entries = append(entries, entry)
-		}
-		return entries
+		return remoteMCPConfigEntries(mcps, remoteMCPProxy, proxyToken)
 	}
 
 	// configUpdater regenerates the MCP config file with current remote MCPs.
@@ -857,7 +857,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		channelModels := buildChannelModels(allChMap, registry)
 
 		// Generate per-channel MCP config files for channels with scoped remote MCPs.
-		mcpConfigPaths := buildMCPConfigPaths(dynamicCtx, allChMap, remoteMCPMgr, mcpConfigDir, mcpAddr, mcpToken)
+		mcpConfigPaths := buildMCPConfigPaths(dynamicCtx, allChMap, remoteMCPMgr, remoteMCPProxy, proxyToken, mcpConfigDir, mcpAddr, mcpToken)
 
 		// Start the outbox for this iteration so delivery goroutines use
 		// the current channel set. Stop on iteration exit to persist state.

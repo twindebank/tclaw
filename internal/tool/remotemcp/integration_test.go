@@ -3,7 +3,6 @@ package remotemcp_test
 import (
 	"context"
 	"encoding/json"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,15 +11,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"tclaw/internal/mcp"
+	"tclaw/internal/remotemcpproxy"
 	"tclaw/internal/remotemcpstore"
 )
 
 // TestAddToConfigFile covers the full path from remote_mcp_add tool call
 // through to the generated --mcp-config JSON file on disk. This is the
-// contract the router relies on: static headers stored via the tool must
-// surface in the generated config so the Claude CLI sends them.
+// contract the router relies on: the server must be routed through the auth
+// proxy and no upstream credential may reach the sandbox-readable config.
 func TestAddToConfigFile(t *testing.T) {
-	t.Run("static headers land in config file", func(t *testing.T) {
+	t.Run("server routes through the proxy with no upstream secrets in config", func(t *testing.T) {
 		server := fakeMCPServer(t, []string{"ha_state_get", "ha_service_call"})
 		h, mgr, _ := setup(t, withHTTPClient(server.Client()))
 
@@ -39,10 +39,12 @@ func TestAddToConfigFile(t *testing.T) {
 
 		got, ok := cfg.MCPServers["home-assistant"]
 		require.True(t, ok, "home-assistant entry missing from config")
-		require.Equal(t, server.URL+"/secret_path_abc", got.URL)
-		require.Equal(t, "client-id.access", got.Headers["CF-Access-Client-Id"])
-		require.Equal(t, "super-secret", got.Headers["CF-Access-Client-Secret"])
-		require.NotContains(t, got.Headers, "Authorization", "no OAuth in this flow")
+		require.Contains(t, got.URL, "127.0.0.1", "config must dial the local proxy, not the upstream")
+		require.NotContains(t, got.URL, "secret_path_abc", "upstream secret URL must not appear in config")
+		require.NotEmpty(t, got.Headers[remotemcpproxy.ProxyTokenHeader])
+		require.NotContains(t, got.Headers, "CF-Access-Client-Id", "upstream credential must not appear in config")
+		require.NotContains(t, got.Headers, "CF-Access-Client-Secret")
+		require.NotContains(t, got.Headers, "Authorization")
 	})
 
 	t.Run("remove drops the server from the config", func(t *testing.T) {
@@ -101,14 +103,17 @@ func TestHeadersOnWire(t *testing.T) {
 				"request %d missing CF-Access-Client-Secret header", i)
 		}
 
-		// And the generated config file carries the same values — proves the
-		// registration-time wire contract also holds at runtime (when the CLI
-		// reads the config and dials the origin on each turn).
+		// At runtime the CLI dials the proxy, not the origin, so the generated
+		// config carries the proxy URL + hop token and none of the upstream
+		// credentials — the proxy injects those server-side (see
+		// remotemcpproxy tests for the injection contract).
 		cfg := generateConfigFromManager(t, mgr)
 		entry, ok := cfg.MCPServers["ha-wire"]
 		require.True(t, ok)
-		require.Equal(t, "client-id.access", entry.Headers["CF-Access-Client-Id"])
-		require.Equal(t, "wire-test-secret", entry.Headers["CF-Access-Client-Secret"])
+		require.Contains(t, entry.URL, "127.0.0.1")
+		require.NotEmpty(t, entry.Headers[remotemcpproxy.ProxyTokenHeader])
+		require.NotContains(t, entry.Headers, "CF-Access-Client-Id")
+		require.NotContains(t, entry.Headers, "CF-Access-Client-Secret")
 	})
 }
 
@@ -171,18 +176,30 @@ func TestSecretRegistration_NoLeaksE2E(t *testing.T) {
 	require.Equal(t, true, listParsed[0]["url_is_secret"])
 	require.NotContains(t, listParsed[0], "url")
 
-	// --- 3. Config file MUST contain real values (CLI dials this) ---
+	// --- 3. Config file MUST NOT contain any secret: it dials the proxy,
+	// which injects the real URL + headers server-side. This is the core
+	// security guarantee — the config is bind-mounted into the agent sandbox.
 	cfg := generateConfigFromManager(t, th.manager)
 	entry, ok := cfg.MCPServers["home-assistant"]
 	require.True(t, ok)
-	require.Equal(t, server.URL+secretURLPath, entry.URL, "config file must contain real URL so CLI can dial it")
-	require.Equal(t, secretClientID, entry.Headers["CF-Access-Client-Id"])
-	require.Equal(t, secretClientSec, entry.Headers["CF-Access-Client-Secret"])
+	require.Contains(t, entry.URL, "127.0.0.1", "config must dial the local proxy")
+	require.NotContains(t, entry.URL, secretURLPath, "secret URL path must not appear in config")
+	require.NotEmpty(t, entry.Headers[remotemcpproxy.ProxyTokenHeader])
+	require.NotContains(t, entry.Headers, "CF-Access-Client-Id")
+	require.NotContains(t, entry.Headers, "CF-Access-Client-Secret")
 
-	// --- 4. Wire test: registration ALREADY exercised the headers via the
-	// initialize + tools/list calls (we require those to succeed before
-	// persisting). Inspect the captured requests to prove the secrets made
-	// it to the origin unchanged — same guarantee as the CLI runtime path.
+	// Belt-and-braces: the entire generated config body contains none of the
+	// secret values — no leak channel anywhere in the file the sandbox reads.
+	cfgBytes, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	assertNoSecretsInString(t, "generated mcp-config", string(cfgBytes),
+		secretURLPath, secretClientID, secretClientSec)
+
+	// --- 4. The credentials still reach the origin: registration exercised
+	// them via the initialize + tools/list calls (required before persisting).
+	// Inspect the captured requests to prove the secrets went out unchanged.
+	// The runtime injection path (config → proxy → origin) is proven
+	// separately in the remotemcpproxy tests.
 	records := receivedHeaders()
 	require.GreaterOrEqual(t, len(records), 2, "initialize + tools/list")
 	for i, h := range records {
@@ -191,26 +208,6 @@ func TestSecretRegistration_NoLeaksE2E(t *testing.T) {
 		require.Equal(t, secretClientSec, h.Get("CF-Access-Client-Secret"),
 			"request %d missing CF-Access-Client-Secret", i)
 	}
-
-	// And an explicit CLI-equivalent hit using the config values, to prove
-	// the runtime path works the same way.
-	req, err := http.NewRequest(http.MethodPost, entry.URL, nil)
-	require.NoError(t, err)
-	for k, v := range entry.Headers {
-		req.Header.Set(k, v)
-	}
-	resp, err := server.Client().Do(req)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = resp.Body.Close() })
-	// The fake server only decodes JSON-RPC; an empty-body POST gets a
-	// non-2xx status. That's fine — this test proves the request reached
-	// the origin with the right headers, not that the server liked it.
-	require.Less(t, resp.StatusCode, 500, "expected a client-side response, not a server error")
-	final := receivedHeaders()
-	require.Greater(t, len(final), len(records), "wire probe should have hit the server")
-	last := final[len(final)-1]
-	require.Equal(t, secretClientID, last.Get("CF-Access-Client-Id"))
-	require.Equal(t, secretClientSec, last.Get("CF-Access-Client-Secret"))
 
 	// --- 5. Error paths must not leak secret values ---
 	t.Run("missing-key error does not leak secret value", func(t *testing.T) {
@@ -434,30 +431,30 @@ func globMatch(pattern, name string) bool {
 
 // --- helpers ---
 
-// generateConfigFromManager replicates the router's buildRemoteMCPEntries
-// closure inline so the test doesn't need to start a full router. If the
-// router's logic diverges, these tests must be kept in sync.
+// generateConfigFromManager replicates the router's remote-MCP config wiring
+// inline so the test doesn't need to start a full router: each server is routed
+// through the auth proxy and carries only the benign proxy-hop token, never the
+// upstream credentials. If the router's logic diverges, keep this in sync.
 func generateConfigFromManager(t *testing.T, mgr *remotemcpstore.Manager) mcp.ConfigFile {
 	t.Helper()
 	ctx := context.Background()
+
+	proxy, err := remotemcpproxy.NewServer(remotemcpproxy.Config{Store: mgr})
+	require.NoError(t, err)
+	_, err = proxy.Start("127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = proxy.Stop(ctx) })
 
 	mcps, err := mgr.ListRemoteMCPs(ctx)
 	require.NoError(t, err)
 
 	var entries []mcp.RemoteMCPEntry
 	for _, m := range mcps {
-		entry := mcp.RemoteMCPEntry{Name: m.Name, URL: m.URL}
-		auth, err := mgr.GetRemoteMCPAuth(ctx, m.Name)
-		require.NoError(t, err)
-		if auth != nil {
-			if auth.AccessToken != "" {
-				entry.BearerToken = auth.AccessToken
-			}
-			if len(auth.StaticHeaders) > 0 {
-				entry.ExtraHeaders = auth.StaticHeaders
-			}
-		}
-		entries = append(entries, entry)
+		entries = append(entries, mcp.RemoteMCPEntry{
+			Name:    m.Name,
+			URL:     proxy.RemoteURL(m.Name),
+			Headers: map[string]string{remotemcpproxy.ProxyTokenHeader: proxy.Token()},
+		})
 	}
 
 	dir := t.TempDir()
