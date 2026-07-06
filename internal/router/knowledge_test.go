@@ -64,6 +64,26 @@ func TestProvisionKnowledgeClone(t *testing.T) {
 		out := gitOutput(t, dir, "log", "--oneline")
 		require.Contains(t, out, "agent note")
 	})
+
+	t.Run("re-points origin at the current proxy URL on re-provision", func(t *testing.T) {
+		remote := createTestRemote(t, "main")
+		dir := filepath.Join(t.TempDir(), "knowledge")
+
+		// First boot: clone against a proxy URL that mimics a now-dead port.
+		stalePort := "http://127.0.0.1:37557/owner/knowledge-base.git"
+		require.NoError(t, provisionKnowledgeClone(knowledgeProvisionParams{
+			Dir: dir, RemoteURL: remote, Branch: "main",
+		}))
+		gitRun(t, dir, "remote", "set-url", "origin", stalePort)
+		require.Equal(t, stalePort, gitConfigValue(t, dir, "remote.origin.url"))
+
+		// Second boot: proxy came up on a fresh port, so provision must re-point.
+		freshRemote := "http://127.0.0.1:41000/owner/knowledge-base.git"
+		require.NoError(t, provisionKnowledgeClone(knowledgeProvisionParams{
+			Dir: dir, RemoteURL: freshRemote, Branch: "main",
+		}))
+		require.Equal(t, freshRemote, gitConfigValue(t, dir, "remote.origin.url"))
+	})
 }
 
 func TestRepoPathFromURL(t *testing.T) {
