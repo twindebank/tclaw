@@ -9,8 +9,9 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
+
+	"github.com/gotd/log"
 
 	"github.com/gotd/td/bin"
 	"github.com/gotd/td/clock"
@@ -66,6 +67,8 @@ type Client struct {
 	onDead         func(error)            // immutable
 	newConnBackoff func() backoff.BackOff // immutable
 	defaultMode    manager.ConnMode       // immutable
+	// onConnectionState is called on primary connection state change.
+	onConnectionState func(ConnectionState) // immutable
 
 	// Migration state.
 	migrationTimeout time.Duration // immutable
@@ -91,9 +94,12 @@ type Client struct {
 	testDC bool // immutable
 
 	// Connection state. Guarded by connMux.
-	session     *pool.SyncSession
-	cfg         *manager.AtomicConfig
-	conn        clientConn
+	session *pool.SyncSession
+	cfg     *manager.AtomicConfig
+	conn    clientConn
+	// connChanged is closed and re-created on every primary connection
+	// replacement, letting invokeConn wait for reconnect and retry.
+	connChanged chan struct{}
 	connBackoff atomic.Pointer[backoff.BackOff]
 	connMux     sync.Mutex
 
@@ -122,7 +128,7 @@ type Client struct {
 
 	// Wrappers for external world, like logs or PRNG.
 	rand  io.Reader   // immutable
-	log   *zap.Logger // immutable
+	log   log.Helper  // immutable
 	clock clock.Clock // immutable
 
 	// Client context. Will be canceled by Run on exit.
@@ -169,7 +175,7 @@ func NewClient(appID int, appHash string, opt Options) *Client {
 	}
 	client := &Client{
 		rand:          opt.Random,
-		log:           opt.Logger,
+		log:           log.For(opt.Logger),
 		appID:         appID,
 		appHash:       appHash,
 		allowCDN:      opt.AllowCDN,
@@ -182,19 +188,20 @@ func NewClient(appID int, appHash string, opt Options) *Client {
 		cfg: manager.NewAtomicConfig(tg.Config{
 			DCOptions: opt.DCList.Options,
 		}),
-		create:           defaultConstructor(),
-		resolver:         opt.Resolver,
-		defaultMode:      mode,
-		newConnBackoff:   opt.ReconnectionBackoff,
-		onDead:           opt.OnDead,
-		clock:            opt.Clock,
-		device:           opt.Device,
-		migrationTimeout: opt.MigrationTimeout,
-		noUpdatesMode:    opt.NoUpdates,
-		mw:               opt.Middlewares,
-		onTransfer:       opt.OnTransfer,
-		onSelfError:      opt.OnSelfError,
-		onSelfSuccess:    opt.OnSelfSuccess,
+		create:            defaultConstructor(),
+		resolver:          opt.Resolver,
+		defaultMode:       mode,
+		newConnBackoff:    opt.ReconnectionBackoff,
+		onDead:            opt.OnDead,
+		onConnectionState: opt.OnConnectionState,
+		clock:             opt.Clock,
+		device:            opt.Device,
+		migrationTimeout:  opt.MigrationTimeout,
+		noUpdatesMode:     opt.NoUpdates,
+		mw:                opt.Middlewares,
+		onTransfer:        opt.OnTransfer,
+		onSelfError:       opt.OnSelfError,
+		onSelfSuccess:     opt.OnSelfSuccess,
 	}
 	if opt.TracerProvider != nil {
 		client.tracer = opt.TracerProvider.Tracer(oteltg.Name)
@@ -203,7 +210,7 @@ func NewClient(appID int, appHash string, opt Options) *Client {
 
 	// Including version into client logger to help with debugging.
 	if v := version.GetVersion(); v != "" {
-		client.log = client.log.With(zap.String("v", v))
+		client.log = client.log.With(log.String("v", v))
 	}
 
 	if opt.SessionStorage != nil {
@@ -238,6 +245,16 @@ func NewClient(appID int, appHash string, opt Options) *Client {
 	return client
 }
 
+// replaceConn replaces primary connection and notifies invokers waiting for
+// reconnection (see invokeConn).
+//
+// Caller must hold connMux.
+func (c *Client) replaceConn(conn clientConn) {
+	c.conn = conn
+	close(c.connChanged)
+	c.connChanged = make(chan struct{})
+}
+
 // init sets fields which needs explicit initialization, like maps or channels.
 func (c *Client) init() {
 	if c.domains == nil {
@@ -247,6 +264,7 @@ func (c *Client) init() {
 		c.cfg = manager.NewAtomicConfig(tg.Config{})
 	}
 	c.ready = tdsync.NewResetReady()
+	c.connChanged = make(chan struct{})
 	c.restart = make(chan struct{})
 	c.migration = make(chan struct{}, 1)
 	c.sessions = map[int]*pool.SyncSession{}

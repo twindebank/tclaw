@@ -2850,6 +2850,95 @@ func (s *ServerDispatcher) OnAccountDeletePasskey(f func(ctx context.Context, id
 	s.handlers[AccountDeletePasskeyRequestTypeID] = handler
 }
 
+func (s *ServerDispatcher) OnAccountConfirmBotConnection(f func(ctx context.Context, botid InputUserClass) (bool, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request AccountConfirmBotConnectionRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, request.BotID)
+		if err != nil {
+			return nil, err
+		}
+		if response {
+			return &BoolBox{Bool: &BoolTrue{}}, nil
+		}
+
+		return &BoolBox{Bool: &BoolFalse{}}, nil
+	}
+
+	s.handlers[AccountConfirmBotConnectionRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnAccountGetWebBrowserSettings(f func(ctx context.Context, hash int64) (AccountWebBrowserSettingsClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request AccountGetWebBrowserSettingsRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, request.Hash)
+		if err != nil {
+			return nil, err
+		}
+		return &AccountWebBrowserSettingsBox{WebBrowserSettings: response}, nil
+	}
+
+	s.handlers[AccountGetWebBrowserSettingsRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnAccountUpdateWebBrowserSettings(f func(ctx context.Context, request *AccountUpdateWebBrowserSettingsRequest) (AccountWebBrowserSettingsClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request AccountUpdateWebBrowserSettingsRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return &AccountWebBrowserSettingsBox{WebBrowserSettings: response}, nil
+	}
+
+	s.handlers[AccountUpdateWebBrowserSettingsRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnAccountToggleWebBrowserSettingsException(f func(ctx context.Context, request *AccountToggleWebBrowserSettingsExceptionRequest) (UpdatesClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request AccountToggleWebBrowserSettingsExceptionRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return &UpdatesBox{Updates: response}, nil
+	}
+
+	s.handlers[AccountToggleWebBrowserSettingsExceptionRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnAccountDeleteWebBrowserSettingsExceptions(f func(ctx context.Context) (AccountWebBrowserSettingsClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request AccountDeleteWebBrowserSettingsExceptionsRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return &AccountWebBrowserSettingsBox{WebBrowserSettings: response}, nil
+	}
+
+	s.handlers[AccountDeleteWebBrowserSettingsExceptionsRequestTypeID] = handler
+}
+
 func (s *ServerDispatcher) OnUsersGetUsers(f func(ctx context.Context, id []InputUserClass) ([]UserClass, error)) {
 	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
 		var request UsersGetUsersRequest
@@ -4172,7 +4261,7 @@ func (s *ServerDispatcher) OnMessagesCheckChatInvite(f func(ctx context.Context,
 	s.handlers[MessagesCheckChatInviteRequestTypeID] = handler
 }
 
-func (s *ServerDispatcher) OnMessagesImportChatInvite(f func(ctx context.Context, hash string) (UpdatesClass, error)) {
+func (s *ServerDispatcher) OnMessagesImportChatInvite(f func(ctx context.Context, hash string) (MessagesChatInviteJoinResultClass, error)) {
 	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
 		var request MessagesImportChatInviteRequest
 		if err := request.Decode(b); err != nil {
@@ -4183,7 +4272,7 @@ func (s *ServerDispatcher) OnMessagesImportChatInvite(f func(ctx context.Context
 		if err != nil {
 			return nil, err
 		}
-		return &UpdatesBox{Updates: response}, nil
+		return &MessagesChatInviteJoinResultBox{ChatInviteJoinResult: response}, nil
 	}
 
 	s.handlers[MessagesImportChatInviteRequestTypeID] = handler
@@ -7869,6 +7958,222 @@ func (s *ServerDispatcher) OnMessagesCheckURLAuthMatchCode(f func(ctx context.Co
 	s.handlers[MessagesCheckURLAuthMatchCodeRequestTypeID] = handler
 }
 
+func (s *ServerDispatcher) OnMessagesComposeMessageWithAI(f func(ctx context.Context, request *MessagesComposeMessageWithAIRequest) (*MessagesComposedMessageWithAI, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request MessagesComposeMessageWithAIRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return response, nil
+	}
+
+	s.handlers[MessagesComposeMessageWithAIRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnMessagesReportReadMetrics(f func(ctx context.Context, request *MessagesReportReadMetricsRequest) (bool, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request MessagesReportReadMetricsRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		if response {
+			return &BoolBox{Bool: &BoolTrue{}}, nil
+		}
+
+		return &BoolBox{Bool: &BoolFalse{}}, nil
+	}
+
+	s.handlers[MessagesReportReadMetricsRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnMessagesReportMusicListen(f func(ctx context.Context, request *MessagesReportMusicListenRequest) (bool, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request MessagesReportMusicListenRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		if response {
+			return &BoolBox{Bool: &BoolTrue{}}, nil
+		}
+
+		return &BoolBox{Bool: &BoolFalse{}}, nil
+	}
+
+	s.handlers[MessagesReportMusicListenRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnMessagesAddPollAnswer(f func(ctx context.Context, request *MessagesAddPollAnswerRequest) (UpdatesClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request MessagesAddPollAnswerRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return &UpdatesBox{Updates: response}, nil
+	}
+
+	s.handlers[MessagesAddPollAnswerRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnMessagesDeletePollAnswer(f func(ctx context.Context, request *MessagesDeletePollAnswerRequest) (UpdatesClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request MessagesDeletePollAnswerRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return &UpdatesBox{Updates: response}, nil
+	}
+
+	s.handlers[MessagesDeletePollAnswerRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnMessagesGetUnreadPollVotes(f func(ctx context.Context, request *MessagesGetUnreadPollVotesRequest) (MessagesMessagesClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request MessagesGetUnreadPollVotesRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return &MessagesMessagesBox{Messages: response}, nil
+	}
+
+	s.handlers[MessagesGetUnreadPollVotesRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnMessagesReadPollVotes(f func(ctx context.Context, request *MessagesReadPollVotesRequest) (*MessagesAffectedHistory, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request MessagesReadPollVotesRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return response, nil
+	}
+
+	s.handlers[MessagesReadPollVotesRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnMessagesSetBotGuestChatResult(f func(ctx context.Context, request *MessagesSetBotGuestChatResultRequest) (InputBotInlineMessageIDClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request MessagesSetBotGuestChatResultRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return &InputBotInlineMessageIDBox{InputBotInlineMessageID: response}, nil
+	}
+
+	s.handlers[MessagesSetBotGuestChatResultRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnMessagesDeleteParticipantReactions(f func(ctx context.Context, request *MessagesDeleteParticipantReactionsRequest) (bool, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request MessagesDeleteParticipantReactionsRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		if response {
+			return &BoolBox{Bool: &BoolTrue{}}, nil
+		}
+
+		return &BoolBox{Bool: &BoolFalse{}}, nil
+	}
+
+	s.handlers[MessagesDeleteParticipantReactionsRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnMessagesDeleteParticipantReaction(f func(ctx context.Context, request *MessagesDeleteParticipantReactionRequest) (UpdatesClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request MessagesDeleteParticipantReactionRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return &UpdatesBox{Updates: response}, nil
+	}
+
+	s.handlers[MessagesDeleteParticipantReactionRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnMessagesGetPersonalChannelHistory(f func(ctx context.Context, request *MessagesGetPersonalChannelHistoryRequest) (MessagesMessagesClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request MessagesGetPersonalChannelHistoryRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return &MessagesMessagesBox{Messages: response}, nil
+	}
+
+	s.handlers[MessagesGetPersonalChannelHistoryRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnMessagesGetRichMessage(f func(ctx context.Context, request *MessagesGetRichMessageRequest) (MessagesMessagesClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request MessagesGetRichMessageRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return &MessagesMessagesBox{Messages: response}, nil
+	}
+
+	s.handlers[MessagesGetRichMessageRequestTypeID] = handler
+}
+
 func (s *ServerDispatcher) OnUpdatesGetState(f func(ctx context.Context) (*UpdatesState, error)) {
 	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
 		var request UpdatesGetStateRequest
@@ -8848,7 +9153,7 @@ func (s *ServerDispatcher) OnChannelsUpdateUsername(f func(ctx context.Context, 
 	s.handlers[ChannelsUpdateUsernameRequestTypeID] = handler
 }
 
-func (s *ServerDispatcher) OnChannelsJoinChannel(f func(ctx context.Context, channel InputChannelClass) (UpdatesClass, error)) {
+func (s *ServerDispatcher) OnChannelsJoinChannel(f func(ctx context.Context, channel InputChannelClass) (MessagesChatInviteJoinResultClass, error)) {
 	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
 		var request ChannelsJoinChannelRequest
 		if err := request.Decode(b); err != nil {
@@ -8859,7 +9164,7 @@ func (s *ServerDispatcher) OnChannelsJoinChannel(f func(ctx context.Context, cha
 		if err != nil {
 			return nil, err
 		}
-		return &UpdatesBox{Updates: response}, nil
+		return &MessagesChatInviteJoinResultBox{ChatInviteJoinResult: response}, nil
 	}
 
 	s.handlers[ChannelsJoinChannelRequestTypeID] = handler
@@ -10208,6 +10513,154 @@ func (s *ServerDispatcher) OnBotsGetBotRecommendations(f func(ctx context.Contex
 	}
 
 	s.handlers[BotsGetBotRecommendationsRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnBotsCheckUsername(f func(ctx context.Context, username string) (bool, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request BotsCheckUsernameRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, request.Username)
+		if err != nil {
+			return nil, err
+		}
+		if response {
+			return &BoolBox{Bool: &BoolTrue{}}, nil
+		}
+
+		return &BoolBox{Bool: &BoolFalse{}}, nil
+	}
+
+	s.handlers[BotsCheckUsernameRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnBotsCreateBot(f func(ctx context.Context, request *BotsCreateBotRequest) (UserClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request BotsCreateBotRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return &UserBox{User: response}, nil
+	}
+
+	s.handlers[BotsCreateBotRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnBotsExportBotToken(f func(ctx context.Context, request *BotsExportBotTokenRequest) (*BotsExportedBotToken, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request BotsExportBotTokenRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return response, nil
+	}
+
+	s.handlers[BotsExportBotTokenRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnBotsRequestWebViewButton(f func(ctx context.Context, request *BotsRequestWebViewButtonRequest) (*BotsRequestedButton, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request BotsRequestWebViewButtonRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return response, nil
+	}
+
+	s.handlers[BotsRequestWebViewButtonRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnBotsGetRequestedWebViewButton(f func(ctx context.Context, request *BotsGetRequestedWebViewButtonRequest) (KeyboardButtonClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request BotsGetRequestedWebViewButtonRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return &KeyboardButtonBox{KeyboardButton: response}, nil
+	}
+
+	s.handlers[BotsGetRequestedWebViewButtonRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnBotsGetAccessSettings(f func(ctx context.Context, bot InputUserClass) (*BotsAccessSettings, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request BotsGetAccessSettingsRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, request.Bot)
+		if err != nil {
+			return nil, err
+		}
+		return response, nil
+	}
+
+	s.handlers[BotsGetAccessSettingsRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnBotsEditAccessSettings(f func(ctx context.Context, request *BotsEditAccessSettingsRequest) (bool, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request BotsEditAccessSettingsRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		if response {
+			return &BoolBox{Bool: &BoolTrue{}}, nil
+		}
+
+		return &BoolBox{Bool: &BoolFalse{}}, nil
+	}
+
+	s.handlers[BotsEditAccessSettingsRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnBotsSetJoinChatResults(f func(ctx context.Context, request *BotsSetJoinChatResultsRequest) (bool, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request BotsSetJoinChatResultsRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		if response {
+			return &BoolBox{Bool: &BoolTrue{}}, nil
+		}
+
+		return &BoolBox{Bool: &BoolFalse{}}, nil
+	}
+
+	s.handlers[BotsSetJoinChatResultsRequestTypeID] = handler
 }
 
 func (s *ServerDispatcher) OnPaymentsGetPaymentForm(f func(ctx context.Context, request *PaymentsGetPaymentFormRequest) (PaymentsPaymentFormClass, error)) {
@@ -12534,6 +12987,23 @@ func (s *ServerDispatcher) OnStatsGetStoryPublicForwards(f func(ctx context.Cont
 	s.handlers[StatsGetStoryPublicForwardsRequestTypeID] = handler
 }
 
+func (s *ServerDispatcher) OnStatsGetPollStats(f func(ctx context.Context, request *StatsGetPollStatsRequest) (*StatsPollStats, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request StatsGetPollStatsRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return response, nil
+	}
+
+	s.handlers[StatsGetPollStatsRequestTypeID] = handler
+}
+
 func (s *ServerDispatcher) OnChatlistsExportChatlistInvite(f func(ctx context.Context, request *ChatlistsExportChatlistInviteRequest) (*ChatlistsExportedChatlistInvite, error)) {
 	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
 		var request ChatlistsExportChatlistInviteRequest
@@ -13549,6 +14019,133 @@ func (s *ServerDispatcher) OnFragmentGetCollectibleInfo(f func(ctx context.Conte
 	}
 
 	s.handlers[FragmentGetCollectibleInfoRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnAicomposeCreateTone(f func(ctx context.Context, request *AicomposeCreateToneRequest) (AiComposeToneClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request AicomposeCreateToneRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return &AiComposeToneBox{AiComposeTone: response}, nil
+	}
+
+	s.handlers[AicomposeCreateToneRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnAicomposeUpdateTone(f func(ctx context.Context, request *AicomposeUpdateToneRequest) (AiComposeToneClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request AicomposeUpdateToneRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return &AiComposeToneBox{AiComposeTone: response}, nil
+	}
+
+	s.handlers[AicomposeUpdateToneRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnAicomposeSaveTone(f func(ctx context.Context, request *AicomposeSaveToneRequest) (bool, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request AicomposeSaveToneRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		if response {
+			return &BoolBox{Bool: &BoolTrue{}}, nil
+		}
+
+		return &BoolBox{Bool: &BoolFalse{}}, nil
+	}
+
+	s.handlers[AicomposeSaveToneRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnAicomposeDeleteTone(f func(ctx context.Context, tone InputAiComposeToneClass) (bool, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request AicomposeDeleteToneRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, request.Tone)
+		if err != nil {
+			return nil, err
+		}
+		if response {
+			return &BoolBox{Bool: &BoolTrue{}}, nil
+		}
+
+		return &BoolBox{Bool: &BoolFalse{}}, nil
+	}
+
+	s.handlers[AicomposeDeleteToneRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnAicomposeGetTone(f func(ctx context.Context, tone InputAiComposeToneClass) (AicomposeTonesClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request AicomposeGetToneRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, request.Tone)
+		if err != nil {
+			return nil, err
+		}
+		return &AicomposeTonesBox{Tones: response}, nil
+	}
+
+	s.handlers[AicomposeGetToneRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnAicomposeGetTones(f func(ctx context.Context, hash int64) (AicomposeTonesClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request AicomposeGetTonesRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, request.Hash)
+		if err != nil {
+			return nil, err
+		}
+		return &AicomposeTonesBox{Tones: response}, nil
+	}
+
+	s.handlers[AicomposeGetTonesRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnAicomposeGetToneExample(f func(ctx context.Context, request *AicomposeGetToneExampleRequest) (*AiComposeToneExample, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request AicomposeGetToneExampleRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return response, nil
+	}
+
+	s.handlers[AicomposeGetToneExampleRequestTypeID] = handler
 }
 
 func (s *ServerDispatcher) OnTestUseError(f func(ctx context.Context) (*Error, error)) {
