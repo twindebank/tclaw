@@ -9,69 +9,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGenerateConfigFile_RemoteHeaders(t *testing.T) {
-	t.Run("bearer token only", func(t *testing.T) {
-		cfg := writeAndRead(t, []RemoteMCPEntry{
-			{Name: "linear", URL: "https://mcp.linear.app/sse", BearerToken: "tok"},
-		})
-		got := cfg.MCPServers["linear"].Headers
-		require.Equal(t, "Bearer tok", got["Authorization"])
-		require.Len(t, got, 1)
-	})
-
-	t.Run("extra headers only", func(t *testing.T) {
+func TestGenerateConfigFile_RemoteEntries(t *testing.T) {
+	t.Run("proxy URL and headers are written verbatim, no upstream credentials", func(t *testing.T) {
 		cfg := writeAndRead(t, []RemoteMCPEntry{
 			{
-				Name: "ha-mcp",
-				URL:  "https://ha-mcp.example.com/mcp_abc",
-				ExtraHeaders: map[string]string{
-					"CF-Access-Client-Id":     "client-id",
-					"CF-Access-Client-Secret": "client-secret",
-				},
+				Name:    "linear",
+				URL:     "http://127.0.0.1:54321/linear",
+				Headers: map[string]string{"X-Tclaw-Proxy-Token": "proxy-tok"},
 			},
 		})
-		got := cfg.MCPServers["ha-mcp"].Headers
-		require.Equal(t, "client-id", got["CF-Access-Client-Id"])
-		require.Equal(t, "client-secret", got["CF-Access-Client-Secret"])
-		require.NotContains(t, got, "Authorization")
+		got := cfg.MCPServers["linear"]
+		require.Equal(t, "http://127.0.0.1:54321/linear", got.URL)
+		require.Equal(t, "http", got.Type)
+		require.Equal(t, "proxy-tok", got.Headers["X-Tclaw-Proxy-Token"])
+		require.Len(t, got.Headers, 1)
+		require.NotContains(t, got.Headers, "Authorization", "no upstream auth belongs in the config")
 	})
 
-	t.Run("bearer plus extra headers", func(t *testing.T) {
+	t.Run("no headers means no headers", func(t *testing.T) {
 		cfg := writeAndRead(t, []RemoteMCPEntry{
-			{
-				Name:        "combo",
-				URL:         "https://combo.example.com/mcp",
-				BearerToken: "tok",
-				ExtraHeaders: map[string]string{
-					"X-Tenant": "acme",
-				},
-			},
-		})
-		got := cfg.MCPServers["combo"].Headers
-		require.Equal(t, "Bearer tok", got["Authorization"])
-		require.Equal(t, "acme", got["X-Tenant"])
-		require.Len(t, got, 2)
-	})
-
-	t.Run("bearer wins when extra headers collide on Authorization", func(t *testing.T) {
-		cfg := writeAndRead(t, []RemoteMCPEntry{
-			{
-				Name:        "collide",
-				URL:         "https://collide.example.com/mcp",
-				BearerToken: "real-bearer",
-				ExtraHeaders: map[string]string{
-					"Authorization": "Basic fake",
-				},
-			},
-		})
-		require.Equal(t, "Bearer real-bearer", cfg.MCPServers["collide"].Headers["Authorization"])
-	})
-
-	t.Run("no auth at all", func(t *testing.T) {
-		cfg := writeAndRead(t, []RemoteMCPEntry{
-			{Name: "open", URL: "https://open.example.com/mcp"},
+			{Name: "open", URL: "http://127.0.0.1:54321/open"},
 		})
 		require.Empty(t, cfg.MCPServers["open"].Headers)
+	})
+
+	t.Run("the local tclaw server is always present with its bearer token", func(t *testing.T) {
+		cfg := writeAndRead(t, nil)
+		local := cfg.MCPServers["tclaw"]
+		require.Equal(t, "http://127.0.0.1:9999/mcp", local.URL)
+		require.Equal(t, "Bearer local-tok", local.Headers["Authorization"])
 	})
 }
 

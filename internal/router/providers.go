@@ -6,6 +6,8 @@ import (
 
 	"tclaw/internal/channel"
 	"tclaw/internal/config"
+	"tclaw/internal/mcp"
+	"tclaw/internal/remotemcpproxy"
 	"tclaw/internal/remotemcpstore"
 	"tclaw/internal/user"
 )
@@ -82,30 +84,18 @@ func buildRegistryEntries(configChannels []config.Channel) []channel.RegistryEnt
 	return entries
 }
 
-// buildRemoteMCPEntries loads remote MCPs and their auth tokens for MCP config generation.
-func buildRemoteMCPEntries(ctx context.Context, mgr *remotemcpstore.Manager) []remoteMCPEntry {
-	mcps, err := mgr.ListRemoteMCPs(ctx)
-	if err != nil {
-		slog.Error("failed to list remote mcps for config", "err", err)
-		return nil
-	}
-	var entries []remoteMCPEntry
+// remoteMCPConfigEntries maps stored remote MCPs to --mcp-config entries that
+// point at the per-user auth proxy. No upstream credentials are read here: the
+// proxy injects them server-side at request time, keeping secrets out of the
+// sandbox-readable config. Each entry carries only the benign proxy-hop token.
+func remoteMCPConfigEntries(mcps []remotemcpstore.RemoteMCP, proxy *remotemcpproxy.Server, proxyToken string) []mcp.RemoteMCPEntry {
+	entries := make([]mcp.RemoteMCPEntry, 0, len(mcps))
 	for _, m := range mcps {
-		entry := remoteMCPEntry{Name: m.Name, URL: m.URL}
-		auth, authErr := mgr.GetRemoteMCPAuth(ctx, m.Name)
-		if authErr != nil {
-			slog.Warn("failed to load remote mcp auth", "name", m.Name, "err", authErr)
-		}
-		if auth != nil && auth.AccessToken != "" {
-			entry.BearerToken = auth.AccessToken
-		}
-		entries = append(entries, entry)
+		entries = append(entries, mcp.RemoteMCPEntry{
+			Name:    m.Name,
+			URL:     proxy.RemoteURL(m.Name),
+			Headers: map[string]string{remotemcpproxy.ProxyTokenHeader: proxyToken},
+		})
 	}
 	return entries
-}
-
-type remoteMCPEntry struct {
-	Name        string
-	URL         string
-	BearerToken string
 }
