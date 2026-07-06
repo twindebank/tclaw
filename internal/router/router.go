@@ -530,6 +530,11 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			seedKnowledgeSkill(mu.cfg.ID, homeDir, dirs.Knowledge)
 		}
 
+		// Re-seed the Google Workspace CLI skills each iteration (idempotent
+		// overwrite) so the agent discovers gws command syntax from skills, and a
+		// reset that cleared home/.claude/ is repaired before the next agent spawn.
+		seedGWSSkills(mu.cfg.ID, homeDir)
+
 		// Regenerate the MCP config on each iteration. ResetAll clears
 		// mcp-config/, so the file must be recreated before the next agent spawn.
 		remotes := buildRemoteMCPEntries(ctx)

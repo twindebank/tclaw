@@ -300,34 +300,12 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 		},
 		{
 			Name: ToolWorkspace,
-			Description: "Execute a Google Workspace command. " +
-				"Supports Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks, and more. " +
-				"The 'command' is the gws CLI arguments (e.g. 'gmail users messages list', 'drive files list'). " +
-				"Use google_workspace_schema to discover available methods and their parameters. " +
-				"gws also has built-in skills ('+' commands) for common workflows — run 'gws gmail --help' to see them. " +
-				"Key skills: 'gmail +triage' (unread summary), 'gmail +reply --message-id ID --body TEXT' (auto-threaded reply), " +
-				"'gmail +send' (compose). " +
-				"For forwarding, use google_gmail_forward instead — it fetches the full body and handles HTML-only emails correctly. " +
-				"Skills handle threading headers, MIME encoding, and attachments automatically. " +
-				"Skill reference: https://github.com/googleworkspace/cli/tree/main/skills " +
-				"IMPORTANT: Never use with Gmail format=full — it returns huge HTML blobs that waste context. Use google_gmail_read instead. " +
-				"Calendar updates: use 'calendar events update' (full PUT), NOT 'calendar events patch' — patching date to dateTime causes a 400. " +
-				"For timezone in dateTime, use UTC offset in the ISO string (e.g. 2026-03-13T17:26:00+00:00), NOT a separate timeZone field. " +
-				"Sheets writes: all write operations (values.update, batchUpdate, values.clear, etc.) require the 'json' field — pass the request body as a JSON string there. Example: command='sheets spreadsheets values update', params='{\"spreadsheetId\":\"...\",\"range\":\"Sheet1!A1\",\"valueInputOption\":\"RAW\"}', json='{\"values\":[[\"hello\"]]}'.\n\n" +
-				"SHEETS GOTCHAS:\n" +
-				"Checkboxes in Google Sheets Tables: do NOT use setDataValidation — it fails with 'not allowed on cells in typed columns' when the sheet uses a Table. " +
-				"Use updateCells with fields='dataValidation' instead (works even on typed columns). " +
-				"If cells show a validation error after adding checkbox format, they likely have stringValue 'TRUE'/'FALSE' instead of boolValue true/false — " +
-				"fix with a separate updateCells request with fields='userEnteredValue' and boolValue: true/false.\n" +
-				"Hyperlinks: set a hyperlink using textFormatRuns with a link object — NOT a =HYPERLINK() formula. " +
-				"Pass userEnteredValue (stringValue: display text) and textFormatRuns ([{startIndex:0, format:{link:{uri:\"...\"}}}]) with fields='userEnteredValue,textFormatRuns'. " +
-				"This matches how Google Sheets stores 'Insert Link' hyperlinks (the hyperlink field on the cell).\n\n" +
-				"READING PDF ATTACHMENTS from Gmail:\n" +
-				"1. google_workspace with 'gmail users messages get', format=full — result is saved to a file (too large for context)\n" +
-				"2. Use node to parse the file and find attachment IDs: iterate payload.parts recursively, look for body.attachmentId and filename\n" +
-				"3. google_workspace with 'gmail users messages attachments get', params {userId:\"me\", messageId:\"...\", id:\"<attachmentId>\"} — also saved to file\n" +
-				"4. Use node to parse and base64-decode: obj.data.replace(/-/g,'+').replace(/_/g,'/'), then Buffer.from(b64,'base64'), write to /tmp/filename.pdf\n" +
-				"5. Use Read tool on the saved PDF — Claude can view it directly as a multimodal input",
+			Description: "Generic passthrough to the Google Workspace CLI (gws) for any Gmail/Drive/Calendar/Docs/Sheets/Slides/Tasks operation not covered by a dedicated tool. " +
+				"BEFORE using this, read the 'gws-tclaw' skill — it explains how to translate a gws CLI example into this tool's arguments and records tclaw-specific API gotchas (calendar, sheets, PDF attachments). The per-service 'gws-*' skills document every command. " +
+				"Mapping: a skill's 'gws <args> --params <P> --json <B>' becomes command=\"<args>\", params=<P>, json=<B>. " +
+				"Example: command='gmail users messages modify', params='{\"userId\":\"me\",\"id\":\"MSG_ID\"}', json='{\"addLabelIds\":[\"LABEL_ID\"],\"removeLabelIds\":[\"UNREAD\"]}'. " +
+				"Use google_workspace_schema to inspect a method's parameters. " +
+				"Prefer the dedicated tools where they exist: google_gmail_list (search/scan), google_gmail_read (read a body — NEVER use Gmail format=full here, it floods context with raw HTML), google_gmail_forward (forward).",
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {

@@ -38,6 +38,17 @@ ENV PATH="/root/.fly/bin:${PATH}"
 # Install claude CLI and Google Workspace CLI globally.
 RUN npm install -g @anthropic-ai/claude-code @googleworkspace/cli
 
+# Generate the gws skill set at build time so the agent discovers Google Workspace
+# command syntax from skills rather than a hand-maintained tool description. Kept in
+# lockstep with the installed gws version. `generate-skills` writes ./skills relative
+# to cwd, so run it in a scratch dir and stash the output at a known image path.
+# The `test -f` guard fails the build if generation ever breaks.
+RUN mkdir -p /etc/tclaw/gws-skills \
+    && cd /tmp && gws generate-skills \
+    && cp -r /tmp/skills/. /etc/tclaw/gws-skills/ \
+    && rm -rf /tmp/skills /tmp/docs \
+    && test -f /etc/tclaw/gws-skills/gws-gmail/SKILL.md
+
 # Copy the Go binary.
 COPY --from=builder /bin/tclaw /usr/local/bin/tclaw
 

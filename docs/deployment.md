@@ -9,6 +9,24 @@
 - Seed config baked into image at `/etc/tclaw/tclaw.yaml`; copied to persistent volume (`/data/tclaw.yaml`) on first boot. Runtime config lives on the volume so agent mutations survive redeploys.
 - Subprocess sandboxing via bubblewrap (mount namespace isolation per user)
 
+## Google Workspace Skills
+
+The agent learns Google Workspace (`gws`) command syntax from **skills**, not a hand-maintained tool
+description. The Dockerfile runs `gws generate-skills` at build time (kept in lockstep with the
+installed gws version) and bakes the ~95 `SKILL.md` files into the image at `/etc/tclaw/gws-skills/`.
+On each boot the router seeds them into every user's `home/.claude/skills/` (`seedGWSSkills`), where the
+claude CLI auto-discovers them — same pattern as the knowledge skill.
+
+A tclaw-authored `gws-tclaw` skill (embedded, seeded last so it wins) explains the one thing the
+generated skills get wrong for tclaw: the agent invokes gws through the `google_workspace` **MCP tool**
+(`command`/`params`/`json`), not the shell, because the OAuth token is injected server-side. It also
+carries tclaw-discovered API gotchas (calendar patch→400, sheets checkboxes/hyperlinks, PDF extraction)
+that the generated skills don't cover. To add a new gotcha, edit `internal/router/gws_tclaw_skill.md` —
+do **not** grow the `google_workspace` tool description.
+
+In local (non-container) dev the baked dir is absent, so seeding is skipped silently; the agent falls
+back to the trimmed tool description and `google_workspace_schema`.
+
 ## Personal Knowledge Base
 
 A user can mount a git-backed markdown vault as the agent's durable knowledge store. The agent reads
