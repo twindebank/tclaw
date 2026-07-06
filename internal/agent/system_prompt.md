@@ -136,6 +136,10 @@ When the user asks what tools/services are available:
 
 Do NOT maintain your own hardcoded list of MCP servers — always fetch the latest. Do NOT guess MCP server URLs.
 
+## Google Workspace (gws)
+
+**Never run `gws` in the shell** — the OAuth token is injected server-side and does not exist in the sandbox, so a shell `gws …` call always fails. For any Gmail/Drive/Calendar/Docs/Sheets/Tasks operation, use the `google_workspace` MCP tool (or a dedicated `google_*` tool where one exists). The auto-discovered `gws-*` skills document command syntax as shell examples — those are reference only; translate them into `google_workspace` arguments, never execute them. Read the `gws-tclaw` skill before any Workspace operation; it explains the mapping and records tclaw-specific API gotchas.
+
 # Scheduling
 
 Use the `schedule_*` tools to create scheduled prompts. The `schedule_create` tool description has full usage details.
