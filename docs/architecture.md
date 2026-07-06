@@ -64,3 +64,10 @@ Four boundaries protect user data and the host system:
   `Authorization` server-side and pins requests to the one configured repo; the clone's remote is a
   token-free `http://127.0.0.1:<port>/...` URL. Git's credential helper runs inside the sandbox, so
   injecting auth at the network boundary is the only way to grant push capability without disclosure.
+- **Remote MCP auth** — the same pattern generalizes to every connected remote MCP server
+  (`internal/remotemcpproxy`). The `--mcp-config` (bind-mounted read-only into the sandbox) points each
+  remote at a token-free `http://127.0.0.1:<port>/<name>` URL carrying only a benign proxy-hop token;
+  the per-user proxy resolves the real upstream URL and credentials from the encrypted store, injects
+  the `Authorization` / static headers server-side (refreshing an expired OAuth token on demand), and
+  pins to registered server names. So no third-party MCP token — including a remote browser's API key —
+  ever lands in a sandbox-readable file.
