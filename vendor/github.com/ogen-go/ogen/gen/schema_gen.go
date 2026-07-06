@@ -59,7 +59,14 @@ func newSchemaGen(lookupRef func(ref jsonschema.Ref) (*ir.Type, bool)) *schemaGe
 }
 
 func variantFieldName(t *ir.Type) string {
-	return naming.Capitalize(t.NamePostfix())
+	name := naming.Capitalize(t.NamePostfix())
+	if name == "Type" {
+		// Sum structs reserve Type for the discriminator field.
+		// TypeValue field is used in generated struct in such
+		// situation.
+		return "TypeValue"
+	}
+	return name
 }
 
 type schemaDepthError struct {
@@ -111,6 +118,10 @@ func (g *schemaGen) generate(name string, schema *jsonschema.Schema, optional bo
 	}()
 
 	schema = transformSchema(schema)
+	schema, err := flattenAllOfSchema(schema)
+	if err != nil {
+		return nil, errors.Wrap(err, "flatten allOf")
+	}
 
 	t, err := g.generate2(name, schema)
 	if err != nil {

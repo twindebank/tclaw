@@ -31,7 +31,7 @@ var (
 	_ = tdjson.Encoder{}
 )
 
-// URLAuthResultRequest represents TL type `urlAuthResultRequest#f8f8eb1e`.
+// URLAuthResultRequest represents TL type `urlAuthResultRequest#3cd623ec`.
 // Details about the authorization request, for more info click here »¹
 //
 // Links:
@@ -46,10 +46,23 @@ type URLAuthResultRequest struct {
 	Flags bin.Fields
 	// Whether the bot would like to send messages to the user
 	RequestWriteAccess bool
-	// RequestPhoneNumber field of URLAuthResultRequest.
+	// The app/website is requesting the user's phone number; if the user consents, set
+	// share_phone_number when calling messages.acceptUrlAuth¹
+	//
+	// Links:
+	//  1) https://core.telegram.org/method/messages.acceptUrlAuth
 	RequestPhoneNumber bool
-	// MatchCodesFirst field of URLAuthResultRequest.
+	// Can only be set if match_codes is also set; if set, clients must ask the user to
+	// select the matching code before showing the rest of the login confirmation UI, and
+	// must validate the selection with messages.checkUrlAuthMatchCode¹ before proceeding
+	//
+	// Links:
+	//  1) https://core.telegram.org/method/messages.checkUrlAuthMatchCode
 	MatchCodesFirst bool
+	// Set if an OAuth request originated from an app rather than a website; when set, domain
+	// must be replaced in the confirmation prompt by verified_app_name (if present) or
+	// "Unverified App"
+	IsApp bool
 	// Username of a bot, which will be used for user authorization. If not specified, the
 	// current bot's username will be assumed. The url's domain must be the same as the
 	// domain linked with the bot. See Linking your domain to the bot¹ for more details.
@@ -59,34 +72,49 @@ type URLAuthResultRequest struct {
 	Bot UserClass
 	// The domain name of the website on which the user will log in.
 	Domain string
-	// Browser field of URLAuthResultRequest.
+	// The browser the user used to make the OAuth request
 	//
 	// Use SetBrowser and GetBrowser helpers.
 	Browser string
-	// Platform field of URLAuthResultRequest.
+	// The platform (operating system) of the user that made the OAuth request
 	//
 	// Use SetPlatform and GetPlatform helpers.
 	Platform string
-	// IP field of URLAuthResultRequest.
+	// The IP address of the user making the OAuth request
 	//
 	// Use SetIP and GetIP helpers.
 	IP string
-	// Region field of URLAuthResultRequest.
+	// The location of the user, inferred from the IP address
 	//
 	// Use SetRegion and GetRegion helpers.
 	Region string
-	// MatchCodes field of URLAuthResultRequest.
+	// A list of emojis or codes, one of which is currently being shown on the login page of
+	// the website/app; the user must select the matching one and pass it to messages
+	// acceptUrlAuth¹.match_code
+	//
+	// Links:
+	//  1) https://core.telegram.org/method/messages.acceptUrlAuth
 	//
 	// Use SetMatchCodes and GetMatchCodes helpers.
 	MatchCodes []string
-	// UserIDHint field of URLAuthResultRequest.
+	// May contain the ID of the account for which the login request was created; if it
+	// matches a logged-in account, clients should automatically switch to that account and
+	// re-invoke messages.requestUrlAuth¹ before showing the prompt
+	//
+	// Links:
+	//  1) https://core.telegram.org/method/messages.requestUrlAuth
 	//
 	// Use SetUserIDHint and GetUserIDHint helpers.
 	UserIDHint int64
+	// Can only be set if is_app is set and the app is verified; must replace domain in the
+	// confirmation prompt when present
+	//
+	// Use SetVerifiedAppName and GetVerifiedAppName helpers.
+	VerifiedAppName string
 }
 
 // URLAuthResultRequestTypeID is TL type id of URLAuthResultRequest.
-const URLAuthResultRequestTypeID = 0xf8f8eb1e
+const URLAuthResultRequestTypeID = 0x3cd623ec
 
 // construct implements constructor of URLAuthResultClass.
 func (u URLAuthResultRequest) construct() URLAuthResultClass { return &u }
@@ -117,6 +145,9 @@ func (u *URLAuthResultRequest) Zero() bool {
 	if !(u.MatchCodesFirst == false) {
 		return false
 	}
+	if !(u.IsApp == false) {
+		return false
+	}
 	if !(u.Bot == nil) {
 		return false
 	}
@@ -141,6 +172,9 @@ func (u *URLAuthResultRequest) Zero() bool {
 	if !(u.UserIDHint == 0) {
 		return false
 	}
+	if !(u.VerifiedAppName == "") {
+		return false
+	}
 
 	return true
 }
@@ -159,6 +193,7 @@ func (u *URLAuthResultRequest) FillFrom(from interface {
 	GetRequestWriteAccess() (value bool)
 	GetRequestPhoneNumber() (value bool)
 	GetMatchCodesFirst() (value bool)
+	GetIsApp() (value bool)
 	GetBot() (value UserClass)
 	GetDomain() (value string)
 	GetBrowser() (value string, ok bool)
@@ -167,10 +202,12 @@ func (u *URLAuthResultRequest) FillFrom(from interface {
 	GetRegion() (value string, ok bool)
 	GetMatchCodes() (value []string, ok bool)
 	GetUserIDHint() (value int64, ok bool)
+	GetVerifiedAppName() (value string, ok bool)
 }) {
 	u.RequestWriteAccess = from.GetRequestWriteAccess()
 	u.RequestPhoneNumber = from.GetRequestPhoneNumber()
 	u.MatchCodesFirst = from.GetMatchCodesFirst()
+	u.IsApp = from.GetIsApp()
 	u.Bot = from.GetBot()
 	u.Domain = from.GetDomain()
 	if val, ok := from.GetBrowser(); ok {
@@ -195,6 +232,10 @@ func (u *URLAuthResultRequest) FillFrom(from interface {
 
 	if val, ok := from.GetUserIDHint(); ok {
 		u.UserIDHint = val
+	}
+
+	if val, ok := from.GetVerifiedAppName(); ok {
+		u.VerifiedAppName = val
 	}
 
 }
@@ -238,6 +279,11 @@ func (u *URLAuthResultRequest) TypeInfo() tdp.Type {
 			Null:       !u.Flags.Has(5),
 		},
 		{
+			Name:       "IsApp",
+			SchemaName: "is_app",
+			Null:       !u.Flags.Has(6),
+		},
+		{
 			Name:       "Bot",
 			SchemaName: "bot",
 		},
@@ -275,6 +321,11 @@ func (u *URLAuthResultRequest) TypeInfo() tdp.Type {
 			SchemaName: "user_id_hint",
 			Null:       !u.Flags.Has(4),
 		},
+		{
+			Name:       "VerifiedAppName",
+			SchemaName: "verified_app_name",
+			Null:       !u.Flags.Has(7),
+		},
 	}
 	return typ
 }
@@ -289,6 +340,9 @@ func (u *URLAuthResultRequest) SetFlags() {
 	}
 	if !(u.MatchCodesFirst == false) {
 		u.Flags.Set(5)
+	}
+	if !(u.IsApp == false) {
+		u.Flags.Set(6)
 	}
 	if !(u.Browser == "") {
 		u.Flags.Set(2)
@@ -308,12 +362,15 @@ func (u *URLAuthResultRequest) SetFlags() {
 	if !(u.UserIDHint == 0) {
 		u.Flags.Set(4)
 	}
+	if !(u.VerifiedAppName == "") {
+		u.Flags.Set(7)
+	}
 }
 
 // Encode implements bin.Encoder.
 func (u *URLAuthResultRequest) Encode(b *bin.Buffer) error {
 	if u == nil {
-		return fmt.Errorf("can't encode urlAuthResultRequest#f8f8eb1e as nil")
+		return fmt.Errorf("can't encode urlAuthResultRequest#3cd623ec as nil")
 	}
 	b.PutID(URLAuthResultRequestTypeID)
 	return u.EncodeBare(b)
@@ -322,17 +379,17 @@ func (u *URLAuthResultRequest) Encode(b *bin.Buffer) error {
 // EncodeBare implements bin.BareEncoder.
 func (u *URLAuthResultRequest) EncodeBare(b *bin.Buffer) error {
 	if u == nil {
-		return fmt.Errorf("can't encode urlAuthResultRequest#f8f8eb1e as nil")
+		return fmt.Errorf("can't encode urlAuthResultRequest#3cd623ec as nil")
 	}
 	u.SetFlags()
 	if err := u.Flags.Encode(b); err != nil {
-		return fmt.Errorf("unable to encode urlAuthResultRequest#f8f8eb1e: field flags: %w", err)
+		return fmt.Errorf("unable to encode urlAuthResultRequest#3cd623ec: field flags: %w", err)
 	}
 	if u.Bot == nil {
-		return fmt.Errorf("unable to encode urlAuthResultRequest#f8f8eb1e: field bot is nil")
+		return fmt.Errorf("unable to encode urlAuthResultRequest#3cd623ec: field bot is nil")
 	}
 	if err := u.Bot.Encode(b); err != nil {
-		return fmt.Errorf("unable to encode urlAuthResultRequest#f8f8eb1e: field bot: %w", err)
+		return fmt.Errorf("unable to encode urlAuthResultRequest#3cd623ec: field bot: %w", err)
 	}
 	b.PutString(u.Domain)
 	if u.Flags.Has(2) {
@@ -356,16 +413,19 @@ func (u *URLAuthResultRequest) EncodeBare(b *bin.Buffer) error {
 	if u.Flags.Has(4) {
 		b.PutLong(u.UserIDHint)
 	}
+	if u.Flags.Has(7) {
+		b.PutString(u.VerifiedAppName)
+	}
 	return nil
 }
 
 // Decode implements bin.Decoder.
 func (u *URLAuthResultRequest) Decode(b *bin.Buffer) error {
 	if u == nil {
-		return fmt.Errorf("can't decode urlAuthResultRequest#f8f8eb1e to nil")
+		return fmt.Errorf("can't decode urlAuthResultRequest#3cd623ec to nil")
 	}
 	if err := b.ConsumeID(URLAuthResultRequestTypeID); err != nil {
-		return fmt.Errorf("unable to decode urlAuthResultRequest#f8f8eb1e: %w", err)
+		return fmt.Errorf("unable to decode urlAuthResultRequest#3cd623ec: %w", err)
 	}
 	return u.DecodeBare(b)
 }
@@ -373,62 +433,63 @@ func (u *URLAuthResultRequest) Decode(b *bin.Buffer) error {
 // DecodeBare implements bin.BareDecoder.
 func (u *URLAuthResultRequest) DecodeBare(b *bin.Buffer) error {
 	if u == nil {
-		return fmt.Errorf("can't decode urlAuthResultRequest#f8f8eb1e to nil")
+		return fmt.Errorf("can't decode urlAuthResultRequest#3cd623ec to nil")
 	}
 	{
 		if err := u.Flags.Decode(b); err != nil {
-			return fmt.Errorf("unable to decode urlAuthResultRequest#f8f8eb1e: field flags: %w", err)
+			return fmt.Errorf("unable to decode urlAuthResultRequest#3cd623ec: field flags: %w", err)
 		}
 	}
 	u.RequestWriteAccess = u.Flags.Has(0)
 	u.RequestPhoneNumber = u.Flags.Has(1)
 	u.MatchCodesFirst = u.Flags.Has(5)
+	u.IsApp = u.Flags.Has(6)
 	{
 		value, err := DecodeUser(b)
 		if err != nil {
-			return fmt.Errorf("unable to decode urlAuthResultRequest#f8f8eb1e: field bot: %w", err)
+			return fmt.Errorf("unable to decode urlAuthResultRequest#3cd623ec: field bot: %w", err)
 		}
 		u.Bot = value
 	}
 	{
 		value, err := b.String()
 		if err != nil {
-			return fmt.Errorf("unable to decode urlAuthResultRequest#f8f8eb1e: field domain: %w", err)
+			return fmt.Errorf("unable to decode urlAuthResultRequest#3cd623ec: field domain: %w", err)
 		}
 		u.Domain = value
 	}
 	if u.Flags.Has(2) {
 		value, err := b.String()
 		if err != nil {
-			return fmt.Errorf("unable to decode urlAuthResultRequest#f8f8eb1e: field browser: %w", err)
+			return fmt.Errorf("unable to decode urlAuthResultRequest#3cd623ec: field browser: %w", err)
 		}
 		u.Browser = value
 	}
 	if u.Flags.Has(2) {
 		value, err := b.String()
 		if err != nil {
-			return fmt.Errorf("unable to decode urlAuthResultRequest#f8f8eb1e: field platform: %w", err)
+			return fmt.Errorf("unable to decode urlAuthResultRequest#3cd623ec: field platform: %w", err)
 		}
 		u.Platform = value
 	}
 	if u.Flags.Has(2) {
 		value, err := b.String()
 		if err != nil {
-			return fmt.Errorf("unable to decode urlAuthResultRequest#f8f8eb1e: field ip: %w", err)
+			return fmt.Errorf("unable to decode urlAuthResultRequest#3cd623ec: field ip: %w", err)
 		}
 		u.IP = value
 	}
 	if u.Flags.Has(2) {
 		value, err := b.String()
 		if err != nil {
-			return fmt.Errorf("unable to decode urlAuthResultRequest#f8f8eb1e: field region: %w", err)
+			return fmt.Errorf("unable to decode urlAuthResultRequest#3cd623ec: field region: %w", err)
 		}
 		u.Region = value
 	}
 	if u.Flags.Has(3) {
 		headerLen, err := b.VectorHeader()
 		if err != nil {
-			return fmt.Errorf("unable to decode urlAuthResultRequest#f8f8eb1e: field match_codes: %w", err)
+			return fmt.Errorf("unable to decode urlAuthResultRequest#3cd623ec: field match_codes: %w", err)
 		}
 
 		if headerLen > 0 {
@@ -437,7 +498,7 @@ func (u *URLAuthResultRequest) DecodeBare(b *bin.Buffer) error {
 		for idx := 0; idx < headerLen; idx++ {
 			value, err := b.String()
 			if err != nil {
-				return fmt.Errorf("unable to decode urlAuthResultRequest#f8f8eb1e: field match_codes: %w", err)
+				return fmt.Errorf("unable to decode urlAuthResultRequest#3cd623ec: field match_codes: %w", err)
 			}
 			u.MatchCodes = append(u.MatchCodes, value)
 		}
@@ -445,9 +506,16 @@ func (u *URLAuthResultRequest) DecodeBare(b *bin.Buffer) error {
 	if u.Flags.Has(4) {
 		value, err := b.Long()
 		if err != nil {
-			return fmt.Errorf("unable to decode urlAuthResultRequest#f8f8eb1e: field user_id_hint: %w", err)
+			return fmt.Errorf("unable to decode urlAuthResultRequest#3cd623ec: field user_id_hint: %w", err)
 		}
 		u.UserIDHint = value
+	}
+	if u.Flags.Has(7) {
+		value, err := b.String()
+		if err != nil {
+			return fmt.Errorf("unable to decode urlAuthResultRequest#3cd623ec: field verified_app_name: %w", err)
+		}
+		u.VerifiedAppName = value
 	}
 	return nil
 }
@@ -507,6 +575,25 @@ func (u *URLAuthResultRequest) GetMatchCodesFirst() (value bool) {
 		return
 	}
 	return u.Flags.Has(5)
+}
+
+// SetIsApp sets value of IsApp conditional field.
+func (u *URLAuthResultRequest) SetIsApp(value bool) {
+	if value {
+		u.Flags.Set(6)
+		u.IsApp = true
+	} else {
+		u.Flags.Unset(6)
+		u.IsApp = false
+	}
+}
+
+// GetIsApp returns value of IsApp conditional field.
+func (u *URLAuthResultRequest) GetIsApp() (value bool) {
+	if u == nil {
+		return
+	}
+	return u.Flags.Has(6)
 }
 
 // GetBot returns value of Bot field.
@@ -633,6 +720,24 @@ func (u *URLAuthResultRequest) GetUserIDHint() (value int64, ok bool) {
 	return u.UserIDHint, true
 }
 
+// SetVerifiedAppName sets value of VerifiedAppName conditional field.
+func (u *URLAuthResultRequest) SetVerifiedAppName(value string) {
+	u.Flags.Set(7)
+	u.VerifiedAppName = value
+}
+
+// GetVerifiedAppName returns value of VerifiedAppName conditional field and
+// boolean which is true if field was set.
+func (u *URLAuthResultRequest) GetVerifiedAppName() (value string, ok bool) {
+	if u == nil {
+		return
+	}
+	if !u.Flags.Has(7) {
+		return value, false
+	}
+	return u.VerifiedAppName, true
+}
+
 // URLAuthResultAccepted represents TL type `urlAuthResultAccepted#623a8fa0`.
 // Details about an accepted authorization request, for more info click here »¹
 //
@@ -641,9 +746,19 @@ func (u *URLAuthResultRequest) GetUserIDHint() (value int64, ok bool) {
 //
 // See https://core.telegram.org/constructor/urlAuthResultAccepted for reference.
 type URLAuthResultAccepted struct {
-	// Flags field of URLAuthResultAccepted.
+	// Flags, see TL conditional fields¹
+	//
+	// Links:
+	//  1) https://core.telegram.org/mtproto/TL-combinators#conditional-fields
 	Flags bin.Fields
-	// The URL name of the website on which the user has logged in.
+	// If present, the URL to open in the external browser (may use a custom scheme for
+	// direct switching to another app); if absent, the login succeeded and clients should
+	// simply show a confirmation toast. Always set for bot button URL authorization¹ and
+	// link URL authorization².
+	//
+	// Links:
+	//  1) https://core.telegram.org/api/url-authorization#bot-button-url-authorization
+	//  2) https://core.telegram.org/api/url-authorization#link-url-authorization
 	//
 	// Use SetURL and GetURL helpers.
 	URL string
@@ -934,7 +1049,7 @@ const URLAuthResultClassName = "UrlAuthResult"
 //	    panic(err)
 //	}
 //	switch v := g.(type) {
-//	case *tg.URLAuthResultRequest: // urlAuthResultRequest#f8f8eb1e
+//	case *tg.URLAuthResultRequest: // urlAuthResultRequest#3cd623ec
 //	case *tg.URLAuthResultAccepted: // urlAuthResultAccepted#623a8fa0
 //	case *tg.URLAuthResultDefault: // urlAuthResultDefault#a9d6db1f
 //	default: panic(v)
@@ -966,7 +1081,7 @@ func DecodeURLAuthResult(buf *bin.Buffer) (URLAuthResultClass, error) {
 	}
 	switch id {
 	case URLAuthResultRequestTypeID:
-		// Decoding urlAuthResultRequest#f8f8eb1e.
+		// Decoding urlAuthResultRequest#3cd623ec.
 		v := URLAuthResultRequest{}
 		if err := v.Decode(buf); err != nil {
 			return nil, fmt.Errorf("unable to decode URLAuthResultClass: %w", err)
