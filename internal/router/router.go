@@ -458,6 +458,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		Callback:          r.callback,
 		CredentialManager: credMgr,
 		Registry:          toolRegistry,
+		MemoryDir:         memoryDir,
 	}
 
 	// Seed pre-provisioned secrets from env vars. Packages declare their own
@@ -876,12 +877,12 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				return modeltools.LoadOverride(s)
 			},
 			ChannelModels: channelModels,
-			MaxTurns:  mu.cfg.MaxTurns,
-			Debug:     mu.cfg.Debug,
-			APIKey:    mu.cfg.APIKey,
-			HomeDir:   homeDir,
-			MemoryDir: memoryDir,
-			AddDirs:   addDirs,
+			MaxTurns:      mu.cfg.MaxTurns,
+			Debug:         mu.cfg.Debug,
+			APIKey:        mu.cfg.APIKey,
+			HomeDir:       homeDir,
+			MemoryDir:     memoryDir,
+			AddDirs:       addDirs,
 			AddDirsFunc: func() []string {
 				// Read from the dev store each turn so worktrees created
 				// mid-session (via dev_start) are immediately accessible.

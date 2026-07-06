@@ -50,7 +50,9 @@ func channelSendDef() mcp.ToolDef {
 		Description: "Send a message to another channel. The message arrives on the target channel " +
 			"as if it were a new incoming message, waking the agent if idle. Only channels declared " +
 			"as links in the config are valid targets. Use this when the current channel detects " +
-			"something that requires action on another channel.",
+			"something that requires action on another channel. Set no_reply to true to " +
+			"report an already-actioned result: it is recorded in the target channel's history but the " +
+			"target agent will not reply or re-process it.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -65,6 +67,11 @@ func channelSendDef() mcp.ToolDef {
 				"message": {
 					"type": "string",
 					"description": "The message text to deliver to the target channel."
+				},
+				"no_reply": {
+					"type": "boolean",
+					"description": "Set to true for an informational, already-actioned update: it is still recorded in the target's history, but the target agent absorbs it silently without replying or re-processing. Defaults to false (normal cross-channel message the target acts on).",
+					"default": false
 				}
 			},
 			"required": ["from_channel", "to_channel", "message"]
@@ -76,6 +83,10 @@ type channelSendParams struct {
 	FromChannel string `json:"from_channel"`
 	ToChannel   string `json:"to_channel"`
 	Message     string `json:"message"`
+
+	// NoReply marks the message as an informational, already-actioned update:
+	// recorded in the target's history but not replied to. Defaults to false.
+	NoReply bool `json:"no_reply"`
 }
 
 func channelSendHandler(deps SendDeps) mcp.ToolHandler {
@@ -145,16 +156,18 @@ func channelSendHandler(deps SendDeps) mcp.ToolHandler {
 			SourceInfo: &channel.MessageSourceInfo{
 				Source:      channel.SourceChannel,
 				FromChannel: p.FromChannel,
+				NoReply:     p.NoReply,
 			},
 		}
 
 		select {
 		case deps.Output <- msg:
-			return json.Marshal(map[string]string{
-				"status":  "sent",
-				"from":    p.FromChannel,
-				"to":      p.ToChannel,
-				"message": p.Message,
+			return json.Marshal(map[string]any{
+				"status":   "sent",
+				"from":     p.FromChannel,
+				"to":       p.ToChannel,
+				"message":  p.Message,
+				"no_reply": p.NoReply,
 			})
 		case <-ctx.Done():
 			return nil, fmt.Errorf("send cancelled: %w", ctx.Err())

@@ -127,6 +127,12 @@ type RegistrationContext struct {
 	CredentialManager  *credential.Manager
 	Registry           *Registry
 	OnCredentialChange func(packageName string)
+
+	// MemoryDir is the user's sandboxed memory directory (agent CWD + --add-dir).
+	// Packages that need to hand the agent a file it can read (e.g. the Gmail
+	// notifier writing full email bodies) write under here. Empty in contexts
+	// with no per-user filesystem (e.g. some tests, local dev without a user dir).
+	MemoryDir string
 }
 
 // CheckCredentialStatus checks the secret store for each SecretSpec and returns

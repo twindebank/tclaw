@@ -80,50 +80,64 @@ func gmailReadHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandl
 
 		slog.Info("gmail read starting", "connection", a.CredentialSet, "message_id", a.MessageID)
 
-		output, err := runGWS(ctx, deps, gws.Gmail.GetMessage(map[string]any{
-			"userId": "me",
-			"id":     a.MessageID,
-			"format": "full",
-		}))
+		rsp, err := readFullMessage(ctx, deps, a.MessageID)
 		if err != nil {
-			return nil, fmt.Errorf("get message: %w", err)
+			return nil, err
 		}
-
-		var msg gmailFullMessage
-		if err := json.Unmarshal(output, &msg); err != nil {
-			return nil, fmt.Errorf("parse message: %w", err)
-		}
-
-		rsp := gmailReadResponse{
-			ID:       msg.ID,
-			ThreadID: msg.ThreadID,
-		}
-
-		if msg.Payload != nil {
-			for _, h := range msg.Payload.Headers {
-				switch h.Name {
-				case "From":
-					rsp.From = h.Value
-				case "To":
-					rsp.To = h.Value
-				case "Subject":
-					rsp.Subject = h.Value
-				case "Date":
-					rsp.Date = h.Value
-				case "Message-ID", "Message-Id":
-					rsp.MessageID = h.Value
-				case "References":
-					rsp.References = h.Value
-				}
-			}
-		}
-
-		rsp.Body = extractBody(msg.Payload)
 
 		slog.Info("gmail read done", "connection", a.CredentialSet, "message_id", a.MessageID, "body_len", len(rsp.Body))
 
 		return json.Marshal(rsp)
 	}
+}
+
+// readFullMessage fetches a single email with format=full and returns it as a
+// gmailReadResponse: parsed headers, threading identifiers, and the best
+// plain-text body (text/plain preferred, HTML stripped as fallback). Shared by
+// the google_gmail_read tool and the new_email notifier so both produce
+// identical, clean bodies without dumping raw HTML into context.
+func readFullMessage(ctx context.Context, deps Deps, messageID string) (gmailReadResponse, error) {
+	output, err := runGWS(ctx, deps, gws.Gmail.GetMessage(map[string]any{
+		"userId": "me",
+		"id":     messageID,
+		"format": "full",
+	}))
+	if err != nil {
+		return gmailReadResponse{}, fmt.Errorf("get message: %w", err)
+	}
+
+	var msg gmailFullMessage
+	if err := json.Unmarshal(output, &msg); err != nil {
+		return gmailReadResponse{}, fmt.Errorf("parse message: %w", err)
+	}
+
+	rsp := gmailReadResponse{
+		ID:       msg.ID,
+		ThreadID: msg.ThreadID,
+	}
+
+	if msg.Payload != nil {
+		for _, h := range msg.Payload.Headers {
+			switch h.Name {
+			case "From":
+				rsp.From = h.Value
+			case "To":
+				rsp.To = h.Value
+			case "Subject":
+				rsp.Subject = h.Value
+			case "Date":
+				rsp.Date = h.Value
+			case "Message-ID", "Message-Id":
+				rsp.MessageID = h.Value
+			case "References":
+				rsp.References = h.Value
+			}
+		}
+	}
+
+	rsp.Body = extractBody(msg.Payload)
+
+	return rsp, nil
 }
 
 // extractBody walks the MIME tree to find the best plain-text representation.

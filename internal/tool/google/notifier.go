@@ -19,7 +19,15 @@ const (
 	TypeNewEmail = "new_email"
 
 	defaultPollInterval = 2 * time.Minute
-	maxPollResults      = 10
+
+	// historyPageSize is how many history records to request per page. Gmail
+	// allows up to 500; 100 keeps individual responses small while making it
+	// rare to need more than one page per poll.
+	historyPageSize = 100
+
+	// maxHistoryPages bounds pagination so a runaway backlog (or an API quirk
+	// that never clears nextPageToken) can't loop forever in one poll.
+	maxHistoryPages = 25
 
 	// Maximum number of recently-seen message IDs to remember per subscription.
 	// Gmail's history.list can return the same message across overlapping polls
@@ -40,6 +48,14 @@ type notifier struct {
 	depsMap func() map[credential.CredentialSetID]Deps
 	state   store.Store
 
+	// memoryDir is the agent-readable directory where full email bodies are
+	// written (see notifier_body.go). Empty disables body files.
+	memoryDir string
+
+	// run executes a gws command; defaults to runGWS. Overridable in tests to
+	// stub the Gmail API without spawning the gws binary.
+	run func(ctx context.Context, deps Deps, cmd gws.Command) (json.RawMessage, error)
+
 	mu      sync.Mutex
 	cancels map[notification.SubscriptionID]context.CancelFunc
 
@@ -51,10 +67,12 @@ type notifier struct {
 	seenLocks map[string]*sync.Mutex
 }
 
-func newNotifier(depsMap func() map[credential.CredentialSetID]Deps, state store.Store) *notifier {
+func newNotifier(depsMap func() map[credential.CredentialSetID]Deps, state store.Store, memoryDir string) *notifier {
 	return &notifier{
 		depsMap:   depsMap,
 		state:     state,
+		memoryDir: memoryDir,
+		run:       runGWS,
 		cancels:   make(map[notification.SubscriptionID]context.CancelFunc),
 		seenLocks: make(map[string]*sync.Mutex),
 	}
@@ -287,33 +305,24 @@ func (n *notifier) poll(ctx context.Context, id notification.SubscriptionID, cre
 
 	newMessageIDs, newHistoryID, err := n.fetchHistory(ctx, credSetID, cursor)
 	if err != nil {
+		// Hold the cursor so the next poll retries the same window — no skip.
 		slog.Error("gmail notifier: history fetch failed", "subscription", id, "error", err)
 		return cursor
 	}
 
-	if newHistoryID != "" {
-		cursor = newHistoryID
-		n.saveCursor(ctx, id, cursor)
-	}
-
 	if len(newMessageIDs) == 0 {
-		return cursor
+		// Nothing new: safe to advance the cursor past this empty window.
+		return n.advanceCursor(ctx, id, cursor, newHistoryID)
 	}
 
-	// Filter and mark seen under a per-credential lock so concurrent pollers
-	// for the same Gmail account can't both observe an empty seen set, fetch
-	// the same message, and both emit. The lock is released before emit so
-	// emitter latency doesn't serialize unrelated pollers.
+	// Dedupe against the rolling seen set (shared per credential set) so
+	// overlapping windows and sibling subscriptions don't re-notify. We only
+	// READ here and reserve AFTER a successful emit below — reserving before
+	// emit would let a fetch failure mark a message seen and silently drop it.
 	lock := n.seenLock(credSetID)
 	lock.Lock()
 	seen := n.loadSeen(ctx, credSetID)
 	freshMessageIDs, duplicates := filterSeen(newMessageIDs, seen)
-	if len(freshMessageIDs) > 0 {
-		// Mark IDs as seen BEFORE emitting so a crash after emit doesn't
-		// cause a re-notification on restart, and parallel pollers see the
-		// fresh entries immediately.
-		n.saveSeen(ctx, credSetID, appendCapped(seen, freshMessageIDs, maxSeenMessageIDs))
-	}
 	lock.Unlock()
 
 	if duplicates > 0 {
@@ -323,26 +332,63 @@ func (n *notifier) poll(ctx context.Context, id notification.SubscriptionID, cre
 	}
 
 	if len(freshMessageIDs) == 0 {
-		return cursor
+		return n.advanceCursor(ctx, id, cursor, newHistoryID)
 	}
 
-	slog.Debug("gmail notifier: poll complete",
+	slog.Debug("gmail notifier: poll processing new messages",
 		"subscription", id, "new_messages", len(freshMessageIDs), "cursor", cursor)
 
-	summaries := n.fetchMetadata(ctx, credSetID, freshMessageIDs)
-	if len(summaries) == 0 {
+	deps, err := resolveDeps(n.depsMap(), credSetID)
+	if err != nil {
+		// Can't fetch bodies right now — hold the cursor and retry next poll.
+		slog.Error("gmail notifier: resolve deps for message fetch", "subscription", id, "error", err)
 		return cursor
 	}
 
-	text := formatNewEmailNotification(summaries)
-	if err := emitter.Emit(ctx, notification.Notification{
-		SubscriptionID: id,
-		Text:           text,
-	}); err != nil {
-		slog.Error("gmail notifier: emit failed", "subscription", id, "error", err)
+	// Emit one notification per email (never bundled) so each becomes its own
+	// queue entry and the agent actions them independently. Mark each seen only
+	// after its notification is emitted; on emit failure, stop and hold the
+	// cursor so the remainder is retried next poll.
+	var emitted []string
+	emitFailed := false
+	for _, messageID := range freshMessageIDs {
+		text := n.buildNotificationText(ctx, deps, messageID)
+		if emitErr := emitter.Emit(ctx, notification.Notification{
+			SubscriptionID: id,
+			Text:           text,
+		}); emitErr != nil {
+			slog.Error("gmail notifier: emit failed", "subscription", id, "message_id", messageID, "error", emitErr)
+			emitFailed = true
+			break
+		}
+		emitted = append(emitted, messageID)
 	}
 
-	return cursor
+	if len(emitted) > 0 {
+		lock.Lock()
+		n.saveSeen(ctx, credSetID, appendCapped(n.loadSeen(ctx, credSetID), emitted, maxSeenMessageIDs))
+		lock.Unlock()
+	}
+
+	if emitFailed {
+		// Hold the cursor: the un-emitted tail is retried next poll (already
+		// emitted IDs are now in the seen set and won't re-notify).
+		return cursor
+	}
+
+	return n.advanceCursor(ctx, id, cursor, newHistoryID)
+}
+
+// advanceCursor persists and returns newHistoryID as the cursor when it is
+// non-empty; otherwise it keeps (holds) the current cursor. An empty
+// newHistoryID means either no history change or paginate-cap hold — in both
+// cases the next poll should re-read from the same point.
+func (n *notifier) advanceCursor(ctx context.Context, id notification.SubscriptionID, cursor, newHistoryID string) string {
+	if newHistoryID == "" {
+		return cursor
+	}
+	n.saveCursor(ctx, id, newHistoryID)
+	return newHistoryID
 }
 
 // filterSeen splits candidate message IDs into those not present in seen
@@ -385,7 +431,7 @@ func (n *notifier) fetchCurrentHistoryID(ctx context.Context, credSetID string) 
 		return "", fmt.Errorf("resolve credential set %s: %w", credSetID, err)
 	}
 
-	output, err := runGWS(ctx, deps, gws.Command{
+	output, err := n.run(ctx, deps, gws.Command{
 		Args:   []string{"gmail", "users", "getProfile"},
 		Params: map[string]any{"userId": "me"},
 	})
@@ -406,6 +452,9 @@ func (n *notifier) fetchCurrentHistoryID(ctx context.Context, credSetID string) 
 	return profile.HistoryID, nil
 }
 
+// fetchHistory returns every message ID added since startHistoryID, following
+// nextPageToken across all pages so a burst larger than one page is never
+// dropped, and the mailbox's current historyId to use as the next cursor.
 func (n *notifier) fetchHistory(ctx context.Context, credSetID, startHistoryID string) ([]string, string, error) {
 	depsMap := n.depsMap()
 	deps, err := resolveDeps(depsMap, credSetID)
@@ -413,44 +462,71 @@ func (n *notifier) fetchHistory(ctx context.Context, credSetID, startHistoryID s
 		return nil, "", fmt.Errorf("resolve credential set %s: %w", credSetID, err)
 	}
 
-	output, err := runGWS(ctx, deps, gws.Command{
-		Args: []string{"gmail", "users", "history", "list"},
-		Params: map[string]any{
+	// Deduplicate message IDs — the same message can appear across multiple
+	// history records and pages.
+	seen := make(map[string]bool)
+	var messageIDs []string
+	var latestHistoryID string
+	pageToken := ""
+
+	for page := 0; page < maxHistoryPages; page++ {
+		params := map[string]any{
 			"userId":         "me",
 			"startHistoryId": startHistoryID,
 			"historyTypes":   "messageAdded",
-			"maxResults":     maxPollResults,
-		},
-	})
-	if err != nil {
-		return nil, "", fmt.Errorf("list history: %w", err)
-	}
+			"maxResults":     historyPageSize,
+		}
+		if pageToken != "" {
+			params["pageToken"] = pageToken
+		}
 
-	var rsp historyListResponse
-	if err := json.Unmarshal(output, &rsp); err != nil {
-		return nil, "", fmt.Errorf("parse history response: %w", err)
-	}
+		output, err := n.run(ctx, deps, gws.Command{
+			Args:   []string{"gmail", "users", "history", "list"},
+			Params: params,
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("list history (page %d): %w", page, err)
+		}
 
-	// Deduplicate message IDs — the same message can appear in multiple
-	// history records.
-	seen := make(map[string]bool)
-	var messageIDs []string
-	for _, record := range rsp.History {
-		for _, added := range record.MessagesAdded {
-			msgID := added.Message.ID
-			if !seen[msgID] {
-				seen[msgID] = true
-				messageIDs = append(messageIDs, msgID)
+		var rsp historyListResponse
+		if err := json.Unmarshal(output, &rsp); err != nil {
+			return nil, "", fmt.Errorf("parse history response: %w", err)
+		}
+
+		for _, record := range rsp.History {
+			for _, added := range record.MessagesAdded {
+				msgID := added.Message.ID
+				if !seen[msgID] {
+					seen[msgID] = true
+					messageIDs = append(messageIDs, msgID)
+				}
 			}
+		}
+
+		if rsp.NextPageToken == "" {
+			// Fully drained: this page's historyId is the safe next cursor.
+			latestHistoryID = rsp.HistoryID
+			break
+		}
+		pageToken = rsp.NextPageToken
+
+		if page == maxHistoryPages-1 {
+			// Cap hit with pages still remaining. Leave latestHistoryID empty so
+			// the caller HOLDS the cursor — the messages we did collect are emitted
+			// (and deduped via the seen set), and the next poll re-pages from the
+			// same startHistoryId to reach the rest. Nothing is skipped.
+			slog.Warn("gmail notifier: history pagination hit page cap, holding cursor for next poll",
+				"credential_set", credSetID, "collected", len(messageIDs))
 		}
 	}
 
-	return messageIDs, rsp.HistoryID, nil
+	return messageIDs, latestHistoryID, nil
 }
 
 type historyListResponse struct {
-	History   []historyRecord `json:"history"`
-	HistoryID string          `json:"historyId"`
+	History       []historyRecord `json:"history"`
+	HistoryID     string          `json:"historyId"`
+	NextPageToken string          `json:"nextPageToken"`
 }
 
 type historyRecord struct {
@@ -461,75 +537,4 @@ type messageAddedEvent struct {
 	Message struct {
 		ID string `json:"id"`
 	} `json:"message"`
-}
-
-func (n *notifier) fetchMetadata(ctx context.Context, credSetID string, messageIDs []string) []gmailSummary {
-	depsMap := n.depsMap()
-	deps, err := resolveDeps(depsMap, credSetID)
-	if err != nil {
-		slog.Error("gmail notifier: resolve deps for metadata fetch", "error", err)
-		return nil
-	}
-
-	type result struct {
-		index   int
-		summary gmailSummary
-		err     error
-	}
-
-	results := make([]result, len(messageIDs))
-	var wg sync.WaitGroup
-	semaphore := make(chan struct{}, gmailMetadataConcurrency)
-
-	for i, msgID := range messageIDs {
-		wg.Add(1)
-		go func(idx int, id string) {
-			defer wg.Done()
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-
-			output, fetchErr := runGWS(ctx, deps, gws.Gmail.GetMessage(map[string]any{
-				"userId":          "me",
-				"id":              id,
-				"format":          "metadata",
-				"metadataHeaders": "Subject,From,To,Date",
-			}))
-			if fetchErr != nil {
-				results[idx] = result{index: idx, err: fetchErr}
-				return
-			}
-
-			var meta gmailMessageMetadata
-			if parseErr := json.Unmarshal(output, &meta); parseErr != nil {
-				results[idx] = result{index: idx, err: parseErr}
-				return
-			}
-
-			results[idx] = result{index: idx, summary: extractSummary(meta)}
-		}(i, msgID)
-	}
-	wg.Wait()
-
-	summaries := make([]gmailSummary, 0, len(results))
-	for _, r := range results {
-		if r.err != nil {
-			slog.Warn("gmail notifier: metadata fetch failed", "error", r.err)
-			continue
-		}
-		summaries = append(summaries, r.summary)
-	}
-	return summaries
-}
-
-func formatNewEmailNotification(summaries []gmailSummary) string {
-	if len(summaries) == 1 {
-		s := summaries[0]
-		return fmt.Sprintf("📧 New email from %s: %s\n%s", s.From, s.Subject, s.Snippet)
-	}
-
-	text := fmt.Sprintf("📧 %d new emails:\n", len(summaries))
-	for _, s := range summaries {
-		text += fmt.Sprintf("• %s — %s\n", s.From, s.Subject)
-	}
-	return text
 }

@@ -3,15 +3,21 @@ package google
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"tclaw/internal/credential"
+	"tclaw/internal/gws"
 	"tclaw/internal/libraries/store"
 	"tclaw/internal/notification"
 )
+
+var errTest = errors.New("boom")
 
 func emptyDepsMap() map[credential.CredentialSetID]Deps { return nil }
 
@@ -257,36 +263,176 @@ func TestAppendCapped(t *testing.T) {
 	})
 }
 
-func TestFormatNewEmailNotification(t *testing.T) {
-	t.Run("single email includes from, subject, and snippet", func(t *testing.T) {
-		text := formatNewEmailNotification([]gmailSummary{
-			{From: "alice@example.com", Subject: "Meeting tomorrow", Snippet: "Hi, can we meet at 3pm?"},
-		})
+func TestFormatEmailNotification(t *testing.T) {
+	t.Run("carries exact ids, preview, and file path", func(t *testing.T) {
+		text := formatEmailNotification(gmailReadResponse{
+			ID:       "msg123",
+			ThreadID: "thread456",
+			From:     "alice@example.com",
+			Subject:  "Meeting tomorrow",
+			Date:     "Mon, 6 Jul 2026 10:00:00 +0000",
+			Body:     "Hi, can we meet at 3pm?",
+		}, "/data/theo/memory/emails/msg123.md")
+
 		require.Contains(t, text, "alice@example.com")
 		require.Contains(t, text, "Meeting tomorrow")
+		require.Contains(t, text, "gmail_message_id: msg123")
+		require.Contains(t, text, "thread_id: thread456")
 		require.Contains(t, text, "Hi, can we meet at 3pm?")
+		require.Contains(t, text, "/data/theo/memory/emails/msg123.md")
+		require.Contains(t, text, "Do not reverse-search Gmail")
 	})
 
-	t.Run("multiple emails shows count and all senders", func(t *testing.T) {
-		text := formatNewEmailNotification([]gmailSummary{
-			{From: "alice@example.com", Subject: "Meeting"},
-			{From: "bob@example.com", Subject: "Invoice"},
-			{From: "carol@example.com", Subject: "Hello"},
+	t.Run("without a file path points to google_gmail_read", func(t *testing.T) {
+		text := formatEmailNotification(gmailReadResponse{
+			ID: "msg123", From: "a@b.com", Subject: "Hi", Body: "body",
+		}, "")
+		require.Contains(t, text, "google_gmail_read")
+		require.NotContains(t, text, "saved to")
+	})
+}
+
+func TestFormatDegradedNotification(t *testing.T) {
+	t.Run("includes message id and read instruction", func(t *testing.T) {
+		text := formatDegradedNotification("msg789", errTest)
+		require.Contains(t, text, "gmail_message_id: msg789")
+		require.Contains(t, text, "google_gmail_read")
+	})
+}
+
+func TestTruncatePreview(t *testing.T) {
+	t.Run("collapses whitespace and leaves short text intact", func(t *testing.T) {
+		require.Equal(t, "hello world", truncatePreview("hello   \n world", 100))
+	})
+
+	t.Run("truncates long text with an ellipsis", func(t *testing.T) {
+		out := truncatePreview("abcdefghij", 4)
+		require.Equal(t, "abcd…", out)
+	})
+}
+
+func TestWriteEmailBodyFile(t *testing.T) {
+	t.Run("writes frontmatter and body, returns readable path", func(t *testing.T) {
+		n, _ := setupNotifier(t)
+
+		path, err := n.writeEmailBodyFile(gmailReadResponse{
+			ID:        "msgABC",
+			ThreadID:  "thr1",
+			From:      "alice@example.com",
+			To:        "theo@example.com",
+			Subject:   `Re: budget: "Q3" plan`,
+			Date:      "Mon, 6 Jul 2026 10:00:00 +0000",
+			MessageID: "<abc@mail.example.com>",
+			Body:      "Line one\nLine two",
 		})
-		require.Contains(t, text, "3 new emails")
-		require.Contains(t, text, "alice@example.com")
-		require.Contains(t, text, "bob@example.com")
-		require.Contains(t, text, "carol@example.com")
+		require.NoError(t, err)
+
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		content := string(data)
+
+		require.Contains(t, content, "gmail_message_id: \"msgABC\"")
+		require.Contains(t, content, "thread_id: \"thr1\"")
+		require.Contains(t, content, "message_id_header: \"<abc@mail.example.com>\"")
+		// Colons and quotes in the subject are JSON-escaped so the frontmatter stays valid.
+		require.Contains(t, content, `subject: "Re: budget: \"Q3\" plan"`)
+		require.Contains(t, content, "Line one\nLine two")
+	})
+}
+
+func TestNotifier_FetchHistory(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("single page returns all ids and advances the cursor", func(t *testing.T) {
+		n := stubbedNotifier(t, []string{
+			`{"history":[
+				{"messagesAdded":[{"message":{"id":"m1"}}]},
+				{"messagesAdded":[{"message":{"id":"m2"}}]}
+			],"historyId":"2000"}`,
+		})
+
+		ids, historyID, err := n.fetchHistory(ctx, testCredSet, "1000")
+		require.NoError(t, err)
+		require.Equal(t, []string{"m1", "m2"}, ids)
+		require.Equal(t, "2000", historyID)
+	})
+
+	t.Run("deduplicates ids repeated across records", func(t *testing.T) {
+		n := stubbedNotifier(t, []string{
+			`{"history":[
+				{"messagesAdded":[{"message":{"id":"m1"}},{"message":{"id":"m1"}}]},
+				{"messagesAdded":[{"message":{"id":"m2"}}]}
+			],"historyId":"2000"}`,
+		})
+
+		ids, _, err := n.fetchHistory(ctx, testCredSet, "1000")
+		require.NoError(t, err)
+		require.Equal(t, []string{"m1", "m2"}, ids)
+	})
+
+	t.Run("follows nextPageToken across pages so nothing is skipped", func(t *testing.T) {
+		n := stubbedNotifier(t, []string{
+			`{"history":[{"messagesAdded":[{"message":{"id":"m1"}},{"message":{"id":"m2"}}]}],"historyId":"2500","nextPageToken":"p2"}`,
+			`{"history":[{"messagesAdded":[{"message":{"id":"m2"}},{"message":{"id":"m3"}}]}],"historyId":"3000"}`,
+		})
+
+		ids, historyID, err := n.fetchHistory(ctx, testCredSet, "1000")
+		require.NoError(t, err)
+		require.Equal(t, []string{"m1", "m2", "m3"}, ids)
+		// Cursor comes from the terminal page, not an intermediate one.
+		require.Equal(t, "3000", historyID)
+	})
+
+	t.Run("holds the cursor when pagination hits the page cap", func(t *testing.T) {
+		// Every page keeps a nextPageToken so the loop is bounded only by
+		// maxHistoryPages. The collected ids must still come back, but with an
+		// empty historyId so the caller holds the cursor and re-pages next poll.
+		pages := make([]string, maxHistoryPages)
+		want := make([]string, maxHistoryPages)
+		for i := range pages {
+			id := fmt.Sprintf("m%d", i)
+			want[i] = id
+			pages[i] = fmt.Sprintf(`{"history":[{"messagesAdded":[{"message":{"id":%q}}]}],"historyId":"9999","nextPageToken":"p%d"}`, id, i+1)
+		}
+		n := stubbedNotifier(t, pages)
+
+		ids, historyID, err := n.fetchHistory(ctx, testCredSet, "1000")
+		require.NoError(t, err)
+		require.Equal(t, want, ids)
+		require.Empty(t, historyID, "capped pagination must hold the cursor")
 	})
 }
 
 // --- helpers ---
 
+const testCredSet = "google/work"
+
 func setupNotifier(t *testing.T) (*notifier, store.Store) {
 	t.Helper()
 	s, err := store.NewFS(t.TempDir())
 	require.NoError(t, err)
-	return newNotifier(emptyDepsMap, s), s
+	return newNotifier(emptyDepsMap, s, t.TempDir()), s
+}
+
+// stubbedNotifier returns a notifier whose Gmail calls are served from a fixed
+// sequence of canned page responses, so history pagination can be tested without
+// spawning the gws binary.
+func stubbedNotifier(t *testing.T, pages []string) *notifier {
+	t.Helper()
+	n, _ := setupNotifier(t)
+	n.depsMap = func() map[credential.CredentialSetID]Deps {
+		return map[credential.CredentialSetID]Deps{testCredSet: {}}
+	}
+	idx := 0
+	n.run = func(_ context.Context, _ Deps, _ gws.Command) (json.RawMessage, error) {
+		if idx >= len(pages) {
+			return nil, errors.New("notifier requested more pages than the stub provides")
+		}
+		out := pages[idx]
+		idx++
+		return json.RawMessage(out), nil
+	}
+	return n
 }
 
 type noopEmitter struct {

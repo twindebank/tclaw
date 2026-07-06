@@ -145,7 +145,7 @@ func (p *Package) OnCredentialSetChange(handler *mcp.Handler, regCtx toolpkg.Reg
 			}
 			return freshDeps
 		}
-		notif := NewNotifier(depsFunc, regCtx.StateStore)
+		notif := NewNotifier(depsFunc, regCtx.StateStore, regCtx.MemoryDir)
 		p.NotificationManager.RegisterNotifier(p.Name(), notif)
 	}
 
@@ -155,8 +155,10 @@ func (p *Package) OnCredentialSetChange(handler *mcp.Handler, regCtx toolpkg.Reg
 // NewNotifier creates a notification.Notifier for Gmail notifications.
 // The depsMap function is called on each poll to get fresh credentials.
 // The state store persists the Gmail history cursor across restarts.
-func NewNotifier(depsMap func() map[credential.CredentialSetID]Deps, state store.Store) notification.Notifier {
-	return newNotifier(depsMap, state)
+// memoryDir is where the notifier writes full email bodies for the agent to
+// read on demand; empty disables body files (agent falls back to google_gmail_read).
+func NewNotifier(depsMap func() map[credential.CredentialSetID]Deps, state store.Store, memoryDir string) notification.Notifier {
+	return newNotifier(depsMap, state, memoryDir)
 }
 
 // toResolvedSets converts toolpkg.ResolvedCredentialSet to providerutil.ResolvedSet.
