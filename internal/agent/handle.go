@@ -326,6 +326,16 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		contextSection += fmt.Sprintf("Source: scheduled prompt (%s)\n", source.ScheduleName)
 	case channel.SourceChannel:
 		contextSection += fmt.Sprintf("Source: cross-channel message from **%s**\n", source.FromChannel)
+		if source.NoReply {
+			// Informational update: already actioned by the source channel. Record
+			// it, don't re-do the work, and don't message the user.
+			contextSection += "This is an informational update that has already been actioned by the " +
+				"source channel — it needs no reply. Absorb it into your context and memory as needed, " +
+				"then finish with channel_done WITHOUT sending a message. Only take action if something " +
+				"is clearly still required of you.\n"
+		}
+	case channel.SourceNotification:
+		contextSection += fmt.Sprintf("Source: notification subscription (%s)\n", source.SubscriptionLabel)
 	case channel.SourceChild:
 		contextSection += fmt.Sprintf("Source: lifecycle event from child channel **%s**\n", source.ChildChannel)
 	case channel.SourceResume:
