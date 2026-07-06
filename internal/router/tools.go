@@ -10,6 +10,7 @@ import (
 	"tclaw/internal/config"
 	"tclaw/internal/credential"
 	"tclaw/internal/mcp"
+	"tclaw/internal/remotemcpproxy"
 	"tclaw/internal/remotemcpstore"
 	"tclaw/internal/toolgroup"
 	"tclaw/internal/user"
@@ -136,6 +137,8 @@ func buildMCPConfigPaths(
 	ctx context.Context,
 	allChMap map[channel.ChannelID]channel.Channel,
 	connMgr *remotemcpstore.Manager,
+	proxy *remotemcpproxy.Server,
+	proxyToken string,
 	mcpConfigDir string,
 	mcpAddr string,
 	mcpToken string,
@@ -164,23 +167,7 @@ func buildMCPConfigPaths(
 			continue
 		}
 
-		var entries []mcp.RemoteMCPEntry
-		for _, m := range mcps {
-			entry := mcp.RemoteMCPEntry{Name: m.Name, URL: m.URL}
-			auth, authErr := connMgr.GetRemoteMCPAuth(ctx, m.Name)
-			if authErr != nil {
-				slog.Warn("failed to load remote mcp auth for channel config", "name", m.Name, "err", authErr)
-			}
-			if auth != nil {
-				if auth.AccessToken != "" {
-					entry.BearerToken = auth.AccessToken
-				}
-				if len(auth.StaticHeaders) > 0 {
-					entry.ExtraHeaders = auth.StaticHeaders
-				}
-			}
-			entries = append(entries, entry)
-		}
+		entries := remoteMCPConfigEntries(mcps, proxy, proxyToken)
 
 		path, err := mcp.GenerateChannelConfigFile(mcpConfigDir, mcpAddr, mcpToken, name, entries)
 		if err != nil {
