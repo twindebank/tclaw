@@ -671,8 +671,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		channelSet.Replace(allChMap)
 		scheduler.Reload()
 
-		// Merge message streams.
-		mergedMsgs := channel.MergeFanIns(dynamicCtx, allStaticMsgs, dynamicMsgs)
+		// Merge message streams. mergeAgentInputs (not a plain fan-in) requeues a
+		// non-user message that's in flight when this iteration is cancelled, so a
+		// schedule firing at a restart boundary isn't silently dropped.
+		mergedMsgs := mergeAgentInputs(dynamicCtx, messageQueue, allStaticMsgs, dynamicMsgs)
 
 		// Build system prompt and add-dirs for this iteration.
 		promptResult := BuildIterationPrompt(dynamicCtx, PromptParams{
@@ -847,6 +849,15 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 					select {
 					case bridgeCh <- msg:
 					case <-agentCtx.Done():
+						// Same guard as mergeAgentInputs, one hop later: a non-user
+						// message pulled here but not handed to the agent before the
+						// turn ends must survive to the next start, not be dropped.
+						if msg.SourceInfo != nil && msg.SourceInfo.Source != channel.SourceUser {
+							if err := messageQueue.Push(context.WithoutCancel(agentCtx), msg); err != nil {
+								slog.Error("router: failed to requeue non-user message on agent shutdown",
+									"channel", msg.ChannelID, "err", err)
+							}
+						}
 						return
 					}
 				case <-agentCtx.Done():
