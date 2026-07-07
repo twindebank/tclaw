@@ -52,6 +52,8 @@ efficient and handle edge cases:
 - `google_gmail_send` — compose and send
 - `google_gmail_forward` — forward (fetches the full body; handles HTML-only emails,
   unlike `gws gmail +forward` which truncates to the snippet)
+- `google_gmail_modify` — label/mark-read/mark-unread. Use this instead of `gmail users
+  messages modify` — pass `add_label_ids`/`remove_label_ids` directly, no JSON assembly
 - `google_calendar_list` / `google_calendar_create` — list and create events
 
 ## tclaw-specific API gotchas
