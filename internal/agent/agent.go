@@ -1,6 +1,6 @@
 // Package agent implements the stateless agent loop. It reads messages from channels, spawns an
-// isolated claude CLI subprocess per turn, and streams responses back. Auth flows, reset menus, and
-// builtin commands (stop, compact, login) are handled inline. The subprocess runs with an environment
+// isolated claude CLI subprocess per turn, and streams responses back. Auth flows and builtin
+// commands (new, stop, compact, login) are handled inline. The subprocess runs with an environment
 // allowlist (only safe env vars inherited) and, on Linux, inside a bubblewrap filesystem sandbox.
 package agent
 
@@ -44,19 +44,36 @@ const (
 	// CmdCompact compacts the conversation context. Rewritten into a prompt
 	// that asks Claude to summarize and discard verbose history.
 	CmdCompact = "compact"
+
+	// CmdNew starts a fresh session on the current channel immediately — no
+	// menu, no confirmation. "reset", "clear", and "delete" are synonyms.
+	CmdNew = "new"
 )
 
 // compactPrompt is injected as the user message when the compact command is used.
 const compactPrompt = "Please compact your conversation context now. Summarize the key points and discard verbose history."
 
-// isResetCommand returns true if the raw user text is one of the
-// recognised reset synonyms. Case-insensitive.
-func isResetCommand(text string) bool {
+// isFreshSessionCommand returns true if the raw user text is the "new" command
+// or one of its synonyms ("reset" / "clear" / "delete"), all of which start a
+// fresh session on the current channel. Case-insensitive.
+func isFreshSessionCommand(text string) bool {
 	switch strings.ToLower(strings.TrimSpace(text)) {
-	case "new", "reset", "clear", "delete":
+	case CmdNew, "reset", "clear", "delete":
 		return true
 	}
 	return false
+}
+
+// clearChannelSession drops the channel's cached session so the next message on
+// that channel starts a fresh conversation. Also notifies the session store via
+// OnSessionUpdate so the cleared state is persisted.
+func clearChannelSession(opts Options, sessions map[channel.ChannelID]string, channelID channel.ChannelID) {
+	old := sessions[channelID]
+	delete(sessions, channelID)
+	if opts.OnSessionUpdate != nil {
+		opts.OnSessionUpdate(channelID, "")
+	}
+	slog.Info("session cleared", "channel", channelID, "old_session", old)
 }
 
 const defaultMaxTurns = 10
@@ -73,10 +90,6 @@ const (
 // ErrIdleTimeout is returned by RunWithMessages when the agent shuts down
 // due to no messages arriving within the idle timeout.
 var ErrIdleTimeout = errors.New("agent idle timeout")
-
-// ErrResetRequested is returned by RunWithMessages when a reset operation
-// requires the agent to restart (project or full reset).
-var ErrResetRequested = errors.New("reset requested")
 
 // ErrChannelChanged is returned by RunWithMessages when a channel was
 // created/edited/deleted and the agent needs to restart to pick up changes.
@@ -216,11 +229,6 @@ type Options struct {
 	// like API keys. Used by the auth flow to persist keys securely.
 	// May be nil if no secret store is available (keys won't be persisted).
 	SecretStore SecretStore
-
-	// OnReset is called when the user triggers a destructive reset (memories,
-	// project, or everything). The callback performs the actual filesystem
-	// cleanup. May be nil if reset is not supported.
-	OnReset func(level ResetLevel) error
 
 	// OnTurnStart is called before each message is handled, with the name
 	// of the channel being processed. The router uses this to track the
@@ -502,39 +510,20 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			// Fall through to handle() below.
 		}
 
-		// Reset command: show the multi-option reset menu.
-		if isResetCommand(msg.Text) {
-			levels := allowedResetLevels(opts, msg.ChannelID)
-			if len(levels) == 0 {
+		// New command (and its "reset"/"clear"/"delete" synonyms): start a fresh
+		// session on this channel immediately — no menu, no confirmation.
+		if isFreshSessionCommand(msg.Text) {
+			if !isBuiltinAllowed(opts, msg.ChannelID, claudecli.BuiltinResetSession) {
 				sendDenied(ctx, opts, msg.ChannelID)
 				continue
 			}
 			fm.Cancel(msg.ChannelID)
-			if ch, ok := opts.channels()[msg.ChannelID]; ok {
-				if _, err := opts.send(ctx, msg.ChannelID, dynamicResetMenuPrompt(levels, ch.Markup())); err != nil {
-					slog.Error("failed to send reset menu", "err", err)
-				}
+			clearChannelSession(opts, sessions, msg.ChannelID)
+			if _, err := opts.send(ctx, msg.ChannelID, "🆕 New session — your next message starts a fresh conversation."); err != nil {
+				slog.Error("failed to send new session confirmation", "err", err)
 			}
 			if err := opts.done(ctx, msg.ChannelID); err != nil {
-				slog.Error("failed to close turn after reset menu", "err", err)
-			}
-			fm.StartReset(msg.ChannelID)
-			continue
-		}
-
-		// Handle active reset flow.
-		if f := fm.Active(msg.ChannelID); f != nil && f.Kind == FlowReset {
-			ch, chOK := opts.channels()[msg.ChannelID]
-			if !chOK {
-				fm.Complete(msg.ChannelID)
-				continue
-			}
-			result := handleResetFlow(ctx, opts, fm, f.Reset, ch, msg, sessions)
-			if result.RestartAgent != nil {
-				return result.RestartAgent
-			}
-			if err := opts.done(ctx, msg.ChannelID); err != nil {
-				slog.Error("failed to close turn after reset step", "err", err)
+				slog.Error("failed to close turn after new session", "err", err)
 			}
 			continue
 		}
@@ -885,11 +874,10 @@ func isBuiltinAllowed(opts Options, channelID channel.ChannelID, cmd claudecli.T
 	return false
 }
 
-// isResetBuiltin reports whether cmd is any of the reset builtins.
+// isResetBuiltin reports whether cmd is one of the reset builtins.
 func isResetBuiltin(cmd claudecli.Tool) bool {
 	switch cmd {
-	case claudecli.BuiltinReset, claudecli.BuiltinResetSession, claudecli.BuiltinResetMemories,
-		claudecli.BuiltinResetProject, claudecli.BuiltinResetAll:
+	case claudecli.BuiltinReset, claudecli.BuiltinResetSession:
 		return true
 	}
 	return false

@@ -41,7 +41,7 @@
 - [x] Timestamps on messages — show when each message was sent/received
 - [x] Visual message separation — clearer boundaries between messages in the chat UI
 - [x] Show tool arguments — display tool call parameters alongside tool use events
-- [x] Chat keywords — builtin commands: `stop` (abort current response), `compact` (compact context), `new`/`reset`/`clear`/`delete` (multi-level reset menu), `login`/`auth` (interactive auth flow)
+- [x] Chat keywords — builtin commands: `stop` (abort current response), `compact` (compact context), `new`/`reset`/`clear`/`delete` (start a fresh session), `login`/`auth` (interactive auth flow)
 - [x] Model switching — `model_get` / `model_set` MCP tools with runtime ModelFunc support
 - [ ] Chat keywords (remaining) — `help` (list commands)
 - [ ] Render markdown in chat — parse and render markdown formatting in the TUI client

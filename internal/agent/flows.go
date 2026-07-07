@@ -11,7 +11,6 @@ type FlowKind int
 const (
 	FlowNone         FlowKind = iota
 	FlowAuth                  // auth choosing, API key entry, OAuth, deploy confirm
-	FlowReset                 // reset menu, confirmation
 	FlowToolApproval          // tool denial → approve/deny
 )
 
@@ -20,7 +19,6 @@ const (
 type ChannelFlow struct {
 	Kind         FlowKind
 	Auth         *pendingAuth
-	Reset        *pendingReset
 	ToolApproval *pendingToolApproval
 }
 
@@ -66,17 +64,6 @@ func (fm *FlowManager) StartAuth(chID channel.ChannelID, originalMsg channel.Tag
 		Auth: auth,
 	}
 	return auth
-}
-
-// StartReset begins a reset flow on a channel, cancelling any existing flow.
-func (fm *FlowManager) StartReset(chID channel.ChannelID) *pendingReset {
-	fm.Cancel(chID)
-	reset := &pendingReset{state: resetChoosing}
-	fm.flows[chID] = &ChannelFlow{
-		Kind:  FlowReset,
-		Reset: reset,
-	}
-	return reset
 }
 
 // StartToolApproval begins a tool approval flow on a channel.
@@ -126,10 +113,6 @@ type FlowResult struct {
 	// normally by handle() (e.g. tool approval "approve" → retry original msg).
 	// When set, Handled is false and the caller should use this message.
 	FallThroughMsg *channel.TaggedMessage
-
-	// RestartAgent is non-nil when the flow requires an agent restart
-	// (e.g. ResetProject or ResetAll).
-	RestartAgent error
 }
 
 // buildApprovalOverride creates a temporary tool permission expansion for

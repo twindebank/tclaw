@@ -20,7 +20,7 @@ var FeatureAreas = []FeatureArea{
 	{ID: "channels", Name: "Multiple channels", Description: "separate Telegram bots, roles, per-channel tool permissions"},
 	{ID: "channel_management", Name: "Channel management", Description: "creating channels at runtime, tool groups, cross-channel messaging"},
 	{ID: "remote_mcps", Name: "MCP ecosystem", Description: "remote MCP servers, directory of available services"},
-	{ID: "compact_reset", Name: "Context management", Description: "compact command, reset options, session management"},
+	{ID: "compact_reset", Name: "Context management", Description: "compact command, new/reset command, session management"},
 	{ID: "dev_workflow", Name: "Dev workflow", Description: "self-modification, git worktrees, PRs, deployment"},
 
 	// Optional / regional — shown later.

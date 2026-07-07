@@ -1,7 +1,6 @@
 package router
 
 import (
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -9,52 +8,6 @@ import (
 	"tclaw/internal/agent"
 	"tclaw/internal/user"
 )
-
-// resetUser clears user data according to the given level.
-//
-// Directory mapping:
-//
-//	ResetMemories → clears memory/ (CLAUDE.md, topic files)
-//	ResetProject  → clears home/.claude/ (Claude Code state) + sessions/
-//	ResetAll      → clears memory/ + home/.claude/ + sessions/ + state/ + secrets/
-func resetUser(level agent.ResetLevel, memoryDir, homeDir, sessionsDir, stateDir, secretsDir, mcpConfigDir string) error {
-	switch level {
-	case agent.ResetMemories:
-		return clearDirectoryContents(memoryDir)
-
-	case agent.ResetProject:
-		claudeDir := filepath.Join(homeDir, ".claude")
-		if err := clearDirectoryContents(claudeDir); err != nil {
-			return fmt.Errorf("clear claude state: %w", err)
-		}
-		if err := clearDirectoryContents(sessionsDir); err != nil {
-			return fmt.Errorf("clear sessions: %w", err)
-		}
-		return nil
-
-	case agent.ResetAll:
-		dirs := []struct {
-			path string
-			name string
-		}{
-			{memoryDir, "memory"},
-			{filepath.Join(homeDir, ".claude"), "claude state"},
-			{sessionsDir, "sessions"},
-			{stateDir, "state"},
-			{secretsDir, "secrets"},
-			{mcpConfigDir, "mcp-config"},
-		}
-		for _, d := range dirs {
-			if err := clearDirectoryContents(d.path); err != nil {
-				return fmt.Errorf("clear %s: %w", d.name, err)
-			}
-		}
-		return nil
-
-	default:
-		return fmt.Errorf("unknown reset level: %d", level)
-	}
-}
 
 // seedUserMemory ensures memory/CLAUDE.md exists, the home/.claude/CLAUDE.md
 // symlink points to it, and settings.json exists with safe defaults.
@@ -97,23 +50,4 @@ func seedUserMemory(userID user.ID, memoryDir, homeDir string) {
 			slog.Debug("seeded settings.json", "user", userID, "path", settingsPath)
 		}
 	}
-}
-
-// clearDirectoryContents removes all entries inside a directory without
-// removing the directory itself. Returns nil if the directory doesn't exist.
-func clearDirectoryContents(dir string) error {
-	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("read dir %s: %w", dir, err)
-	}
-	for _, entry := range entries {
-		path := filepath.Join(dir, entry.Name())
-		if err := os.RemoveAll(path); err != nil {
-			return fmt.Errorf("remove %s: %w", path, err)
-		}
-	}
-	return nil
 }
