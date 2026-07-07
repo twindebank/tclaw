@@ -486,6 +486,12 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// their timeout. Reads channel config each tick via the config writer.
 	go cleanupEphemeralChannels(ctx, mu.cfg.ID, configWriter, runtimeState, activityTracker, secretStore, provisioners, onChannelChange, messageQueue, channelSet.Snapshot, devStore)
 
+	// knowledgeSyncMu serializes background vault syncs so an OnTurnEnd firing
+	// before the previous sync finished can't run concurrent git commands
+	// against the same clone. Lives at user lifetime, shared across agent
+	// restarts within this session.
+	var knowledgeSyncMu sync.Mutex
+
 	// hotAddMsgs carries messages from channels added mid-session via hot-reload.
 	// Lives at user lifetime (like scheduleMsgs) so it outlives agent sessions.
 	hotAddMsgs := make(chan channel.TaggedMessage, 8)
@@ -932,6 +938,25 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			},
 			OnTurnEnd: func(channelName string) {
 				activityTracker.TurnEnded(channelName)
+
+				if kc := mu.cfg.Knowledge; kc != nil {
+					// Background so the turn (and the next one) is never blocked on
+					// git/network I/O. Bound to the router's own ctx (not the
+					// per-turn ctx, which is already cancelled by the time this
+					// fires) so the sync can outlive the turn but still stops at
+					// shutdown.
+					go func() {
+						knowledgeSyncMu.Lock()
+						defer knowledgeSyncMu.Unlock()
+						syncKnowledgeVault(ctx, knowledgeSyncParams{
+							Dir:          knowledgeDir,
+							UserID:       string(mu.cfg.ID),
+							ChannelName:  channelName,
+							Outbox:       messageOutbox,
+							ChannelsFunc: channelsFunc,
+						})
+					}()
+				}
 			},
 			AllowedTools:         mu.cfg.AllowedTools,
 			DisallowedTools:      mu.cfg.DisallowedTools,
