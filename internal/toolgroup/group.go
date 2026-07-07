@@ -41,8 +41,8 @@ func AllGroups() []GroupInfo {
 	return []GroupInfo{
 		{GroupAllTools, "Full permissions: every CLI tool, all built-in commands, and all MCP tools (mcp__*) — current and future. New tools are picked up automatically. For trusted channels that should never be tool-gated."},
 		{GroupCoreTools, "Bash shell, file operations (read/write/edit/glob/grep), web access (fetch/search), and model management. The foundation most channels need."},
-		{GroupAllBuiltins, "All built-in commands: stop, compact, login, auth, and all reset levels (session/memories/project/everything)."},
-		{GroupSafeBuiltins, "Safe built-in commands only: stop, compact, session reset, memories reset. No project/everything reset or auth commands."},
+		{GroupAllBuiltins, "All built-in commands: stop, compact, login, auth, and new/reset (fresh session)."},
+		{GroupSafeBuiltins, "Safe built-in commands only: stop, compact, and new/reset (fresh session). No auth commands."},
 		{GroupChannelMessaging, "Send messages to other channels (channel_send), read conversation history (channel_transcript), check if channels are busy (channel_is_busy), and tear down the current channel (channel_done). Cannot create new channels."},
 		{GroupChannelManagement, "Full channel lifecycle: create, delete, edit, list channels, plus everything in channel_messaging. Required for orchestrating ephemeral channels."},
 		{GroupScheduling, "Create, edit, delete, pause, and resume cron schedules."},
@@ -105,8 +105,8 @@ var cliToolsAll = []claudecli.Tool{
 	claudecli.ToolEnterWorktree, claudecli.ToolListMcpResources, claudecli.ToolReadMcpResource,
 }
 
-// allBuiltins is every built-in command. BuiltinReset acts as a wildcard for
-// all reset sub-levels (session/memories/project/everything).
+// allBuiltins is every built-in command. BuiltinReset is an alias for
+// BuiltinResetSession (both start a fresh session).
 var allBuiltins = []claudecli.Tool{
 	claudecli.BuiltinStop,
 	claudecli.BuiltinCompact,
@@ -151,7 +151,6 @@ var groupTools = map[ToolGroup][]claudecli.Tool{
 		claudecli.BuiltinStop,
 		claudecli.BuiltinCompact,
 		claudecli.BuiltinResetSession,
-		claudecli.BuiltinResetMemories,
 	},
 }
 

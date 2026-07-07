@@ -68,9 +68,6 @@ func toolListHandler(handler *mcp.Handler) mcp.ToolHandler {
 			string(claudecli.BuiltinAuth),
 			string(claudecli.BuiltinReset),
 			string(claudecli.BuiltinResetSession),
-			string(claudecli.BuiltinResetMemories),
-			string(claudecli.BuiltinResetProject),
-			string(claudecli.BuiltinResetAll),
 		}
 
 		// MCP tools from the handler (fully qualified as mcp__tclaw__<name>).

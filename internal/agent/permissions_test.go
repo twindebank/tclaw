@@ -17,8 +17,8 @@ func TestIsBuiltinAllowed(t *testing.T) {
 		if isBuiltinAllowed(opts, "ch1", claudecli.BuiltinStop) {
 			t.Error("expected stop denied when no builtins in list")
 		}
-		if isBuiltinAllowed(opts, "ch1", claudecli.BuiltinResetAll) {
-			t.Error("expected reset_all denied when no builtins in list")
+		if isBuiltinAllowed(opts, "ch1", claudecli.BuiltinResetSession) {
+			t.Error("expected reset_session denied when no builtins in list")
 		}
 	})
 
@@ -34,19 +34,13 @@ func TestIsBuiltinAllowed(t *testing.T) {
 		}
 	})
 
-	t.Run("reset wildcard", func(t *testing.T) {
+	t.Run("reset alias", func(t *testing.T) {
 		opts := Options{
 			AllowedTools: []claudecli.Tool{claudecli.BuiltinReset},
 		}
-		for _, cmd := range []claudecli.Tool{
-			claudecli.BuiltinResetSession,
-			claudecli.BuiltinResetMemories,
-			claudecli.BuiltinResetProject,
-			claudecli.BuiltinResetAll,
-		} {
-			if !isBuiltinAllowed(opts, "ch1", cmd) {
-				t.Errorf("expected %s allowed via builtin__reset wildcard", cmd)
-			}
+		// builtin__reset grants the session-clear command.
+		if !isBuiltinAllowed(opts, "ch1", claudecli.BuiltinResetSession) {
+			t.Error("expected reset_session allowed via builtin__reset alias")
 		}
 		// Non-reset builtins should still be denied.
 		if isBuiltinAllowed(opts, "ch1", claudecli.BuiltinStop) {
@@ -122,121 +116,6 @@ func TestResolveToolsForChannel(t *testing.T) {
 		}
 		if allowed[0] != "Read" {
 			t.Errorf("expected Read, got %s", allowed[0])
-		}
-	})
-}
-
-func TestResolveResetChoice(t *testing.T) {
-	t.Run("dynamic numbering", func(t *testing.T) {
-		// Only session and memories allowed.
-		levels := []ResetLevel{ResetSession, ResetMemories}
-
-		if got := resolveResetChoice("1", levels); got != ResetSession {
-			t.Errorf("choice '1' = %d, want ResetSession", got)
-		}
-		if got := resolveResetChoice("2", levels); got != ResetMemories {
-			t.Errorf("choice '2' = %d, want ResetMemories", got)
-		}
-		// 3 is cancel (len(levels)+1).
-		if got := resolveResetChoice("3", levels); got != resetCancel {
-			t.Errorf("choice '3' = %d, want resetCancel", got)
-		}
-		// 4 is out of range.
-		if got := resolveResetChoice("4", levels); got != resetInvalid {
-			t.Errorf("choice '4' = %d, want resetInvalid", got)
-		}
-	})
-
-	t.Run("word aliases", func(t *testing.T) {
-		levels := []ResetLevel{ResetSession, ResetMemories}
-
-		if got := resolveResetChoice("session", levels); got != ResetSession {
-			t.Errorf("choice 'session' = %d, want ResetSession", got)
-		}
-		if got := resolveResetChoice("memories", levels); got != ResetMemories {
-			t.Errorf("choice 'memories' = %d, want ResetMemories", got)
-		}
-		// "project" not in levels -> invalid.
-		if got := resolveResetChoice("project", levels); got != resetInvalid {
-			t.Errorf("choice 'project' = %d, want resetInvalid (not in levels)", got)
-		}
-		if got := resolveResetChoice("cancel", levels); got != resetCancel {
-			t.Errorf("choice 'cancel' = %d, want resetCancel", got)
-		}
-	})
-}
-
-func TestAllowedResetLevels(t *testing.T) {
-	t.Run("no builtins gives no levels", func(t *testing.T) {
-		// Without explicit builtin groups, no reset levels are available.
-		opts := Options{
-			AllowedTools: []claudecli.Tool{"Bash"},
-		}
-		levels := allowedResetLevels(opts, "ch1")
-		if len(levels) != 0 {
-			t.Errorf("expected 0 levels, got %d: %v", len(levels), levels)
-		}
-	})
-
-	t.Run("only session and memories", func(t *testing.T) {
-		opts := Options{
-			AllowedTools: []claudecli.Tool{
-				claudecli.BuiltinResetSession,
-				claudecli.BuiltinResetMemories,
-				claudecli.BuiltinStop,
-			},
-		}
-		levels := allowedResetLevels(opts, "ch1")
-		if len(levels) != 2 {
-			t.Errorf("expected 2 levels, got %d: %v", len(levels), levels)
-		}
-		if levels[0] != ResetSession || levels[1] != ResetMemories {
-			t.Errorf("expected [Session, Memories], got %v", levels)
-		}
-	})
-
-	t.Run("reset wildcard gives all levels", func(t *testing.T) {
-		opts := Options{
-			AllowedTools: []claudecli.Tool{claudecli.BuiltinReset},
-		}
-		levels := allowedResetLevels(opts, "ch1")
-		if len(levels) != 4 {
-			t.Errorf("expected 4 levels via wildcard, got %d: %v", len(levels), levels)
-		}
-	})
-
-	t.Run("no reset builtins gives empty", func(t *testing.T) {
-		// Only non-reset builtins → no reset levels available.
-		opts := Options{
-			AllowedTools: []claudecli.Tool{claudecli.BuiltinStop},
-		}
-		levels := allowedResetLevels(opts, "ch1")
-		if len(levels) != 0 {
-			t.Errorf("expected empty levels, got %v", levels)
-		}
-	})
-}
-
-func TestDynamicResetMenuPrompt(t *testing.T) {
-	t.Run("restricted levels", func(t *testing.T) {
-		levels := []ResetLevel{ResetSession, ResetMemories}
-		menu := dynamicResetMenuPrompt(levels, channel.MarkupMarkdown)
-
-		if !strings.Contains(menu, "Session") {
-			t.Error("menu should contain Session")
-		}
-		if !strings.Contains(menu, "Memories") {
-			t.Error("menu should contain Memories")
-		}
-		if strings.Contains(menu, "Project") {
-			t.Error("menu should NOT contain Project when restricted")
-		}
-		if strings.Contains(menu, "Everything") {
-			t.Error("menu should NOT contain Everything when restricted")
-		}
-		// Cancel should be option 3 (2 levels + 1).
-		if !strings.Contains(menu, "3") {
-			t.Error("cancel should be option 3")
 		}
 	})
 }

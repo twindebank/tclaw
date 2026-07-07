@@ -23,18 +23,6 @@ func TestFlowManager(t *testing.T) {
 		require.Equal(t, FlowAuth, f.Kind)
 	})
 
-	t.Run("starts reset flow", func(t *testing.T) {
-		fm := NewFlowManager()
-		reset := fm.StartReset("ch1")
-
-		require.NotNil(t, reset)
-		require.Equal(t, resetChoosing, reset.state)
-
-		f := fm.Active("ch1")
-		require.NotNil(t, f)
-		require.Equal(t, FlowReset, f.Kind)
-	})
-
 	t.Run("starts tool approval flow", func(t *testing.T) {
 		fm := NewFlowManager()
 		msg := channel.TaggedMessage{ChannelID: "ch1", Text: "original"}
@@ -49,7 +37,7 @@ func TestFlowManager(t *testing.T) {
 
 	t.Run("cancel removes flow", func(t *testing.T) {
 		fm := NewFlowManager()
-		fm.StartReset("ch1")
+		fm.StartAuth("ch1", channel.TaggedMessage{})
 		fm.Cancel("ch1")
 
 		require.Nil(t, fm.Active("ch1"))
@@ -57,7 +45,7 @@ func TestFlowManager(t *testing.T) {
 
 	t.Run("complete removes flow", func(t *testing.T) {
 		fm := NewFlowManager()
-		fm.StartReset("ch1")
+		fm.StartAuth("ch1", channel.TaggedMessage{})
 		fm.Complete("ch1")
 
 		require.Nil(t, fm.Active("ch1"))
@@ -76,9 +64,9 @@ func TestFlowManager(t *testing.T) {
 		fm.StartAuth("ch1", channel.TaggedMessage{})
 		require.Equal(t, FlowAuth, fm.Active("ch1").Kind)
 
-		// Starting a reset flow on the same channel cancels auth.
-		fm.StartReset("ch1")
-		require.Equal(t, FlowReset, fm.Active("ch1").Kind)
+		// Starting a tool approval flow on the same channel cancels auth.
+		fm.StartToolApproval("ch1", channel.TaggedMessage{}, nil, "")
+		require.Equal(t, FlowToolApproval, fm.Active("ch1").Kind)
 	})
 
 	t.Run("has flow", func(t *testing.T) {
@@ -88,51 +76,21 @@ func TestFlowManager(t *testing.T) {
 
 		fm.StartAuth("ch1", channel.TaggedMessage{})
 		require.True(t, fm.HasFlow("ch1", FlowAuth))
-		require.False(t, fm.HasFlow("ch1", FlowReset))
+		require.False(t, fm.HasFlow("ch1", FlowToolApproval))
 	})
 
 	t.Run("independent channels", func(t *testing.T) {
 		fm := NewFlowManager()
 
 		fm.StartAuth("ch1", channel.TaggedMessage{})
-		fm.StartReset("ch2")
+		fm.StartToolApproval("ch2", channel.TaggedMessage{}, nil, "")
 
 		require.Equal(t, FlowAuth, fm.Active("ch1").Kind)
-		require.Equal(t, FlowReset, fm.Active("ch2").Kind)
+		require.Equal(t, FlowToolApproval, fm.Active("ch2").Kind)
 
 		// Cancel ch1 doesn't affect ch2.
 		fm.Cancel("ch1")
 		require.Nil(t, fm.Active("ch1"))
 		require.NotNil(t, fm.Active("ch2"))
-	})
-
-	t.Run("session reset via agent", func(t *testing.T) {
-		var updatedSessionID string
-		opts := Options{
-			Sessions: map[channel.ChannelID]string{"test-ch": "old-session"},
-			OnSessionUpdate: func(chID channel.ChannelID, sessionID string) {
-				updatedSessionID = sessionID
-			},
-		}
-
-		_, sends := sendMessages(t, opts, "reset", "1")
-
-		// Session should be cleared.
-		require.Equal(t, "", updatedSessionID)
-
-		// Should have sent the menu then the confirmation.
-		require.GreaterOrEqual(t, len(sends), 2)
-		require.Contains(t, sends[len(sends)-1], "Session cleared")
-	})
-
-	t.Run("stop cancels active reset flow", func(t *testing.T) {
-		// Send reset to start the flow, then stop to cancel it.
-		_, sends := sendMessages(t, Options{}, "reset", "stop")
-
-		// Menu should have been sent, but no reset confirmation.
-		for _, s := range sends {
-			require.NotContains(t, s, "Session cleared")
-			require.NotContains(t, s, "reset complete")
-		}
 	})
 }
