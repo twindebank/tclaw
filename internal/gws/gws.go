@@ -94,6 +94,14 @@ func (gmailBuilder) SendMessage(params map[string]any, body map[string]any) Comm
 	}
 }
 
+func (gmailBuilder) ModifyMessage(params map[string]any, body map[string]any) Command {
+	return Command{
+		Args:   []string{"gmail", "users", "messages", "modify"},
+		Params: params,
+		Body:   body,
+	}
+}
+
 // Calendar constructs commands for the Calendar API.
 var Calendar = calendarBuilder{}
 

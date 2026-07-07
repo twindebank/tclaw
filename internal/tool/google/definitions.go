@@ -1,3 +1,26 @@
+// Package google implements Google Workspace MCP tools.
+//
+// # When to add a dedicated tool vs. use the passthrough
+//
+// google_workspace is a generic passthrough to the gws CLI — it covers every
+// Gmail/Drive/Calendar/Docs/Sheets/Slides/Tasks operation, but the agent must
+// hand-assemble command/params/json cold on every call. Add a dedicated typed
+// tool (like google_gmail_modify, google_gmail_forward) only when an action is
+// used OFTEN — frequent, repeated operations justify the upkeep of a typed
+// schema, a handler, and tests. One-off or rarely-used operations should stay
+// on the passthrough; adding a dedicated tool for every gws call would bloat
+// this package for no benefit.
+//
+// When you do add one:
+//  1. Add a Tool* constant below, include it in ToolNames(), and add its
+//     mcp.ToolDef in ToolDefs().
+//  2. Implement the handler in its own file (see gmail_forward.go for the
+//     template) and register it in google.go's RegisterTools — note the
+//     registration is positional (defs[N] matches ToolDefs()'s slice order),
+//     so inserting a tool mid-list means renumbering every later index.
+//  3. Point the google_workspace tool description (below) and the
+//     `gws-tclaw` skill (internal/router/gws_tclaw_skill.md) at the new
+//     dedicated tool so agents stop falling through to the passthrough for it.
 package google
 
 import (
@@ -14,6 +37,7 @@ const (
 	ToolGmailRead       = "google_gmail_read"
 	ToolGmailSend       = "google_gmail_send"
 	ToolGmailForward    = "google_gmail_forward"
+	ToolGmailModify     = "google_gmail_modify"
 	ToolCalendarList    = "google_calendar_list"
 	ToolCalendarCreate  = "google_calendar_create"
 	ToolWorkspace       = "google_workspace"
@@ -23,7 +47,7 @@ const (
 // ToolNames returns all tool name constants in this package.
 func ToolNames() []string {
 	return []string{
-		ToolGmailList, ToolGmailRead, ToolGmailSend, ToolGmailForward,
+		ToolGmailList, ToolGmailRead, ToolGmailSend, ToolGmailForward, ToolGmailModify,
 		ToolCalendarList, ToolCalendarCreate,
 		ToolWorkspace, ToolWorkspaceSchema,
 	}
@@ -196,6 +220,39 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 			}`, connDescription, enumJSON)),
 		},
 		{
+			Name: ToolGmailModify,
+			Description: "Modify labels on a Gmail message — mark as read/unread, apply or remove labels, archive, etc. " +
+				"Use this instead of google_workspace 'gmail users messages modify' whenever changing a message's label state. " +
+				"To mark read: remove_label_ids=[\"UNREAD\"]. To apply a label: add_label_ids=[\"LABEL_ID\"]. " +
+				"Both can be set in a single call (e.g. label + mark read together). " +
+				"Get label IDs from google_workspace_schema or from a prior google_gmail_list/read call's labels field.",
+			InputSchema: json.RawMessage(fmt.Sprintf(`{
+				"type": "object",
+				"properties": {
+					"credential_set": {
+						"type": "string",
+						"description": %q,
+						"enum": %s
+					},
+					"message_id": {
+						"type": "string",
+						"description": "The Gmail message ID to modify (from google_gmail_list or google_gmail_read)."
+					},
+					"add_label_ids": {
+						"type": "array",
+						"items": {"type": "string"},
+						"description": "Label IDs to add to the message, e.g. [\"Label_36\"]."
+					},
+					"remove_label_ids": {
+						"type": "array",
+						"items": {"type": "string"},
+						"description": "Label IDs to remove from the message, e.g. [\"UNREAD\"] to mark as read."
+					}
+				},
+				"required": ["credential_set","message_id"]
+			}`, connDescription, enumJSON)),
+		},
+		{
 			Name: ToolCalendarList,
 			Description: "List calendar events with full details (title, time, attendees, location, meeting links). " +
 				"Returns a clean summary for each event — no need to parse raw API responses. " +
@@ -305,7 +362,7 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 				"Mapping: a skill's 'gws <args> --params <P> --json <B>' becomes command=\"<args>\", params=<P>, json=<B>. " +
 				"Example: command='gmail users messages modify', params='{\"userId\":\"me\",\"id\":\"MSG_ID\"}', json='{\"addLabelIds\":[\"LABEL_ID\"],\"removeLabelIds\":[\"UNREAD\"]}'. " +
 				"Use google_workspace_schema to inspect a method's parameters. " +
-				"Prefer the dedicated tools where they exist: google_gmail_list (search/scan), google_gmail_read (read a body — NEVER use Gmail format=full here, it floods context with raw HTML), google_gmail_forward (forward).",
+				"Prefer the dedicated tools where they exist: google_gmail_list (search/scan), google_gmail_read (read a body — NEVER use Gmail format=full here, it floods context with raw HTML), google_gmail_forward (forward), google_gmail_modify (label/mark-read/mark-unread).",
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
