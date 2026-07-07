@@ -56,6 +56,15 @@ Documentation lives close to the code. Three layers, strictly separated:
 - **Deployment/config changes** → update @docs/deployment.md
 - **Go conventions** → update @docs/go-patterns.md
 
+### Dedicated Tools vs. Generic Passthrough (gws)
+Google Workspace (and any other CLI-backed) integrations should default to a generic
+passthrough tool (e.g. `google_workspace`) that the agent drives by assembling
+command/params/json cold. Only promote an operation to a dedicated typed tool
+(e.g. `google_gmail_modify`, `google_gmail_forward`) when it's used OFTEN — frequent,
+repeated operations justify the upkeep cost of a typed schema, a handler, and tests.
+Rarely-used operations should stay on the passthrough. See the package doc comment at
+the top of `internal/tool/google/definitions.go` for the concrete steps to add one.
+
 ## Deployment
 - **Deploys happen automatically via GitHub Actions CI** on push to main (`.github/workflows/deploy.yml`)
 - CI builds locally on the GitHub runner (7GB RAM) and pushes to Fly — avoids the remote builder OOM from gotd/td
