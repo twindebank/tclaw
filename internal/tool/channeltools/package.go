@@ -34,6 +34,7 @@ type Package struct {
 	Links    func() map[string][]channel.Link
 	Output   chan<- channel.TaggedMessage
 	Channels func() map[channel.ChannelID]channel.Channel
+	Send     func(ctx context.Context, chID channel.ChannelID, text string, opts channel.SendOpts) (channel.MessageID, error)
 
 	// Transcript deps.
 	SessionStore *channel.SessionStore
@@ -126,12 +127,13 @@ func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationCont
 	})
 
 	// Cross-channel send tools.
-	if p.Links != nil && p.Output != nil && p.Channels != nil && p.ActiveChannel != nil {
+	if p.Links != nil && p.Output != nil && p.Channels != nil && p.ActiveChannel != nil && p.Send != nil {
 		RegisterSendTool(handler, SendDeps{
 			Links:         p.Links,
 			Output:        p.Output,
 			Channels:      p.Channels,
 			ActiveChannel: p.ActiveChannel,
+			Send:          p.Send,
 		})
 	}
 

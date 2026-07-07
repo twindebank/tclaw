@@ -23,6 +23,8 @@ type SendDeps struct {
 
 	// Output receives cross-channel messages for injection into the
 	// target channel's message stream (same pattern as schedule injection).
+	// Used only for normal (non no_reply) sends — no_reply sends bypass
+	// the agent pipeline entirely via Send.
 	Output chan<- channel.TaggedMessage
 
 	// Channels resolves the current set of live channels. Called at send
@@ -34,6 +36,22 @@ type SendDeps struct {
 	// validate from_channel server-side — prevents prompt injection
 	// from spoofing the source channel.
 	ActiveChannel func() string
+
+	// Send delivers text directly to a channel's transport (via the
+	// outbox), bypassing the inbound agent pipeline entirely. Used for
+	// no_reply sends: the target sees the message immediately but no CLI
+	// turn is spawned, so no tokens are spent and nothing is added to the
+	// target's own session history. If the user later replies to the
+	// delivered message on Telegram, the transport's native reply-context
+	// handling recovers it for a real follow-up turn.
+	Send func(ctx context.Context, chID channel.ChannelID, text string, opts channel.SendOpts) (channel.MessageID, error)
+}
+
+// noReplyPrefix marks a directly-delivered message with its source channel,
+// e.g. "📩 from email". Kept plain (no markup) to match other system-generated
+// notices in this codebase (lifecycle notifications, cross-channel notices).
+func noReplyPrefix(fromChannel string) string {
+	return "📩 from " + fromChannel + "\n"
 }
 
 // RegisterSendTool adds the channel_send tool to the MCP handler.
@@ -51,8 +69,10 @@ func channelSendDef() mcp.ToolDef {
 			"as if it were a new incoming message, waking the agent if idle. Only channels declared " +
 			"as links in the config are valid targets. Use this when the current channel detects " +
 			"something that requires action on another channel. Set no_reply to true to " +
-			"report an already-actioned result: it is recorded in the target channel's history but the " +
-			"target agent will not reply or re-process it.",
+			"report an already-actioned result: the message is delivered directly to the target " +
+			"channel's transport (so the user sees it immediately) without waking the target agent or " +
+			"spending any tokens — it is NOT added to the target's own conversation session, though the " +
+			"user can reply to it there to pull it into a real follow-up turn.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -70,7 +90,7 @@ func channelSendDef() mcp.ToolDef {
 				},
 				"no_reply": {
 					"type": "boolean",
-					"description": "Set to true for an informational, already-actioned update: it is still recorded in the target's history, but the target agent absorbs it silently without replying or re-processing. Defaults to false (normal cross-channel message the target acts on).",
+					"description": "Set to true for an informational, already-actioned update: delivered directly to the target channel's transport with no agent turn and no token cost — the target agent never processes it (the user can still reply to it there to start a real conversation). Defaults to false (normal cross-channel message that wakes the target agent to process).",
 					"default": false
 				}
 			},
@@ -85,7 +105,8 @@ type channelSendParams struct {
 	Message     string `json:"message"`
 
 	// NoReply marks the message as an informational, already-actioned update:
-	// recorded in the target's history but not replied to. Defaults to false.
+	// delivered directly to the target's transport, bypassing the agent
+	// pipeline entirely. Defaults to false.
 	NoReply bool `json:"no_reply"`
 }
 
@@ -150,13 +171,28 @@ func channelSendHandler(deps SendDeps) mcp.ToolHandler {
 			return nil, fmt.Errorf("target channel %q not found in active channels", p.ToChannel)
 		}
 
+		// no_reply bypasses the agent pipeline entirely: deliver straight to the
+		// target's transport so it's never queued, never spawns a CLI turn, and
+		// never lands in the target's own session history.
+		if p.NoReply {
+			if _, err := deps.Send(ctx, targetID, noReplyPrefix(p.FromChannel)+p.Message, channel.SendOpts{Notify: true}); err != nil {
+				return nil, fmt.Errorf("deliver no-reply message: %w", err)
+			}
+			return json.Marshal(map[string]any{
+				"status":   "delivered",
+				"from":     p.FromChannel,
+				"to":       p.ToChannel,
+				"message":  p.Message,
+				"no_reply": true,
+			})
+		}
+
 		msg := channel.TaggedMessage{
 			ChannelID: targetID,
 			Text:      p.Message,
 			SourceInfo: &channel.MessageSourceInfo{
 				Source:      channel.SourceChannel,
 				FromChannel: p.FromChannel,
-				NoReply:     p.NoReply,
 			},
 		}
 
@@ -167,7 +203,7 @@ func channelSendHandler(deps SendDeps) mcp.ToolHandler {
 				"from":     p.FromChannel,
 				"to":       p.ToChannel,
 				"message":  p.Message,
-				"no_reply": p.NoReply,
+				"no_reply": false,
 			})
 		case <-ctx.Done():
 			return nil, fmt.Errorf("send cancelled: %w", ctx.Err())

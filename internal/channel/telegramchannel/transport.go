@@ -31,6 +31,11 @@ const maxMediaDownloadBytes = 10 * 1024 * 1024
 // Files older than this are deleted when new media is downloaded.
 const mediaRetention = 24 * time.Hour
 
+// replySnippetMaxLen caps the "[replying to: ...]" preview prepended when a
+// user replies to a prior message. Large enough to cover a multi-line summary
+// (e.g. a no_reply cross-channel digest) rather than just the opening words.
+const replySnippetMaxLen = 500
+
 // TelegramOptions configures optional webhook mode for a Telegram channel.
 type TelegramOptions struct {
 	// WebhookURL is the full URL Telegram should POST updates to.
@@ -181,7 +186,7 @@ func (t *Telegram) Messages(ctx context.Context) <-chan string {
 				// Prepend a short snippet of the replied-to message so the
 				// agent knows what the user is referring to.
 				if reply := msg.ReplyToMessage; reply != nil && reply.Text != "" {
-					snippet := tgsdk.TruncateSnippet(reply.Text, 100)
+					snippet := tgsdk.TruncateSnippet(reply.Text, replySnippetMaxLen)
 					text = "[replying to: \"" + snippet + "\"]\n" + text
 				}
 

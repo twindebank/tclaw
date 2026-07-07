@@ -3,6 +3,7 @@ package channeltools_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -42,14 +43,13 @@ func TestChannelSend(t *testing.T) {
 			require.NotNil(t, msg.SourceInfo)
 			require.Equal(t, channel.SourceChannel, msg.SourceInfo.Source)
 			require.Equal(t, "assistant", msg.SourceInfo.FromChannel)
-			require.False(t, msg.SourceInfo.NoReply)
 		case <-time.After(time.Second):
 			t.Fatal("timed out waiting for cross-channel message")
 		}
 	})
 
-	t.Run("no_reply marks the message as informational", func(t *testing.T) {
-		h, output := setupSend(t, "email", map[string][]channel.Link{
+	t.Run("no_reply delivers directly without waking the target agent", func(t *testing.T) {
+		h, output, rec := setupSendWithRecorder(t, "email", map[string][]channel.Link{
 			"email": {{Target: "assistant", Description: "report actioned email"}},
 		})
 
@@ -62,16 +62,36 @@ func TestChannelSend(t *testing.T) {
 
 		var rsp map[string]any
 		require.NoError(t, json.Unmarshal(result, &rsp))
+		require.Equal(t, "delivered", rsp["status"])
 		require.Equal(t, true, rsp["no_reply"])
 
+		// Delivered straight to the transport, prefixed with the source channel.
+		require.Len(t, rec.calls, 1)
+		require.Equal(t, channel.ChannelID("assistant-id"), rec.calls[0].chID)
+		require.Equal(t, "📩 from email\nFiled receipt from Amazon under expenses.", rec.calls[0].text)
+		require.True(t, rec.calls[0].notify, "no_reply delivery should notify the user")
+
+		// Never queued for the agent — no turn, no tokens, no session entry.
 		select {
 		case msg := <-output:
-			require.NotNil(t, msg.SourceInfo)
-			require.Equal(t, channel.SourceChannel, msg.SourceInfo.Source)
-			require.True(t, msg.SourceInfo.NoReply)
-		case <-time.After(time.Second):
-			t.Fatal("timed out waiting for cross-channel message")
+			t.Fatalf("no_reply message should not enter the agent pipeline, got %+v", msg)
+		case <-time.After(50 * time.Millisecond):
 		}
+	})
+
+	t.Run("no_reply propagates delivery failure as a tool error", func(t *testing.T) {
+		h, _, rec := setupSendWithRecorder(t, "email", map[string][]channel.Link{
+			"email": {{Target: "assistant", Description: "report actioned email"}},
+		})
+		rec.failNext = fmt.Errorf("telegram: chat not found")
+
+		err := callToolExpectError(t, h, "channel_send", map[string]any{
+			"from_channel": "email",
+			"to_channel":   "assistant",
+			"message":      "Filed receipt from Amazon under expenses.",
+			"no_reply":     true,
+		})
+		require.Contains(t, err.Error(), "deliver no-reply message")
 	})
 
 	t.Run("rejects spoofed from_channel", func(t *testing.T) {
@@ -170,6 +190,7 @@ func TestChannelSend(t *testing.T) {
 				}
 			},
 			ActiveChannel: func() string { return "assistant" },
+			Send:          (&sendRecorder{}).Send,
 		})
 
 		err := callToolExpectError(t, handler, "channel_send", map[string]any{
@@ -185,8 +206,17 @@ func TestChannelSend(t *testing.T) {
 
 func setupSend(t *testing.T, activeChannel string, links map[string][]channel.Link) (*mcp.Handler, chan channel.TaggedMessage) {
 	t.Helper()
+	h, output, _ := setupSendWithRecorder(t, activeChannel, links)
+	return h, output
+}
+
+// setupSendWithRecorder is like setupSend but also wires a recording Send
+// dependency, for tests exercising no_reply direct-delivery behavior.
+func setupSendWithRecorder(t *testing.T, activeChannel string, links map[string][]channel.Link) (*mcp.Handler, chan channel.TaggedMessage, *sendRecorder) {
+	t.Helper()
 	output := make(chan channel.TaggedMessage, 8)
 	handler := mcp.NewHandler()
+	rec := &sendRecorder{}
 
 	channelMap := map[channel.ChannelID]channel.Channel{
 		"assistant-id": &stubChannel{name: "assistant"},
@@ -200,9 +230,10 @@ func setupSend(t *testing.T, activeChannel string, links map[string][]channel.Li
 			return channelMap
 		},
 		ActiveChannel: func() string { return activeChannel },
+		Send:          rec.Send,
 	})
 
-	return handler, output
+	return handler, output, rec
 }
 
 // stubChannel implements channel.Channel for testing name resolution.
@@ -223,3 +254,27 @@ func (s *stubChannel) Done(context.Context) error                            { r
 func (s *stubChannel) SplitStatusMessages() bool                             { return false }
 func (s *stubChannel) Markup() channel.Markup                                { return channel.MarkupMarkdown }
 func (s *stubChannel) StatusWrap() channel.StatusWrap                        { return channel.StatusWrap{} }
+
+// sendCall records a single invocation of sendRecorder.Send.
+type sendCall struct {
+	chID   channel.ChannelID
+	text   string
+	notify bool
+}
+
+// sendRecorder is a test double for SendDeps.Send — records calls and can be
+// configured to fail the next call.
+type sendRecorder struct {
+	calls    []sendCall
+	failNext error
+}
+
+func (r *sendRecorder) Send(_ context.Context, chID channel.ChannelID, text string, opts channel.SendOpts) (channel.MessageID, error) {
+	if r.failNext != nil {
+		err := r.failNext
+		r.failNext = nil
+		return "", err
+	}
+	r.calls = append(r.calls, sendCall{chID: chID, text: text, notify: opts.Notify})
+	return "test-msg-id", nil
+}
