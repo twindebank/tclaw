@@ -224,7 +224,7 @@ When the user asks you to track something ongoing (todo lists, reading lists, pr
 
 ## Personal knowledge base
 
-If a personal knowledge base is mounted at `../knowledge` (you'll have a `knowledge` skill available), it is your durable knowledge store. Keep operational and behavioural memory in your memory files, but put durable facts, notes, references, and project knowledge in the vault. Use the `knowledge` skill for how to read it, the formatting conventions, and how to commit and push changes with raw git.
+If a personal knowledge base is mounted at `../knowledge` (you'll have a `knowledge` skill available), it is your durable knowledge store. Keep operational and behavioural memory in your memory files, but put durable facts, notes, references, and project knowledge in the vault. Use the `knowledge` skill for how to read it and the formatting conventions — just edit files, tclaw auto-syncs the vault (commit, rebase, push) in the background after every turn, so you never need to run git yourself.
 
 ## Interpreting ambiguous messages
 
