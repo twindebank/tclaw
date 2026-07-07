@@ -126,13 +126,19 @@ type RateLimitEvent struct {
 
 // ResultEvent is the final summary emitted when the CLI finishes.
 type ResultEvent struct {
-	Type       EventType `json:"type"`
-	IsError    bool      `json:"is_error"`
-	Result     string    `json:"result"`
-	DurationMs float64   `json:"duration_ms"`
-	NumTurns   int       `json:"num_turns"`
-	SessionID  string    `json:"session_id"`
-	CostUSD    float64   `json:"total_cost_usd"`
+	Type    EventType `json:"type"`
+	IsError bool      `json:"is_error"`
+
+	// Subtype categorises the outcome, e.g. "success", "error_max_turns",
+	// "error_during_execution". On error results Result is sometimes empty, so
+	// Subtype is the only signal for what went wrong.
+	Subtype string `json:"subtype"`
+
+	Result     string  `json:"result"`
+	DurationMs float64 `json:"duration_ms"`
+	NumTurns   int     `json:"num_turns"`
+	SessionID  string  `json:"session_id"`
+	CostUSD    float64 `json:"total_cost_usd"`
 
 	// ModelUsage is a per-model breakdown of token usage and cost.
 	// Keys are model identifiers (may include context window suffix, e.g. "claude-opus-4-6[1m]").

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"tclaw/internal/dev"
 	"tclaw/internal/mcp"
 )
 
@@ -22,7 +23,7 @@ func devPRDef() mcp.ToolDef {
 			"properties": {
 				"session": {
 					"type": "string",
-					"description": "Branch name of the session. Optional if only one session is active."
+					"description": "Branch name of the session. Optional if this channel has only one active session. Must be a session started in this channel."
 				},
 				"title": {
 					"type": "string",
@@ -54,7 +55,10 @@ func devPRHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("title is required")
 		}
 
-		sess, err := deps.Store.ResolveSession(ctx, a.Session)
+		sess, err := deps.Store.ResolveSession(ctx, dev.ResolveParams{
+			Session: a.Session,
+			Channel: deps.activeChannelName(),
+		})
 		if err != nil {
 			return nil, err
 		}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"tclaw/internal/dev"
 	"tclaw/internal/mcp"
 )
 
@@ -18,13 +19,14 @@ func devEndDef() mcp.ToolDef {
 			"Preferred workflow: use dev_pr to open/update the PR and iterate, then call dev_end when the PR is merged or you're done. " +
 			"dev_end also creates a PR if none exists yet. " +
 			"If PR creation fails after a successful push, the session is preserved — call dev_end again to retry. " +
-			"Note: the 'session' parameter is only for disambiguating which session to end — it is NOT the way to resume a session.",
+			"Sessions are scoped to the channel that started them: you can only end a session started in THIS channel, and if this channel has just one, omit 'session' — it resolves automatically. " +
+			"Note: the 'session' parameter is only for disambiguating between multiple sessions in this channel — it is NOT the way to resume a session.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"session": {
 					"type": "string",
-					"description": "Branch name of the session to end. Optional if only one session is active."
+					"description": "Branch name of the session to end. Optional if this channel has only one active session. Must be a session started in this channel."
 				},
 				"title": {
 					"type": "string",
@@ -56,7 +58,10 @@ func devEndHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("title is required")
 		}
 
-		sess, err := deps.Store.ResolveSession(ctx, a.Session)
+		sess, err := deps.Store.ResolveSession(ctx, dev.ResolveParams{
+			Session: a.Session,
+			Channel: deps.activeChannelName(),
+		})
 		if err != nil {
 			return nil, err
 		}
