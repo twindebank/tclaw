@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"tclaw/internal/dev"
 	"tclaw/internal/mcp"
 )
 
@@ -40,7 +41,9 @@ func devStatusHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
-		sessions, err := deps.Store.ListSessions(ctx)
+		// Scope to the calling channel so status matches what dev_end/dev_cancel
+		// can actually act on — a channel never sees another channel's sessions.
+		sessions, err := deps.Store.ListSessionsForChannel(ctx, deps.activeChannelName())
 		if err != nil {
 			return nil, err
 		}
@@ -71,7 +74,10 @@ func devStatusHandler(deps Deps) mcp.ToolHandler {
 			})
 		}
 
-		sess, err := deps.Store.ResolveSession(ctx, a.Session)
+		sess, err := deps.Store.ResolveSession(ctx, dev.ResolveParams{
+			Session: a.Session,
+			Channel: deps.activeChannelName(),
+		})
 		if err != nil {
 			return nil, err
 		}

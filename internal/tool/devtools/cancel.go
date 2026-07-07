@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"tclaw/internal/dev"
 	"tclaw/internal/mcp"
 )
 
@@ -19,7 +20,7 @@ func devCancelDef() mcp.ToolDef {
 			"properties": {
 				"session": {
 					"type": "string",
-					"description": "Branch name of the session to cancel. Optional if only one session is active."
+					"description": "Branch name of the session to cancel. Optional if this channel has only one active session. Must be a session started in this channel."
 				}
 			}
 		}`),
@@ -37,7 +38,10 @@ func devCancelHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
-		sess, err := deps.Store.ResolveSession(ctx, a.Session)
+		sess, err := deps.Store.ResolveSession(ctx, dev.ResolveParams{
+			Session: a.Session,
+			Channel: deps.activeChannelName(),
+		})
 		if err != nil {
 			return nil, err
 		}
