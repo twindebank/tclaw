@@ -31,18 +31,20 @@ and formatting. In short:
 - Inline `[[wikilinks]]` in prose; add each new note to its folder's `index.md` map.
 - Never write secret values. Reference secrets as `op://<vault>/<item>/<field>` pointers only.
 
-## Saving changes (raw git)
+## Saving changes
 
-The vault is an ordinary git clone with a preconfigured, authenticated remote — you never
-need credentials. To publish changes:
+Just edit files. tclaw auto-syncs the vault in the background after every turn — committing
+any changes, rebasing onto the remote, and pushing — so you never need to run git yourself.
+
+If a rebase hits a conflict, the background sync backs out cleanly (your commit stays intact,
+just unpushed) and sends you a one-off notification rather than surfacing it as a message you
+need to act on mid-turn. When you see that notification, resolve it with raw git:
 
 ```
 cd {{path}}
-git pull --rebase          # get the latest before editing
-# ...create or edit notes...
+git pull --rebase   # reproduces the conflict
+# ...resolve conflict markers...
 git add -A
-git commit -m "<clear, specific message>"
+git rebase --continue
 git push
 ```
-
-If `git pull --rebase` reports a conflict, stop and surface it to the user — do not force.

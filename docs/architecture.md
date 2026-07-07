@@ -59,8 +59,9 @@ Four boundaries protect user data and the host system:
 - Config secrets via `${secret:NAME}` (keychain → env var fallback, then scrubbed).
 - Runtime secrets via encrypted store (agent-collected OAuth tokens, API keys).
 - Fly secrets seeded into encrypted store on boot, then scrubbed from env.
-- **Knowledge base git auth** — the agent runs raw git against its knowledge-base clone, but the GitHub
-  token is never exposed to it. A per-user localhost reverse proxy (`internal/knowledgeproxy`) injects
+- **Knowledge base git auth** — both the agent (ad-hoc) and the router's background auto-sync run raw
+  git against the knowledge-base clone, but the GitHub token is never exposed to either. A per-user
+  localhost reverse proxy (`internal/knowledgeproxy`) injects
   `Authorization` server-side and pins requests to the one configured repo; the clone's remote is a
   token-free `http://127.0.0.1:<port>/...` URL. Git's credential helper runs inside the sandbox, so
   injecting auth at the network boundary is the only way to grant push capability without disclosure.
