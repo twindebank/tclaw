@@ -48,6 +48,48 @@ func (m *mockChannel) Edit(_ context.Context, id channel.MessageID, text string)
 	return nil
 }
 
+func TestFriendlyErrorMessage(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		subtype string
+		want    string
+	}{
+		{
+			name:    "empty error falls back to subtype",
+			raw:     "",
+			subtype: "error_during_execution",
+			want:    "claude ended the turn with an error (error_during_execution) but gave no details — check the logs",
+		},
+		{
+			name:    "empty error and empty subtype still gives a message",
+			raw:     "",
+			subtype: "",
+			want:    "claude ended the turn with an error but gave no details — check the logs",
+		},
+		{
+			name: "session limit classified with reset time preserved",
+			raw:  "You've hit your session limit · resets 1:50pm (UTC)",
+			want: "usage limit reached — You've hit your session limit · resets 1:50pm (UTC)",
+		},
+		{
+			name: "out of extra usage classified",
+			raw:  "You're out of extra usage · resets 12:40pm (UTC)",
+			want: "usage limit reached — You're out of extra usage · resets 12:40pm (UTC)",
+		},
+		{
+			name: "unknown error passes through raw",
+			raw:  "some novel failure",
+			want: "claude error: some novel failure",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, friendlyErrorMessage(tt.raw, tt.subtype))
+		})
+	}
+}
+
 func TestWriteSplit(t *testing.T) {
 	t.Run("proactive split status", func(t *testing.T) {
 		ch := &mockChannel{}

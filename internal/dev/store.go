@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"tclaw/internal/libraries/store"
 )
@@ -113,10 +114,25 @@ func (s *Store) saveSessions(ctx context.Context, sessions map[string]Session) e
 	return s.store.Set(ctx, sessionsKey, data)
 }
 
-// ResolveSession finds the session to operate on. If session is non-empty, it
-// looks up that specific branch. If empty and there's exactly one active session,
-// it returns that one. Returns an error if ambiguous or not found.
-func (s *Store) ResolveSession(ctx context.Context, session string) (*Session, error) {
+// ResolveParams selects which session a dev tool should operate on.
+type ResolveParams struct {
+	// Session is the explicit branch name to resolve. Empty means auto-select
+	// the single session owned by Channel.
+	Session string
+
+	// Channel scopes resolution to sessions started from this channel. A session
+	// started from a different channel is never resolved — this is what stops a
+	// dev_end/dev_cancel in one channel from tearing down another channel's work.
+	// Empty (stdio, tests, or no active channel) disables scoping and matches any
+	// session, preserving the original single-user behaviour.
+	Channel string
+}
+
+// ResolveSession finds the session to operate on, scoped to the calling channel.
+// With an explicit branch it returns that session only if the channel owns it;
+// otherwise it auto-selects the channel's single session, erroring when the
+// channel has zero or multiple sessions. See ResolveParams for scoping rules.
+func (s *Store) ResolveSession(ctx context.Context, p ResolveParams) (*Session, error) {
 	sessions, err := s.ListSessions(ctx)
 	if err != nil {
 		return nil, err
@@ -125,25 +141,68 @@ func (s *Store) ResolveSession(ctx context.Context, session string) (*Session, e
 		return nil, fmt.Errorf("no active dev sessions")
 	}
 
-	if session != "" {
-		sess, ok := sessions[session]
+	if p.Session != "" {
+		sess, ok := sessions[p.Session]
 		if !ok {
-			return nil, fmt.Errorf("no active session for branch %q", session)
+			return nil, fmt.Errorf("no active session for branch %q", p.Session)
+		}
+		if !sessionInScope(sess, p.Channel) {
+			// Refuse to act across channel boundaries — the caller must switch to
+			// the owning channel. This guards against ending the wrong session.
+			return nil, fmt.Errorf("session %q belongs to channel %q, not this channel — switch to that channel to act on it", p.Session, sess.CreatedByChannel)
 		}
 		return &sess, nil
 	}
 
-	if len(sessions) == 1 {
-		for _, sess := range sessions {
+	scoped := make(map[string]Session)
+	for branch, sess := range sessions {
+		if sessionInScope(sess, p.Channel) {
+			scoped[branch] = sess
+		}
+	}
+	if len(scoped) == 0 {
+		return nil, fmt.Errorf("no active dev sessions for this channel")
+	}
+	if len(scoped) == 1 {
+		for _, sess := range scoped {
 			return &sess, nil
 		}
 	}
 
-	var branches []string
-	for b := range sessions {
+	branches := make([]string, 0, len(scoped))
+	for b := range scoped {
 		branches = append(branches, b)
 	}
-	return nil, fmt.Errorf("multiple active sessions — specify which one: %v", branches)
+	sort.Strings(branches)
+	return nil, fmt.Errorf("multiple active sessions in this channel — specify which one: %v", branches)
+}
+
+// sessionInScope reports whether a session may be acted on from the given channel.
+// A channel-less session (stdio, tests, or created before channel tagging) and an
+// empty scope both match anything, for backwards compatibility; otherwise the
+// session's owning channel must match exactly.
+func sessionInScope(sess Session, channel string) bool {
+	if channel == "" || sess.CreatedByChannel == "" {
+		return true
+	}
+	return sess.CreatedByChannel == channel
+}
+
+// ListSessionsForChannel returns the active sessions a channel may act on,
+// applying the same scoping rules as ResolveSession. An empty channel returns
+// all sessions.
+func (s *Store) ListSessionsForChannel(ctx context.Context, channel string) (map[string]Session, error) {
+	sessions, err := s.ListSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	scoped := make(map[string]Session, len(sessions))
+	for branch, sess := range sessions {
+		if sessionInScope(sess, channel) {
+			scoped[branch] = sess
+		}
+	}
+	return scoped, nil
 }
 
 // GetRepoURL returns the cached repository URL, or empty if not set.
