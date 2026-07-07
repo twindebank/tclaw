@@ -124,13 +124,6 @@ type MessageSourceInfo struct {
 
 	// ChildChannel is the name of the child channel (set when Source == SourceChild).
 	ChildChannel string `json:"child_channel,omitempty"`
-
-	// NoReply marks a message that should be absorbed into the channel's history
-	// (a turn still runs, so it lands in the session) but must NOT produce a
-	// user-facing reply. Set by channel_send with response_required=false so one
-	// channel can report an already-actioned result to another without triggering
-	// a second round of processing.
-	NoReply bool `json:"no_reply,omitempty"`
 }
 
 // TaggedMessage pairs an incoming message with the channel it arrived on

@@ -72,6 +72,10 @@ type Params struct {
 	CrossChOutput chan<- channel.TaggedMessage
 	ChannelsFunc  func() map[channel.ChannelID]channel.Channel
 
+	// CrossChSend delivers text directly to a channel's transport for
+	// no_reply cross-channel sends, bypassing the inbound agent pipeline.
+	CrossChSend func(ctx context.Context, chID channel.ChannelID, text string, opts channel.SendOpts) (channel.MessageID, error)
+
 	// Channel transcript deps.
 	SessionStore *channel.SessionStore
 	HomeDir      string
@@ -157,6 +161,7 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 		Links:           p.Links,
 		Output:          p.CrossChOutput,
 		Channels:        p.ChannelsFunc,
+		Send:            p.CrossChSend,
 		SessionStore:    p.SessionStore,
 		HomeDir:         p.HomeDir,
 		MemoryDir:       p.MemoryDir,
