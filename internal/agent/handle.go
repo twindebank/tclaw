@@ -766,11 +766,13 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				continue
 			}
 			if result.IsError {
+				slog.Error("claude result error", "channel", channelID,
+					"subtype", result.Subtype, "result", result.Result)
 				if isRateLimitError(result.Result) {
 					// Return the session ID so retries can resume the same session.
 					return sessionID, ErrRateLimited
 				}
-				return "", fmt.Errorf("%s", friendlyErrorMessage(result.Result))
+				return "", fmt.Errorf("%s", friendlyErrorMessage(result.Result, result.Subtype))
 			}
 			if result.SessionID != "" && sessionID == "" {
 				sessionID = result.SessionID
@@ -850,17 +852,31 @@ func isRateLimitError(raw string) bool {
 }
 
 // friendlyErrorMessage converts a raw CLI error string into a user-facing message.
-// Detects known error categories (rate limit, context length, auth) and returns
-// a more actionable message; falls back to the raw text for unknown errors.
-func friendlyErrorMessage(raw string) string {
+// Detects known error categories (rate limit, usage limit, context length, auth)
+// and returns a more actionable message. When the CLI reports an error with no
+// message text (raw is empty — seen in production as a bare "claude error:"), it
+// falls back to the result subtype so the user always gets something diagnostic.
+func friendlyErrorMessage(raw, subtype string) string {
 	lower := strings.ToLower(raw)
 	switch {
 	case strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit") || strings.Contains(lower, "429"):
 		return "rate limit reached — please wait a moment before sending another message"
+	case strings.Contains(lower, "usage") || strings.Contains(lower, "session limit"):
+		// Usage/session limits ("out of extra usage", "hit your session limit")
+		// carry a reset time in the raw text — surface it verbatim so the user
+		// knows when to retry.
+		return "usage limit reached — " + raw
 	case strings.Contains(lower, "context") && (strings.Contains(lower, "length") || strings.Contains(lower, "too long") || strings.Contains(lower, "limit")):
 		return "context too long — use 'compact' to reduce conversation size and try again"
 	case strings.Contains(lower, "authentication") || strings.Contains(lower, "auth") || strings.Contains(lower, "unauthorized") || strings.Contains(lower, "401"):
 		return "authentication error — use 'login' to re-authenticate"
+	case strings.TrimSpace(raw) == "":
+		// The CLI signalled an error but gave no message. Report the subtype so
+		// the failure is never silent (e.g. "error_during_execution").
+		if s := strings.TrimSpace(subtype); s != "" {
+			return "claude ended the turn with an error (" + s + ") but gave no details — check the logs"
+		}
+		return "claude ended the turn with an error but gave no details — check the logs"
 	default:
 		return "claude error: " + raw
 	}

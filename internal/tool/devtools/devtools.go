@@ -44,6 +44,16 @@ type Deps struct {
 	ActiveChannel func() string
 }
 
+// activeChannelName returns the current channel name, or "" when unknown. It
+// scopes session resolution so dev_end/dev_pr/dev_cancel only touch sessions
+// started from the calling channel.
+func (d Deps) activeChannelName() string {
+	if d.ActiveChannel == nil {
+		return ""
+	}
+	return d.ActiveChannel()
+}
+
 // RegisterTools adds dev workflow tools to the MCP handler.
 func RegisterTools(handler *mcp.Handler, deps Deps) {
 	handler.Register(devStartDef(), devStartHandler(deps))
