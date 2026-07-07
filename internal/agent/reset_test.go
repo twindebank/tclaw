@@ -12,7 +12,7 @@ import (
 
 func TestResetFlow(t *testing.T) {
 	t.Run("shows menu", func(t *testing.T) {
-		for _, cmd := range []string{"reset", "Reset", "new", "clear", "delete"} {
+		for _, cmd := range []string{"reset", "Reset", "clear", "delete"} {
 			t.Run(cmd, func(t *testing.T) {
 				// Send reset command then close channel (agent exits).
 				_, sends := sendMessages(t, Options{}, cmd)
@@ -333,6 +333,74 @@ func TestResetFlow(t *testing.T) {
 
 		if resetCalled {
 			t.Error("OnReset should not be called after stop")
+		}
+	})
+}
+
+func TestNewSession(t *testing.T) {
+	t.Run("clears session without a menu or confirmation", func(t *testing.T) {
+		for _, cmd := range []string{"new", "New", "NEW"} {
+			t.Run(cmd, func(t *testing.T) {
+				var updatedChID channel.ChannelID
+				var updatedSessionID string
+				updateCalled := false
+
+				opts := Options{
+					Sessions: map[channel.ChannelID]string{
+						"test-ch": "old-session-123",
+					},
+					OnSessionUpdate: func(chID channel.ChannelID, sessionID string) {
+						updateCalled = true
+						updatedChID = chID
+						updatedSessionID = sessionID
+					},
+				}
+
+				_, sends := sendMessages(t, opts, cmd)
+
+				if !updateCalled {
+					t.Fatal("expected OnSessionUpdate to be called")
+				}
+				if updatedChID != "test-ch" {
+					t.Errorf("expected OnSessionUpdate for test-ch, got %q", updatedChID)
+				}
+				if updatedSessionID != "" {
+					t.Errorf("expected empty session ID, got %q", updatedSessionID)
+				}
+
+				// Should confirm a fresh session directly — never show the reset menu.
+				if len(sends) == 0 {
+					t.Fatal("expected a confirmation message")
+				}
+				if !strings.Contains(strings.ToLower(sends[0]), "new session") {
+					t.Errorf("expected 'new session' confirmation, got: %v", sends)
+				}
+				for _, s := range sends {
+					if strings.Contains(s, "Choose what to clear") {
+						t.Errorf("new should not show the reset menu, got: %v", sends)
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("denied when session reset builtin not allowed", func(t *testing.T) {
+		opts := Options{
+			// Omit BuiltinResetSession so the command is not permitted.
+			AllowedTools: []claudecli.Tool{claudecli.BuiltinStop},
+		}
+
+		_, sends := sendMessages(t, opts, "new")
+
+		found := false
+		for _, s := range sends {
+			if strings.Contains(strings.ToLower(s), "not available") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected a denial message, got: %v", sends)
 		}
 	})
 }

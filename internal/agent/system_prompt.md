@@ -60,7 +60,8 @@ These are typed directly by the user (not as tool calls). When the user asks abo
 - **stop** — cancel the current response mid-turn
 - **login** — start the authentication flow (OAuth or API key)
 - **auth** — show current authentication status
-- **new** / **reset** / **clear** / **delete** — open the reset menu with options:
+- **new** — start a fresh session on this channel immediately (clears this channel's conversation, no menu or confirmation)
+- **reset** / **clear** / **delete** — open the reset menu with options:
   1. Session — clear this channel's conversation
   2. Memories — erase all memory files (requires confirmation)
   3. Project — clear Claude state + all sessions, keep memories/connections (requires confirmation)

@@ -2,12 +2,25 @@ package agent
 
 import (
 	"fmt"
+	"log/slog"
 	"slices"
 	"strconv"
 
 	"tclaw/internal/channel"
 	"tclaw/internal/claudecli"
 )
+
+// clearChannelSession drops the channel's cached session so the next message on
+// that channel starts a fresh conversation. Also notifies the session store via
+// OnSessionUpdate so the cleared state is persisted.
+func clearChannelSession(opts Options, sessions map[channel.ChannelID]string, channelID channel.ChannelID) {
+	old := sessions[channelID]
+	delete(sessions, channelID)
+	if opts.OnSessionUpdate != nil {
+		opts.OnSessionUpdate(channelID, "")
+	}
+	slog.Info("session cleared", "channel", channelID, "old_session", old)
+}
 
 // ResetLevel identifies what to clear when the user resets.
 type ResetLevel int

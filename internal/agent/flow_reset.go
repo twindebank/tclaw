@@ -47,12 +47,7 @@ func handleResetChoosing(
 
 	switch chosen {
 	case ResetSession:
-		old := sessions[msg.ChannelID]
-		delete(sessions, msg.ChannelID)
-		if opts.OnSessionUpdate != nil {
-			opts.OnSessionUpdate(msg.ChannelID, "")
-		}
-		slog.Info("session reset", "channel", msg.ChannelID, "old_session", old)
+		clearChannelSession(opts, sessions, msg.ChannelID)
 		if _, err := opts.send(ctx, msg.ChannelID, "🗑️ Session cleared — next message starts a fresh conversation."); err != nil {
 			slog.Error("failed to send reset confirmation", "err", err)
 		}

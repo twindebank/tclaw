@@ -44,16 +44,27 @@ const (
 	// CmdCompact compacts the conversation context. Rewritten into a prompt
 	// that asks Claude to summarize and discard verbose history.
 	CmdCompact = "compact"
+
+	// CmdNew starts a fresh session on the current channel immediately — no
+	// menu, no confirmation. Distinct from the reset synonyms below, which open
+	// the multi-level reset menu.
+	CmdNew = "new"
 )
 
 // compactPrompt is injected as the user message when the compact command is used.
 const compactPrompt = "Please compact your conversation context now. Summarize the key points and discard verbose history."
 
+// isNewSessionCommand returns true if the raw user text is the "new" command,
+// which starts a fresh session directly. Case-insensitive.
+func isNewSessionCommand(text string) bool {
+	return strings.EqualFold(strings.TrimSpace(text), CmdNew)
+}
+
 // isResetCommand returns true if the raw user text is one of the
 // recognised reset synonyms. Case-insensitive.
 func isResetCommand(text string) bool {
 	switch strings.ToLower(strings.TrimSpace(text)) {
-	case "new", "reset", "clear", "delete":
+	case "reset", "clear", "delete":
 		return true
 	}
 	return false
@@ -500,6 +511,23 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			}
 			msg.Text = compactPrompt
 			// Fall through to handle() below.
+		}
+
+		// New command: start a fresh session immediately — no menu, no confirmation.
+		if isNewSessionCommand(msg.Text) {
+			if !isBuiltinAllowed(opts, msg.ChannelID, claudecli.BuiltinResetSession) {
+				sendDenied(ctx, opts, msg.ChannelID)
+				continue
+			}
+			fm.Cancel(msg.ChannelID)
+			clearChannelSession(opts, sessions, msg.ChannelID)
+			if _, err := opts.send(ctx, msg.ChannelID, "🆕 New session — your next message starts a fresh conversation."); err != nil {
+				slog.Error("failed to send new session confirmation", "err", err)
+			}
+			if err := opts.done(ctx, msg.ChannelID); err != nil {
+				slog.Error("failed to close turn after new session", "err", err)
+			}
+			continue
 		}
 
 		// Reset command: show the multi-option reset menu.
