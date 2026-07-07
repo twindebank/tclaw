@@ -433,6 +433,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		ActiveChannel:       activeChannelFunc,
 		Links:               linksFunc,
 		CrossChOutput:       chan<- channel.TaggedMessage(crossChannelMsgs),
+		CrossChSend:         messageOutbox.Send,
 		ChannelsFunc:        channelsFunc,
 		SessionStore:        sessionStore,
 		HomeDir:             homeDir,
