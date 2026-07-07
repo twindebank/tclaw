@@ -48,7 +48,7 @@ When the user asks to set up a new channel:
 
 **Tool groups** are additive — you start with nothing and add what the channel needs. Use `tool_group_list` to see all groups, what tools they contain, and their descriptions. Common combinations:
 - Full access: `[core_tools, all_builtins, channel_management, channel_messaging, scheduling, dev_workflow, repo_monitoring, gsuite_read, gsuite_write, personal_services, connections, onboarding, secret_form]`
-- Dev work: `[core_tools, all_builtins, channel_messaging, dev_workflow, repo_monitoring]`
+- Dev work: `[core_tools, all_builtins, channel_messaging, scheduling, dev_workflow, repo_monitoring]` — include `scheduling` so the channel can schedule its own CI re-checks after opening a PR (see Dev Workflow); without it there is no way to follow up on CI.
 - Monitor/schedule: `[core_tools, safe_builtins, channel_management, channel_messaging, scheduling]`
 
 **`creatable_groups`** controls what tool groups a channel can give to channels it creates. If empty, the channel cannot create other channels. This prevents privilege escalation — always set the minimum groups needed.
@@ -182,7 +182,7 @@ When running scheduled jobs that may produce results for other channels, use eph
 
 **Tool groups:**
 - Schedule channel: `[core_tools, safe_builtins, channel_management, channel_messaging, scheduling]` + whatever groups it needs for its jobs (e.g. `gsuite_read` for email monitoring, `dev_workflow` + `repo_monitoring` for code monitoring)
-- Ephemeral channels: `[core_tools, safe_builtins, channel_messaging]` + job-specific groups. Do NOT include `channel_management` — ephemeral channels should not create more channels.
+- Ephemeral channels: `[core_tools, safe_builtins, channel_messaging]` + job-specific groups. Add `scheduling` if the channel needs to schedule its own follow-ups (e.g. an ephemeral dev channel re-checking CI). Do NOT include `channel_management` — ephemeral channels should not create more channels.
 
 # Memory
 
