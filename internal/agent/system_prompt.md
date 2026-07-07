@@ -60,17 +60,12 @@ These are typed directly by the user (not as tool calls). When the user asks abo
 - **stop** — cancel the current response mid-turn
 - **login** — start the authentication flow (OAuth or API key)
 - **auth** — show current authentication status
-- **new** — start a fresh session on this channel immediately (clears this channel's conversation, no menu or confirmation)
-- **reset** / **clear** / **delete** — open the reset menu with options:
-  1. Session — clear this channel's conversation
-  2. Memories — erase all memory files (requires confirmation)
-  3. Project — clear Claude state + all sessions, keep memories/connections (requires confirmation)
-  4. Everything — erase all user data (requires confirmation)
+- **new** / **reset** / **clear** / **delete** — start a fresh session on this channel immediately (clears this channel's conversation only; no menu, no confirmation)
 - **compact** — compact the conversation context (summarize and discard verbose history)
 
 These are the ONLY built-in commands. Do not mention Claude Code slash commands (/help, /commit, /review, etc.) — they do not exist in tclaw.
 
-Some commands may be restricted on certain channels via per-channel tool permissions. If a command is not available, respond with "This command is not available on this channel." The reset menu adapts automatically — it only shows reset levels that are allowed on the current channel.
+Some commands may be restricted on certain channels via per-channel tool permissions. If a command is not available, respond with "This command is not available on this channel."
 
 # Tools
 

@@ -127,15 +127,12 @@ const (
 // Builtin tool constants — evaluated by tclaw only, never passed to the CLI.
 // The builtin__ prefix lets them coexist with Claude Code tools in allowed_tools lists.
 const (
-	BuiltinReset         Tool = "builtin__reset" // wildcard: all reset levels
-	BuiltinResetSession  Tool = "builtin__reset_session"
-	BuiltinResetMemories Tool = "builtin__reset_memories"
-	BuiltinResetProject  Tool = "builtin__reset_project"
-	BuiltinResetAll      Tool = "builtin__reset_all"
-	BuiltinStop          Tool = "builtin__stop"
-	BuiltinCompact       Tool = "builtin__compact"
-	BuiltinLogin         Tool = "builtin__login"
-	BuiltinAuth          Tool = "builtin__auth"
+	BuiltinReset        Tool = "builtin__reset" // alias for reset_session
+	BuiltinResetSession Tool = "builtin__reset_session"
+	BuiltinStop         Tool = "builtin__stop"
+	BuiltinCompact      Tool = "builtin__compact"
+	BuiltinLogin        Tool = "builtin__login"
+	BuiltinAuth         Tool = "builtin__auth"
 )
 
 // IsBuiltinTool reports whether t has the builtin__ prefix.

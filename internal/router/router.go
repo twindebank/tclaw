@@ -539,12 +539,12 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		}
 
 		// Re-seed the Google Workspace CLI skills each iteration (idempotent
-		// overwrite) so the agent discovers gws command syntax from skills, and a
-		// reset that cleared home/.claude/ is repaired before the next agent spawn.
+		// overwrite) so the agent discovers gws command syntax from skills before
+		// the next agent spawn.
 		seedGWSSkills(mu.cfg.ID, homeDir)
 
-		// Regenerate the MCP config on each iteration. ResetAll clears
-		// mcp-config/, so the file must be recreated before the next agent spawn.
+		// Regenerate the MCP config on each iteration so the file is always
+		// present before the next agent spawn.
 		remotes := buildRemoteMCPEntries(ctx)
 		if p, genErr := mcp.GenerateConfigFile(mcpConfigDir, mcpAddr, mcpToken, remotes); genErr != nil {
 			slog.Error("failed to regenerate mcp config", "user", mu.cfg.ID, "err", genErr)
@@ -989,14 +989,11 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			SystemPrompt:    systemPrompt,
 			SecretStore:     secretStore,
 			ChannelChangeCh: channelChangeNotify,
-			OnReset: func(level agent.ResetLevel) error {
-				return resetUser(level, dirs.Memory, dirs.Home, dirs.Sessions, dirs.State, dirs.Secrets, dirs.MCPConfig)
-			},
-			Env:           r.env,
-			UserID:        string(mu.cfg.ID),
-			SetupToken:    setupToken,
-			HasProdConfig: config.HasEnv(r.configPath, config.EnvProd),
-			ResumeNotice:  resumeNotice,
+			Env:             r.env,
+			UserID:          string(mu.cfg.ID),
+			SetupToken:      setupToken,
+			HasProdConfig:   config.HasEnv(r.configPath, config.EnvProd),
+			ResumeNotice:    resumeNotice,
 		}
 
 		agentErr := make(chan error, 1)
@@ -1047,14 +1044,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			// Idle timeout means the agent wasn't doing anything — don't resume.
 			if clearErr := messageQueue.ClearInterrupted(ctx); clearErr != nil {
 				slog.Error("failed to clear interrupted marker on idle timeout", "err", clearErr)
-			}
-			continue
-		}
-		if errors.Is(err, agent.ErrResetRequested) {
-			slog.Info("agent restarting", "user", mu.cfg.ID, "reason", "reset")
-			// User explicitly reset — don't resume old work.
-			if clearErr := messageQueue.ClearInterrupted(ctx); clearErr != nil {
-				slog.Error("failed to clear interrupted marker on reset", "err", clearErr)
 			}
 			continue
 		}
