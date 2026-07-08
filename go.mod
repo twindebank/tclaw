@@ -5,7 +5,7 @@ go 1.26
 require (
 	github.com/creack/pty/v2 v2.0.1
 	github.com/go-telegram/bot v1.22.0
-	github.com/gotd/td v0.159.0
+	github.com/gotd/td v0.160.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/stretchr/testify v1.11.1
 	github.com/zalando/go-keyring v0.2.6
@@ -37,7 +37,7 @@ require (
 	github.com/gotd/ige v0.2.2 // indirect
 	github.com/gotd/log v0.1.0 // indirect
 	github.com/gotd/neo v0.1.5 // indirect
-	github.com/klauspost/compress v1.18.6 // indirect
+	github.com/klauspost/compress v1.19.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/ogen-go/ogen v1.22.0 // indirect
@@ -57,7 +57,7 @@ require (
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
-	golang.org/x/tools v0.46.0 // indirect
+	golang.org/x/tools v0.47.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	rsc.io/qr v0.2.0 // indirect
 )

@@ -73,7 +73,7 @@ github.com/gotd/log
 # github.com/gotd/neo v0.1.5
 ## explicit; go 1.12
 github.com/gotd/neo
-# github.com/gotd/td v0.159.0
+# github.com/gotd/td v0.160.0
 ## explicit; go 1.25.0
 github.com/gotd/td/ascii
 github.com/gotd/td/bin
@@ -114,7 +114,7 @@ github.com/gotd/td/tgerr
 github.com/gotd/td/tmap
 github.com/gotd/td/transport
 github.com/gotd/td/wsutil
-# github.com/klauspost/compress v1.18.6
+# github.com/klauspost/compress v1.19.0
 ## explicit; go 1.24
 github.com/klauspost/compress
 github.com/klauspost/compress/flate
@@ -297,7 +297,7 @@ golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
 golang.org/x/text/unicode/rangetable
-# golang.org/x/tools v0.46.0
+# golang.org/x/tools v0.47.0
 ## explicit; go 1.25.0
 golang.org/x/tools/go/ast/astutil
 golang.org/x/tools/go/ast/edge
