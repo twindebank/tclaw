@@ -24,8 +24,10 @@ import (
 )
 
 // maxMediaDownloadBytes is the maximum file size we'll download from Telegram.
-// Conservative limit for the 512MB Fly VM.
-const maxMediaDownloadBytes = 10 * 1024 * 1024
+// 20 MiB is the Telegram Bot API's own hard cap for getFile downloads, so
+// nothing larger is reachable anyway; the download streams to disk so this
+// bound never has to fit in memory on the 512MB Fly VM.
+const maxMediaDownloadBytes = 20 * 1024 * 1024
 
 // mediaRetention is how long downloaded media files are kept before cleanup.
 // Files older than this are deleted when new media is downloaded.
@@ -150,7 +152,7 @@ func (t *Telegram) Messages(ctx context.Context) <-chan string {
 					text = msg.Caption
 				}
 
-				hasMedia := len(msg.Photo) > 0 || msg.Voice != nil || msg.Audio != nil
+				attachment, hasMedia := mediaFileInfo(msg)
 				if text == "" && !hasMedia {
 					return
 				}
@@ -174,7 +176,7 @@ func (t *Telegram) Messages(ctx context.Context) <-chan string {
 
 				// Download media if present.
 				if hasMedia && t.opts.MediaDir != "" {
-					mediaPath, err := t.downloadMedia(handlerCtx, b, msg)
+					mediaPath, err := t.downloadMedia(handlerCtx, b, msg, attachment)
 					if err != nil {
 						slog.Error("failed to download media", "err", err, "channel", t.name)
 						text = formatMediaError(text, err)
@@ -459,19 +461,15 @@ func (t *Telegram) StatusWrap() channel.StatusWrap {
 	return channel.StatusWrap{Open: "<blockquote expandable>", Close: "</blockquote>"}
 }
 
-// downloadMedia downloads the media attachment from a Telegram message to the
-// configured MediaDir. Returns the absolute path so the agent can pass it
-// directly to the Read tool without needing to resolve against a base dir.
-func (t *Telegram) downloadMedia(ctx context.Context, b *bot.Bot, msg *models.Message) (string, error) {
+// downloadMedia downloads the resolved media attachment to the configured
+// MediaDir, streaming to disk so a large file never has to fit in memory.
+// Returns the absolute path so the agent can pass it directly to the Read tool
+// without needing to resolve against a base dir.
+func (t *Telegram) downloadMedia(ctx context.Context, b *bot.Bot, msg *models.Message, att mediaAttachment) (string, error) {
 	// Clean up old media files before downloading new ones.
 	cleanupOldMedia(t.opts.MediaDir)
 
-	fileID, ext := mediaFileInfo(msg)
-	if fileID == "" {
-		return "", fmt.Errorf("no supported media in message")
-	}
-
-	file, err := b.GetFile(ctx, &bot.GetFileParams{FileID: fileID})
+	file, err := b.GetFile(ctx, &bot.GetFileParams{FileID: att.FileID})
 	if err != nil {
 		return "", fmt.Errorf("get file: %w", err)
 	}
@@ -495,20 +493,23 @@ func (t *Telegram) downloadMedia(ctx context.Context, b *bot.Bot, msg *models.Me
 		return "", fmt.Errorf("download status %d", resp.StatusCode)
 	}
 
-	// Limit the reader to prevent unexpectedly large downloads.
-	body := io.LimitReader(resp.Body, maxMediaDownloadBytes+1)
-	data, err := io.ReadAll(body)
+	fullPath := filepath.Join(t.opts.MediaDir, mediaFilename(att, msg.ID))
+	out, err := os.OpenFile(fullPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
-		return "", fmt.Errorf("read body: %w", err)
+		return "", fmt.Errorf("create file: %w", err)
 	}
-	if len(data) > maxMediaDownloadBytes {
-		return "", fmt.Errorf("file too large (downloaded %d bytes, max %d)", len(data), maxMediaDownloadBytes)
-	}
+	defer out.Close()
 
-	filename := mediaFilename(msg, ext)
-	fullPath := filepath.Join(t.opts.MediaDir, filename)
-	if err := os.WriteFile(fullPath, data, 0o644); err != nil {
+	// Bound the copy even when getFile under-reports FileSize (it can be unset
+	// for some types) — read one byte past the cap so we can detect overrun.
+	written, err := io.Copy(out, io.LimitReader(resp.Body, maxMediaDownloadBytes+1))
+	if err != nil {
+		removePartialDownload(fullPath)
 		return "", fmt.Errorf("write file: %w", err)
+	}
+	if written > maxMediaDownloadBytes {
+		removePartialDownload(fullPath)
+		return "", fmt.Errorf("file too large (downloaded %d bytes, max %d)", written, maxMediaDownloadBytes)
 	}
 
 	// Return the absolute path so the agent can pass it directly to the Read
@@ -516,43 +517,87 @@ func (t *Telegram) downloadMedia(ctx context.Context, b *bot.Bot, msg *models.Me
 	return fullPath, nil
 }
 
-// mediaFileInfo extracts the Telegram file ID and a file extension from the
-// message's media attachment. Returns empty strings if no supported media.
-func mediaFileInfo(msg *models.Message) (fileID string, ext string) {
+// removePartialDownload deletes a half-written download so a rejected file never
+// lingers for the agent to stumble onto. Best-effort — logged, never surfaced.
+func removePartialDownload(path string) {
+	if err := os.Remove(path); err != nil {
+		slog.Warn("failed to remove partial media download", "path", path, "err", err)
+	}
+}
+
+// mediaAttachment is the single resolved view of whatever downloadable file a
+// Telegram message carries — the one place that knows the supported type set,
+// so the inbound gate, filename, and download all agree.
+type mediaAttachment struct {
+	// FileID is Telegram's handle for fetching the file via getFile.
+	FileID string
+
+	// Ext is the file extension to save under (leading dot, e.g. ".pdf").
+	Ext string
+
+	// Prefix is the human-readable filename prefix (e.g. "photo", "document").
+	Prefix string
+}
+
+// mediaFileInfo resolves the downloadable attachment on a message. ok is false
+// when the message carries no supported media (text-only, or an unsupported
+// non-file type like a location or poll).
+func mediaFileInfo(msg *models.Message) (att mediaAttachment, ok bool) {
 	switch {
 	case len(msg.Photo) > 0:
 		// Telegram sends photos as an array of sizes — last is largest.
 		largest := msg.Photo[len(msg.Photo)-1]
-		return largest.FileID, ".jpg"
+		return mediaAttachment{FileID: largest.FileID, Ext: ".jpg", Prefix: "photo"}, true
 	case msg.Voice != nil:
-		return msg.Voice.FileID, ".ogg"
+		return mediaAttachment{FileID: msg.Voice.FileID, Ext: ".ogg", Prefix: "voice"}, true
 	case msg.Audio != nil:
-		ext := ".mp3"
-		if msg.Audio.FileName != "" {
-			if e := filepath.Ext(msg.Audio.FileName); e != "" {
-				ext = e
-			}
-		}
-		return msg.Audio.FileID, ext
+		return mediaAttachment{FileID: msg.Audio.FileID, Ext: extOrDefault(msg.Audio.FileName, ".mp3"), Prefix: "audio"}, true
+	case msg.Video != nil:
+		return mediaAttachment{FileID: msg.Video.FileID, Ext: extOrDefault(msg.Video.FileName, ".mp4"), Prefix: "video"}, true
+	case msg.VideoNote != nil:
+		// Round video messages carry no filename; they're always MP4.
+		return mediaAttachment{FileID: msg.VideoNote.FileID, Ext: ".mp4", Prefix: "videonote"}, true
+	case msg.Animation != nil:
+		// Telegram sets both Animation and Document for GIFs; match Animation
+		// first so it keeps its ".mp4" (Telegram delivers GIFs as silent MP4).
+		return mediaAttachment{FileID: msg.Animation.FileID, Ext: extOrDefault(msg.Animation.FileName, ".mp4"), Prefix: "animation"}, true
+	case msg.Sticker != nil:
+		return mediaAttachment{FileID: msg.Sticker.FileID, Ext: stickerExt(msg.Sticker), Prefix: "sticker"}, true
+	case msg.Document != nil:
+		// The catch-all: any file type the user sends as a document.
+		return mediaAttachment{FileID: msg.Document.FileID, Ext: extOrDefault(msg.Document.FileName, ".bin"), Prefix: "document"}, true
 	default:
-		return "", ""
+		return mediaAttachment{}, false
 	}
 }
 
-// mediaFilename builds a unique filename for a downloaded media file.
-func mediaFilename(msg *models.Message, ext string) string {
-	ts := time.Now().Unix()
-	prefix := "file"
+// stickerExt picks the on-disk extension for a sticker: video stickers are
+// WebM, animated (Lottie) stickers are gzipped .tgs, and the rest are WebP.
+func stickerExt(s *models.Sticker) string {
 	switch {
-	case len(msg.Photo) > 0:
-		prefix = "photo"
-	case msg.Voice != nil:
-		prefix = "voice"
-	case msg.Audio != nil:
-		prefix = "audio"
+	case s.IsVideo:
+		return ".webm"
+	case s.IsAnimated:
+		return ".tgs"
+	default:
+		return ".webp"
 	}
-	// Use the message ID as a simple collision-resistant suffix.
-	return fmt.Sprintf("%s_%d_%d%s", prefix, ts, msg.ID, ext)
+}
+
+// extOrDefault returns the extension of fileName when it has one, else fallback.
+func extOrDefault(fileName, fallback string) string {
+	if fileName != "" {
+		if e := filepath.Ext(fileName); e != "" {
+			return e
+		}
+	}
+	return fallback
+}
+
+// mediaFilename builds a unique filename for a downloaded media file, using the
+// message ID as a simple collision-resistant suffix.
+func mediaFilename(att mediaAttachment, msgID int) string {
+	return fmt.Sprintf("%s_%d_%d%s", att.Prefix, time.Now().Unix(), msgID, att.Ext)
 }
 
 // formatMediaError builds the prompt text that tells the agent a media
@@ -566,18 +611,29 @@ func formatMediaError(text string, err error) string {
 }
 
 // formatMediaMessage builds the prompt text that tells the agent about an
-// attached media file so it knows to Read it.
+// attached media file. It only ever passes the path — never the contents — so
+// the agent decides whether to load the file into context.
 func formatMediaMessage(text string, mediaPath string) string {
 	mediaType := "file"
-	ext := filepath.Ext(mediaPath)
+	// The Read tool can open images, audio, PDFs, and text; anything else the
+	// agent has to reach for another tool, so don't nudge it toward Read.
+	hint := "available on disk if you want to inspect it"
+	ext := strings.ToLower(filepath.Ext(mediaPath))
 	switch {
 	case ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp":
 		mediaType = "image"
+		hint = "view it with the Read tool"
 	case ext == ".ogg" || ext == ".mp3" || ext == ".m4a" || ext == ".wav" || ext == ".flac":
 		mediaType = "audio"
+		hint = "view it with the Read tool"
+	case ext == ".mp4" || ext == ".mov" || ext == ".webm" || ext == ".mkv" || ext == ".avi":
+		mediaType = "video"
+	case ext == ".pdf":
+		mediaType = "PDF"
+		hint = "view it with the Read tool"
 	}
 
-	attachment := fmt.Sprintf("[Attached %s: %s — view it with the Read tool]", mediaType, mediaPath)
+	attachment := fmt.Sprintf("[Attached %s: %s — %s]", mediaType, mediaPath, hint)
 	if text == "" {
 		return attachment
 	}

@@ -19,43 +19,139 @@ func TestMediaFileInfo(t *testing.T) {
 				{FileID: "large", Width: 800, Height: 800},
 			},
 		}
-		fileID, ext := mediaFileInfo(msg)
-		require.Equal(t, "large", fileID)
-		require.Equal(t, ".jpg", ext)
+		att, ok := mediaFileInfo(msg)
+		require.True(t, ok)
+		require.Equal(t, "large", att.FileID)
+		require.Equal(t, ".jpg", att.Ext)
+		require.Equal(t, "photo", att.Prefix)
 	})
 
 	t.Run("voice message", func(t *testing.T) {
 		msg := &models.Message{
 			Voice: &models.Voice{FileID: "voice123"},
 		}
-		fileID, ext := mediaFileInfo(msg)
-		require.Equal(t, "voice123", fileID)
-		require.Equal(t, ".ogg", ext)
+		att, ok := mediaFileInfo(msg)
+		require.True(t, ok)
+		require.Equal(t, "voice123", att.FileID)
+		require.Equal(t, ".ogg", att.Ext)
+		require.Equal(t, "voice", att.Prefix)
 	})
 
 	t.Run("audio with filename", func(t *testing.T) {
 		msg := &models.Message{
 			Audio: &models.Audio{FileID: "audio456", FileName: "song.m4a"},
 		}
-		fileID, ext := mediaFileInfo(msg)
-		require.Equal(t, "audio456", fileID)
-		require.Equal(t, ".m4a", ext)
+		att, ok := mediaFileInfo(msg)
+		require.True(t, ok)
+		require.Equal(t, "audio456", att.FileID)
+		require.Equal(t, ".m4a", att.Ext)
 	})
 
 	t.Run("audio without filename defaults to mp3", func(t *testing.T) {
 		msg := &models.Message{
 			Audio: &models.Audio{FileID: "audio789"},
 		}
-		fileID, ext := mediaFileInfo(msg)
-		require.Equal(t, "audio789", fileID)
-		require.Equal(t, ".mp3", ext)
+		att, ok := mediaFileInfo(msg)
+		require.True(t, ok)
+		require.Equal(t, "audio789", att.FileID)
+		require.Equal(t, ".mp3", att.Ext)
 	})
 
-	t.Run("no media returns empty", func(t *testing.T) {
+	t.Run("document keeps its filename extension", func(t *testing.T) {
+		msg := &models.Message{
+			Document: &models.Document{FileID: "doc1", FileName: "report.pdf"},
+		}
+		att, ok := mediaFileInfo(msg)
+		require.True(t, ok)
+		require.Equal(t, "doc1", att.FileID)
+		require.Equal(t, ".pdf", att.Ext)
+		require.Equal(t, "document", att.Prefix)
+	})
+
+	t.Run("document without filename falls back to .bin", func(t *testing.T) {
+		msg := &models.Message{
+			Document: &models.Document{FileID: "doc2"},
+		}
+		att, ok := mediaFileInfo(msg)
+		require.True(t, ok)
+		require.Equal(t, ".bin", att.Ext)
+	})
+
+	t.Run("video with filename", func(t *testing.T) {
+		msg := &models.Message{
+			Video: &models.Video{FileID: "vid1", FileName: "clip.mov"},
+		}
+		att, ok := mediaFileInfo(msg)
+		require.True(t, ok)
+		require.Equal(t, "vid1", att.FileID)
+		require.Equal(t, ".mov", att.Ext)
+		require.Equal(t, "video", att.Prefix)
+	})
+
+	t.Run("video without filename defaults to mp4", func(t *testing.T) {
+		msg := &models.Message{
+			Video: &models.Video{FileID: "vid2"},
+		}
+		att, ok := mediaFileInfo(msg)
+		require.True(t, ok)
+		require.Equal(t, ".mp4", att.Ext)
+	})
+
+	t.Run("video note is always mp4", func(t *testing.T) {
+		msg := &models.Message{
+			VideoNote: &models.VideoNote{FileID: "note1"},
+		}
+		att, ok := mediaFileInfo(msg)
+		require.True(t, ok)
+		require.Equal(t, "note1", att.FileID)
+		require.Equal(t, ".mp4", att.Ext)
+		require.Equal(t, "videonote", att.Prefix)
+	})
+
+	t.Run("animation defaults to mp4", func(t *testing.T) {
+		msg := &models.Message{
+			Animation: &models.Animation{FileID: "anim1"},
+		}
+		att, ok := mediaFileInfo(msg)
+		require.True(t, ok)
+		require.Equal(t, "anim1", att.FileID)
+		require.Equal(t, ".mp4", att.Ext)
+		require.Equal(t, "animation", att.Prefix)
+	})
+
+	t.Run("static sticker is webp", func(t *testing.T) {
+		msg := &models.Message{
+			Sticker: &models.Sticker{FileID: "st1"},
+		}
+		att, ok := mediaFileInfo(msg)
+		require.True(t, ok)
+		require.Equal(t, "st1", att.FileID)
+		require.Equal(t, ".webp", att.Ext)
+		require.Equal(t, "sticker", att.Prefix)
+	})
+
+	t.Run("video sticker is webm", func(t *testing.T) {
+		msg := &models.Message{
+			Sticker: &models.Sticker{FileID: "st2", IsVideo: true},
+		}
+		att, ok := mediaFileInfo(msg)
+		require.True(t, ok)
+		require.Equal(t, ".webm", att.Ext)
+	})
+
+	t.Run("animated sticker is tgs", func(t *testing.T) {
+		msg := &models.Message{
+			Sticker: &models.Sticker{FileID: "st3", IsAnimated: true},
+		}
+		att, ok := mediaFileInfo(msg)
+		require.True(t, ok)
+		require.Equal(t, ".tgs", att.Ext)
+	})
+
+	t.Run("no media returns false", func(t *testing.T) {
 		msg := &models.Message{Text: "just text"}
-		fileID, ext := mediaFileInfo(msg)
-		require.Empty(t, fileID)
-		require.Empty(t, ext)
+		_, ok := mediaFileInfo(msg)
+		require.False(t, ok)
 	})
 
 	t.Run("photo takes priority over voice", func(t *testing.T) {
@@ -63,40 +159,42 @@ func TestMediaFileInfo(t *testing.T) {
 			Photo: []models.PhotoSize{{FileID: "photo1"}},
 			Voice: &models.Voice{FileID: "voice1"},
 		}
-		fileID, _ := mediaFileInfo(msg)
-		require.Equal(t, "photo1", fileID)
+		att, ok := mediaFileInfo(msg)
+		require.True(t, ok)
+		require.Equal(t, "photo1", att.FileID)
+	})
+
+	t.Run("animation takes priority over document for GIFs", func(t *testing.T) {
+		// Telegram sets both fields for a GIF; Animation must win so the file
+		// keeps its ".mp4" rather than the document fallback.
+		msg := &models.Message{
+			Animation: &models.Animation{FileID: "anim1"},
+			Document:  &models.Document{FileID: "doc1", FileName: "giphy.gif"},
+		}
+		att, ok := mediaFileInfo(msg)
+		require.True(t, ok)
+		require.Equal(t, "anim1", att.FileID)
+		require.Equal(t, "animation", att.Prefix)
 	})
 }
 
 func TestMediaFilename(t *testing.T) {
 	t.Run("photo filename", func(t *testing.T) {
-		msg := &models.Message{
-			ID:    42,
-			Photo: []models.PhotoSize{{FileID: "x"}},
-		}
-		name := mediaFilename(msg, ".jpg")
+		name := mediaFilename(mediaAttachment{Prefix: "photo", Ext: ".jpg"}, 42)
 		require.Contains(t, name, "photo_")
 		require.Contains(t, name, "_42.jpg")
 	})
 
 	t.Run("voice filename", func(t *testing.T) {
-		msg := &models.Message{
-			ID:    99,
-			Voice: &models.Voice{FileID: "x"},
-		}
-		name := mediaFilename(msg, ".ogg")
+		name := mediaFilename(mediaAttachment{Prefix: "voice", Ext: ".ogg"}, 99)
 		require.Contains(t, name, "voice_")
 		require.Contains(t, name, "_99.ogg")
 	})
 
-	t.Run("audio filename", func(t *testing.T) {
-		msg := &models.Message{
-			ID:    7,
-			Audio: &models.Audio{FileID: "x"},
-		}
-		name := mediaFilename(msg, ".mp3")
-		require.Contains(t, name, "audio_")
-		require.Contains(t, name, "_7.mp3")
+	t.Run("document filename", func(t *testing.T) {
+		name := mediaFilename(mediaAttachment{Prefix: "document", Ext: ".pdf"}, 7)
+		require.Contains(t, name, "document_")
+		require.Contains(t, name, "_7.pdf")
 	})
 }
 
@@ -116,9 +214,22 @@ func TestFormatMediaMessage(t *testing.T) {
 		require.Equal(t, "[Attached audio: media/voice_123_42.ogg — view it with the Read tool]", result)
 	})
 
+	t.Run("pdf uses the Read tool", func(t *testing.T) {
+		result := formatMediaMessage("", "media/document_123_42.pdf")
+		require.Contains(t, result, "[Attached PDF:")
+		require.Contains(t, result, "view it with the Read tool")
+	})
+
+	t.Run("video is not steered toward the Read tool", func(t *testing.T) {
+		result := formatMediaMessage("", "media/video_123_42.mp4")
+		require.Contains(t, result, "[Attached video:")
+		require.Contains(t, result, "available on disk")
+	})
+
 	t.Run("unknown extension treated as file", func(t *testing.T) {
-		result := formatMediaMessage("", "media/doc_123_42.pdf")
+		result := formatMediaMessage("", "media/document_123_42.xyz")
 		require.Contains(t, result, "[Attached file:")
+		require.Contains(t, result, "available on disk")
 	})
 }
 
