@@ -2,7 +2,11 @@
 // system-derived paths (home dir, store path, socket path) are computed by the router at runtime.
 package user
 
-import "tclaw/internal/claudecli"
+import (
+	"time"
+
+	"tclaw/internal/claudecli"
+)
 
 // ID uniquely identifies a user across the system.
 type ID string
@@ -19,6 +23,11 @@ type Config struct {
 	DisallowedTools []claudecli.Tool
 	MaxTurns        int
 	Debug           bool
+
+	// MessageDebounce coalesces same-channel user messages that arrive within
+	// this rolling window into a single agent turn (e.g. a photo album delivered
+	// as separate messages). 0 disables debouncing.
+	MessageDebounce time.Duration
 
 	// SystemPrompt is custom text appended after tclaw's default system prompt.
 	// Configured per-user in tclaw.yaml.

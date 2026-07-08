@@ -2,6 +2,7 @@ package queue_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -210,6 +211,110 @@ func TestQueue(t *testing.T) {
 		require.NoError(t, q.ClearInterrupted(ctx))
 		require.Equal(t, channel.ChannelID(""), q.InterruptedChannel())
 	})
+
+	t.Run("coalesces same-channel user messages within the debounce window", func(t *testing.T) {
+		q := setupDebounce(t, 30*time.Millisecond)
+		ctx := context.Background()
+		input := make(chan channel.TaggedMessage)
+
+		for _, text := range []string{"photo one", "photo two", "photo three"} {
+			require.NoError(t, q.Push(ctx, userMsg("ch1", text)))
+		}
+
+		msg, err := q.Next(ctx, input)
+		require.NoError(t, err)
+		require.Equal(t, "photo one\n\nphoto two\n\nphoto three", msg.Text)
+		require.Equal(t, channel.ChannelID("ch1"), msg.ChannelID)
+		require.Equal(t, channel.SourceUser, msg.SourceInfo.Source)
+		require.Equal(t, 0, q.Len(), "queue should be drained after coalescing")
+	})
+
+	t.Run("does not merge messages from different channels", func(t *testing.T) {
+		q := setupDebounce(t, 30*time.Millisecond)
+		ctx := context.Background()
+		input := make(chan channel.TaggedMessage)
+
+		require.NoError(t, q.Push(ctx, userMsg("ch1", "from one")))
+		require.NoError(t, q.Push(ctx, userMsg("ch2", "from two")))
+
+		first, err := q.Next(ctx, input)
+		require.NoError(t, err)
+		second, err := q.Next(ctx, input)
+		require.NoError(t, err)
+
+		require.ElementsMatch(t, []string{"from one", "from two"}, []string{first.Text, second.Text})
+		require.NotEqual(t, first.ChannelID, second.ChannelID)
+	})
+
+	t.Run("control command is never batched", func(t *testing.T) {
+		q := setupDebounce(t, 30*time.Millisecond)
+		ctx := context.Background()
+		input := make(chan channel.TaggedMessage)
+
+		// A lone control command is returned immediately, on its own turn.
+		require.NoError(t, q.Push(ctx, userMsg("ch1", "stop")))
+		msg, err := q.Next(ctx, input)
+		require.NoError(t, err)
+		require.Equal(t, "stop", msg.Text)
+
+		// A stop queued after an album leaves the batch intact; the batch turn runs
+		// first, then the stop is handled on the following Next.
+		require.NoError(t, q.Push(ctx, userMsg("ch1", "photo one")))
+		require.NoError(t, q.Push(ctx, userMsg("ch1", "photo two")))
+		require.NoError(t, q.Push(ctx, userMsg("ch1", "stop")))
+
+		batch, err := q.Next(ctx, input)
+		require.NoError(t, err)
+		require.Equal(t, "photo one\n\nphoto two", batch.Text)
+
+		after, err := q.Next(ctx, input)
+		require.NoError(t, err)
+		require.Equal(t, "stop", after.Text)
+	})
+
+	t.Run("reset-on-arrival coalesces siblings that trickle in", func(t *testing.T) {
+		q := setupDebounce(t, 40*time.Millisecond)
+		ctx := context.Background()
+		input := make(chan channel.TaggedMessage, 1)
+
+		require.NoError(t, q.Push(ctx, userMsg("ch1", "first")))
+
+		// Deliver a sibling through the input channel partway through the window;
+		// the reset-on-arrival window should keep it in the same batch.
+		go func() {
+			time.Sleep(15 * time.Millisecond)
+			input <- userMsg("ch1", "second")
+		}()
+
+		msg, err := q.Next(ctx, input)
+		require.NoError(t, err)
+		require.Equal(t, "first\n\nsecond", msg.Text)
+		require.Equal(t, 0, q.Len())
+	})
+
+	t.Run("debounce window of zero returns one message per Next", func(t *testing.T) {
+		s, err := store.NewFS(t.TempDir())
+		require.NoError(t, err)
+		// DebounceWindow unset (0) — coalescing disabled, one message per Next.
+		q := queue.New(queue.QueueParams{
+			Store:    s,
+			Activity: channel.NewActivityTracker(),
+			Channels: multiChannelsFunc(),
+		})
+		ctx := context.Background()
+		input := make(chan channel.TaggedMessage)
+
+		require.NoError(t, q.Push(ctx, userMsg("ch1", "one")))
+		require.NoError(t, q.Push(ctx, userMsg("ch1", "two")))
+
+		first, err := q.Next(ctx, input)
+		require.NoError(t, err)
+		require.Equal(t, "one", first.Text)
+
+		second, err := q.Next(ctx, input)
+		require.NoError(t, err)
+		require.Equal(t, "two", second.Text)
+	})
 }
 
 // --- helpers ---
@@ -232,6 +337,40 @@ func channelsFunc() func() map[channel.ChannelID]channel.Channel {
 		return map[channel.ChannelID]channel.Channel{
 			"ch1": &mockChannel{name: "main", id: "ch1"},
 		}
+	}
+}
+
+// setupDebounce builds a queue with debouncing enabled and "stop" treated as a
+// control command, so tests can exercise coalescing and the control carve-out.
+func setupDebounce(t *testing.T, window time.Duration) *queue.Queue {
+	t.Helper()
+	s, err := store.NewFS(t.TempDir())
+	require.NoError(t, err)
+	return queue.New(queue.QueueParams{
+		Store:          s,
+		Activity:       channel.NewActivityTracker(),
+		Channels:       multiChannelsFunc(),
+		DebounceWindow: window,
+		IsControlMessage: func(m channel.TaggedMessage) bool {
+			return strings.EqualFold(strings.TrimSpace(m.Text), "stop")
+		},
+	})
+}
+
+func multiChannelsFunc() func() map[channel.ChannelID]channel.Channel {
+	return func() map[channel.ChannelID]channel.Channel {
+		return map[channel.ChannelID]channel.Channel{
+			"ch1": &mockChannel{name: "main", id: "ch1"},
+			"ch2": &mockChannel{name: "second", id: "ch2"},
+		}
+	}
+}
+
+func userMsg(chID channel.ChannelID, text string) channel.TaggedMessage {
+	return channel.TaggedMessage{
+		ChannelID:  chID,
+		Text:       text,
+		SourceInfo: &channel.MessageSourceInfo{Source: channel.SourceUser},
 	}
 }
 

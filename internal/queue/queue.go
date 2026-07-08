@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +26,11 @@ import (
 )
 
 const storeKey = "message_queue"
+
+// maxBatchWindow caps how long a coalesced batch can keep growing before it's
+// flushed, so a steady trickle of messages can't defer processing indefinitely
+// via the reset-on-arrival debounce window.
+const maxBatchWindow = 5 * time.Second
 
 // ErrInputClosed is returned by Next when the input channel is closed.
 var ErrInputClosed = errors.New("input channel closed")
@@ -65,6 +71,17 @@ type QueueParams struct {
 	// OnWaiting is called when a queued message starts waiting for a busy
 	// channel. Used to send user-visible feedback. May be nil.
 	OnWaiting func(WaitingInfo)
+
+	// DebounceWindow coalesces same-channel user messages that arrive within this
+	// rolling window into a single dequeued message (e.g. a photo album delivered
+	// as separate messages). The window resets each time a sibling arrives, bounded
+	// by maxBatchWindow. 0 disables debouncing.
+	DebounceWindow time.Duration
+
+	// IsControlMessage reports whether a message is a builtin command (stop, login,
+	// auth, compact, fresh-session) that must be processed on its own turn and never
+	// batched into a coalesced turn. May be nil (nothing is treated as control).
+	IsControlMessage func(channel.TaggedMessage) bool
 }
 
 // Queue is a persistent priority queue for agent messages.
@@ -72,6 +89,9 @@ type Queue struct {
 	store    store.Store
 	activity *channel.ActivityTracker
 	channels func() map[channel.ChannelID]channel.Channel
+
+	debounceWindow   time.Duration
+	isControlMessage func(channel.TaggedMessage) bool
 
 	mu                 sync.Mutex
 	messages           []QueuedMessage
@@ -85,10 +105,12 @@ type Queue struct {
 // New creates a Queue from the given params.
 func New(p QueueParams) *Queue {
 	return &Queue{
-		store:    p.Store,
-		activity: p.Activity,
-		channels: p.Channels,
-		notify:   make(chan struct{}, 1),
+		store:            p.Store,
+		activity:         p.Activity,
+		channels:         p.Channels,
+		debounceWindow:   p.DebounceWindow,
+		isControlMessage: p.IsControlMessage,
+		notify:           make(chan struct{}, 1),
 	}
 }
 
@@ -148,6 +170,16 @@ func (q *Queue) Push(ctx context.Context, msg channel.TaggedMessage) error {
 // processable when the target channel is idle.
 func (q *Queue) Next(ctx context.Context, input <-chan channel.TaggedMessage) (channel.TaggedMessage, error) {
 	for {
+		// When debouncing is on and the highest-priority processable message is a
+		// coalescable user message, hold it briefly so sibling messages (e.g. the
+		// rest of a photo album) can land and be merged into a single turn. Control
+		// commands and non-user messages fall through to the immediate path below.
+		if q.debounceWindow > 0 {
+			if chID, ok := q.peekBatchableChannel(); ok {
+				return q.debounceAndCoalesce(ctx, chID, input)
+			}
+		}
+
 		// Try to dequeue a processable message.
 		if msg, ok := q.tryDequeue(ctx); ok {
 			return msg, nil
@@ -238,6 +270,138 @@ func (q *Queue) dequeueIndex() int {
 // isUserMessage returns true for messages typed by a human.
 func isUserMessage(m QueuedMessage) bool {
 	return m.SourceInfo == nil || m.SourceInfo.Source == channel.SourceUser
+}
+
+// isBatchable reports whether a queued message can be coalesced with its
+// same-channel siblings: it must be a human-typed message and not a builtin
+// control command (which must run on its own turn). Caller must hold q.mu.
+func (q *Queue) isBatchable(m QueuedMessage) bool {
+	if !isUserMessage(m) {
+		return false
+	}
+	if q.isControlMessage == nil {
+		return true
+	}
+	return !q.isControlMessage(channel.TaggedMessage{
+		ChannelID:  m.ChannelID,
+		Text:       m.Text,
+		SourceInfo: m.SourceInfo,
+	})
+}
+
+// peekBatchableChannel reports the ChannelID of the highest-priority processable
+// message when that message is batchable, so Next can debounce its channel. If
+// the top message is instead a control command (or nothing is processable), it
+// returns false so Next takes the immediate path and handles it alone.
+func (q *Queue) peekBatchableChannel() (channel.ChannelID, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	idx := q.dequeueIndex()
+	if idx < 0 {
+		return "", false
+	}
+	m := q.messages[idx]
+	if !q.isBatchable(m) {
+		return "", false
+	}
+	return m.ChannelID, true
+}
+
+// debounceAndCoalesce holds a ready batchable message for debounceWindow, letting
+// same-channel siblings drain into the queue, then coalesces every queued
+// batchable message for chID into one message. The window resets each time a new
+// message arrives — via the input channel or an external Push (q.notify) — so a
+// trickling photo album stays together, bounded by maxBatchWindow so a steady
+// stream can't defer processing forever.
+func (q *Queue) debounceAndCoalesce(ctx context.Context, chID channel.ChannelID, input <-chan channel.TaggedMessage) (channel.TaggedMessage, error) {
+	timer := time.NewTimer(q.debounceWindow)
+	defer timer.Stop()
+	hardCap := time.After(maxBatchWindow)
+
+	for {
+		select {
+		case <-ctx.Done():
+			// Pushed siblings are already persisted, so nothing is lost by bailing.
+			return channel.TaggedMessage{}, ctx.Err()
+
+		case m, ok := <-input:
+			if !ok {
+				return channel.TaggedMessage{}, ErrInputClosed
+			}
+			if err := q.Push(ctx, m); err != nil {
+				slog.Error("queue: push failed during debounce", "error", err)
+			}
+			// Reset-on-arrival: a fresh sibling extends the window.
+			resetTimer(timer, q.debounceWindow)
+
+		case <-q.notify:
+			// A message was pushed externally (bridge goroutine) — extend the window.
+			resetTimer(timer, q.debounceWindow)
+
+		case <-timer.C:
+			return q.coalesceBatch(ctx, chID)
+
+		case <-hardCap:
+			return q.coalesceBatch(ctx, chID)
+		}
+	}
+}
+
+// coalesceBatch removes every queued batchable message for chID in FIFO order and
+// returns them as a single message — texts joined by a blank line, carrying the
+// first message's SourceInfo. Control, non-user, and other-channel messages are
+// left in place so priority semantics hold (e.g. a stop queued after an album is
+// handled on the next Next call, cancelling the batch turn).
+func (q *Queue) coalesceBatch(ctx context.Context, chID channel.ChannelID) (channel.TaggedMessage, error) {
+	q.mu.Lock()
+
+	var texts []string
+	var sourceInfo *channel.MessageSourceInfo
+	kept := make([]QueuedMessage, 0, len(q.messages))
+	for _, m := range q.messages {
+		if m.ChannelID == chID && q.isBatchable(m) {
+			if len(texts) == 0 {
+				sourceInfo = m.SourceInfo
+			}
+			texts = append(texts, m.Text)
+			continue
+		}
+		kept = append(kept, m)
+	}
+
+	if len(texts) == 0 {
+		// The peeked message vanished before we could collect it. With a single
+		// Next consumer this shouldn't happen; surface it rather than returning an
+		// empty message the caller would treat as a real turn.
+		q.mu.Unlock()
+		return channel.TaggedMessage{}, fmt.Errorf("coalesce batch for channel %q: no batchable messages", chID)
+	}
+
+	q.messages = kept
+	q.mu.Unlock()
+
+	if err := q.persist(ctx); err != nil {
+		slog.Error("queue: failed to persist after coalesce", "error", err)
+	}
+
+	return channel.TaggedMessage{
+		ChannelID:  chID,
+		Text:       strings.Join(texts, "\n\n"),
+		SourceInfo: sourceInfo,
+	}, nil
+}
+
+// resetTimer resets t to fire after d, draining a pending expiry first so the
+// next receive on t.C reflects the new deadline rather than a stale one.
+func resetTimer(t *time.Timer, d time.Duration) {
+	if !t.Stop() {
+		select {
+		case <-t.C:
+		default:
+		}
+	}
+	t.Reset(d)
 }
 
 // idleNotifyForQueued returns a channel that fires when any channel with
