@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 
 	"tclaw/internal/channel"
 
@@ -175,6 +176,45 @@ func TestValidate_ClaudeSessionTimeout(t *testing.T) {
 		err := validate(cfg)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "invalid claude_session_timeout")
+	})
+}
+
+func TestValidate_MessageDebounce(t *testing.T) {
+	t.Run("accepts a valid duration", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].MessageDebounce = "2s"
+		require.NoError(t, validate(cfg))
+	})
+
+	t.Run("accepts empty (defaults applied later)", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].MessageDebounce = ""
+		require.NoError(t, validate(cfg))
+	})
+
+	t.Run("rejects unparseable duration", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].MessageDebounce = "not a duration"
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid message_debounce")
+	})
+}
+
+func TestUser_MessageDebounceDuration(t *testing.T) {
+	t.Run("defaults to 1s when unset", func(t *testing.T) {
+		u := User{ID: "u"}
+		require.Equal(t, defaultMessageDebounce, u.ToUserConfig().MessageDebounce)
+	})
+
+	t.Run("parses an explicit duration", func(t *testing.T) {
+		u := User{ID: "u", MessageDebounce: "3s"}
+		require.Equal(t, 3*time.Second, u.ToUserConfig().MessageDebounce)
+	})
+
+	t.Run("treats 0s as explicitly disabled", func(t *testing.T) {
+		u := User{ID: "u", MessageDebounce: "0s"}
+		require.Equal(t, time.Duration(0), u.ToUserConfig().MessageDebounce)
 	})
 }
 

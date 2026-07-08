@@ -356,6 +356,11 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		Store:    s,
 		Activity: activityTracker,
 		Channels: channelSet.Snapshot,
+		// Coalesce bursts of same-channel user messages (e.g. a photo album that
+		// arrives as separate messages) into one turn; control commands are never
+		// batched, so the classifier is injected here (queue can't import agent).
+		DebounceWindow:   mu.cfg.MessageDebounce,
+		IsControlMessage: func(m channel.TaggedMessage) bool { return agent.IsControlCommand(m.Text) },
 	})
 
 	// Outbound message queue — all Send/Edit/Done calls go through the outbox

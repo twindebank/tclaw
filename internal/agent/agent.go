@@ -53,6 +53,23 @@ const (
 // compactPrompt is injected as the user message when the compact command is used.
 const compactPrompt = "Please compact your conversation context now. Summarize the key points and discard verbose history."
 
+// IsControlCommand reports whether raw user text is a builtin command
+// (stop / login / auth / compact / fresh-session synonyms) that must be handled
+// on its own turn and never coalesced with sibling messages by the queue. The
+// queue can't import this package (agent imports queue), so the router injects
+// this classifier into the queue as QueueParams.IsControlMessage.
+func IsControlCommand(text string) bool {
+	t := strings.TrimSpace(text)
+	switch {
+	case strings.EqualFold(t, CmdStop),
+		strings.EqualFold(t, CmdLogin),
+		strings.EqualFold(t, CmdAuthStatus),
+		strings.EqualFold(t, CmdCompact):
+		return true
+	}
+	return isFreshSessionCommand(t)
+}
+
 // isFreshSessionCommand returns true if the raw user text is the "new" command
 // or one of its synonyms ("reset" / "clear" / "delete"), all of which start a
 // fresh session on the current channel. Case-insensitive.
