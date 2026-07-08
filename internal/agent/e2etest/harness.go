@@ -59,6 +59,11 @@ type Config struct {
 	// DisableOutbox sends directly to channels instead of through the outbox.
 	DisableOutbox bool
 
+	// DebounceWindow enables inbound message coalescing in the queue, mirroring
+	// the per-user message_debounce config wired by the router. 0 (default)
+	// disables it, matching today's one-message-per-turn behavior.
+	DebounceWindow time.Duration
+
 	// Debug logs raw CLI events for troubleshooting.
 	Debug bool
 }
@@ -166,6 +171,9 @@ func NewHarness(t *testing.T, cfg Config) *Harness {
 		Store:    s,
 		Activity: activity,
 		Channels: func() map[channel.ChannelID]channel.Channel { return channelMap },
+		// Mirror the router: coalesce bursts of user messages, never batch builtins.
+		DebounceWindow:   cfg.DebounceWindow,
+		IsControlMessage: func(m channel.TaggedMessage) bool { return agent.IsControlCommand(m.Text) },
 	})
 
 	channelChangeCh := make(chan struct{})

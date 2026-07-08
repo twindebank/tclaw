@@ -53,6 +53,29 @@ How it works:
 - Guidance (vault conventions, git workflow) is seeded as a `knowledge` skill in the user's
   `home/.claude/skills/`; the agent loads it on demand.
 
+## Message Debounce
+
+A burst of user messages that lands close together — most visibly a photo album, which every
+channel delivers as **separate** messages — would otherwise start one agent turn per message
+(each seeing a single attachment). The `message_debounce` per-user knob coalesces same-channel
+user messages that arrive within a rolling window into a **single** turn:
+
+```yaml
+users:
+  - id: alice
+    message_debounce: "1s"   # optional; unset defaults to 1s, "0s" disables
+```
+
+- **Default 1s** when unset — every user message is held ~1s so siblings can land, then all
+  queued same-channel user messages are joined into one turn (accepting the small latency on
+  lone messages). Set `"0s"` to opt out and process every message immediately.
+- The window **resets on each arrival** (a trickling album stays together), bounded by an
+  internal 5s cap so a steady stream can't defer processing forever.
+- **Control commands** (`stop`, `login`, `auth`, `compact`, and the fresh-session synonyms
+  `new`/`reset`/`clear`/`delete`) are never batched — they always run on their own turn.
+- Implemented once at the queue layer (`internal/queue/queue.go`), so it covers every channel
+  and plain-text bursts too, not just Telegram albums.
+
 ## Secret Management
 - Secrets stored locally in OS keychain via `tclaw secret set NAME value`
 - `tclaw deploy secrets` scans `tclaw.yaml` for `${secret:NAME}` refs across all environments, reads each from keychain, pushes to Fly in one call

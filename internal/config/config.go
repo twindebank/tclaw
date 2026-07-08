@@ -27,6 +27,11 @@ import (
 // Prevents path traversal when names are used in filesystem paths or URL routes.
 var channelNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
+// defaultMessageDebounce is applied when a user leaves message_debounce unset, so
+// bursts (e.g. a photo album delivered as separate messages) coalesce into one
+// turn by default. Set message_debounce: "0s" to opt out.
+const defaultMessageDebounce = 1 * time.Second
+
 // resolvedSecretCache stores secrets resolved during initial Load so that
 // ReloadConfig can re-resolve them after env vars have been scrubbed.
 var (
@@ -87,6 +92,12 @@ type User struct {
 	PermissionMode claudecli.PermissionMode `yaml:"permission_mode"`
 	MaxTurns       int                      `yaml:"max_turns"`
 	Debug          bool                     `yaml:"debug"`
+
+	// MessageDebounce coalesces same-channel user messages that arrive within
+	// this rolling window into a single agent turn (e.g. a photo album delivered
+	// as separate messages). A duration string like "1s"; unset defaults to 1s,
+	// "0s" disables debouncing.
+	MessageDebounce string `yaml:"message_debounce,omitempty"`
 
 	AllowedTools    []claudecli.Tool `yaml:"allowed_tools"`
 	DisallowedTools []claudecli.Tool `yaml:"disallowed_tools"`
@@ -374,6 +385,12 @@ func validate(cfg *Config) error {
 			}
 		}
 
+		if u.MessageDebounce != "" {
+			if _, err := time.ParseDuration(u.MessageDebounce); err != nil {
+				return fmt.Errorf("user %q: invalid message_debounce %q: %w", u.ID, u.MessageDebounce, err)
+			}
+		}
+
 		// Knowledge is a pointer shared with cfg.Users[i], so normalizing through
 		// u.Knowledge also updates the stored config.
 		if u.Knowledge != nil {
@@ -643,5 +660,23 @@ func (u *User) ToUserConfig() user.Config {
 		SystemPrompt:    u.SystemPrompt,
 		TelegramUserID:  tgUserID,
 		Knowledge:       knowledge,
+		MessageDebounce: u.messageDebounceDuration(),
 	}
+}
+
+// messageDebounceDuration resolves the configured debounce window. An unset
+// (empty) value applies the 1s default; a parse error — already rejected by
+// validate before ToUserConfig runs — falls back to the default rather than
+// silently disabling debouncing.
+func (u *User) messageDebounceDuration() time.Duration {
+	if u.MessageDebounce == "" {
+		return defaultMessageDebounce
+	}
+	d, err := time.ParseDuration(u.MessageDebounce)
+	if err != nil {
+		slog.Warn("config: invalid message_debounce, using default",
+			"user", u.ID, "value", u.MessageDebounce, "err", err)
+		return defaultMessageDebounce
+	}
+	return d
 }
