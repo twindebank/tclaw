@@ -142,7 +142,7 @@ func calendarListHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHa
 
 		output, err := runGWS(ctx, deps, gws.Calendar.ListEvents(params))
 		if err != nil {
-			return nil, fmt.Errorf("list events: %w", err)
+			return nil, fmt.Errorf("list events: %w", annotateCalendarNotFound(err, calendarID, a.CredentialSet))
 		}
 
 		var eventsRsp calendarEventsResponse
@@ -175,11 +175,22 @@ type calendarCreateArgs struct {
 	CredentialSet string `json:"credential_set"`
 	Title         string `json:"title"`
 	Date          string `json:"date"`
+
 	// EndDate is the inclusive last day of a multi-day all-day event (YYYY-MM-DD).
 	// When omitted, all-day events default to a single day.
-	EndDate   string `json:"end_date"`
+	EndDate string `json:"end_date"`
+
 	StartTime string `json:"start_time"`
 	EndTime   string `json:"end_time"`
+
+	// AllDay marks the event as all-day. Required to create an all-day event —
+	// a bare date without times is rejected to avoid accidental all-day events.
+	AllDay bool `json:"all_day"`
+
+	// TimeZone is the IANA name for a timed event's local time (e.g. "Asia/Tokyo").
+	// Empty defaults to Europe/London. Ignored for all-day events.
+	TimeZone string `json:"timezone"`
+
 	Description string `json:"description"`
 	Location    string `json:"location"`
 	CalendarID  string `json:"calendar_id"`
@@ -224,9 +235,21 @@ func calendarCreateHandler(depsMap map[credential.CredentialSetID]Deps) mcp.Tool
 			calendarID = "primary"
 		}
 
-		isAllDay := a.StartTime == "" && a.EndTime == ""
+		// Resolve and validate the event's timing up front. This enforces explicit
+		// timed-vs-all-day intent so a bare date can't silently become an all-day event.
+		timing, err := buildEventTiming(timingInput{
+			Date:      a.Date,
+			EndDate:   a.EndDate,
+			StartTime: a.StartTime,
+			EndTime:   a.EndTime,
+			AllDay:    a.AllDay,
+			TimeZone:  a.TimeZone,
+		})
+		if err != nil {
+			return nil, err
+		}
 
-		slog.Info("calendar create starting", "connection", a.CredentialSet, "title", a.Title, "date", a.Date, "all_day", isAllDay)
+		slog.Info("calendar create starting", "connection", a.CredentialSet, "title", a.Title, "date", a.Date, "all_day", timing.AllDay)
 
 		// Check for duplicates on the same day with similar title.
 		duplicate, err := findDuplicate(ctx, deps, calendarID, a.Title, eventDate)
@@ -238,65 +261,15 @@ func calendarCreateHandler(depsMap map[credential.CredentialSetID]Deps) mcp.Tool
 			slog.Info("calendar create skipped — duplicate found", "existing_id", duplicate.ID, "title", duplicate.Summary)
 			return json.Marshal(calendarCreateToolResponse{
 				DuplicateOf:     &summary,
-				DuplicateAction: "Event already exists on this date with a matching title. Not created. Use google_workspace to update the existing event if needed.",
+				DuplicateAction: "Event already exists on this date with a matching title. Not created. Use google_calendar_update to modify the existing event if needed.",
 			})
 		}
 
 		// Build the event body.
 		eventBody := map[string]any{
 			"summary": a.Title,
-		}
-
-		if isAllDay {
-			// All-day event: use date (not dateTime).
-			eventBody["start"] = map[string]string{"date": a.Date}
-			// Google Calendar all-day end dates are exclusive.
-			var endDate string
-			if a.EndDate != "" {
-				// Multi-day all-day event: end_date is inclusive, so add 1 day for the exclusive API value.
-				endDateParsed, err := time.Parse("2006-01-02", a.EndDate)
-				if err != nil {
-					return nil, fmt.Errorf("invalid end_date format %q — use YYYY-MM-DD", a.EndDate)
-				}
-				if !endDateParsed.After(eventDate) {
-					return nil, fmt.Errorf("end_date %q must be after date %q", a.EndDate, a.Date)
-				}
-				endDate = endDateParsed.AddDate(0, 0, 1).Format("2006-01-02")
-			} else {
-				// Single-day event: end is the next day (exclusive).
-				endDate = eventDate.AddDate(0, 0, 1).Format("2006-01-02")
-			}
-			eventBody["end"] = map[string]string{"date": endDate}
-		} else {
-			// Timed event: pass a naive local datetime with the Europe/London timeZone field
-			// so Google Calendar resolves the correct UTC offset (handles BST/GMT transitions).
-			// Do NOT embed an offset in the dateTime string — the server runs in UTC so
-			// time.Now().Zone() would always return +00:00, shifting the event by 1h in BST.
-			startTime := a.StartTime
-			if startTime == "" {
-				return nil, fmt.Errorf("start_time is required for timed events (format: HH:MM)")
-			}
-			endTime := a.EndTime
-			if endTime == "" {
-				return nil, fmt.Errorf("end_time is required for timed events (format: HH:MM)")
-			}
-
-			// Validate time formats.
-			if _, err := time.Parse("15:04", startTime); err != nil {
-				return nil, fmt.Errorf("invalid start_time format %q — use HH:MM (24h)", startTime)
-			}
-			if _, err := time.Parse("15:04", endTime); err != nil {
-				return nil, fmt.Errorf("invalid end_time format %q — use HH:MM (24h)", endTime)
-			}
-
-			eventBody["start"] = map[string]string{
-				"dateTime": fmt.Sprintf("%sT%s:00", a.Date, startTime),
-				"timeZone": "Europe/London",
-			}
-			eventBody["end"] = map[string]string{
-				"dateTime": fmt.Sprintf("%sT%s:00", a.Date, endTime),
-				"timeZone": "Europe/London",
-			}
+			"start":   timing.Start,
+			"end":     timing.End,
 		}
 
 		if a.Description != "" {
@@ -326,7 +299,7 @@ func calendarCreateHandler(depsMap map[credential.CredentialSetID]Deps) mcp.Tool
 
 		output, err := runGWS(ctx, deps, gws.Calendar.InsertEvent(calendarParams, eventBody))
 		if err != nil {
-			return nil, fmt.Errorf("create event: %w", err)
+			return nil, fmt.Errorf("create event: %w", annotateCalendarNotFound(err, calendarID, a.CredentialSet))
 		}
 
 		var created calendarEvent
@@ -341,6 +314,126 @@ func calendarCreateHandler(depsMap map[credential.CredentialSetID]Deps) mcp.Tool
 		return json.Marshal(calendarCreateToolResponse{
 			Created: &summary,
 		})
+	}
+}
+
+type calendarUpdateArgs struct {
+	CredentialSet string `json:"credential_set"`
+	EventID       string `json:"event_id"`
+	CalendarID    string `json:"calendar_id"`
+
+	Title   string `json:"title"`
+	Date    string `json:"date"`
+	EndDate string `json:"end_date"`
+
+	StartTime string `json:"start_time"`
+	EndTime   string `json:"end_time"`
+
+	// AllDay converts the event to all-day. Only needed when changing the event type.
+	AllDay bool `json:"all_day"`
+
+	// TimeZone is the IANA name for a timed event's local time (e.g. "Asia/Tokyo").
+	// Empty inherits the event's existing timezone. Ignored for all-day events.
+	TimeZone string `json:"timezone"`
+
+	Description string `json:"description"`
+	Location    string `json:"location"`
+}
+
+type calendarUpdateToolResponse struct {
+	Updated *calendarEventSummary `json:"updated"`
+}
+
+func calendarUpdateHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandler {
+	return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+		var a calendarUpdateArgs
+		if err := json.Unmarshal(raw, &a); err != nil {
+			return nil, fmt.Errorf("invalid arguments: %w", err)
+		}
+
+		deps, err := resolveDeps(depsMap, a.CredentialSet)
+		if err != nil {
+			return nil, err
+		}
+
+		if a.EventID == "" {
+			return nil, fmt.Errorf("event_id is required")
+		}
+
+		// Any of these signals a timing change; a bare all_day flag counts because it
+		// converts a timed event to all-day.
+		timingTouched := a.Date != "" || a.EndDate != "" || a.StartTime != "" || a.EndTime != "" || a.AllDay
+		if a.Title == "" && a.Description == "" && a.Location == "" && !timingTouched {
+			return nil, fmt.Errorf("nothing to update — provide at least one of title, date, end_date, start_time, end_time, all_day, description, or location")
+		}
+
+		calendarID := a.CalendarID
+		if calendarID == "" {
+			calendarID = "primary"
+		}
+
+		// Fetch the existing event first: update is a full PUT, so we merge changes onto
+		// the current event to avoid wiping fields we aren't touching (attendees,
+		// reminders, conference data, description, etc.).
+		getOutput, err := runGWS(ctx, deps, gws.Calendar.GetEvent(map[string]any{
+			"calendarId": calendarID,
+			"eventId":    a.EventID,
+		}))
+		if err != nil {
+			return nil, fmt.Errorf("get event: %w", annotateCalendarNotFound(err, calendarID, a.CredentialSet))
+		}
+
+		var existing calendarEvent
+		if err := json.Unmarshal(getOutput, &existing); err != nil {
+			return nil, fmt.Errorf("parse existing event: %w", err)
+		}
+		// Round-trip the full resource as a generic map so unmodified fields are preserved
+		// in the PUT body exactly as Google returned them.
+		var body map[string]any
+		if err := json.Unmarshal(getOutput, &body); err != nil {
+			return nil, fmt.Errorf("parse existing event body: %w", err)
+		}
+
+		if a.Title != "" {
+			body["summary"] = a.Title
+		}
+		if a.Description != "" {
+			body["description"] = a.Description
+		}
+		if a.Location != "" {
+			body["location"] = a.Location
+		}
+
+		if timingTouched {
+			timing, err := resolveUpdatedTiming(existing, a)
+			if err != nil {
+				return nil, err
+			}
+			// Assigning fresh start/end maps fully replaces the old blocks, so switching
+			// between timed and all-day drops the previous dateTime/date form cleanly.
+			body["start"] = timing.Start
+			body["end"] = timing.End
+		}
+
+		slog.Info("calendar update starting", "connection", a.CredentialSet, "event_id", a.EventID, "timing_changed", timingTouched)
+
+		updateOutput, err := runGWS(ctx, deps, gws.Calendar.UpdateEvent(
+			map[string]any{"calendarId": calendarID, "eventId": a.EventID},
+			body,
+		))
+		if err != nil {
+			return nil, fmt.Errorf("update event: %w", annotateCalendarNotFound(err, calendarID, a.CredentialSet))
+		}
+
+		var updated calendarEvent
+		if err := json.Unmarshal(updateOutput, &updated); err != nil {
+			return nil, fmt.Errorf("parse updated event: %w", err)
+		}
+		summary := extractEventSummary(updated)
+
+		slog.Info("calendar update done", "connection", a.CredentialSet, "event_id", updated.ID)
+
+		return json.Marshal(calendarUpdateToolResponse{Updated: &summary})
 	}
 }
 
@@ -404,6 +497,177 @@ func findDuplicate(ctx context.Context, deps Deps, calendarID, title string, dat
 	}
 
 	return nil, nil
+}
+
+// defaultCalendarTimeZone is used for timed events when no timezone is supplied.
+// Theo is based in London; travel/trip events should pass an explicit timezone.
+const defaultCalendarTimeZone = "Europe/London"
+
+// timingInput describes the requested date/time for an event before it's resolved
+// into Google Calendar start/end blocks.
+type timingInput struct {
+	Date      string
+	EndDate   string
+	StartTime string
+	EndTime   string
+	AllDay    bool
+
+	// TimeZone is an IANA name (e.g. "Asia/Tokyo"). Empty defaults to
+	// Europe/London. Only used for timed events.
+	TimeZone string
+}
+
+// eventTiming holds the resolved start/end blocks for a calendar event body.
+type eventTiming struct {
+	Start  map[string]string
+	End    map[string]string
+	AllDay bool
+}
+
+// buildEventTiming validates a timingInput and resolves it into Google Calendar
+// start/end blocks, enforcing explicit timed-vs-all-day intent so a bare date can
+// never silently become an all-day event.
+//
+// Timed events use a naive local dateTime plus a timeZone field so Google Calendar
+// resolves the correct UTC offset (DST-safe, and correct when travelling across
+// timezones). We deliberately do NOT embed a numeric offset in the dateTime string:
+// the server runs in UTC so a locally-derived offset would always be +00:00 (wrong
+// in BST), and a hardcoded offset would break across DST and international zones.
+func buildEventTiming(in timingInput) (eventTiming, error) {
+	if in.Date == "" {
+		return eventTiming{}, fmt.Errorf("date is required (format: YYYY-MM-DD)")
+	}
+	startDate, err := time.Parse("2006-01-02", in.Date)
+	if err != nil {
+		return eventTiming{}, fmt.Errorf("invalid date format %q — use YYYY-MM-DD", in.Date)
+	}
+
+	hasTimes := in.StartTime != "" || in.EndTime != ""
+	// An end_date only makes sense for an all-day event, so treat it as an all-day signal.
+	wantsAllDay := in.AllDay || in.EndDate != ""
+
+	if hasTimes && wantsAllDay {
+		return eventTiming{}, fmt.Errorf("conflicting event type: provide start_time+end_time for a timed event, OR all_day=true (with optional end_date) for an all-day event — not both")
+	}
+
+	switch {
+	case hasTimes:
+		if in.StartTime == "" || in.EndTime == "" {
+			return eventTiming{}, fmt.Errorf("timed events need BOTH start_time and end_time (format: HH:MM, 24h)")
+		}
+		if _, err := time.Parse("15:04", in.StartTime); err != nil {
+			return eventTiming{}, fmt.Errorf("invalid start_time format %q — use HH:MM (24h)", in.StartTime)
+		}
+		if _, err := time.Parse("15:04", in.EndTime); err != nil {
+			return eventTiming{}, fmt.Errorf("invalid end_time format %q — use HH:MM (24h)", in.EndTime)
+		}
+
+		timeZone := in.TimeZone
+		if timeZone == "" {
+			timeZone = defaultCalendarTimeZone
+		}
+		if _, err := time.LoadLocation(timeZone); err != nil {
+			return eventTiming{}, fmt.Errorf("invalid timezone %q: %w. Use an IANA name, e.g. 'Europe/London', 'Asia/Tokyo', 'America/New_York'", timeZone, err)
+		}
+
+		return eventTiming{
+			Start: map[string]string{
+				"dateTime": fmt.Sprintf("%sT%s:00", in.Date, in.StartTime),
+				"timeZone": timeZone,
+			},
+			End: map[string]string{
+				"dateTime": fmt.Sprintf("%sT%s:00", in.Date, in.EndTime),
+				"timeZone": timeZone,
+			},
+		}, nil
+
+	case wantsAllDay:
+		// Google Calendar all-day end dates are exclusive.
+		var endDate string
+		if in.EndDate != "" {
+			// Multi-day all-day event: end_date is the inclusive last day, so add 1 day
+			// for the exclusive API value.
+			endDateParsed, err := time.Parse("2006-01-02", in.EndDate)
+			if err != nil {
+				return eventTiming{}, fmt.Errorf("invalid end_date format %q — use YYYY-MM-DD", in.EndDate)
+			}
+			if !endDateParsed.After(startDate) {
+				return eventTiming{}, fmt.Errorf("end_date %q must be after date %q", in.EndDate, in.Date)
+			}
+			endDate = endDateParsed.AddDate(0, 0, 1).Format("2006-01-02")
+		} else {
+			// Single-day event: end is the next day (exclusive).
+			endDate = startDate.AddDate(0, 0, 1).Format("2006-01-02")
+		}
+		return eventTiming{
+			AllDay: true,
+			Start:  map[string]string{"date": in.Date},
+			End:    map[string]string{"date": endDate},
+		}, nil
+
+	default:
+		return eventTiming{}, fmt.Errorf("ambiguous event type: provide start_time+end_time for a timed event, or all_day=true for an all-day event — a bare date is not accepted to avoid accidentally creating an all-day event")
+	}
+}
+
+// resolveUpdatedTiming computes new start/end blocks for an event update, filling in
+// the date and timezone from the existing event when the caller omits them. This means
+// a time-only edit keeps the event on its original day and in its original timezone —
+// important when tweaking trip events booked in another timezone.
+func resolveUpdatedTiming(existing calendarEvent, a calendarUpdateArgs) (eventTiming, error) {
+	date := a.Date
+	if date == "" {
+		existingDate, err := existingEventDate(existing)
+		if err != nil {
+			return eventTiming{}, err
+		}
+		date = existingDate
+	}
+
+	timeZone := a.TimeZone
+	if timeZone == "" {
+		timeZone = existing.Start.TimeZone
+	}
+
+	return buildEventTiming(timingInput{
+		Date:      date,
+		EndDate:   a.EndDate,
+		StartTime: a.StartTime,
+		EndTime:   a.EndTime,
+		AllDay:    a.AllDay,
+		TimeZone:  timeZone,
+	})
+}
+
+// annotateCalendarNotFound turns a Google 404 into an actionable hint. A 404 while
+// loading a specific calendar almost always means the calendarId doesn't exist on THIS
+// Google account — the calendar may live on the other credential set (a "shared"
+// calendar is often owned on the personal account, not the shared one), or the
+// calendar_id is wrong. Non-404 errors are returned unchanged.
+func annotateCalendarNotFound(err error, calendarID, credentialSet string) error {
+	if err == nil {
+		return nil
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "notfound") {
+		return err
+	}
+	return fmt.Errorf("calendar %q not found on credential_set %q — it may live on a different Google account (try the other credential_set), or the calendar_id is wrong. Run google_workspace with command \"calendar calendarList list\" on each account to find the correct calendarId and where it lives. underlying: %w", calendarID, credentialSet, err)
+}
+
+// existingEventDate returns an event's calendar date (YYYY-MM-DD), whether it's an
+// all-day event (Start.Date) or a timed event (date portion of Start.DateTime).
+func existingEventDate(event calendarEvent) (string, error) {
+	if event.Start.Date != "" {
+		return event.Start.Date, nil
+	}
+	if event.Start.DateTime != "" {
+		parsed, err := time.Parse(time.RFC3339, event.Start.DateTime)
+		if err != nil {
+			return "", fmt.Errorf("parse existing event start %q: %w", event.Start.DateTime, err)
+		}
+		return parsed.Format("2006-01-02"), nil
+	}
+	return "", fmt.Errorf("existing event has no start date or dateTime")
 }
 
 func extractEventSummary(event calendarEvent) calendarEventSummary {

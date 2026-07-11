@@ -40,6 +40,7 @@ const (
 	ToolGmailModify     = "google_gmail_modify"
 	ToolCalendarList    = "google_calendar_list"
 	ToolCalendarCreate  = "google_calendar_create"
+	ToolCalendarUpdate  = "google_calendar_update"
 	ToolWorkspace       = "google_workspace"
 	ToolWorkspaceSchema = "google_workspace_schema"
 )
@@ -48,7 +49,7 @@ const (
 func ToolNames() []string {
 	return []string{
 		ToolGmailList, ToolGmailRead, ToolGmailSend, ToolGmailForward, ToolGmailModify,
-		ToolCalendarList, ToolCalendarCreate,
+		ToolCalendarList, ToolCalendarCreate, ToolCalendarUpdate,
 		ToolWorkspace, ToolWorkspaceSchema,
 	}
 }
@@ -301,12 +302,15 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 		{
 			Name: ToolCalendarCreate,
 			Description: "Create a calendar event with automatic duplicate detection. " +
-				"Checks for existing events with the same title on the same date before creating — " +
-				"if a duplicate is found, returns the existing event instead of creating a new one. " +
-				"For single-day all-day events, provide only date. For multi-day all-day events (e.g. hotel stays, trips), provide date + end_date — both in YYYY-MM-DD format, end_date is the inclusive last day. For timed events, provide date + start_time + end_time. " +
-				"Times use 24h format (HH:MM). The local timezone offset is applied automatically — do NOT include timezone info in times. " +
-				"Set add_meet=true to automatically attach a Google Meet video conference link. " +
-				"For complex operations (updating events, managing attendees, recurring rules), use google_workspace directly.",
+				"Checks for an existing event with the same title on the same date first — if found, returns it instead of creating a duplicate. " +
+				"Event type must be explicit to avoid accidental all-day events: " +
+				"for a TIMED event provide date + start_time + end_time (24h HH:MM); " +
+				"for an ALL-DAY event set all_day=true (add end_date for multi-day stays like hotels/trips — inclusive last day, YYYY-MM-DD). " +
+				"A bare date with no times and no all_day is REJECTED with an error. " +
+				"timezone is an IANA name (e.g. 'Asia/Tokyo', 'Europe/Lisbon') for the event's local wall-clock time — defaults to Europe/London. " +
+				"Always set it for events in another timezone (travel/trips) so start/end land at the correct local time; do NOT put offsets in the times. " +
+				"Set add_meet=true to attach a Google Meet video conference link. " +
+				"To reschedule or modify an existing event, use google_calendar_update. For attendees/recurring rules, use google_workspace directly.",
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
@@ -325,15 +329,23 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 					},
 					"end_date": {
 						"type": "string",
-						"description": "Inclusive end date for multi-day all-day events (YYYY-MM-DD). Only valid for all-day events (omit start_time/end_time). Must be after date. For single-day all-day events, omit this field."
+						"description": "Inclusive end date for multi-day all-day events (YYYY-MM-DD). Only valid for all-day events (set all_day=true, omit start_time/end_time). Must be after date. For single-day all-day events, omit this field."
 					},
 					"start_time": {
 						"type": "string",
-						"description": "Start time in HH:MM 24-hour format. Omit for all-day events."
+						"description": "Start time in HH:MM 24-hour format. Provide together with end_time for a timed event. Omit for all-day events."
 					},
 					"end_time": {
 						"type": "string",
-						"description": "End time in HH:MM 24-hour format. Omit for all-day events."
+						"description": "End time in HH:MM 24-hour format. Provide together with start_time for a timed event. Omit for all-day events."
+					},
+					"all_day": {
+						"type": "boolean",
+						"description": "Set true to create an all-day event (no times). Required for all-day events — a bare date without times or all_day is rejected."
+					},
+					"timezone": {
+						"type": "string",
+						"description": "IANA timezone name for the event's local time (e.g. 'Asia/Tokyo', 'Europe/Lisbon', 'America/New_York'). Defaults to Europe/London. Set this for events in another timezone so the time is stored correctly. Ignored for all-day events."
 					},
 					"description": {
 						"type": "string",
@@ -353,6 +365,71 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 					}
 				},
 				"required": ["credential_set","title", "date"]
+			}`, connDescription, enumJSON)),
+		},
+		{
+			Name: ToolCalendarUpdate,
+			Description: "Update an existing calendar event by event_id — reschedule, rename, move, or edit details. " +
+				"Fetches the event and applies a full update, so fields you omit are preserved (attendees, reminders, Meet link, etc.). " +
+				"Provide ONLY the fields you want to change: title, description, location, and/or timing. " +
+				"Timing: to change the time provide start_time + end_time (both required); to move to another day provide date; to make it all-day provide all_day=true (with optional end_date). " +
+				"When you change the time without a date, the event stays on its original day; when you omit timezone, it keeps its existing timezone. " +
+				"timezone is an IANA name (e.g. 'Asia/Tokyo') — set it to move the event into another timezone (travel/trips). Do NOT put offsets in the times. " +
+				"Get the event_id from google_calendar_list. To create a new event, use google_calendar_create.",
+			InputSchema: json.RawMessage(fmt.Sprintf(`{
+				"type": "object",
+				"properties": {
+					"credential_set": {
+						"type": "string",
+						"description": %q,
+						"enum": %s
+					},
+					"event_id": {
+						"type": "string",
+						"description": "ID of the event to update (from google_calendar_list results)."
+					},
+					"title": {
+						"type": "string",
+						"description": "New event title/summary. Omit to leave unchanged."
+					},
+					"date": {
+						"type": "string",
+						"description": "New start date (YYYY-MM-DD). Omit to keep the event on its current day when only changing the time."
+					},
+					"end_date": {
+						"type": "string",
+						"description": "New inclusive end date for a multi-day all-day event (YYYY-MM-DD). Must be after date."
+					},
+					"start_time": {
+						"type": "string",
+						"description": "New start time in HH:MM 24-hour format. Provide together with end_time to (re)time the event."
+					},
+					"end_time": {
+						"type": "string",
+						"description": "New end time in HH:MM 24-hour format. Provide together with start_time to (re)time the event."
+					},
+					"all_day": {
+						"type": "boolean",
+						"description": "Set true to convert the event to all-day (drops the times). Only needed when changing the event type."
+					},
+					"timezone": {
+						"type": "string",
+						"description": "IANA timezone name for a timed event (e.g. 'Asia/Tokyo'). Omit to keep the event's existing timezone. Set it to move the event into another timezone."
+					},
+					"description": {
+						"type": "string",
+						"description": "New description/notes. Omit to leave unchanged."
+					},
+					"location": {
+						"type": "string",
+						"description": "New location. Omit to leave unchanged."
+					},
+					"calendar_id": {
+						"type": "string",
+						"description": "Calendar ID. Defaults to 'primary'."
+					}
+				},
+				"required": ["credential_set","event_id"]
 			}`, connDescription, enumJSON)),
 		},
 		{
