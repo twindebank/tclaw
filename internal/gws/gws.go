@@ -122,6 +122,23 @@ func (calendarBuilder) InsertEvent(params map[string]any, body map[string]any) C
 	}
 }
 
+func (calendarBuilder) GetEvent(params map[string]any) Command {
+	return Command{
+		Args:   []string{"calendar", "events", "get"},
+		Params: params,
+	}
+}
+
+// UpdateEvent performs a full PUT of the event body — not a patch. Patching a
+// date→dateTime transition causes a 400, so callers must send the complete event.
+func (calendarBuilder) UpdateEvent(params map[string]any, body map[string]any) Command {
+	return Command{
+		Args:   []string{"calendar", "events", "update"},
+		Params: params,
+		Body:   body,
+	}
+}
+
 // Schema returns API schema documentation for the given dotted method name.
 func Schema(method string) Command {
 	return Command{

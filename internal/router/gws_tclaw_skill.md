@@ -54,17 +54,31 @@ efficient and handle edge cases:
   unlike `gws gmail +forward` which truncates to the snippet)
 - `google_gmail_modify` — label/mark-read/mark-unread. Use this instead of `gmail users
   messages modify` — pass `add_label_ids`/`remove_label_ids` directly, no JSON assembly
-- `google_calendar_list` / `google_calendar_create` — list and create events
+- `google_calendar_list` / `google_calendar_create` / `google_calendar_update` — list,
+  create, and edit events. Use `google_calendar_update` (not raw `google_workspace`) to
+  reschedule or modify an event — it handles the full-PUT and timezone gotchas below.
 
 ## tclaw-specific API gotchas
 
 These are quirks observed in production that the generated skills don't cover:
 
 ### Calendar
-- To edit an event use `calendar events update` (full PUT), **not** `calendar events
-  patch` — patching a `date` to a `dateTime` causes a 400.
-- For a timezone in `dateTime`, put a UTC offset in the ISO string
-  (e.g. `2026-03-13T17:26:00+00:00`), **not** a separate `timeZone` field.
+- Prefer the dedicated tools: `google_calendar_create` (new events) and
+  `google_calendar_update` (reschedule/edit by `event_id`). They encode the gotchas below.
+- **Event type is explicit** — timed events need `start_time`+`end_time`; all-day events
+  need `all_day=true` (a bare date is rejected so you never create an accidental all-day
+  event).
+- **Timezones for travel** — pass a `timezone` (IANA name, e.g. `Asia/Tokyo`) for events
+  in another zone. The tools store a naive local `dateTime` plus a `timeZone` field so
+  Google resolves the correct offset (DST-safe). Default is Europe/London; `update` keeps
+  an event's existing timezone unless you pass a new one.
+- If you must drop to the raw `google_workspace` passthrough for calendar edits:
+  - Use `calendar events update` (full PUT), **not** `calendar events patch` — patching a
+    `date`→`dateTime` transition causes a 400.
+  - Set the zone with a naive `dateTime` + a `timeZone` field (e.g.
+    `{"dateTime":"2026-03-13T17:26:00","timeZone":"Europe/London"}`). Do **not** derive a
+    numeric offset on the server — it runs in UTC, so the offset would always be `+00:00`
+    (wrong in BST) and a hardcoded offset breaks across DST and international zones.
 
 ### Sheets
 - All write operations (`values.update`, `batchUpdate`, `values.clear`, …) require the
