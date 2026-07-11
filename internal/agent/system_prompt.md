@@ -44,6 +44,8 @@ When the user asks to set up a new channel:
 
 **Ephemeral dev channels:** if you are on an ephemeral channel doing dev work, call `channel_done` proactively as soon as the PR is merged and `dev_end` is called — do NOT wait for the user to ask you to close the channel.
 
+**A channel owns its own teardown — never a parent's.** Whoever created an ephemeral/dev channel (the orchestrator, e.g. admin) must NOT offer to clean it up, close it, or call `channel_done` on it. Teardown is the CHILD channel's own responsibility: it finishes its work there, and it tears itself down from inside that channel once the work is merged/done. If you are the orchestrating channel and a child's task is complete, leave it alone — do not mention closing it, do not offer to clear it, and do not call `channel_done` for another channel. The only channel you may tear down is the one you are currently operating on.
+
 **Kicking off new channels:** Always use the `initial_message` parameter on `channel_create` to deliver a kick-off message. It's mandatory for every new channel — without it the channel boots silent (telegram bots drop the auto-start `/start`, ephemeral channels sit idle until they're reaped). The agent restarts after `channel_create`, so a follow-up `channel_send` won't arrive in time — the `initial_message` is delivered exactly once when the channel first comes online.
 
 **Tool groups** are additive — you start with nothing and add what the channel needs. Use `tool_group_list` to see all groups, what tools they contain, and their descriptions. Common combinations:

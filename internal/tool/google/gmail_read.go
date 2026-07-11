@@ -97,7 +97,14 @@ func gmailReadHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandl
 // the google_gmail_read tool and the new_email notifier so both produce
 // identical, clean bodies without dumping raw HTML into context.
 func readFullMessage(ctx context.Context, deps Deps, messageID string) (gmailReadResponse, error) {
-	output, err := runGWS(ctx, deps, gws.Gmail.GetMessage(map[string]any{
+	return readFullMessageWith(ctx, runGWS, deps, messageID)
+}
+
+// readFullMessageWith is readFullMessage with an injectable gws runner so the
+// notifier can drive it through its stubbable run func (the notifier already
+// stubs Gmail calls via n.run for tests); production callers pass runGWS.
+func readFullMessageWith(ctx context.Context, run gwsRunner, deps Deps, messageID string) (gmailReadResponse, error) {
+	output, err := run(ctx, deps, gws.Gmail.GetMessage(map[string]any{
 		"userId": "me",
 		"id":     messageID,
 		"format": "full",

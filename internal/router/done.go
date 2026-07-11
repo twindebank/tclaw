@@ -53,6 +53,15 @@ func interceptPendingDone(
 		return false
 	}
 
+	// Only a genuine user reply answers the confirmation. Automated traffic
+	// (notifications, cross-channel sends) must never confirm, cancel, or
+	// otherwise consume a pending teardown — forward it untouched and leave the
+	// flag armed so the user's actual reply still lands. A nil SourceInfo is
+	// treated as a user message (same convention as the agent loop).
+	if msg.SourceInfo != nil && msg.SourceInfo.Source != channel.SourceUser {
+		return false
+	}
+
 	text := strings.TrimSpace(strings.ToLower(msg.Text))
 	if text != "yes" && text != "y" {
 		// User cancelled — clear the flag and forward to agent.

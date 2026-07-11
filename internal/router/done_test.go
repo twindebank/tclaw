@@ -287,6 +287,65 @@ func TestInterceptPendingDone(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, channels, 1)
 	})
+
+	t.Run("ignores a non-user yes and keeps the confirmation armed", func(t *testing.T) {
+		rs, ss, cw := setupDoneTest(t)
+
+		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
+			s.PendingDone = true
+			s.TeardownState = telegramchannel.NewTeardownState("tclaw_test_bot")
+		}))
+		require.NoError(t, ss.Set(context.Background(), channel.ChannelSecretKey("ephemeral"), "fake-token"))
+		require.NoError(t, cw.AddChannel(testUserID, config.Channel{
+			Type: channel.TypeTelegram, Name: "ephemeral", Description: "test",
+		}))
+
+		prov := &mockDoneProvisioner{}
+
+		// A notification (or any non-user source) that happens to say "yes" must
+		// not be able to confirm the teardown — only a real user can.
+		consumed := interceptPendingDone(
+			context.Background(),
+			doneTaggedMsgFrom("ephemeral-id", "yes", channel.SourceNotification),
+			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeTelegram),
+			rs, cw, testUserID, ss,
+			provLookup(channel.TypeTelegram, prov),
+			nil, "",
+		)
+
+		require.False(t, consumed, "non-user message must be forwarded, not consumed as confirmation")
+		require.False(t, prov.teardownCalled, "non-user yes must not trigger teardown")
+
+		// PendingDone stays armed so the user's real reply still lands.
+		state, err := rs.Get(context.Background(), "ephemeral")
+		require.NoError(t, err)
+		require.True(t, state.PendingDone, "pending_done must remain set after a non-user message")
+	})
+
+	t.Run("does not let a non-user message cancel a pending teardown", func(t *testing.T) {
+		rs, ss, cw := setupDoneTest(t)
+
+		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
+			s.PendingDone = true
+		}))
+
+		consumed := interceptPendingDone(
+			context.Background(),
+			doneTaggedMsgFrom("ephemeral-id", "some cross-channel update", channel.SourceChannel),
+			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeSocket),
+			rs, cw, testUserID, ss,
+			provLookup(channel.TypeSocket, &mockDoneProvisioner{}),
+			nil, "",
+		)
+
+		require.False(t, consumed)
+
+		// The flag must NOT be cleared by automated traffic — otherwise a stray
+		// notification would silently cancel the pending teardown.
+		state, err := rs.Get(context.Background(), "ephemeral")
+		require.NoError(t, err)
+		require.True(t, state.PendingDone)
+	})
 }
 
 // --- helpers ---
@@ -329,6 +388,16 @@ func doneTaggedMsg(channelID, text string) channel.TaggedMessage {
 	return channel.TaggedMessage{
 		ChannelID: channel.ChannelID(channelID),
 		Text:      text,
+	}
+}
+
+// doneTaggedMsgFrom builds a message tagged with a specific source so the
+// user-vs-automated gating in interceptPendingDone can be exercised.
+func doneTaggedMsgFrom(channelID, text string, source channel.MessageSource) channel.TaggedMessage {
+	return channel.TaggedMessage{
+		ChannelID:  channel.ChannelID(channelID),
+		Text:       text,
+		SourceInfo: &channel.MessageSourceInfo{Source: source},
 	}
 }
 

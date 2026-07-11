@@ -54,7 +54,7 @@ type notifier struct {
 
 	// run executes a gws command; defaults to runGWS. Overridable in tests to
 	// stub the Gmail API without spawning the gws binary.
-	run func(ctx context.Context, deps Deps, cmd gws.Command) (json.RawMessage, error)
+	run gwsRunner
 
 	mu      sync.Mutex
 	cancels map[notification.SubscriptionID]context.CancelFunc
@@ -154,11 +154,23 @@ func (n *notifier) saveSeen(ctx context.Context, credSetID string, ids []string)
 	}
 }
 
+// reserveSeen durably records messageID in the credential set's seen set so it
+// is never re-notified — including across a restart between this call and the
+// next poll. Persisting per message (rather than once per batch) keeps the
+// at-least-once re-delivery window to a single in-flight message. Serialized on
+// the per-credential seen lock so it composes safely with sibling pollers.
+func (n *notifier) reserveSeen(ctx context.Context, credSetID, messageID string) {
+	lock := n.seenLock(credSetID)
+	lock.Lock()
+	defer lock.Unlock()
+	n.saveSeen(ctx, credSetID, appendCapped(n.loadSeen(ctx, credSetID), []string{messageID}, maxSeenMessageIDs))
+}
+
 func (n *notifier) NotificationTypes() []notification.NotificationType {
 	return []notification.NotificationType{
 		{
 			Name:        TypeNewEmail,
-			Description: "Watch for new emails using Gmail's history API. Polls every 2 minutes for changes since the last check — only new arrivals trigger a notification, not existing unread mail.",
+			Description: "Watch for new emails using Gmail's history API. Polls every 2 minutes for changes since the last check — only new arrivals trigger a notification, not existing unread mail. Delivery is deduplicated and idempotent across restarts, and messages that no longer exist (deleted before they could be read) are skipped, so you are notified exactly once per real, still-present email.",
 			Scopes:      []notification.Scope{notification.ScopeCredential, notification.ScopePersistent},
 		},
 	}
@@ -346,33 +358,42 @@ func (n *notifier) poll(ctx context.Context, id notification.SubscriptionID, cre
 	}
 
 	// Emit one notification per email (never bundled) so each becomes its own
-	// queue entry and the agent actions them independently. Mark each seen only
-	// after its notification is emitted; on emit failure, stop and hold the
-	// cursor so the remainder is retried next poll.
-	var emitted []string
+	// queue entry and the agent actions them independently. Each message is
+	// reserved in the seen set the instant it's handled — emitted OR confirmed
+	// gone — and persisted immediately, not batched at the end of the poll. This
+	// is the dedupe guarantee: because the history cursor is inclusive, a restart
+	// mid-poll re-reads this same window, so anything not yet reserved would
+	// re-notify. Per-message reservation bounds that re-delivery to the single
+	// in-flight message rather than the whole batch.
 	emitFailed := false
 	for _, messageID := range freshMessageIDs {
-		text := n.buildNotificationText(ctx, deps, messageID)
+		text, outcome := n.buildNotification(ctx, deps, messageID)
+
+		if outcome == fetchGone {
+			// Message no longer exists — don't notify, but reserve the ID so the
+			// next inclusive re-read of this window never surfaces it again.
+			n.reserveSeen(ctx, credSetID, messageID)
+			continue
+		}
+
 		if emitErr := emitter.Emit(ctx, notification.Notification{
 			SubscriptionID: id,
 			Text:           text,
 		}); emitErr != nil {
+			// Hold the cursor and stop: this message and the remainder are retried
+			// next poll. It is deliberately NOT reserved, so it re-notifies
+			// (at-least-once — better a rare duplicate than a dropped email).
 			slog.Error("gmail notifier: emit failed", "subscription", id, "message_id", messageID, "error", emitErr)
 			emitFailed = true
 			break
 		}
-		emitted = append(emitted, messageID)
-	}
 
-	if len(emitted) > 0 {
-		lock.Lock()
-		n.saveSeen(ctx, credSetID, appendCapped(n.loadSeen(ctx, credSetID), emitted, maxSeenMessageIDs))
-		lock.Unlock()
+		// Reserve AFTER a successful emit — never before. Reserving before emit
+		// would let an emit/crash failure mark a message seen and silently drop it.
+		n.reserveSeen(ctx, credSetID, messageID)
 	}
 
 	if emitFailed {
-		// Hold the cursor: the un-emitted tail is retried next poll (already
-		// emitted IDs are now in the seen set and won't re-notify).
 		return cursor
 	}
 
