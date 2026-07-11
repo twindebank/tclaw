@@ -52,6 +52,11 @@ func accessToken(ctx context.Context, deps Deps) (string, error) {
 	return providerutil.AccessToken(ctx, deps)
 }
 
+// gwsRunner runs a typed gws command against a credential set's Deps and returns
+// the raw JSON output. runGWS is the production implementation; tests inject a
+// stub (see the notifier's run field) to serve canned Gmail responses.
+type gwsRunner = func(ctx context.Context, deps Deps, cmd gws.Command) (json.RawMessage, error)
+
 // runGWS executes a typed gws command with the credential set's access token.
 // Returns the raw JSON output.
 func runGWS(ctx context.Context, deps Deps, cmd gws.Command) (json.RawMessage, error) {
