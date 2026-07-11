@@ -142,7 +142,7 @@ func calendarListHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHa
 
 		output, err := runGWS(ctx, deps, gws.Calendar.ListEvents(params))
 		if err != nil {
-			return nil, fmt.Errorf("list events: %w", err)
+			return nil, fmt.Errorf("list events: %w", annotateCalendarNotFound(err, calendarID, a.CredentialSet))
 		}
 
 		var eventsRsp calendarEventsResponse
@@ -299,7 +299,7 @@ func calendarCreateHandler(depsMap map[credential.CredentialSetID]Deps) mcp.Tool
 
 		output, err := runGWS(ctx, deps, gws.Calendar.InsertEvent(calendarParams, eventBody))
 		if err != nil {
-			return nil, fmt.Errorf("create event: %w", err)
+			return nil, fmt.Errorf("create event: %w", annotateCalendarNotFound(err, calendarID, a.CredentialSet))
 		}
 
 		var created calendarEvent
@@ -380,7 +380,7 @@ func calendarUpdateHandler(depsMap map[credential.CredentialSetID]Deps) mcp.Tool
 			"eventId":    a.EventID,
 		}))
 		if err != nil {
-			return nil, fmt.Errorf("get event: %w", err)
+			return nil, fmt.Errorf("get event: %w", annotateCalendarNotFound(err, calendarID, a.CredentialSet))
 		}
 
 		var existing calendarEvent
@@ -422,7 +422,7 @@ func calendarUpdateHandler(depsMap map[credential.CredentialSetID]Deps) mcp.Tool
 			body,
 		))
 		if err != nil {
-			return nil, fmt.Errorf("update event: %w", err)
+			return nil, fmt.Errorf("update event: %w", annotateCalendarNotFound(err, calendarID, a.CredentialSet))
 		}
 
 		var updated calendarEvent
@@ -637,6 +637,21 @@ func resolveUpdatedTiming(existing calendarEvent, a calendarUpdateArgs) (eventTi
 		AllDay:    a.AllDay,
 		TimeZone:  timeZone,
 	})
+}
+
+// annotateCalendarNotFound turns a Google 404 into an actionable hint. A 404 while
+// loading a specific calendar almost always means the calendarId doesn't exist on THIS
+// Google account — the calendar may live on the other credential set (a "shared"
+// calendar is often owned on the personal account, not the shared one), or the
+// calendar_id is wrong. Non-404 errors are returned unchanged.
+func annotateCalendarNotFound(err error, calendarID, credentialSet string) error {
+	if err == nil {
+		return nil
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "notfound") {
+		return err
+	}
+	return fmt.Errorf("calendar %q not found on credential_set %q — it may live on a different Google account (try the other credential_set), or the calendar_id is wrong. Run google_workspace with command \"calendar calendarList list\" on each account to find the correct calendarId and where it lives. underlying: %w", calendarID, credentialSet, err)
 }
 
 // existingEventDate returns an event's calendar date (YYYY-MM-DD), whether it's an
