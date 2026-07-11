@@ -27,18 +27,43 @@ const (
 	emailBodyRetention = 7 * 24 * time.Hour
 )
 
-// buildNotificationText produces the notification body for a single new email.
-// It deterministically fetches the full message once, writes the body to a file
-// the agent can read, and returns a compact summary that carries the exact
-// message_id/thread_id plus a preview and the file path — so the agent never has
-// to reverse-search Gmail. On any fetch failure it degrades to an ID-only
-// notification (never dropped) so the agent can still read it with google_gmail_read.
-func (n *notifier) buildNotificationText(ctx context.Context, deps Deps, messageID string) string {
-	rsp, err := readFullMessage(ctx, deps, messageID)
+// fetchOutcome classifies the result of fetching a message before notifying.
+type fetchOutcome int
+
+const (
+	// fetchOK: the message was fetched — emit a full notification.
+	fetchOK fetchOutcome = iota
+
+	// fetchGone: the message no longer exists (Gmail 404 / notFound). A history
+	// record surfaced an ID that was deleted before we could read it. Do NOT
+	// notify — there's no email to act on.
+	fetchGone
+
+	// fetchTransient: the fetch failed for some other (likely transient) reason.
+	// Degrade to an ID-only notification rather than drop a possibly-real email.
+	fetchTransient
+)
+
+// buildNotification produces the notification body for a single new email and an
+// outcome telling the caller whether to emit it. It fetches the full message
+// once, writes the body to a file the agent can read, and returns a compact
+// summary carrying the exact message_id/thread_id plus a preview and file path —
+// so the agent never has to reverse-search Gmail. A Gmail not-found returns
+// fetchGone with no text (the caller skips it); any other fetch error degrades to
+// an ID-only notification (fetchTransient, never dropped).
+func (n *notifier) buildNotification(ctx context.Context, deps Deps, messageID string) (string, fetchOutcome) {
+	rsp, err := readFullMessageWith(ctx, n.run, deps, messageID)
 	if err != nil {
+		if isNotFoundError(err) {
+			// The message was added to the mailbox history but is already gone
+			// (deleted/moved before this poll). Nothing to notify about.
+			slog.Info("gmail notifier: skipping message that no longer exists",
+				"message_id", messageID, "error", err)
+			return "", fetchGone
+		}
 		slog.Warn("gmail notifier: full fetch failed, degrading to id-only notification",
 			"message_id", messageID, "error", err)
-		return formatDegradedNotification(messageID, err)
+		return formatDegradedNotification(messageID, err), fetchTransient
 	}
 
 	bodyPath := ""
@@ -52,7 +77,21 @@ func (n *notifier) buildNotificationText(ctx context.Context, deps Deps, message
 		}
 	}
 
-	return formatEmailNotification(rsp, bodyPath)
+	return formatEmailNotification(rsp, bodyPath), fetchOK
+}
+
+// isNotFoundError reports whether err is a Gmail "entity not found" (HTTP 404 /
+// reason notFound) — meaning the message ID no longer resolves to a real message.
+// Matches the JSON error body gws surfaces (e.g. reason "notFound", or the
+// human-readable "Requested entity was not found").
+func isNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "notfound") ||
+		strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "requested entity was not found")
 }
 
 // writeEmailBodyFile writes the full email as a markdown file with a

@@ -2,6 +2,7 @@ package google
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -403,9 +404,175 @@ func TestNotifier_FetchHistory(t *testing.T) {
 	})
 }
 
+func TestIsNotFoundError(t *testing.T) {
+	t.Run("matches Gmail notFound reason", func(t *testing.T) {
+		err := errors.New(`get message: {"error":{"code":404,"message":"Requested entity was not found.","reason":"notFound"}}`)
+		require.True(t, isNotFoundError(err))
+	})
+
+	t.Run("matches the human-readable phrasing", func(t *testing.T) {
+		require.True(t, isNotFoundError(errors.New("get message: Requested entity was not found.")))
+	})
+
+	t.Run("does not match unrelated errors", func(t *testing.T) {
+		require.False(t, isNotFoundError(errTest))
+		require.False(t, isNotFoundError(errors.New("rate limit exceeded")))
+	})
+
+	t.Run("nil is not a not-found", func(t *testing.T) {
+		require.False(t, isNotFoundError(nil))
+	})
+}
+
+func TestNotifier_BuildNotification(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns a full notification for a present message", func(t *testing.T) {
+		n := messageStubNotifier(t, map[string]messageStubResponse{
+			"m1": {body: validMessageJSON("m1", "alice@example.com", "Hello there", "hi")},
+		})
+
+		text, outcome := n.buildNotification(ctx, Deps{}, "m1")
+		require.Equal(t, fetchOK, outcome)
+		require.Contains(t, text, "alice@example.com")
+		require.Contains(t, text, "Hello there")
+		require.Contains(t, text, "gmail_message_id: m1")
+	})
+
+	t.Run("returns fetchGone with no text for a deleted message", func(t *testing.T) {
+		n := messageStubNotifier(t, map[string]messageStubResponse{
+			"m1": {err: notFoundErr()},
+		})
+
+		text, outcome := n.buildNotification(ctx, Deps{}, "m1")
+		require.Equal(t, fetchGone, outcome)
+		require.Empty(t, text)
+	})
+
+	t.Run("degrades to an id-only notification on a transient error", func(t *testing.T) {
+		n := messageStubNotifier(t, map[string]messageStubResponse{
+			"m1": {err: errors.New("get message: connection reset")},
+		})
+
+		text, outcome := n.buildNotification(ctx, Deps{}, "m1")
+		require.Equal(t, fetchTransient, outcome)
+		require.Contains(t, text, "gmail_message_id: m1")
+		require.Contains(t, text, "could not fetch")
+	})
+}
+
+func TestNotifier_Poll(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("skips deleted messages and emits only present ones", func(t *testing.T) {
+		em := &noopEmitter{}
+		n := pollStubNotifier(t,
+			`{"history":[{"messagesAdded":[{"message":{"id":"m1"}}]},{"messagesAdded":[{"message":{"id":"m2"}}]}],"historyId":"2000"}`,
+			map[string]messageStubResponse{
+				"m1": {err: notFoundErr()},
+				"m2": {body: validMessageJSON("m2", "bob@example.com", "Real email", "body")},
+			})
+
+		id := notification.GenerateID()
+		cursor := n.poll(ctx, id, testCredSet, "1000", em)
+
+		// Only the present message is notified.
+		require.Len(t, em.messages, 1)
+		require.Contains(t, em.messages[0].Text, "gmail_message_id: m2")
+
+		// Both IDs are reserved — the phantom so it's never reprocessed, the real
+		// one so it isn't re-notified.
+		require.ElementsMatch(t, []string{"m1", "m2"}, n.loadSeen(ctx, testCredSet))
+		require.Equal(t, "2000", cursor)
+	})
+
+	t.Run("a re-read of the same window re-notifies nothing (idempotent across restarts)", func(t *testing.T) {
+		em := &noopEmitter{}
+		history := `{"history":[{"messagesAdded":[{"message":{"id":"m2"}}]}],"historyId":"2000"}`
+		n := pollStubNotifier(t, history, map[string]messageStubResponse{
+			"m2": {body: validMessageJSON("m2", "bob@example.com", "Real email", "body")},
+		})
+
+		id := notification.GenerateID()
+
+		// First poll delivers the email and reserves it durably.
+		n.poll(ctx, id, testCredSet, "1000", em)
+		require.Len(t, em.messages, 1)
+
+		// A restart re-reads the same inclusive history window from the same
+		// cursor. Because the reservation was persisted per-message, nothing is
+		// re-delivered.
+		n.poll(ctx, id, testCredSet, "1000", em)
+		require.Len(t, em.messages, 1, "the same email must not be notified twice")
+	})
+}
+
 // --- helpers ---
 
 const testCredSet = "google/work"
+
+// messageStubResponse is a canned Gmail messages.get result: either a body or an error.
+type messageStubResponse struct {
+	body string
+	err  error
+}
+
+func notFoundErr() error {
+	return errors.New(`get message: {"error":{"code":404,"message":"Requested entity was not found.","reason":"notFound"}}`)
+}
+
+// validMessageJSON builds a minimal format=full Gmail message with a plain-text body.
+func validMessageJSON(id, from, subject, body string) string {
+	data := base64.URLEncoding.EncodeToString([]byte(body))
+	return fmt.Sprintf(`{"id":%q,"threadId":"t-%s","payload":{"mimeType":"text/plain","headers":[{"name":"From","value":%q},{"name":"Subject","value":%q}],"body":{"data":%q}}}`,
+		id, id, from, subject, data)
+}
+
+// messageStubNotifier serves messages.get calls from a fixed map keyed by message ID.
+func messageStubNotifier(t *testing.T, messages map[string]messageStubResponse) *notifier {
+	t.Helper()
+	n, _ := setupNotifier(t)
+	n.depsMap = func() map[credential.CredentialSetID]Deps {
+		return map[credential.CredentialSetID]Deps{testCredSet: {}}
+	}
+	n.run = func(_ context.Context, _ Deps, cmd gws.Command) (json.RawMessage, error) {
+		return serveMessageGet(cmd, messages)
+	}
+	return n
+}
+
+// pollStubNotifier serves history.list from a single canned page and messages.get
+// from a per-ID map, so a full poll can be driven without the gws binary.
+func pollStubNotifier(t *testing.T, history string, messages map[string]messageStubResponse) *notifier {
+	t.Helper()
+	n, _ := setupNotifier(t)
+	n.depsMap = func() map[credential.CredentialSetID]Deps {
+		return map[credential.CredentialSetID]Deps{testCredSet: {}}
+	}
+	n.run = func(_ context.Context, _ Deps, cmd gws.Command) (json.RawMessage, error) {
+		if len(cmd.Args) >= 3 && cmd.Args[2] == "history" {
+			return json.RawMessage(history), nil
+		}
+		return serveMessageGet(cmd, messages)
+	}
+	return n
+}
+
+// serveMessageGet resolves a messages.get command against the canned map.
+func serveMessageGet(cmd gws.Command, messages map[string]messageStubResponse) (json.RawMessage, error) {
+	if len(cmd.Args) < 4 || cmd.Args[3] != "get" {
+		return nil, fmt.Errorf("unexpected gws command: %v", cmd.Args)
+	}
+	id, _ := cmd.Params["id"].(string)
+	rsp, ok := messages[id]
+	if !ok {
+		return nil, fmt.Errorf("no stubbed response for message %q", id)
+	}
+	if rsp.err != nil {
+		return nil, rsp.err
+	}
+	return json.RawMessage(rsp.body), nil
+}
 
 func setupNotifier(t *testing.T) (*notifier, store.Store) {
 	t.Helper()
