@@ -81,13 +81,16 @@ func devPRHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("push: %w", err)
 		}
 
-		// Find an existing PR or create a new one.
-		prURL, err := ghPRFind(sess.WorktreeDir, sess.Branch, token)
+		// Reuse the branch's open PR if it has one; otherwise open a fresh PR. A
+		// merged/closed PR is not reused — pushing new commits after a merge means
+		// this is continued work that needs its own PR.
+		pr, err := ghPRFind(sess.WorktreeDir, sess.Branch, token)
 		if err != nil {
-			prURL = ""
+			pr = prInfo{}
 		}
 
-		if prURL == "" {
+		prURL := pr.URL
+		if shouldCreatePRForPR(pr.State) {
 			body := a.Body
 			if body == "" {
 				body = a.Title

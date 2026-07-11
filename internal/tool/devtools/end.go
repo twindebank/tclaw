@@ -17,7 +17,7 @@ func devEndDef() mcp.ToolDef {
 		Name: ToolEnd,
 		Description: "Tear down a dev session. Commits any uncommitted changes, pushes, and cleans up the worktree. " +
 			"Preferred workflow: use dev_pr to open/update the PR and iterate, then call dev_end when the PR is merged or you're done. " +
-			"dev_end also creates a PR if none exists yet. " +
+			"dev_end opens a PR only if the branch doesn't already have one — it will NOT duplicate a PR that is already open or merged, so ending a session after its PR was merged just cleans up the worktree. " +
 			"If PR creation fails after a successful push, the session is preserved — call dev_end again to retry. " +
 			"Sessions are scoped to the channel that started them: you can only end a session started in THIS channel, and if this channel has just one, omit 'session' — it resolves automatically. " +
 			"Note: the 'session' parameter is only for disambiguating between multiple sessions in this channel — it is NOT the way to resume a session.",
@@ -87,16 +87,22 @@ func devEndHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("push: %w", err)
 		}
 
-		// Check for existing PR.
-		prURL, err := ghPRFind(sess.WorktreeDir, sess.Branch, token)
+		// Check for an existing PR across all states. A branch whose PR is already
+		// OPEN or MERGED must NOT get a second PR — creating one after a merge is
+		// exactly the duplicate-PR bug. Only a branch with no PR (or a PR that was
+		// closed without merging) gets a fresh PR here.
+		pr, err := ghPRFind(sess.WorktreeDir, sess.Branch, token)
 		if err != nil {
 			// Non-fatal: gh might not be available or the repo may not be on GitHub.
 			slog.Warn("failed to check for existing PR", "branch", sess.Branch, "err", err)
-			prURL = ""
+			pr = prInfo{}
 		}
 
-		if prURL == "" {
-			// Create new PR.
+		prURL := pr.URL
+		alreadyMerged := pr.State == prStateMerged
+
+		if shouldCreatePRForEnd(pr.State) {
+			// No usable PR (none, or closed-without-merge) — create one.
 			body := a.Body
 			if body == "" {
 				body = a.Title
@@ -124,11 +130,15 @@ func devEndHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("delete session: %w", err)
 		}
 
+		message := fmt.Sprintf("Dev session ended. Branch %q pushed and worktree cleaned up.", sess.Branch)
+		if alreadyMerged {
+			message = fmt.Sprintf("Dev session ended. Branch %q was already merged (%s) — no new PR created; worktree cleaned up.", sess.Branch, prURL)
+		}
 		result := map[string]any{
 			"branch":    sess.Branch,
 			"committed": committed,
 			"pr_url":    prURL,
-			"message":   fmt.Sprintf("Dev session ended. Branch %q pushed and worktree cleaned up.", sess.Branch),
+			"message":   message,
 		}
 		return json.Marshal(result)
 	}

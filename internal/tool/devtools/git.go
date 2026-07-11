@@ -1,6 +1,7 @@
 package devtools
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -251,14 +252,63 @@ func ghPRCreate(worktreeDir string, branch string, title string, body string, to
 	return strings.TrimSpace(string(out)), nil
 }
 
-// ghPRFind checks if a PR already exists for a branch. Returns the URL if found.
-func ghPRFind(worktreeDir string, branch string, token string) (string, error) {
-	cmd := exec.Command("gh", "pr", "list", "--head", branch, "--json", "url", "--jq", ".[0].url")
+// prState is a GitHub PR's state as reported by `gh pr list`.
+type prState string
+
+const (
+	prStateNone   prState = ""       // no PR exists for the branch
+	prStateOpen   prState = "OPEN"   // a PR is open and can be pushed to
+	prStateMerged prState = "MERGED" // a PR was already merged — do NOT open another
+	prStateClosed prState = "CLOSED" // a PR was closed without merging
+)
+
+// prInfo describes the most recent PR for a branch (any state).
+type prInfo struct {
+	URL   string  `json:"url"`
+	State prState `json:"state"`
+}
+
+// ghPRFind returns the most recent PR for a branch across ALL states (open,
+// merged, closed). It must include merged/closed PRs — `gh pr list` defaults to
+// open-only, so after a branch's PR is merged this would otherwise report "no PR"
+// and callers would open a duplicate. An empty prInfo means no PR exists yet.
+func ghPRFind(worktreeDir string, branch string, token string) (prInfo, error) {
+	cmd := exec.Command("gh", "pr", "list", "--head", branch, "--state", "all", "--json", "url,state", "--jq", ".[0]")
 	cmd.Dir = worktreeDir
 	cmd.Env = ghEnv(token)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("gh pr list: %s: %w", string(out), err)
+		return prInfo{}, fmt.Errorf("gh pr list: %s: %w", string(out), err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return parsePRListOutput(string(out))
+}
+
+// parsePRListOutput parses the `gh pr list ... --jq '.[0]'` output into a prInfo.
+// gh prints nothing (or "null") when the branch has no PRs — both mean "no PR".
+func parsePRListOutput(raw string) (prInfo, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || trimmed == "null" {
+		return prInfo{}, nil
+	}
+
+	var pr prInfo
+	if err := json.Unmarshal([]byte(trimmed), &pr); err != nil {
+		return prInfo{}, fmt.Errorf("parse gh pr list output %q: %w", trimmed, err)
+	}
+	return pr, nil
+}
+
+// shouldCreatePRForEnd reports whether dev_end should open a new PR given the
+// state of the branch's most recent PR. An OPEN or MERGED PR must never get a
+// duplicate — creating one after a merge is the duplicate-PR bug this guards
+// against. Only a branch with no PR, or one closed without merging, gets a fresh PR.
+func shouldCreatePRForEnd(state prState) bool {
+	return state != prStateOpen && state != prStateMerged
+}
+
+// shouldCreatePRForPR reports whether dev_pr should open a new PR. It reuses only
+// an OPEN PR; a merged/closed branch that receives new commits is continued work
+// that needs its own PR.
+func shouldCreatePRForPR(state prState) bool {
+	return state != prStateOpen
 }
