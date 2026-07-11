@@ -1,6 +1,7 @@
 package google
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -212,6 +213,28 @@ func TestResolveUpdatedTiming(t *testing.T) {
 		_, err := resolveUpdatedTiming(timedTokyo, calendarUpdateArgs{StartTime: "20:00"})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "BOTH")
+	})
+}
+
+func TestAnnotateCalendarNotFound(t *testing.T) {
+	t.Run("adds an actionable hint to a 404/notFound error", func(t *testing.T) {
+		raw := fmt.Errorf(`{"error":{"code":404,"message":"Not Found","reason":"notFound"}}`)
+		got := annotateCalendarNotFound(raw, "cal@group.calendar.google.com", "google/shared")
+		require.Error(t, got)
+		require.Contains(t, got.Error(), "not found on credential_set \"google/shared\"")
+		require.Contains(t, got.Error(), "different Google account")
+		require.Contains(t, got.Error(), "calendarList list")
+		require.ErrorIs(t, got, raw)
+	})
+
+	t.Run("leaves non-404 errors unchanged", func(t *testing.T) {
+		raw := fmt.Errorf("some other failure")
+		got := annotateCalendarNotFound(raw, "primary", "google/personal")
+		require.Equal(t, raw, got)
+	})
+
+	t.Run("returns nil for a nil error", func(t *testing.T) {
+		require.NoError(t, annotateCalendarNotFound(nil, "primary", "google/personal"))
 	})
 }
 
