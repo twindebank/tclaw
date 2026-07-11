@@ -29,7 +29,11 @@ func channelDoneDef() mcp.ToolDef {
 			"this call may cause a double-message and interfere with teardown. The tool handles " +
 			"everything — your job is done the moment this call returns.\n\n" +
 			"REQUIRED: Before calling this, you MUST send all results to other channels via channel_send. " +
-			"The results_sent field is mandatory.",
+			"The results_sent field is mandatory.\n\n" +
+			"OWNERSHIP: A channel tears down ITSELF. Call this only for the channel you are currently " +
+			"operating on (leave channel_name unset). Do NOT call it for a child/ephemeral channel you " +
+			"created — that channel owns its own teardown once its work is done. A parent/orchestrator " +
+			"must never offer to clean up or close a child channel.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -100,14 +104,27 @@ func channelDoneHandler(deps Deps) mcp.ToolHandler {
 				return nil, fmt.Errorf("read channel token for confirmation: %w", tokenErr)
 			}
 
-			if promptErr := provisioner.SendTeardownPrompt(ctx, token, runtimeState.PlatformState); promptErr != nil {
-				return nil, fmt.Errorf("send teardown prompt for channel %q: %w", a.ChannelName, promptErr)
-			}
-
+			// Arm PendingDone BEFORE sending the prompt so the router's intercept is
+			// live the instant the user could reply. If the prompt were sent first,
+			// a fast "yes" (or a reply already queued) could arrive while PendingDone
+			// is still false, slip past interceptPendingDone, and reach the agent —
+			// which would then process and answer its own confirmation prompt.
 			if updateErr := deps.RuntimeState.Update(ctx, a.ChannelName, func(rs *channel.RuntimeState) {
 				rs.PendingDone = true
 			}); updateErr != nil {
 				return nil, fmt.Errorf("set pending_done for channel %q: %w", a.ChannelName, updateErr)
+			}
+
+			if promptErr := provisioner.SendTeardownPrompt(ctx, token, runtimeState.PlatformState); promptErr != nil {
+				// Roll back so the channel isn't left armed for a teardown the user
+				// was never actually asked to confirm.
+				if clearErr := deps.RuntimeState.Update(ctx, a.ChannelName, func(rs *channel.RuntimeState) {
+					rs.PendingDone = false
+				}); clearErr != nil {
+					slog.Error("channel_done: failed to roll back pending_done after prompt send failure",
+						"channel", a.ChannelName, "error", clearErr)
+				}
+				return nil, fmt.Errorf("send teardown prompt for channel %q: %w", a.ChannelName, promptErr)
 			}
 
 			slog.Info("channel_done: confirmation prompt sent, awaiting user reply", "channel", a.ChannelName)
