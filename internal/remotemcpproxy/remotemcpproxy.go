@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
+	"crypto/tls"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
@@ -64,11 +65,16 @@ type Config struct {
 }
 
 // route carries the resolved upstream target and injected headers from the
-// request handler to the reverse-proxy Director, without struct-field state.
+// request handler to the reverse-proxy Director (and its TLS dialer), without
+// struct-field state.
 type route struct {
 	upstream *url.URL
 	subpath  string
 	headers  map[string]string
+
+	// tlsPin, when set, is the hex SHA-256 fingerprint the upstream's TLS leaf
+	// cert must match — for self-signed servers on Fly private hosts.
+	tlsPin string
 }
 
 type routeContextKey struct{}
@@ -113,6 +119,11 @@ func NewServer(cfg Config) (*Server, error) {
 		// FlushInterval -1 streams responses immediately without buffering, so
 		// MCP server-sent-event streams pass through the proxy in real time.
 		FlushInterval: -1,
+		// Custom TLS dial so a per-server cert pin (route.tlsPin) authenticates a
+		// self-signed upstream by exact fingerprint instead of the system trust
+		// store. Only affects https upstreams; plain-http upstreams use the
+		// default DialContext untouched.
+		Transport: pinAwareTransport(),
 		Director: func(req *http.Request) {
 			rt, ok := req.Context().Value(routeContextKey{}).(*route)
 			if !ok {
@@ -140,6 +151,42 @@ func NewServer(cfg Config) (*Server, error) {
 	}
 
 	return s, nil
+}
+
+// pinAwareTransport builds the reverse proxy's RoundTripper. Its DialTLSContext
+// reads the per-request route (set by handle) and, when that route carries a
+// cert pin, authenticates the upstream by exact SHA-256 fingerprint rather than
+// the system trust store — the runtime counterpart of the pinned discovery
+// client. Upstreams without a pin get ordinary hostname/chain verification;
+// plain-http upstreams never reach here (they use the default DialContext).
+func pinAwareTransport() *http.Transport {
+	return &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 60 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			serverName, _, err := net.SplitHostPort(addr)
+			if err != nil {
+				serverName = addr
+			}
+
+			var cfg *tls.Config
+			if rt, ok := ctx.Value(routeContextKey{}).(*route); ok && rt.tlsPin != "" {
+				cfg, err = discovery.PinnedTLSConfig(rt.tlsPin)
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				cfg = &tls.Config{}
+			}
+			// ServerName drives SNI either way; with a pin, hostname verification
+			// is skipped (the pin is stronger), so this only selects the SNI name.
+			cfg.ServerName = serverName
+
+			return (&tls.Dialer{Config: cfg}).DialContext(ctx, network, addr)
+		},
+	}
 }
 
 // Token returns the benign per-user token clients must present in the
@@ -259,7 +306,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rt := &route{upstream: upstream, subpath: subpath, headers: headers}
+	rt := &route{upstream: upstream, subpath: subpath, headers: headers, tlsPin: remote.TLSPinSHA256}
 	r = r.WithContext(context.WithValue(r.Context(), routeContextKey{}, rt))
 	s.proxy.ServeHTTP(w, r)
 }

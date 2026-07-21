@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -40,6 +41,10 @@ func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error
 		return nil, fmt.Errorf("invalid address %q: %w", addr, err)
 	}
 
+	// Fly private names resolve to 6PN ULA addresses; those are expected, so the
+	// private-IP block below is skipped for them (see IsFlyPrivateHost).
+	flyPrivate := IsFlyPrivateHost(host)
+
 	ips, err := net.DefaultResolver.LookupHost(ctx, host)
 	if err != nil {
 		return nil, fmt.Errorf("DNS lookup failed for %q: %w", host, err)
@@ -52,7 +57,7 @@ func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error
 		if ip == nil {
 			continue
 		}
-		if isPrivateIP(ip) {
+		if !flyPrivate && isPrivateIP(ip) {
 			lastErr = fmt.Errorf("refusing to connect to private IP %s for host %q", ipStr, host)
 			continue
 		}
@@ -70,21 +75,27 @@ func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error
 }
 
 // validateExternalURL checks that a URL is safe to fetch during discovery:
-// - Must be HTTPS (except in tests)
-// - Must not resolve to a private/loopback/link-local address
+// - Must be HTTPS (except for Fly private hosts, and in tests via an injected client)
+// - Must not resolve to a private/loopback/link-local address (except Fly private hosts)
 func validateExternalURL(rawURL string) error {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("invalid URL: %w", err)
 	}
 
-	if parsed.Scheme != "https" {
-		return fmt.Errorf("only HTTPS URLs are allowed (got %q)", parsed.Scheme)
-	}
-
 	hostname := parsed.Hostname()
 	if hostname == "" {
 		return fmt.Errorf("URL has no hostname")
+	}
+
+	// Fly private names (*.flycast/*.internal) live only on the encrypted 6PN,
+	// so http is fine and their 6PN ULA addresses are expected, not SSRF.
+	if IsFlyPrivateHost(hostname) {
+		return nil
+	}
+
+	if parsed.Scheme != "https" {
+		return fmt.Errorf("only HTTPS URLs are allowed (got %q)", parsed.Scheme)
 	}
 
 	// Resolve hostname to IPs and block private ranges.
@@ -104,6 +115,16 @@ func validateExternalURL(rawURL string) error {
 	}
 
 	return nil
+}
+
+// IsFlyPrivateHost reports whether host is a Fly private-network DNS name
+// (*.flycast or *.internal). These resolve only inside the org's
+// WireGuard-encrypted 6PN, so they may be reached over http and are exempt from
+// the private-IP SSRF block. Raw private-IP literals stay blocked — only Fly's
+// own private DNS names get the exemption.
+func IsFlyPrivateHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	return strings.HasSuffix(host, ".flycast") || strings.HasSuffix(host, ".internal")
 }
 
 // isPrivateIP returns true if the IP is loopback, private, link-local,
