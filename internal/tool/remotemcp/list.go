@@ -13,8 +13,9 @@ const ToolRemoteMCPList = "remote_mcp_list"
 
 func remoteMCPListDef() mcp.ToolDef {
 	return mcp.ToolDef{
-		Name:        ToolRemoteMCPList,
-		Description: "List all connected remote MCP servers, showing their name, URL, and auth status.",
+		Name: ToolRemoteMCPList,
+		Description: "List all connected remote MCP servers, showing their name, URL, auth status, and any " +
+			"usage instructions the server published (how to use it, session lifecycle, tool conventions).",
 		InputSchema: json.RawMessage(`{"type": "object", "properties": {}}`),
 	}
 }
@@ -42,6 +43,12 @@ func remoteMCPListHandler(deps Deps) mcp.ToolHandler {
 			}
 			info["has_auth"] = auth != nil
 			info["has_token"] = auth != nil && auth.AccessToken != ""
+			// The server's own usage guidance (session lifecycle, tool
+			// conventions), captured at registration. Lets the agent recall how
+			// to drive a server it connected on an earlier turn.
+			if m.Instructions != "" {
+				info["instructions"] = m.Instructions
+			}
 			result = append(result, info)
 		}
 

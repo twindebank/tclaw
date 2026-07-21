@@ -89,6 +89,50 @@ func TestManager_StaticHeadersRoundtrip(t *testing.T) {
 	})
 }
 
+func TestManager_Instructions(t *testing.T) {
+	t.Run("AddRemoteMCP persists instructions", func(t *testing.T) {
+		mgr := newManager(t)
+		ctx := context.Background()
+
+		_, err := mgr.AddRemoteMCP(ctx, remotemcpstore.AddRemoteMCPParams{
+			Name:         "browser-mcp",
+			URL:          "https://browser-mcp.example.com/mcp",
+			Channel:      "desktop",
+			Instructions: "One browser session per connection.",
+		})
+		require.NoError(t, err)
+
+		got, err := mgr.GetRemoteMCP(ctx, "browser-mcp")
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Equal(t, "One browser session per connection.", got.Instructions)
+	})
+
+	t.Run("SetInstructions updates an existing entry", func(t *testing.T) {
+		mgr := newManager(t)
+		ctx := context.Background()
+
+		_, err := mgr.AddRemoteMCP(ctx, remotemcpstore.AddRemoteMCPParams{
+			Name: "browser-mcp", URL: "https://browser-mcp.example.com/mcp", Channel: "desktop",
+		})
+		require.NoError(t, err)
+
+		require.NoError(t, mgr.SetInstructions(ctx, "browser-mcp", "Sessions reset each turn."))
+
+		got, err := mgr.GetRemoteMCP(ctx, "browser-mcp")
+		require.NoError(t, err)
+		require.Equal(t, "Sessions reset each turn.", got.Instructions)
+	})
+
+	t.Run("SetInstructions errors on unknown server", func(t *testing.T) {
+		mgr := newManager(t)
+
+		err := mgr.SetInstructions(context.Background(), "ghost", "anything")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "not found")
+	})
+}
+
 // --- helpers ---
 
 func newManager(t *testing.T) *remotemcpstore.Manager {

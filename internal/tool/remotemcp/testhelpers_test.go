@@ -14,7 +14,16 @@ import (
 // so tests can plumb it into remotemcp.Deps.HTTPClient.
 func fakeMCPServer(t *testing.T, toolNames []string) *httptest.Server {
 	t.Helper()
-	server := httptest.NewTLSServer(http.HandlerFunc(fakeMCPHandler(toolNames, nil)))
+	server := httptest.NewTLSServer(http.HandlerFunc(fakeMCPHandler(toolNames, "", nil)))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// fakeMCPServerWithInstructions is fakeMCPServer plus an
+// InitializeResult.instructions string, for exercising instruction capture.
+func fakeMCPServerWithInstructions(t *testing.T, toolNames []string, instructions string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewTLSServer(http.HandlerFunc(fakeMCPHandler(toolNames, instructions, nil)))
 	t.Cleanup(server.Close)
 	return server
 }
@@ -26,15 +35,16 @@ func withRecordedHeaders(t *testing.T, toolNames []string) (*httptest.Server, fu
 	t.Helper()
 	var received []http.Header
 	record := func(h http.Header) { received = append(received, h) }
-	server := httptest.NewTLSServer(http.HandlerFunc(fakeMCPHandler(toolNames, record)))
+	server := httptest.NewTLSServer(http.HandlerFunc(fakeMCPHandler(toolNames, "", record)))
 	t.Cleanup(server.Close)
 	return server, func() []http.Header { return received }
 }
 
 // fakeMCPHandler is the raw HTTP handler body for a minimal MCP server that
-// replies to initialize and tools/list. Other methods 404. onRequest (if
+// replies to initialize and tools/list. Other methods 404. instructions, when
+// non-empty, is returned as InitializeResult.instructions. onRequest (if
 // non-nil) is invoked with a clone of the request headers before dispatch.
-func fakeMCPHandler(toolNames []string, onRequest func(http.Header)) func(http.ResponseWriter, *http.Request) {
+func fakeMCPHandler(toolNames []string, instructions string, onRequest func(http.Header)) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if onRequest != nil {
 			onRequest(r.Header.Clone())
@@ -51,14 +61,18 @@ func fakeMCPHandler(toolNames []string, onRequest func(http.Header)) func(http.R
 		w.Header().Set("Content-Type", "application/json")
 		switch req.Method {
 		case "initialize":
+			initResult := map[string]any{
+				"protocolVersion": "2025-06-18",
+				"serverInfo":      map[string]string{"name": "fake", "version": "0.0.0"},
+				"capabilities":    map[string]any{"tools": map[string]any{}},
+			}
+			if instructions != "" {
+				initResult["instructions"] = instructions
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"jsonrpc": "2.0",
 				"id":      req.ID,
-				"result": map[string]any{
-					"protocolVersion": "2025-06-18",
-					"serverInfo":      map[string]string{"name": "fake", "version": "0.0.0"},
-					"capabilities":    map[string]any{"tools": map[string]any{}},
-				},
+				"result":  initResult,
 			})
 		case "tools/list":
 			tools := make([]map[string]any, len(toolNames))
