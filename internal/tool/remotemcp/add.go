@@ -74,6 +74,10 @@ func remoteMCPAddDef() mcp.ToolDef {
 					"type": "object",
 					"description": "Headers whose values are resolved from the secret store at registration time. Map of HTTP header name → secret store key. The referenced keys must already be set via a prior secret_form_request. Requires skip_auth_discovery=true.",
 					"additionalProperties": {"type": "string"}
+				},
+				"tls_pin_sha256": {
+					"type": "string",
+					"description": "Pin the server's TLS certificate by its SHA-256 fingerprint (hex, e.g. from 'openssl x509 -fingerprint -sha256'). Use for a self-signed https server on a Fly private host (*.flycast/*.internal) where no public CA applies — it authenticates the server by exact cert, not the system trust store. Non-secret. Requires an https URL."
 				}
 			},
 			"required": ["name", "channel"]
@@ -89,6 +93,7 @@ type remoteMCPAddArgs struct {
 	SkipAuthDiscovery bool              `json:"skip_auth_discovery,omitempty"`
 	Headers           map[string]string `json:"headers,omitempty"`
 	HeaderSecretKeys  map[string]string `json:"header_secret_keys,omitempty"`
+	TLSPinSHA256      string            `json:"tls_pin_sha256,omitempty"`
 }
 
 func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
@@ -116,8 +121,22 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 			return nil, fmt.Errorf("url must be a valid absolute URL (e.g. https://mcp.example.com/sse)")
 		}
-		if parsed.Scheme != "https" {
-			return nil, fmt.Errorf("only HTTPS MCP server URLs are allowed")
+		// Public hosts must use HTTPS. http is allowed only for Fly private hosts
+		// (*.flycast/*.internal), which are reachable only over the encrypted 6PN.
+		if parsed.Scheme != "https" && !(parsed.Scheme == "http" && discovery.IsFlyPrivateHost(parsed.Hostname())) {
+			return nil, fmt.Errorf("only HTTPS MCP server URLs are allowed (http permitted only for Fly private hosts: *.flycast, *.internal)")
+		}
+
+		// A cert pin only applies to a TLS connection, and must be a valid
+		// SHA-256 fingerprint. Reject early so a typo can't silently fall back
+		// to unpinned behaviour.
+		if a.TLSPinSHA256 != "" {
+			if parsed.Scheme != "https" {
+				return nil, fmt.Errorf("tls_pin_sha256 requires an https URL")
+			}
+			if _, err := discovery.ParsePin(a.TLSPinSHA256); err != nil {
+				return nil, err
+			}
 		}
 
 		hasAnyHeaders := len(a.Headers) > 0 || len(a.HeaderSecretKeys) > 0
@@ -148,7 +167,18 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 		// store clean and surfaces the real error to the user now, not later.
 		var toolNames []string
 		if a.SkipAuthDiscovery {
-			toolNames, err = discovery.ListTools(ctx, resolvedURL, mergedHeaders, listToolsOpts(deps)...)
+			listOpts := listToolsOpts(deps)
+			// When a pin is set and no client was injected (i.e. real use, not a
+			// test), discover over a pinned-TLS client so the self-signed cert is
+			// authenticated exactly as it will be at runtime.
+			if a.TLSPinSHA256 != "" && deps.HTTPClient == nil {
+				pinnedClient, perr := discovery.NewPinnedSafeClient(a.TLSPinSHA256)
+				if perr != nil {
+					return nil, perr
+				}
+				listOpts = append(listOpts, discovery.WithHTTPClient(pinnedClient))
+			}
+			toolNames, err = discovery.ListTools(ctx, resolvedURL, mergedHeaders, listOpts...)
 			if err != nil {
 				return nil, fmt.Errorf("failed to list tools from remote MCP %q: %w", a.Name, err)
 			}
@@ -164,6 +194,7 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 			Channel:      a.Channel,
 			URLSensitive: a.URLSecretKey != "",
 			ToolNames:    toolNames,
+			TLSPinSHA256: a.TLSPinSHA256,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("add remote mcp: %w", err)

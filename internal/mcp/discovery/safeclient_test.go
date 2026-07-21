@@ -68,6 +68,11 @@ func TestValidateExternalURL(t *testing.T) {
 		// HTTP rejected
 		{"http://example.com/mcp", true},
 
+		// Fly private hosts allowed over http/https (only reachable on the 6PN)
+		{"http://svc.flycast:8000/mcp", false},
+		{"https://svc.flycast:8000/mcp", false},
+		{"http://svc.internal/mcp", false},
+
 		// Private/loopback rejected
 		{"https://localhost/mcp", true},
 		{"https://127.0.0.1/mcp", true},
