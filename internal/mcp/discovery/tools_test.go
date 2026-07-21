@@ -17,9 +17,32 @@ func TestListTools(t *testing.T) {
 		server := newFakeMCPServer(t, fakeMCPOptions{
 			Tools: []fakeTool{{Name: "ha_state_get"}, {Name: "ha_service_call"}},
 		})
-		names, err := discovery.ListTools(context.Background(), server.URL+"/mcp", nil, discovery.WithHTTPClient(server.Client()))
+		res, err := discovery.ListTools(context.Background(), server.URL+"/mcp", nil, discovery.WithHTTPClient(server.Client()))
 		require.NoError(t, err)
-		require.Equal(t, []string{"ha_state_get", "ha_service_call"}, names)
+		require.Equal(t, []string{"ha_state_get", "ha_service_call"}, res.ToolNames)
+		require.Empty(t, res.Instructions)
+	})
+
+	t.Run("captures server instructions from initialize", func(t *testing.T) {
+		server := newFakeMCPServer(t, fakeMCPOptions{
+			Tools:        []fakeTool{{Name: "browser_navigate"}},
+			Instructions: "One persistent browser session per connection; state resets when you reconnect.",
+		})
+		res, err := discovery.ListTools(context.Background(), server.URL+"/mcp", nil, discovery.WithHTTPClient(server.Client()))
+		require.NoError(t, err)
+		require.Equal(t, []string{"browser_navigate"}, res.ToolNames)
+		require.Equal(t, "One persistent browser session per connection; state resets when you reconnect.", res.Instructions)
+	})
+
+	t.Run("captures instructions from SSE-framed initialize", func(t *testing.T) {
+		server := newFakeMCPServer(t, fakeMCPOptions{
+			Tools:        []fakeTool{{Name: "browser_navigate"}},
+			Instructions: "Session lives for the connection.",
+			UseSSEFrames: true,
+		})
+		res, err := discovery.ListTools(context.Background(), server.URL+"/mcp", nil, discovery.WithHTTPClient(server.Client()))
+		require.NoError(t, err)
+		require.Equal(t, "Session lives for the connection.", res.Instructions)
 	})
 
 	t.Run("passes custom headers on initialize and tools/list", func(t *testing.T) {
@@ -47,9 +70,9 @@ func TestListTools(t *testing.T) {
 			Tools:        []fakeTool{{Name: "sse_tool"}},
 			UseSSEFrames: true,
 		})
-		names, err := discovery.ListTools(context.Background(), server.URL+"/mcp", nil, discovery.WithHTTPClient(server.Client()))
+		res, err := discovery.ListTools(context.Background(), server.URL+"/mcp", nil, discovery.WithHTTPClient(server.Client()))
 		require.NoError(t, err)
-		require.Equal(t, []string{"sse_tool"}, names)
+		require.Equal(t, []string{"sse_tool"}, res.ToolNames)
 	})
 
 	t.Run("propagates session id from initialize to tools/list", func(t *testing.T) {
@@ -58,9 +81,9 @@ func TestListTools(t *testing.T) {
 			SessionID:      "sess-abc-123",
 			RequireSession: true,
 		})
-		names, err := discovery.ListTools(context.Background(), server.URL+"/mcp", nil, discovery.WithHTTPClient(server.Client()))
+		res, err := discovery.ListTools(context.Background(), server.URL+"/mcp", nil, discovery.WithHTTPClient(server.Client()))
 		require.NoError(t, err)
-		require.Equal(t, []string{"stateful_tool"}, names)
+		require.Equal(t, []string{"stateful_tool"}, res.ToolNames)
 	})
 
 	t.Run("surfaces rpc error from tools/list", func(t *testing.T) {
@@ -109,6 +132,7 @@ type fakeMCPOptions struct {
 	SessionID      string // if set, returned from initialize and required on tools/list
 	RequireSession bool   // 400 if tools/list arrives without the session id
 	ToolsListError *rpcError
+	Instructions   string // if set, returned as InitializeResult.instructions
 }
 
 type fakeMCPServer struct {
@@ -140,14 +164,18 @@ func newFakeMCPServer(t *testing.T, opts fakeMCPOptions) *fakeMCPServer {
 			if opts.SessionID != "" {
 				w.Header().Set("Mcp-Session-Id", opts.SessionID)
 			}
+			initResult := map[string]any{
+				"protocolVersion": "2025-06-18",
+				"serverInfo":      map[string]string{"name": "fake", "version": "0.0.0"},
+				"capabilities":    map[string]any{"tools": map[string]any{}},
+			}
+			if opts.Instructions != "" {
+				initResult["instructions"] = opts.Instructions
+			}
 			writeMCPResponse(w, opts.UseSSEFrames, mcpResponse{
 				JSONRPC: "2.0",
 				ID:      req.ID,
-				Result: map[string]any{
-					"protocolVersion": "2025-06-18",
-					"serverInfo":      map[string]string{"name": "fake", "version": "0.0.0"},
-					"capabilities":    map[string]any{"tools": map[string]any{}},
-				},
+				Result:  initResult,
 			})
 		case "tools/list":
 			if opts.RequireSession && r.Header.Get("Mcp-Session-Id") != opts.SessionID {
