@@ -37,6 +37,13 @@ type RemoteMCP struct {
 	// like `mcp__<server>__*` into explicit tool names at agent-start time.
 	// Without this list the CLI refuses every tool call on the server.
 	ToolNames []string `json:"tool_names,omitempty"`
+
+	// TLSPinSHA256 pins the server's TLS leaf certificate by its hex SHA-256
+	// fingerprint. Set for self-signed servers on Fly private hosts, where no
+	// public CA applies — the pin authenticates the server without trusting the
+	// network. Non-secret (a public cert hash), so it's stored inline like the
+	// URL. Empty means default chain verification.
+	TLSPinSHA256 string `json:"tls_pin_sha256,omitempty"`
 }
 
 // RemoteMCPAuth holds OAuth credentials and registration for a remote MCP,
@@ -124,6 +131,10 @@ type AddRemoteMCPParams struct {
 	// it the Claude CLI can't expand the tool permission glob for this
 	// server and will refuse every tool call.
 	ToolNames []string
+
+	// TLSPinSHA256 pins the server's TLS certificate by hex SHA-256 fingerprint.
+	// Empty means default chain verification. See RemoteMCP.TLSPinSHA256.
+	TLSPinSHA256 string
 }
 
 func (m *Manager) AddRemoteMCP(ctx context.Context, p AddRemoteMCPParams) (*RemoteMCP, error) {
@@ -143,6 +154,7 @@ func (m *Manager) AddRemoteMCP(ctx context.Context, p AddRemoteMCPParams) (*Remo
 		CreatedAt:    time.Now(),
 		URLSensitive: p.URLSensitive,
 		ToolNames:    p.ToolNames,
+		TLSPinSHA256: p.TLSPinSHA256,
 	}
 	mcps = append(mcps, entry)
 	if err := m.saveRemoteMCPs(ctx, mcps); err != nil {

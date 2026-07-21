@@ -2,6 +2,8 @@ package remotemcpproxy_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -218,6 +220,36 @@ func TestServer_RefreshesExpiredToken(t *testing.T) {
 	})
 }
 
+func TestServer_PinnedTLSUpstream(t *testing.T) {
+	t.Run("forwards to a self-signed https upstream whose cert matches the pin", func(t *testing.T) {
+		upstream, rec := newTLSUpstream(t, "pinned-ok")
+		mgr := newManager(t)
+		registerPinned(t, mgr, "pinned-mcp", upstream.URL+"/mcp", certPin(t, upstream))
+
+		srv := startProxy(t, mgr, nil)
+		resp, body := proxyGET(t, srv, "pinned-mcp")
+
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Equal(t, "pinned-ok", body)
+		require.Equal(t, "/mcp", rec.lastPath())
+	})
+
+	t.Run("refuses a self-signed https upstream whose cert does not match the pin", func(t *testing.T) {
+		upstream, _ := newTLSUpstream(t, "should-not-reach")
+		mgr := newManager(t)
+		// A valid-shape pin that belongs to a different certificate.
+		wrongPin := strings.Repeat("ab", 32)
+		registerPinned(t, mgr, "pinned-mcp", upstream.URL+"/mcp", wrongPin)
+
+		srv := startProxy(t, mgr, nil)
+		resp, body := proxyGET(t, srv, "pinned-mcp")
+
+		// The TLS pin mismatch fails the dial, so the proxy's ErrorHandler returns 502.
+		require.Equal(t, http.StatusBadGateway, resp.StatusCode)
+		require.NotContains(t, body, "should-not-reach")
+	})
+}
+
 // --- helpers ---
 
 func newManager(t *testing.T) *remotemcpstore.Manager {
@@ -316,6 +348,40 @@ func newUpstream(t *testing.T, responseBody string) (*httptest.Server, *recorder
 	}))
 	t.Cleanup(srv.Close)
 	return srv, rec
+}
+
+// newTLSUpstream is like newUpstream but serves HTTPS with a throwaway
+// self-signed cert (httptest's), so we can exercise the proxy's cert pinning.
+func newTLSUpstream(t *testing.T, responseBody string) (*httptest.Server, *recorder) {
+	t.Helper()
+	rec := &recorder{}
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		rec.record(req)
+		_, _ = io.WriteString(w, responseBody)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, rec
+}
+
+// certPin returns the hex SHA-256 fingerprint of a TLS server's leaf cert — the
+// value a client would pin.
+func certPin(t *testing.T, srv *httptest.Server) string {
+	t.Helper()
+	require.NotNil(t, srv.Certificate())
+	sum := sha256.Sum256(srv.Certificate().Raw)
+	return hex.EncodeToString(sum[:])
+}
+
+func registerPinned(t *testing.T, mgr *remotemcpstore.Manager, name, url, pin string) {
+	t.Helper()
+	_, err := mgr.AddRemoteMCP(context.Background(), remotemcpstore.AddRemoteMCPParams{
+		Name:         name,
+		URL:          url,
+		Channel:      "desktop",
+		ToolNames:    []string{"probe"},
+		TLSPinSHA256: pin,
+	})
+	require.NoError(t, err)
 }
 
 // memorySecretStore is a map-backed secret.Store for tests.
