@@ -44,6 +44,13 @@ type RemoteMCP struct {
 	// network. Non-secret (a public cert hash), so it's stored inline like the
 	// URL. Empty means default chain verification.
 	TLSPinSHA256 string `json:"tls_pin_sha256,omitempty"`
+
+	// Instructions is the server's self-description captured from the MCP
+	// initialize handshake (InitializeResult.instructions) — how to use the
+	// server and its features. Surfaced to the agent so it knows how to drive
+	// the server (e.g. session lifecycle) instead of guessing. Empty if the
+	// server exposed none.
+	Instructions string `json:"instructions,omitempty"`
 }
 
 // RemoteMCPAuth holds OAuth credentials and registration for a remote MCP,
@@ -135,6 +142,10 @@ type AddRemoteMCPParams struct {
 	// TLSPinSHA256 pins the server's TLS certificate by hex SHA-256 fingerprint.
 	// Empty means default chain verification. See RemoteMCP.TLSPinSHA256.
 	TLSPinSHA256 string
+
+	// Instructions is the server's self-description from the MCP initialize
+	// handshake. See RemoteMCP.Instructions. Empty if the server exposed none.
+	Instructions string
 }
 
 func (m *Manager) AddRemoteMCP(ctx context.Context, p AddRemoteMCPParams) (*RemoteMCP, error) {
@@ -155,6 +166,7 @@ func (m *Manager) AddRemoteMCP(ctx context.Context, p AddRemoteMCPParams) (*Remo
 		URLSensitive: p.URLSensitive,
 		ToolNames:    p.ToolNames,
 		TLSPinSHA256: p.TLSPinSHA256,
+		Instructions: p.Instructions,
 	}
 	mcps = append(mcps, entry)
 	if err := m.saveRemoteMCPs(ctx, mcps); err != nil {
@@ -189,6 +201,29 @@ func (m *Manager) SetToolNames(ctx context.Context, name string, toolNames []str
 	for i := range mcps {
 		if mcps[i].Name == name {
 			mcps[i].ToolNames = toolNames
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("remote mcp %q not found", name)
+	}
+	return m.saveRemoteMCPs(ctx, mcps)
+}
+
+// SetInstructions updates the stored server instructions for an existing remote
+// MCP. Used by the OAuth and no-auth registration paths where the initialize
+// handshake runs after the entry has already been persisted. An empty string is
+// a valid value — it clears any prior instructions when the server exposes none.
+func (m *Manager) SetInstructions(ctx context.Context, name string, instructions string) error {
+	mcps, err := m.ListRemoteMCPs(ctx)
+	if err != nil {
+		return err
+	}
+	found := false
+	for i := range mcps {
+		if mcps[i].Name == name {
+			mcps[i].Instructions = instructions
 			found = true
 			break
 		}
