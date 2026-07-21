@@ -95,7 +95,7 @@ func finalizeAuthorized(ctx context.Context, deps Deps, name string, auth *remot
 
 	if len(entry.ToolNames) == 0 {
 		headers := map[string]string{"Authorization": "Bearer " + auth.AccessToken}
-		toolNames, listErr := discovery.ListTools(ctx, entry.URL, headers, listToolsOpts(deps)...)
+		discovered, listErr := discovery.ListTools(ctx, entry.URL, headers, listToolsOpts(deps)...)
 		if listErr != nil {
 			// Auth worked but tool discovery didn't. Return the error — the
 			// registration is unusable without the tool list and the user
@@ -103,13 +103,16 @@ func finalizeAuthorized(ctx context.Context, deps Deps, name string, auth *remot
 			// MCP registered.
 			return nil, fmt.Errorf("authorized but failed to list tools: %w", listErr)
 		}
-		if len(toolNames) == 0 {
+		if len(discovered.ToolNames) == 0 {
 			return nil, fmt.Errorf("remote MCP %q exposed no tools", name)
 		}
-		if err := deps.Manager.SetToolNames(ctx, name, toolNames); err != nil {
+		if err := deps.Manager.SetToolNames(ctx, name, discovered.ToolNames); err != nil {
 			return nil, fmt.Errorf("persist tool names: %w", err)
 		}
-		slog.Info("captured tool names for authorised remote mcp", "name", name, "count", len(toolNames))
+		if err := deps.Manager.SetInstructions(ctx, name, discovered.Instructions); err != nil {
+			return nil, fmt.Errorf("persist instructions: %w", err)
+		}
+		slog.Info("captured tool names for authorised remote mcp", "name", name, "count", len(discovered.ToolNames))
 	}
 
 	if deps.ConfigUpdater != nil {

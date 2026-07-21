@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -27,17 +28,29 @@ func WithHTTPClient(c *http.Client) ListToolsOption {
 	return func(cfg *listToolsConfig) { cfg.client = c }
 }
 
-// ListTools fetches the tool names exposed by an MCP server by performing the
-// standard MCP initialize + tools/list handshake over HTTP. Used at
-// remote_mcp_add time so tclaw can cache the list and expand tool-permission
-// globs against real tool names (the Claude CLI's --allowedTools does not
-// honour wildcards for MCP tools).
+// ToolsListResult is what the MCP initialize + tools/list handshake discovered
+// about a server.
+type ToolsListResult struct {
+	// ToolNames are the tool names the server exposed, in the order listed.
+	ToolNames []string
+
+	// Instructions is the server's InitializeResult.instructions — free-form
+	// guidance on how to use the server and its features (e.g. session-lifecycle
+	// notes). Empty if the server set none. tclaw surfaces this to the agent so
+	// it knows how to drive the server rather than guessing.
+	Instructions string
+}
+
+// ListTools performs the standard MCP initialize + tools/list handshake over
+// HTTP and returns the exposed tool names plus the server's self-description.
+// Used at remote_mcp_add time so tclaw can cache the list and expand
+// tool-permission globs against real tool names (the Claude CLI's
+// --allowedTools does not honour wildcards for MCP tools) and surface the
+// server's usage instructions to the agent.
 //
 // headers are added to every request — used for auth layers that sit in front
 // of the MCP server (e.g. Cloudflare Access service tokens).
-//
-// Returns the tool names in the order the server listed them.
-func ListTools(ctx context.Context, mcpURL string, headers map[string]string, opts ...ListToolsOption) ([]string, error) {
+func ListTools(ctx context.Context, mcpURL string, headers map[string]string, opts ...ListToolsOption) (ToolsListResult, error) {
 	cfg := listToolsConfig{}
 	for _, opt := range opts {
 		opt(&cfg)
@@ -46,7 +59,7 @@ func ListTools(ctx context.Context, mcpURL string, headers map[string]string, op
 	if client == nil {
 		client = safeClient
 		if err := validateExternalURL(mcpURL); err != nil {
-			return nil, fmt.Errorf("unsafe MCP URL: %w", err)
+			return ToolsListResult{}, fmt.Errorf("unsafe MCP URL: %w", err)
 		}
 	}
 
@@ -54,9 +67,9 @@ func ListTools(ctx context.Context, mcpURL string, headers map[string]string, op
 	// default, but the spec still requires the initialize handshake before
 	// other methods. Servers that operate statefully set Mcp-Session-Id in
 	// the initialize response and expect it echoed on subsequent requests.
-	sessionID, err := mcpInitialize(ctx, client, mcpURL, headers)
+	init, err := mcpInitialize(ctx, client, mcpURL, headers)
 	if err != nil {
-		return nil, fmt.Errorf("mcp initialize: %w", err)
+		return ToolsListResult{}, fmt.Errorf("mcp initialize: %w", err)
 	}
 
 	// Call tools/list. Response shape: {"result": {"tools": [{"name": "..."}, ...]}}
@@ -66,9 +79,9 @@ func ListTools(ctx context.Context, mcpURL string, headers map[string]string, op
 		Method:  "tools/list",
 		Params:  json.RawMessage(`{}`),
 	}
-	raw, err := postMCP(ctx, client, mcpURL, headers, sessionID, req)
+	raw, err := postMCP(ctx, client, mcpURL, headers, init.sessionID, req)
 	if err != nil {
-		return nil, fmt.Errorf("tools/list: %w", err)
+		return ToolsListResult{}, fmt.Errorf("tools/list: %w", err)
 	}
 
 	var parsed struct {
@@ -83,26 +96,37 @@ func ListTools(ctx context.Context, mcpURL string, headers map[string]string, op
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil, fmt.Errorf("parse tools/list response: %w", err)
+		return ToolsListResult{}, fmt.Errorf("parse tools/list response: %w", err)
 	}
 	if parsed.Error != nil {
-		return nil, fmt.Errorf("tools/list rpc error %d: %s", parsed.Error.Code, parsed.Error.Message)
+		return ToolsListResult{}, fmt.Errorf("tools/list rpc error %d: %s", parsed.Error.Code, parsed.Error.Message)
 	}
 
 	names := make([]string, len(parsed.Result.Tools))
 	for i, t := range parsed.Result.Tools {
 		if t.Name == "" {
-			return nil, fmt.Errorf("tools/list returned a tool with empty name at index %d", i)
+			return ToolsListResult{}, fmt.Errorf("tools/list returned a tool with empty name at index %d", i)
 		}
 		names[i] = t.Name
 	}
-	return names, nil
+	return ToolsListResult{ToolNames: names, Instructions: init.instructions}, nil
+}
+
+// initializeResult carries what the MCP initialize handshake surfaced.
+type initializeResult struct {
+	// sessionID is the Mcp-Session-Id the server assigned, echoed on subsequent
+	// requests. Empty for stateless servers — that's fine, callers just omit the
+	// header.
+	sessionID string
+
+	// instructions is the server's InitializeResult.instructions — free-form
+	// guidance on how to use the server. Empty if the server set none.
+	instructions string
 }
 
 // mcpInitialize sends the MCP initialize request and returns the session ID
-// (if the server set one). Stateless servers return an empty session ID —
-// that's fine, subsequent requests just omit the header.
-func mcpInitialize(ctx context.Context, client *http.Client, mcpURL string, headers map[string]string) (string, error) {
+// (if the server set one) along with the server's instructions field.
+func mcpInitialize(ctx context.Context, client *http.Client, mcpURL string, headers map[string]string) (initializeResult, error) {
 	req := jsonRPCRequest{
 		JSONRPC: "2.0",
 		ID:      json.RawMessage(`1`),
@@ -116,12 +140,12 @@ func mcpInitialize(ctx context.Context, client *http.Client, mcpURL string, head
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		return "", fmt.Errorf("marshal initialize: %w", err)
+		return initializeResult{}, fmt.Errorf("marshal initialize: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, mcpURL, bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("create initialize request: %w", err)
+		return initializeResult{}, fmt.Errorf("create initialize request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json, text/event-stream")
@@ -131,19 +155,52 @@ func mcpInitialize(ctx context.Context, client *http.Client, mcpURL string, head
 
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("send initialize: %w", err)
+		return initializeResult{}, fmt.Errorf("send initialize: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// Drain a capped amount of the body for diagnostics.
-		preview, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return "", fmt.Errorf("unexpected status %d: %s", resp.StatusCode, strings.TrimSpace(string(preview)))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
+	if err != nil {
+		return initializeResult{}, fmt.Errorf("read initialize response: %w", err)
 	}
 
-	// Drain to allow connection reuse.
-	io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBodyBytes))
-	return resp.Header.Get("Mcp-Session-Id"), nil
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// Cap the body for diagnostics.
+		preview := raw
+		if len(preview) > 512 {
+			preview = preview[:512]
+		}
+		return initializeResult{}, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, strings.TrimSpace(string(preview)))
+	}
+
+	// Unwrap SSE framing if the server used the streamable-http transport, so we
+	// can read the instructions field out of the initialize result body.
+	payload := raw
+	if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+		payload, err = extractSSEMessage(raw)
+		if err != nil {
+			return initializeResult{}, fmt.Errorf("parse SSE initialize response: %w", err)
+		}
+	}
+
+	result := initializeResult{sessionID: resp.Header.Get("Mcp-Session-Id")}
+
+	// instructions are optional and best-effort: the session id already came
+	// from the header and tools/list works without them, so a malformed body is
+	// a warning, not a fatal error.
+	var parsed struct {
+		Result struct {
+			Instructions string `json:"instructions"`
+		} `json:"result"`
+	}
+	if len(payload) > 0 {
+		if err := json.Unmarshal(payload, &parsed); err != nil {
+			slog.Warn("mcp initialize: could not parse response body for instructions", "err", err)
+		} else {
+			result.instructions = parsed.Result.Instructions
+		}
+	}
+	return result, nil
 }
 
 // postMCP sends a JSON-RPC request to an MCP server and returns the decoded

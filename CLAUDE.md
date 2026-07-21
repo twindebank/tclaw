@@ -3,6 +3,7 @@
 ## Git Workflow
 - **NEVER use Graphite (`gt`) in this repo** — use plain `git` and `gh` only
 - **PR creation**: `git push -u origin HEAD` then `gh pr create`
+- **This is a PUBLIC repo** — everything committed (code, tests, fixtures, comments, commit messages) must be appropriate for public view. Before committing, scrub anything private: personal/internal server codenames (use generic names like `browser-mcp` in tests, not real project codenames), real hostnames/URLs, secrets, tokens, personal info. Never `git add` gitignored files (`tclaw.yaml`, `fly.toml`).
 
 ## MANDATORY: Read Before Writing Any Code
 **EVERY time you write or modify code — including in resumed/continued sessions — you MUST read @docs/go-patterns.md first AND follow every pattern exactly.** No exceptions. This includes tests, one-line fixes, and refactors. Don't rely on memory or assumptions about conventions; read the file and match its patterns precisely. Tests MUST use `t.Run` subtests grouped under one top-level func per method — never split scenarios into separate top-level test functions.

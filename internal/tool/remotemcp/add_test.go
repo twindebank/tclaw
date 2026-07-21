@@ -129,6 +129,67 @@ func TestRemoteMCPAdd_SkipAuthDiscoveryWithHeaders(t *testing.T) {
 	})
 }
 
+func TestRemoteMCPAdd_CapturesInstructions(t *testing.T) {
+	const instructions = "One persistent browser session per connection; state resets when you reconnect."
+
+	t.Run("echoes server instructions in the add response and persists them", func(t *testing.T) {
+		server := fakeMCPServerWithInstructions(t, []string{"browser_navigate"}, instructions)
+		th := setupHarness(t, withHTTPClient(server.Client()))
+
+		result := callTool(t, th.handler, "remote_mcp_add", map[string]any{
+			"name":                "browser-mcp",
+			"url":                 server.URL + "/mcp",
+			"channel":             "desktop",
+			"skip_auth_discovery": true,
+		})
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(result, &got))
+		require.Equal(t, "ready", got["status"])
+		require.Equal(t, instructions, got["instructions"],
+			"the server's how-to-use instructions should be echoed on add")
+
+		entry, err := th.manager.GetRemoteMCP(context.Background(), "browser-mcp")
+		require.NoError(t, err)
+		require.NotNil(t, entry)
+		require.Equal(t, instructions, entry.Instructions, "instructions should be persisted on the entry")
+	})
+
+	t.Run("remote_mcp_list surfaces persisted instructions", func(t *testing.T) {
+		server := fakeMCPServerWithInstructions(t, []string{"browser_navigate"}, instructions)
+		th := setupHarness(t, withHTTPClient(server.Client()))
+
+		_ = callTool(t, th.handler, "remote_mcp_add", map[string]any{
+			"name":                "browser-mcp",
+			"url":                 server.URL + "/mcp",
+			"channel":             "desktop",
+			"skip_auth_discovery": true,
+		})
+
+		listed := callTool(t, th.handler, "remote_mcp_list", map[string]any{})
+		var entries []map[string]any
+		require.NoError(t, json.Unmarshal(listed, &entries))
+		require.Len(t, entries, 1)
+		require.Equal(t, instructions, entries[0]["instructions"])
+	})
+
+	t.Run("omits the instructions field when the server exposes none", func(t *testing.T) {
+		server := fakeMCPServer(t, []string{"browser_navigate"})
+		th := setupHarness(t, withHTTPClient(server.Client()))
+
+		result := callTool(t, th.handler, "remote_mcp_add", map[string]any{
+			"name":                "silent",
+			"url":                 server.URL + "/mcp",
+			"channel":             "desktop",
+			"skip_auth_discovery": true,
+		})
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(result, &got))
+		require.NotContains(t, got, "instructions", "no instructions field when the server set none")
+	})
+}
+
 func TestRemoteMCPAdd_PrivateHostHTTP(t *testing.T) {
 	t.Run("allows http past the https gate for a Fly private host", func(t *testing.T) {
 		h, _, _ := setup(t)

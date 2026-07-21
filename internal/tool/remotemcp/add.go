@@ -166,6 +166,7 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 		// Failing the add on an unreachable server is correct: it keeps the
 		// store clean and surfaces the real error to the user now, not later.
 		var toolNames []string
+		var instructions string
 		if a.SkipAuthDiscovery {
 			listOpts := listToolsOpts(deps)
 			// When a pin is set and no client was injected (i.e. real use, not a
@@ -178,13 +179,15 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 				}
 				listOpts = append(listOpts, discovery.WithHTTPClient(pinnedClient))
 			}
-			toolNames, err = discovery.ListTools(ctx, resolvedURL, mergedHeaders, listOpts...)
-			if err != nil {
-				return nil, fmt.Errorf("failed to list tools from remote MCP %q: %w", a.Name, err)
+			discovered, listErr := discovery.ListTools(ctx, resolvedURL, mergedHeaders, listOpts...)
+			if listErr != nil {
+				return nil, fmt.Errorf("failed to list tools from remote MCP %q: %w", a.Name, listErr)
 			}
-			if len(toolNames) == 0 {
+			if len(discovered.ToolNames) == 0 {
 				return nil, fmt.Errorf("remote MCP %q exposed no tools", a.Name)
 			}
+			toolNames = discovered.ToolNames
+			instructions = discovered.Instructions
 		}
 
 		// Store the remote MCP entry.
@@ -195,6 +198,7 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 			URLSensitive: a.URLSecretKey != "",
 			ToolNames:    toolNames,
 			TLSPinSHA256: a.TLSPinSHA256,
+			Instructions: instructions,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("add remote mcp: %w", err)
@@ -237,20 +241,24 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 
 		// No auth needed — fetch the tool list and update the config.
 		if authMeta == nil {
-			toolNames, listErr := discovery.ListTools(ctx, resolvedURL, nil)
+			discovered, listErr := discovery.ListTools(ctx, resolvedURL, nil)
 			if listErr != nil {
 				return nil, fmt.Errorf("failed to list tools from remote MCP %q: %w", a.Name, listErr)
 			}
-			if len(toolNames) == 0 {
+			if len(discovered.ToolNames) == 0 {
 				return nil, fmt.Errorf("remote MCP %q exposed no tools", a.Name)
 			}
-			if setErr := deps.Manager.SetToolNames(ctx, a.Name, toolNames); setErr != nil {
+			if setErr := deps.Manager.SetToolNames(ctx, a.Name, discovered.ToolNames); setErr != nil {
 				return nil, fmt.Errorf("persist tool names: %w", setErr)
+			}
+			if setErr := deps.Manager.SetInstructions(ctx, a.Name, discovered.Instructions); setErr != nil {
+				return nil, fmt.Errorf("persist instructions: %w", setErr)
 			}
 			if updateErr := deps.ConfigUpdater(ctx); updateErr != nil {
 				return nil, fmt.Errorf("remote MCP %q added but config update failed — tools won't be available until next restart: %w", a.Name, updateErr)
 			}
-			entry.ToolNames = toolNames
+			entry.ToolNames = discovered.ToolNames
+			entry.Instructions = discovered.Instructions
 			if deps.OnChannelChange != nil {
 				deps.OnChannelChange()
 			}
@@ -333,6 +341,11 @@ func buildAddResponse(entry *remotemcpstore.RemoteMCP, status, message string) m
 	result["name"] = entry.Name
 	result["status"] = status
 	result["message"] = message
+	// Surface the server's own usage guidance (session lifecycle, tool
+	// conventions) so the agent can drive it correctly straight away.
+	if entry.Instructions != "" {
+		result["instructions"] = entry.Instructions
+	}
 	return result
 }
 
