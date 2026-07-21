@@ -2,8 +2,11 @@ package remotemcp_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -123,6 +126,91 @@ func TestRemoteMCPAdd_SkipAuthDiscoveryWithHeaders(t *testing.T) {
 			"headers":             map[string]string{"X-Foo": "ok\r\nX-Evil: injected"},
 		})
 		require.Contains(t, err.Error(), "control character")
+	})
+}
+
+func TestRemoteMCPAdd_PrivateHostHTTP(t *testing.T) {
+	t.Run("allows http past the https gate for a Fly private host", func(t *testing.T) {
+		h, _, _ := setup(t)
+
+		// The private host doesn't resolve in a test, so the add fails at tool
+		// discovery — but reaching that stage (rather than an "only HTTPS"
+		// rejection) proves http was allowed for the Fly private host.
+		err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
+			"name":                "private-mcp",
+			"url":                 "http://svc.flycast:8000/mcp",
+			"channel":             "desktop",
+			"skip_auth_discovery": true,
+		})
+		require.Contains(t, err.Error(), "failed to list tools")
+		require.NotContains(t, err.Error(), "HTTPS")
+	})
+
+	t.Run("rejects http on a public host", func(t *testing.T) {
+		h, _, _ := setup(t)
+
+		err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
+			"name":                "bad",
+			"url":                 "http://example.com/mcp",
+			"channel":             "desktop",
+			"skip_auth_discovery": true,
+		})
+		require.Contains(t, err.Error(), "HTTPS")
+	})
+}
+
+func TestRemoteMCPAdd_TLSPin(t *testing.T) {
+	validPin := strings.Repeat("ab", 32)
+
+	t.Run("stores the cert pin on the entry", func(t *testing.T) {
+		server := fakeMCPServer(t, []string{"browse"})
+		th := setupHarness(t, withHTTPClient(server.Client()))
+		sum := sha256.Sum256(server.Certificate().Raw)
+		pin := hex.EncodeToString(sum[:])
+
+		result := callTool(t, th.handler, "remote_mcp_add", map[string]any{
+			"name":                "pinned-mcp",
+			"url":                 server.URL + "/mcp",
+			"channel":             "desktop",
+			"skip_auth_discovery": true,
+			"tls_pin_sha256":      pin,
+		})
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(result, &got))
+		require.Equal(t, "ready", got["status"])
+
+		entry, err := th.manager.GetRemoteMCP(context.Background(), "pinned-mcp")
+		require.NoError(t, err)
+		require.NotNil(t, entry)
+		require.Equal(t, pin, entry.TLSPinSHA256)
+	})
+
+	t.Run("rejects a pin on a non-https url", func(t *testing.T) {
+		th := setupHarness(t)
+
+		err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
+			"name":                "pinned-mcp",
+			"url":                 "http://svc.flycast:8000/mcp",
+			"channel":             "desktop",
+			"skip_auth_discovery": true,
+			"tls_pin_sha256":      validPin,
+		})
+		require.Contains(t, err.Error(), "requires an https URL")
+	})
+
+	t.Run("rejects a malformed pin", func(t *testing.T) {
+		server := fakeMCPServer(t, []string{"browse"})
+		th := setupHarness(t, withHTTPClient(server.Client()))
+
+		err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
+			"name":                "pinned-mcp",
+			"url":                 server.URL + "/mcp",
+			"channel":             "desktop",
+			"skip_auth_discovery": true,
+			"tls_pin_sha256":      "not-a-real-fingerprint",
+		})
+		require.Contains(t, err.Error(), "tls pin")
 	})
 }
 
