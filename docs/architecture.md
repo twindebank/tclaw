@@ -71,4 +71,6 @@ Four boundaries protect user data and the host system:
   the per-user proxy resolves the real upstream URL and credentials from the encrypted store, injects
   the `Authorization` / static headers server-side (refreshing an expired OAuth token on demand), and
   pins to registered server names. So no third-party MCP token — including a remote browser's API key —
-  ever lands in a sandbox-readable file.
+  ever lands in a sandbox-readable file. The proxy also retries connection-level failures (reset / EOF /
+  refused) so an autostop upstream (e.g. understudy) that resets the connection while it cold-starts from
+  sleep is waited out rather than surfaced to the agent as an immediate 502.
