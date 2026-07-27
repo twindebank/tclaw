@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -250,6 +252,58 @@ func TestServer_PinnedTLSUpstream(t *testing.T) {
 	})
 }
 
+func TestServer_ColdStartRetry(t *testing.T) {
+	t.Run("retries a sleeping upstream that resets the connection while it wakes", func(t *testing.T) {
+		// The upstream refuses (resets) its first two connections — the way a Fly
+		// autostop machine behaves mid-cold-start — then serves normally.
+		upstreamURL, rec := flakyUpstream(t, 2, "awake-now")
+		mgr := newManager(t)
+		register(t, mgr, "understudy", upstreamURL+"/mcp", &remotemcpstore.RemoteMCPAuth{AccessToken: "tok"})
+
+		srv := startProxy(t, mgr, nil)
+		resp, body := proxyPOST(t, srv, "understudy", `{"jsonrpc":"2.0","id":1,"method":"initialize"}`)
+
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Equal(t, "awake-now", body)
+		// The buffered request body was replayed intact on the winning attempt.
+		require.Equal(t, `{"jsonrpc":"2.0","id":1,"method":"initialize"}`, rec.lastBody())
+		require.Equal(t, "Bearer tok", rec.lastHeader().Get("Authorization"))
+	})
+
+	t.Run("gives up and 502s when the upstream never comes up", func(t *testing.T) {
+		// More failing connections than the retry budget: the proxy must surface a
+		// 502 rather than hang or retry forever.
+		upstreamURL, _ := flakyUpstream(t, 50, "never-reached")
+		mgr := newManager(t)
+		register(t, mgr, "understudy", upstreamURL+"/mcp", nil)
+
+		srv := startProxy(t, mgr, nil)
+		resp, _ := proxyGET(t, srv, "understudy")
+
+		require.Equal(t, http.StatusBadGateway, resp.StatusCode)
+	})
+
+	t.Run("does not retry a real HTTP error response", func(t *testing.T) {
+		// A 500 from a live upstream is a genuine response, not a cold start — it
+		// must pass straight through on the first attempt.
+		var attempts atomic.Int32
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			attempts.Add(1)
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		t.Cleanup(upstream.Close)
+
+		mgr := newManager(t)
+		register(t, mgr, "understudy", upstream.URL+"/mcp", nil)
+
+		srv := startProxy(t, mgr, nil)
+		resp, _ := proxyGET(t, srv, "understudy")
+
+		require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+		require.Equal(t, int32(1), attempts.Load(), "HTTP errors must not be retried")
+	})
+}
+
 // --- helpers ---
 
 func newManager(t *testing.T) *remotemcpstore.Manager {
@@ -412,4 +466,61 @@ func (m *memorySecretStore) Delete(_ context.Context, key string) error {
 	defer m.mu.Unlock()
 	delete(m.data, key)
 	return nil
+}
+
+func proxyPOST(t *testing.T, srv *remotemcpproxy.Server, name, body string) (*http.Response, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, srv.RemoteURL(name), strings.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set(remotemcpproxy.ProxyTokenHeader, srv.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	respBody, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return resp, string(respBody)
+}
+
+// flakyUpstream serves responseBody over plain HTTP, but resets its first
+// failFirst connections before answering — reproducing a Fly autostop machine
+// that resets connections while it wakes. It returns the base URL and a recorder
+// of the requests that reached the handler.
+func flakyUpstream(t *testing.T, failFirst int, responseBody string) (string, *recorder) {
+	t.Helper()
+	rec := &recorder{}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		rec.record(req)
+		_, _ = io.WriteString(w, responseBody)
+	})}
+	go func() { _ = srv.Serve(&flakyListener{Listener: ln, failFirst: failFirst}) }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	return "http://" + ln.Addr().String(), rec
+}
+
+// flakyListener closes the first failFirst accepted connections before the HTTP
+// server ever sees them, so the client observes a pre-response reset/EOF and the
+// proxy's cold-start retry kicks in.
+type flakyListener struct {
+	net.Listener
+	failFirst int
+	count     atomic.Int32
+}
+
+func (l *flakyListener) Accept() (net.Conn, error) {
+	for {
+		conn, err := l.Listener.Accept()
+		if err != nil {
+			return nil, err
+		}
+		if int(l.count.Add(1)) <= l.failFirst {
+			_ = conn.Close()
+			continue
+		}
+		return conn, nil
+	}
 }

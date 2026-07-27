@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -20,6 +21,7 @@ import (
 	"tclaw/internal/oauth"
 	"tclaw/internal/router"
 	"tclaw/internal/version"
+	"tclaw/internal/watchdog"
 )
 
 // volumeConfigPath is where the runtime config lives on the persistent Fly
@@ -136,6 +138,15 @@ func runServe() {
 		fmt.Fprintln(w, version.Commit)
 	}))
 
+	// Under Fly, self-restart if the process stops answering its own health
+	// endpoint. Fly's check detects the wedge but never restarts the machine, so
+	// without this a wedged process stays down until a human intervenes. Gated on
+	// FLY_MACHINE_ID because a hard exit only self-heals where Fly restarts us;
+	// locally it would just kill the dev process.
+	if os.Getenv("FLY_MACHINE_ID") != "" {
+		go watchdog.Run(ctx, watchdog.Config{HealthURL: healthProbeURL(callback.Addr())})
+	}
+
 	r := router.New(cfg.BaseDir, cfg.Env, cfg.Credentials, callback, cfg.Server.PublicURL, logBuf, activeConfigPath)
 	defer r.StopAll()
 
@@ -149,6 +160,19 @@ func runServe() {
 	// Block until shutdown signal.
 	<-ctx.Done()
 	slog.Info("shutting down")
+}
+
+// healthProbeURL builds the loopback /healthz URL the watchdog polls from the
+// HTTP server's bound address. The server may bind an unspecified host
+// (0.0.0.0 / ::) in prod, so the watchdog always dials loopback, which the same
+// listener serves regardless of bind interface.
+func healthProbeURL(boundAddr string) string {
+	_, port, err := net.SplitHostPort(boundAddr)
+	if err != nil {
+		// Unparseable address — probe it as given rather than guess a port.
+		return fmt.Sprintf("http://%s/healthz", boundAddr)
+	}
+	return fmt.Sprintf("http://127.0.0.1:%s/healthz", port)
 }
 
 func runServeDev() {

@@ -9,6 +9,27 @@
 - Seed config baked into image at `/etc/tclaw/tclaw.yaml`; copied to persistent volume (`/data/tclaw.yaml`) on first boot. Runtime config lives on the volume so agent mutations survive redeploys.
 - Subprocess sandboxing via bubblewrap (mount namespace isolation per user)
 
+## Self-Healing Watchdog
+
+Fly's health check detects an unresponsive machine but **only stops routing to it — it
+never restarts it**. A tclaw process that wedges (stops serving `/healthz`: goroutine
+starvation, deadlock, fd/memory exhaustion) therefore stays down until a human runs
+`fly machine restart`. This bit us once: the machine sat `critical` for hours with
+broken outbound DNS while the health check timed out.
+
+`internal/watchdog` closes that gap. When running under Fly (gated on `FLY_MACHINE_ID`),
+it probes the process's own `/healthz` on loopback every 30s; after 4 consecutive
+failures (~2 min) it logs the wedge (with goroutine count) and `os.Exit(1)`s. Fly's
+default `on-fail` restart policy then replaces the process, and tclaw recovers from
+persisted queue/outbox state — turning a multi-hour outage into a ~10s blip.
+
+- **Scope is self-liveness only** — it restarts when the process can't answer its own
+  health endpoint (what Fly measures), not when an external dependency (Telegram, Gmail)
+  is down. Restarting on external-dependency failure risks a crash loop if that
+  dependency is globally down, so it is deliberately out of scope.
+- A 90s boot grace period and the 4-failure threshold keep a transient blip from
+  triggering a needless restart.
+
 ## Google Workspace Skills
 
 The agent learns Google Workspace (`gws`) command syntax from **skills**, not a hand-maintained tool
