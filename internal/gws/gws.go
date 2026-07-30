@@ -65,6 +65,13 @@ type Command struct {
 
 	// Body is the request body passed via --json as JSON.
 	Body map[string]any
+
+	// Dir, if set, is the working directory the gws subprocess runs in. Some
+	// gws commands (e.g. "drive files get" with alt=media) write binary output
+	// to a relative filename in the process CWD rather than stdout — without
+	// Dir pointed at a location the caller can actually read, that output is
+	// unreachable. Empty means inherit the parent process's CWD.
+	Dir string
 }
 
 // Gmail constructs commands for the Gmail API.
@@ -209,6 +216,9 @@ func Run(ctx context.Context, token string, cmd Command) (json.RawMessage, error
 	binary := FindBinary()
 	execCmd := exec.CommandContext(ctx, binary, args...)
 	execCmd.Env = buildEnv(token)
+	if err := applyDir(execCmd, cmd.Dir); err != nil {
+		return nil, err
+	}
 
 	output, err := execCmd.CombinedOutput()
 	if err != nil {
@@ -233,6 +243,9 @@ func RunRaw(ctx context.Context, token string, cmd Command) (string, error) {
 	binary := FindBinary()
 	execCmd := exec.CommandContext(ctx, binary, args...)
 	execCmd.Env = buildEnv(token)
+	if err := applyDir(execCmd, cmd.Dir); err != nil {
+		return "", err
+	}
 
 	output, err := execCmd.CombinedOutput()
 	if err != nil {
@@ -241,6 +254,19 @@ func RunRaw(ctx context.Context, token string, cmd Command) (string, error) {
 	}
 
 	return string(output), nil
+}
+
+// applyDir sets execCmd's working directory to dir, creating it first if
+// necessary. A no-op when dir is empty.
+func applyDir(execCmd *exec.Cmd, dir string) error {
+	if dir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create gws working directory: %w", err)
+	}
+	execCmd.Dir = dir
+	return nil
 }
 
 // allowedEnvPrefixes mirrors the agent subprocess allowlist — only these env
