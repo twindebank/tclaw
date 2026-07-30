@@ -1,10 +1,33 @@
 package gws
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestApplyDir(t *testing.T) {
+	t.Run("empty dir is a no-op", func(t *testing.T) {
+		execCmd := &exec.Cmd{}
+		require.NoError(t, applyDir(execCmd, ""))
+		require.Empty(t, execCmd.Dir)
+	})
+
+	t.Run("sets Dir and creates the directory if missing", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "downloads")
+		execCmd := &exec.Cmd{}
+
+		require.NoError(t, applyDir(execCmd, dir))
+
+		require.Equal(t, dir, execCmd.Dir)
+		info, err := os.Stat(dir)
+		require.NoError(t, err)
+		require.True(t, info.IsDir())
+	})
+}
 
 func TestMarshalMapOrRaw(t *testing.T) {
 	t.Run("raw string value passed through", func(t *testing.T) {

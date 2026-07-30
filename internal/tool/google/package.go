@@ -129,7 +129,7 @@ func (p *Package) OnCredentialSetChange(handler *mcp.Handler, regCtx toolpkg.Reg
 		return nil
 	}
 
-	RegisterTools(handler, depsMap)
+	RegisterTools(handler, depsMap, regCtx.MemoryDir)
 
 	// Register the Gmail notifier so the agent can discover and subscribe
 	// to new_email notifications. The depsMap closure rebuilds credentials
