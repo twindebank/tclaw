@@ -439,7 +439,8 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 				"Mapping: a skill's 'gws <args> --params <P> --json <B>' becomes command=\"<args>\", params=<P>, json=<B>. " +
 				"Example: command='gmail users messages modify', params='{\"userId\":\"me\",\"id\":\"MSG_ID\"}', json='{\"addLabelIds\":[\"LABEL_ID\"],\"removeLabelIds\":[\"UNREAD\"]}'. " +
 				"Use google_workspace_schema to inspect a method's parameters. " +
-				"Prefer the dedicated tools where they exist: google_gmail_list (search/scan), google_gmail_read (read a body — NEVER use Gmail format=full here, it floods context with raw HTML), google_gmail_forward (forward), google_gmail_modify (label/mark-read/mark-unread).",
+				"Prefer the dedicated tools where they exist: google_gmail_list (search/scan), google_gmail_read (read a body — NEVER use Gmail format=full here, it floods context with raw HTML), google_gmail_forward (forward), google_gmail_modify (label/mark-read/mark-unread). " +
+				"Downloads (e.g. 'drive files get' with alt=media) are written to a file rather than returned inline — the response's saved_file field is the absolute path to read the downloaded bytes from.",
 			InputSchema: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {

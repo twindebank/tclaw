@@ -4,11 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 
 	"tclaw/internal/credential"
 	"tclaw/internal/gws"
 	"tclaw/internal/mcp"
 )
+
+// workspaceDownloadsSubdir is where the gws subprocess writes binary output
+// (e.g. "drive files get" with alt=media) for commands run through the
+// generic passthrough tool, so the agent sandbox can actually reach it.
+const workspaceDownloadsSubdir = "downloads"
 
 type workspaceArgs struct {
 	CredentialSet string `json:"credential_set"`
@@ -17,7 +23,12 @@ type workspaceArgs struct {
 	JSON          string `json:"json"`
 }
 
-func workspaceHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandler {
+func workspaceHandler(depsMap map[credential.CredentialSetID]Deps, memoryDir string) mcp.ToolHandler {
+	downloadDir := ""
+	if memoryDir != "" {
+		downloadDir = filepath.Join(memoryDir, workspaceDownloadsSubdir)
+	}
+
 	return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var a workspaceArgs
 		if err := json.Unmarshal(raw, &a); err != nil {
@@ -33,6 +44,43 @@ func workspaceHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandl
 			return nil, fmt.Errorf("command is required (e.g. 'gmail users messages list')")
 		}
 
-		return runGWS(ctx, deps, gws.Raw(a.Command, a.Params, a.JSON))
+		cmd := gws.Raw(a.Command, a.Params, a.JSON)
+		cmd.Dir = downloadDir
+
+		result, err := runGWS(ctx, deps, cmd)
+		if err != nil {
+			return nil, err
+		}
+
+		return resolveSavedFilePath(result, downloadDir), nil
 	}
+}
+
+// resolveSavedFilePath rewrites a gws response's "saved_file" field (a
+// filename relative to the subprocess's working directory) into the absolute
+// path the caller can actually read. Responses without a "saved_file" string
+// field, or with no downloadDir configured, are returned unchanged.
+func resolveSavedFilePath(raw json.RawMessage, downloadDir string) json.RawMessage {
+	if downloadDir == "" {
+		return raw
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		// Not a JSON object (e.g. an array response) — nothing to rewrite.
+		return raw
+	}
+
+	savedFile, ok := payload["saved_file"].(string)
+	if !ok || savedFile == "" || filepath.IsAbs(savedFile) {
+		return raw
+	}
+
+	payload["saved_file"] = filepath.Join(downloadDir, savedFile)
+	rewritten, err := json.Marshal(payload)
+	if err != nil {
+		// Marshaling a map we just unmarshaled cannot fail; fall back defensively.
+		return raw
+	}
+	return rewritten
 }
