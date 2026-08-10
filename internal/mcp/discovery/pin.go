@@ -69,11 +69,11 @@ func NewPinnedSafeClient(pinHex string) (*http.Client, error) {
 	}
 	return &http.Client{
 		Timeout: httpTimeout,
-		Transport: &http.Transport{
+		Transport: NewColdStartRetryTransport(&http.Transport{
 			DialContext:           safeDialContext,
 			TLSClientConfig:       tlsCfg,
 			TLSHandshakeTimeout:   10 * time.Second,
 			ResponseHeaderTimeout: 10 * time.Second,
-		},
+		}, DefaultColdStartRetry),
 	}, nil
 }
