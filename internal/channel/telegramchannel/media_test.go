@@ -51,6 +51,33 @@ func TestMediaFileInfo(t *testing.T) {
 		require.Equal(t, ".mp3", ext)
 	})
 
+	t.Run("document with filename", func(t *testing.T) {
+		msg := &models.Message{
+			Document: &models.Document{FileID: "doc123", FileName: "notice.pdf", MimeType: "application/pdf"},
+		}
+		fileID, ext := mediaFileInfo(msg)
+		require.Equal(t, "doc123", fileID)
+		require.Equal(t, ".pdf", ext)
+	})
+
+	t.Run("document without filename falls back to mime type", func(t *testing.T) {
+		msg := &models.Message{
+			Document: &models.Document{FileID: "doc456", MimeType: "application/pdf"},
+		}
+		fileID, ext := mediaFileInfo(msg)
+		require.Equal(t, "doc456", fileID)
+		require.Equal(t, ".pdf", ext)
+	})
+
+	t.Run("document without filename or known mime type has no extension", func(t *testing.T) {
+		msg := &models.Message{
+			Document: &models.Document{FileID: "doc789", MimeType: "application/octet-stream"},
+		}
+		fileID, ext := mediaFileInfo(msg)
+		require.Equal(t, "doc789", fileID)
+		require.Empty(t, ext)
+	})
+
 	t.Run("no media returns empty", func(t *testing.T) {
 		msg := &models.Message{Text: "just text"}
 		fileID, ext := mediaFileInfo(msg)
@@ -98,26 +125,48 @@ func TestMediaFilename(t *testing.T) {
 		require.Contains(t, name, "audio_")
 		require.Contains(t, name, "_7.mp3")
 	})
+
+	t.Run("document filename", func(t *testing.T) {
+		msg := &models.Message{
+			ID:       13,
+			Document: &models.Document{FileID: "x"},
+		}
+		name := mediaFilename(msg, ".pdf")
+		require.Contains(t, name, "document_")
+		require.Contains(t, name, "_13.pdf")
+	})
 }
 
 func TestFormatMediaMessage(t *testing.T) {
 	t.Run("image with caption", func(t *testing.T) {
-		result := formatMediaMessage("What is this?", "media/photo_123_42.jpg")
+		result := formatMediaMessage("What is this?", "media/photo_123_42.jpg", &models.Message{})
 		require.Equal(t, "[Attached image: media/photo_123_42.jpg — view it with the Read tool]\nWhat is this?", result)
 	})
 
 	t.Run("image without caption", func(t *testing.T) {
-		result := formatMediaMessage("", "media/photo_123_42.jpg")
+		result := formatMediaMessage("", "media/photo_123_42.jpg", &models.Message{})
 		require.Equal(t, "[Attached image: media/photo_123_42.jpg — view it with the Read tool]", result)
 	})
 
 	t.Run("audio file", func(t *testing.T) {
-		result := formatMediaMessage("", "media/voice_123_42.ogg")
+		result := formatMediaMessage("", "media/voice_123_42.ogg", &models.Message{})
 		require.Equal(t, "[Attached audio: media/voice_123_42.ogg — view it with the Read tool]", result)
 	})
 
-	t.Run("unknown extension treated as file", func(t *testing.T) {
-		result := formatMediaMessage("", "media/doc_123_42.pdf")
+	t.Run("document with filename and mime type", func(t *testing.T) {
+		msg := &models.Message{Document: &models.Document{FileName: "notice.pdf", MimeType: "application/pdf"}}
+		result := formatMediaMessage("", "media/document_123_42.pdf", msg)
+		require.Equal(t, "[Attached document: media/document_123_42.pdf (original filename: notice.pdf, mime: application/pdf) — view it with the Read tool]", result)
+	})
+
+	t.Run("document without filename or mime type", func(t *testing.T) {
+		msg := &models.Message{Document: &models.Document{}}
+		result := formatMediaMessage("", "media/document_123_42.pdf", msg)
+		require.Equal(t, "[Attached document: media/document_123_42.pdf — view it with the Read tool]", result)
+	})
+
+	t.Run("unknown extension with no document treated as file", func(t *testing.T) {
+		result := formatMediaMessage("", "media/unknown_123_42.xyz", &models.Message{})
 		require.Contains(t, result, "[Attached file:")
 	})
 }

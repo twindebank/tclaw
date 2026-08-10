@@ -150,7 +150,7 @@ func (t *Telegram) Messages(ctx context.Context) <-chan string {
 					text = msg.Caption
 				}
 
-				hasMedia := len(msg.Photo) > 0 || msg.Voice != nil || msg.Audio != nil
+				hasMedia := len(msg.Photo) > 0 || msg.Voice != nil || msg.Audio != nil || msg.Document != nil
 				if text == "" && !hasMedia {
 					return
 				}
@@ -179,7 +179,7 @@ func (t *Telegram) Messages(ctx context.Context) <-chan string {
 						slog.Error("failed to download media", "err", err, "channel", t.name)
 						text = formatMediaError(text, err)
 					} else {
-						text = formatMediaMessage(text, mediaPath)
+						text = formatMediaMessage(text, mediaPath, msg)
 					}
 				}
 
@@ -534,8 +534,37 @@ func mediaFileInfo(msg *models.Message) (fileID string, ext string) {
 			}
 		}
 		return msg.Audio.FileID, ext
+	case msg.Document != nil:
+		ext := filepath.Ext(msg.Document.FileName)
+		if ext == "" {
+			ext = documentExtFromMimeType(msg.Document.MimeType)
+		}
+		return msg.Document.FileID, ext
 	default:
 		return "", ""
+	}
+}
+
+// documentExtFromMimeType maps common document MIME types to a file
+// extension, used when Telegram doesn't supply one via the original filename.
+func documentExtFromMimeType(mimeType string) string {
+	switch mimeType {
+	case "application/pdf":
+		return ".pdf"
+	case "application/msword":
+		return ".doc"
+	case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+		return ".docx"
+	case "application/vnd.ms-excel":
+		return ".xls"
+	case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+		return ".xlsx"
+	case "text/plain":
+		return ".txt"
+	case "text/csv":
+		return ".csv"
+	default:
+		return ""
 	}
 }
 
@@ -550,6 +579,8 @@ func mediaFilename(msg *models.Message, ext string) string {
 		prefix = "voice"
 	case msg.Audio != nil:
 		prefix = "audio"
+	case msg.Document != nil:
+		prefix = "document"
 	}
 	// Use the message ID as a simple collision-resistant suffix.
 	return fmt.Sprintf("%s_%d_%d%s", prefix, ts, msg.ID, ext)
@@ -566,22 +597,44 @@ func formatMediaError(text string, err error) string {
 }
 
 // formatMediaMessage builds the prompt text that tells the agent about an
-// attached media file so it knows to Read it.
-func formatMediaMessage(text string, mediaPath string) string {
+// attached media file so it knows to Read it. For documents, it also notes
+// the original filename and MIME type so the agent (and user) can tell what
+// was actually sent, since the file on disk is renamed for collision-safety.
+func formatMediaMessage(text string, mediaPath string, msg *models.Message) string {
 	mediaType := "file"
+	detail := ""
 	ext := filepath.Ext(mediaPath)
 	switch {
 	case ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp":
 		mediaType = "image"
 	case ext == ".ogg" || ext == ".mp3" || ext == ".m4a" || ext == ".wav" || ext == ".flac":
 		mediaType = "audio"
+	case msg.Document != nil:
+		mediaType = "document"
+		detail = documentDetail(msg.Document)
 	}
 
-	attachment := fmt.Sprintf("[Attached %s: %s — view it with the Read tool]", mediaType, mediaPath)
+	attachment := fmt.Sprintf("[Attached %s: %s%s — view it with the Read tool]", mediaType, mediaPath, detail)
 	if text == "" {
 		return attachment
 	}
 	return attachment + "\n" + text
+}
+
+// documentDetail formats the original filename and MIME type of a document
+// attachment as a parenthetical suffix, e.g. " (original filename: notice.pdf,
+// mime: application/pdf)". Omits fields Telegram didn't supply.
+func documentDetail(doc *models.Document) string {
+	switch {
+	case doc.FileName != "" && doc.MimeType != "":
+		return fmt.Sprintf(" (original filename: %s, mime: %s)", doc.FileName, doc.MimeType)
+	case doc.FileName != "":
+		return fmt.Sprintf(" (original filename: %s)", doc.FileName)
+	case doc.MimeType != "":
+		return fmt.Sprintf(" (mime: %s)", doc.MimeType)
+	default:
+		return ""
+	}
 }
 
 // cleanupOldMedia removes files in the media directory that are older than
