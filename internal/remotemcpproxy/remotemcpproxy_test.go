@@ -329,7 +329,13 @@ func register(t *testing.T, mgr *remotemcpstore.Manager, name, url string, auth 
 
 func startProxy(t *testing.T, mgr *remotemcpstore.Manager, refresher remotemcpproxy.TokenRefresher) *remotemcpproxy.Server {
 	t.Helper()
-	srv, err := remotemcpproxy.NewServer(remotemcpproxy.Config{Store: mgr, Refresher: refresher})
+	// A tiny retry budget: the production one waits out a ~30s browser cold start,
+	// which a test exercising the give-up path would otherwise sit through.
+	srv, err := remotemcpproxy.NewServer(remotemcpproxy.Config{
+		Store:          mgr,
+		Refresher:      refresher,
+		ColdStartRetry: discovery.ColdStartRetry{MaxAttempts: 4, BackoffCap: 10 * time.Millisecond},
+	})
 	require.NoError(t, err)
 	_, err = srv.Start("127.0.0.1:0")
 	require.NoError(t, err)

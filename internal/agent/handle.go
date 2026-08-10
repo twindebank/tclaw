@@ -506,6 +506,14 @@ func buildEnv(opts Options) []string {
 	// knowledge dirs have their CLAUDE.md auto-loaded into context.
 	overrides["CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"] = "1"
 
+	// Give a remote MCP server long enough to answer its first handshake. The
+	// CLI's 30s default is shorter than a Fly machine that boots a browser
+	// before it serves (~30s), and a server whose handshake times out is dropped
+	// for the whole turn — the agent silently loses its entire tool surface with
+	// no error it can report. Must exceed the proxy's cold-start retry budget,
+	// which is what actually waits the upstream out.
+	overrides["MCP_TIMEOUT"] = "60000"
+
 	// Cap the Node.js V8 heap to stay within the VM's memory budget.
 	// NODE_MAX_HEAP_MB is set in fly.toml [env] — see the comment there
 	// for sizing guidance. Without this, the claude CLI can consume all
