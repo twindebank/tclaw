@@ -84,11 +84,14 @@ func (p *Package) Register(handler *mcp.Handler, ctx toolpkg.RegistrationContext
 }
 
 // CredentialSpec implements toolpkg.CredentialProvider.
+//
+// The GitHub token is absent by design: the dev workflow reads it from the
+// shared git credential slot, not from a "dev" credential set. RequiredSecrets
+// still bridges GITHUB_TOKEN_<USER> into that slot at boot.
 func (p *Package) CredentialSpec() toolpkg.CredentialSpec {
 	return toolpkg.CredentialSpec{
 		AuthType: toolpkg.AuthAPIKey,
 		Fields: []toolpkg.CredentialField{
-			{Key: githubTokenKey, Label: "GitHub Token", Description: "Personal access token for git push and PR creation via gh.", Required: false, EnvVarPrefix: "GITHUB_TOKEN"},
 			{Key: "fly_api_token", Label: "Fly.io API Token", Description: "API token for deploying to Fly.io via fly deploy.", Required: false, EnvVarPrefix: "FLY_TOKEN"},
 		},
 	}

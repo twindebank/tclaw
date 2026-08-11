@@ -36,6 +36,10 @@ type CredentialSet struct {
 	// means available on all channels.
 	Channel string `json:"channel,omitempty"`
 
+	// Description explains what the credential is for, carried over from the
+	// slot that declared it so credential_list can say why it exists.
+	Description string `json:"description,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 }
 

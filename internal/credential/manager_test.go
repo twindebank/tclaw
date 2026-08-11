@@ -15,7 +15,7 @@ func TestManager_AddAndList(t *testing.T) {
 		mgr := setup(t)
 		ctx := context.Background()
 
-		set, err := mgr.Add(ctx, "google", "work", "admin")
+		set, err := mgr.Add(ctx, credential.AddParams{Package: "google", Label: "work", Channel: "admin"})
 		require.NoError(t, err)
 		require.Equal(t, credential.CredentialSetID("google/work"), set.ID)
 		require.Equal(t, "google", set.Package)
@@ -32,10 +32,10 @@ func TestManager_AddAndList(t *testing.T) {
 		mgr := setup(t)
 		ctx := context.Background()
 
-		_, err := mgr.Add(ctx, "tfl", "default", "")
+		_, err := mgr.Add(ctx, credential.AddParams{Package: "tfl", Label: "default"})
 		require.NoError(t, err)
 
-		_, err = mgr.Add(ctx, "tfl", "default", "")
+		_, err = mgr.Add(ctx, credential.AddParams{Package: "tfl", Label: "default"})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "already exists")
 	})
@@ -44,11 +44,11 @@ func TestManager_AddAndList(t *testing.T) {
 		mgr := setup(t)
 		ctx := context.Background()
 
-		_, err := mgr.Add(ctx, "google", "work", "admin")
+		_, err := mgr.Add(ctx, credential.AddParams{Package: "google", Label: "work", Channel: "admin"})
 		require.NoError(t, err)
-		_, err = mgr.Add(ctx, "tfl", "default", "")
+		_, err = mgr.Add(ctx, credential.AddParams{Package: "tfl", Label: "default"})
 		require.NoError(t, err)
-		_, err = mgr.Add(ctx, "monzo", "personal", "finance")
+		_, err = mgr.Add(ctx, credential.AddParams{Package: "monzo", Label: "personal", Channel: "finance"})
 		require.NoError(t, err)
 
 		// "admin" channel should see google/work (scoped) + tfl/default (global).
@@ -68,7 +68,7 @@ func TestManager_Fields(t *testing.T) {
 		mgr := setup(t)
 		ctx := context.Background()
 
-		set, err := mgr.Add(ctx, "tfl", "default", "")
+		set, err := mgr.Add(ctx, credential.AddParams{Package: "tfl", Label: "default"})
 		require.NoError(t, err)
 
 		err = mgr.SetField(ctx, set.ID, "api_key", "test-key-123")
@@ -83,7 +83,7 @@ func TestManager_Fields(t *testing.T) {
 		mgr := setup(t)
 		ctx := context.Background()
 
-		set, err := mgr.Add(ctx, "tfl", "default", "")
+		set, err := mgr.Add(ctx, credential.AddParams{Package: "tfl", Label: "default"})
 		require.NoError(t, err)
 
 		val, err := mgr.GetField(ctx, set.ID, "nonexistent")
@@ -95,7 +95,7 @@ func TestManager_Fields(t *testing.T) {
 		mgr := setup(t)
 		ctx := context.Background()
 
-		set, err := mgr.Add(ctx, "monzo", "default", "")
+		set, err := mgr.Add(ctx, credential.AddParams{Package: "monzo", Label: "default"})
 		require.NoError(t, err)
 
 		err = mgr.SetField(ctx, set.ID, "client_id", "id-123")
@@ -116,7 +116,7 @@ func TestManager_OAuthTokens(t *testing.T) {
 		mgr := setup(t)
 		ctx := context.Background()
 
-		set, err := mgr.Add(ctx, "google", "work", "")
+		set, err := mgr.Add(ctx, credential.AddParams{Package: "google", Label: "work"})
 		require.NoError(t, err)
 
 		tokens := &credential.OAuthTokens{
@@ -136,7 +136,7 @@ func TestManager_OAuthTokens(t *testing.T) {
 		mgr := setup(t)
 		ctx := context.Background()
 
-		set, err := mgr.Add(ctx, "google", "work", "")
+		set, err := mgr.Add(ctx, credential.AddParams{Package: "google", Label: "work"})
 		require.NoError(t, err)
 
 		got, err := mgr.GetOAuthTokens(ctx, set.ID)
@@ -150,7 +150,7 @@ func TestManager_IsReady(t *testing.T) {
 		mgr := setup(t)
 		ctx := context.Background()
 
-		set, err := mgr.Add(ctx, "tfl", "default", "")
+		set, err := mgr.Add(ctx, credential.AddParams{Package: "tfl", Label: "default"})
 		require.NoError(t, err)
 
 		err = mgr.SetField(ctx, set.ID, "api_key", "key-123")
@@ -165,7 +165,7 @@ func TestManager_IsReady(t *testing.T) {
 		mgr := setup(t)
 		ctx := context.Background()
 
-		set, err := mgr.Add(ctx, "tfl", "default", "")
+		set, err := mgr.Add(ctx, credential.AddParams{Package: "tfl", Label: "default"})
 		require.NoError(t, err)
 
 		ready, err := mgr.IsReady(ctx, set.ID, []string{"api_key"}, false)
@@ -177,7 +177,7 @@ func TestManager_IsReady(t *testing.T) {
 		mgr := setup(t)
 		ctx := context.Background()
 
-		set, err := mgr.Add(ctx, "google", "work", "")
+		set, err := mgr.Add(ctx, credential.AddParams{Package: "google", Label: "work"})
 		require.NoError(t, err)
 
 		err = mgr.SetField(ctx, set.ID, "client_id", "id")
@@ -192,7 +192,7 @@ func TestManager_IsReady(t *testing.T) {
 		mgr := setup(t)
 		ctx := context.Background()
 
-		set, err := mgr.Add(ctx, "google", "work", "")
+		set, err := mgr.Add(ctx, credential.AddParams{Package: "google", Label: "work"})
 		require.NoError(t, err)
 
 		err = mgr.SetField(ctx, set.ID, "client_id", "id")
@@ -210,7 +210,7 @@ func TestManager_Remove(t *testing.T) {
 	mgr := setup(t)
 	ctx := context.Background()
 
-	set, err := mgr.Add(ctx, "tfl", "default", "")
+	set, err := mgr.Add(ctx, credential.AddParams{Package: "tfl", Label: "default"})
 	require.NoError(t, err)
 
 	err = mgr.SetField(ctx, set.ID, "api_key", "key-123")

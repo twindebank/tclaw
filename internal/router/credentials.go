@@ -33,7 +33,12 @@ func seedCredentialSlots(ctx context.Context, credMgr *credential.Manager, slots
 			return fmt.Errorf("check credential slot %s: %w", setID, err)
 		}
 		if existing == nil {
-			if _, err := credMgr.Add(ctx, slot.Type, label, slot.Channel); err != nil {
+			if _, err := credMgr.Add(ctx, credential.AddParams{
+				Package:     slot.Type,
+				Label:       label,
+				Channel:     slot.Channel,
+				Description: slot.Description,
+			}); err != nil {
 				return fmt.Errorf("create credential slot %s: %w", setID, err)
 			}
 		}

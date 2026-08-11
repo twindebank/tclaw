@@ -94,14 +94,29 @@ func (m *Manager) Get(ctx context.Context, id CredentialSetID) (*CredentialSet, 
 	return nil, nil
 }
 
+// AddParams describes a credential set to create.
+type AddParams struct {
+	// Package is the set's type: a tool package name, or "git".
+	Package string
+
+	// Label distinguishes sets of the same type.
+	Label string
+
+	// Channel restricts the set to one channel. Empty means all channels.
+	Channel string
+
+	// Description explains what the credential is for. Surfaced by credential_list.
+	Description string
+}
+
 // Add creates a new credential set. Returns an error if one with the same ID exists.
-func (m *Manager) Add(ctx context.Context, packageName string, label string, channel string) (*CredentialSet, error) {
+func (m *Manager) Add(ctx context.Context, params AddParams) (*CredentialSet, error) {
 	sets, err := m.List(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	id := NewCredentialSetID(packageName, label)
+	id := NewCredentialSetID(params.Package, params.Label)
 	for _, s := range sets {
 		if s.ID == id {
 			return nil, fmt.Errorf("credential set %q already exists", id)
@@ -109,11 +124,12 @@ func (m *Manager) Add(ctx context.Context, packageName string, label string, cha
 	}
 
 	set := CredentialSet{
-		ID:        id,
-		Package:   packageName,
-		Label:     label,
-		Channel:   channel,
-		CreatedAt: time.Now(),
+		ID:          id,
+		Package:     params.Package,
+		Label:       params.Label,
+		Channel:     params.Channel,
+		Description: params.Description,
+		CreatedAt:   time.Now(),
 	}
 	sets = append(sets, set)
 
