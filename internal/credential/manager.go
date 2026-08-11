@@ -168,3 +168,10 @@ func (m *Manager) saveSets(ctx context.Context, sets []CredentialSet) error {
 func fieldKey(id CredentialSetID, field string) string {
 	return credKeyPrefix + string(id) + "/" + field
 }
+
+// FieldKey returns the secret store key a credential set's field is stored under.
+// Exported for callers that must address the key directly (e.g. secret forms writing
+// into a declared slot) rather than going through SetField.
+func FieldKey(id CredentialSetID, field string) string {
+	return fieldKey(id, field)
+}
