@@ -12,8 +12,10 @@ import (
 
 const (
 	// httpTimeout is the per-request timeout for all outbound HTTP calls
-	// during discovery and token exchange.
-	httpTimeout = 30 * time.Second
+	// during discovery and token exchange. It bounds the cold-start retry loop
+	// too (Client.Timeout covers every attempt), so it must stay comfortably
+	// above that budget or a waking upstream is abandoned mid-retry.
+	httpTimeout = 90 * time.Second
 
 	// maxResponseBodyBytes caps the amount of data read from any discovery
 	// response to prevent memory exhaustion from oversized payloads.
@@ -22,13 +24,15 @@ const (
 
 // safeClient is an http.Client with timeouts that refuses to connect to
 // private/loopback IP addresses, preventing SSRF attacks during MCP discovery.
+// Its transport retries cold starts so registering an autostopped server does
+// not fail on the request that wakes it.
 var safeClient = &http.Client{
 	Timeout: httpTimeout,
-	Transport: &http.Transport{
+	Transport: NewColdStartRetryTransport(&http.Transport{
 		DialContext:           safeDialContext,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 10 * time.Second,
-	},
+	}, DefaultColdStartRetry),
 }
 
 // safeDialContext resolves DNS and validates that the target IP is not
