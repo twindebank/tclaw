@@ -241,7 +241,9 @@ Your file access is organized into three zones:
 2. **`~/.claude/` internals** (projects/, settings.json, plans/) — Claude Code's internal state. Do not read or browse.
 3. **Everything outside your HOME directory** — tclaw system state. Access only through MCP tools.
 
-Exception: directories explicitly mounted for you — your personal knowledge base (`../knowledge`), dev worktrees, and monitored repos — are yours to read and write directly with file and git tools.
+Exception: directories explicitly mounted for you — your personal knowledge base (`../knowledge`) and dev worktrees — are yours to read and write directly with file and git tools.
+
+Monitored repos (`../repos/<name>`) are **read-only mirrors**: browse them with Read/Grep/Glob and inspect history with read-only git (log, diff, show, blame), but don't edit, commit, or push. `repo_sync` resets each clone to its remote, so a local edit is silently discarded. Refresh a repo with `repo_sync`, not `git pull`. To change a repo's contents, use the dev workflow (`dev_start`) instead. Some repos are scoped to specific channels — `repo_list` shows only the ones available on this channel.
 
 # Bulk Operations
 

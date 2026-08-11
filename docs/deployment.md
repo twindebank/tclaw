@@ -74,6 +74,48 @@ How it works:
 - Guidance (vault conventions, git workflow) is seeded as a `knowledge` skill in the user's
   `home/.claude/skills/`; the agent loads it on demand.
 
+## Declarative Repos
+
+Read-only git repos can be declared per-user so they're cloned on boot and always available to the
+agent — no `repo_add` to remember, and they survive a volume wipe. Unlike the knowledge base these are
+**mirrors**: the clone is reset to the remote on every sync, so the agent browses them but never
+writes back.
+
+```yaml
+users:
+  - id: theo
+    repos:
+      - name: ha-config                        # directory alias under <user>/repos/
+        repo: owner/homeassistant-config       # owner/repo shorthand or full HTTPS URL
+        branch: main                           # optional, defaults to main
+        description: Live Home Assistant config mirror
+        channels: [homeassistant]              # optional; omit to expose on every channel
+```
+
+How it works:
+- On boot `provisionConfigRepos` registers each declared repo in the tracked-repo store (marked
+  `managed`) and clones or fetches it. A repo that can't be fetched is logged and skipped — the rest
+  of the session comes up regardless, and the agent can retry with `repo_sync`.
+- Config is the source of truth: dropping a repo from `tclaw.yaml` deletes its store entry and clone on
+  the next boot, and `repo_remove` refuses to delete a declared repo.
+- Repos added by the agent at runtime with `repo_add` keep working and are untouched by reconciliation.
+  They are unscoped, so every channel sees them.
+
+**Channel scoping** (`channels:`) is enforced in two places, since MCP tools have no way to know which
+channel a turn belongs to beyond the active-channel hook:
+- **Mounts** — each turn passes only the repos visible to that channel as `--add-dir`, and bwrap masks
+  the other clones behind an empty tmpfs so an unrestricted `Bash` tool can't read around the list.
+- **Tools** — `repo_list` omits repos scoped elsewhere, and `repo_sync` / `repo_log` / `repo_remove`
+  report them as not found. An unknown channel fails closed: scoped repos stay hidden.
+
+Scoping is not a hard boundary in local (macOS) development, where there is no sandbox — the `--add-dir`
+list still scopes the CLI, but nothing masks the directories on disk.
+
+**Auth**: private repos use the shared `github_token` secret. The token is passed to git per command as
+an HTTP `Authorization` header rather than embedded in the remote URL, because `.git/config` sits inside
+a directory bound into the agent's sandbox. Clones made by earlier versions have their token-bearing
+origin rewritten on the next fetch.
+
 ## Message Debounce
 
 A burst of user messages that lands close together — most visibly a photo album, which every
