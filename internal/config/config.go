@@ -52,10 +52,9 @@ type Config struct {
 	// Server configures the HTTP server (health checks, OAuth callbacks, webhooks).
 	Server ServerConfig `yaml:"server"`
 
-	// Credentials provides pre-configured OAuth client credentials keyed by
-	// tool package name (e.g. "google", "monzo"). These are seeded into the
-	// credential system at startup so the agent doesn't need to collect them.
-	Credentials CredentialsConfig `yaml:"credentials"`
+	// CredentialSlots declares the credentials tclaw may hold and what may
+	// reference them. Seeded into the credential system at startup.
+	CredentialSlots []CredentialSlot `yaml:"credential_slots"`
 
 	Users []User `yaml:"users"`
 }
@@ -72,16 +71,98 @@ type ServerConfig struct {
 	PublicURL string `yaml:"public_url"`
 }
 
-// CredentialsConfig maps tool package names to lists of credential entries.
-// Each key (e.g. "google", "monzo") matches the tool package's Name().
-// Entries are seeded into credential sets at startup.
-type CredentialsConfig map[string][]CredentialEntry
+// CredentialSlot declares a named place a credential goes. Declaring a slot says
+// how the credential is found and who may reference it — the value itself may not
+// be there yet, which is what lets a credential be declared here and filled later
+// from a phone via a secret form or an OAuth flow.
+//
+// Slots are the only credentials the rest of the config can name (a repo's
+// `credential:`, for instance). Everything else tclaw holds — OAuth tokens,
+// per-channel transport tokens, remote MCP headers — is keyed by the system and
+// deliberately unreferenceable.
+type CredentialSlot struct {
+	// Type is the subsystem the credential belongs to: a tool package name
+	// (e.g. "google"), or "git" for the namespace shared by repo tooling, the
+	// dev workflow and the knowledge base.
+	Type string `yaml:"type"`
 
-// CredentialEntry is a single credential set definition from the config file.
-type CredentialEntry struct {
-	Label   string            `yaml:"label"`
-	Channel string            `yaml:"channel,omitempty"`
-	Secrets map[string]string `yaml:"secrets"`
+	// Label distinguishes slots of the same type (e.g. "default", "work").
+	// Type and Label together form the credential set ID.
+	Label string `yaml:"label"`
+
+	// Channel restricts the slot to a single channel. Empty means every channel.
+	Channel string `yaml:"channel,omitempty"`
+
+	// Description explains what the credential is for. Surfaced by credential_list.
+	Description string `yaml:"description,omitempty"`
+
+	// Fields holds values keyed by the field names the consuming package
+	// declares (e.g. "token", "client_id"), usually as ${boot:NAME} references.
+	// Optional: a slot with no fields is created empty and filled at runtime.
+	Fields map[string]string `yaml:"fields,omitempty"`
+}
+
+// ID returns the credential set identifier this slot seeds, as "<type>/<label>".
+func (c CredentialSlot) ID() string {
+	return c.Type + "/" + c.Label
+}
+
+// GitCredentialType is the slot type shared by everything that talks to git and
+// GitHub — repo monitoring, the dev workflow and the knowledge base. It is the
+// one slot type that is not a tool package name.
+const GitCredentialType = "git"
+
+// slotNamePattern restricts slot types and labels to characters that are safe in
+// a store key path segment.
+var slotNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+
+// ValidateCredentialSlotTypes checks every declared slot against the types that
+// actually consume credentials. Kept separate from validate because only the
+// tool registry knows the valid names, and config cannot import it.
+func ValidateCredentialSlotTypes(slots []CredentialSlot, knownTypes []string) error {
+	known := make(map[string]bool, len(knownTypes))
+	for _, t := range knownTypes {
+		known[t] = true
+	}
+	for i, slot := range slots {
+		if !known[slot.Type] {
+			return fmt.Errorf("credential_slots[%d]: unknown type %q (known: %s)",
+				i, slot.Type, strings.Join(knownTypes, ", "))
+		}
+	}
+	return nil
+}
+
+// validateCredentialSlots checks slot shape and uniqueness, and that any channel
+// scoping names a channel some user actually declares. The slot's type is checked
+// against the registered tool packages later, at seeding time, since only the
+// tool registry knows the valid names.
+func validateCredentialSlots(cfg *Config) error {
+	channelNames := make(map[string]bool)
+	for _, u := range cfg.Users {
+		for _, ch := range u.Channels {
+			channelNames[ch.Name] = true
+		}
+	}
+
+	seen := make(map[string]bool, len(cfg.CredentialSlots))
+	for i, slot := range cfg.CredentialSlots {
+		if !slotNamePattern.MatchString(slot.Type) {
+			return fmt.Errorf("credential_slots[%d]: type %q must match %s", i, slot.Type, slotNamePattern.String())
+		}
+		if !slotNamePattern.MatchString(slot.Label) {
+			return fmt.Errorf("credential_slots[%d] (%s): label %q must match %s", i, slot.ID(), slot.Label, slotNamePattern.String())
+		}
+		if seen[slot.ID()] {
+			return fmt.Errorf("credential_slots[%d]: duplicate slot %q", i, slot.ID())
+		}
+		seen[slot.ID()] = true
+
+		if slot.Channel != "" && !channelNames[slot.Channel] {
+			return fmt.Errorf("credential_slots[%d] (%s): channel %q does not match any channel name", i, slot.ID(), slot.Channel)
+		}
+	}
+	return nil
 }
 
 // User defines per-user agent configuration.
@@ -412,6 +493,10 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("no users defined")
 	}
 
+	if err := validateCredentialSlots(cfg); err != nil {
+		return err
+	}
+
 	seen := make(map[user.ID]bool)
 	for i, u := range cfg.Users {
 		if u.ID == "" {
@@ -596,8 +681,12 @@ func validate(cfg *Config) error {
 }
 
 const (
-	secretRefPrefix = "${secret:"
-	refSuffix       = "}"
+	// bootRefPrefix marks a value supplied outside tclaw — the OS keychain
+	// locally, a Fly secret in prod — resolved as config loads and then
+	// scrubbed from the environment. Named for the category rather than
+	// "secret", which the credential slots below also use.
+	bootRefPrefix = "${boot:"
+	refSuffix     = "}"
 )
 
 // resolveSecrets expands secret references in config fields and returns the
@@ -637,20 +726,17 @@ func resolveSecrets(cfg *Config) ([]string, error) {
 		}
 	}
 
-	// Resolve credential secret references.
-	for pkg, entries := range cfg.Credentials {
-		for i, entry := range entries {
-			for key, val := range entry.Secrets {
-				resolved, envVar, err := resolveRef(val)
-				if err != nil {
-					return nil, fmt.Errorf("credentials.%s[%d].secrets.%s: %w", pkg, i, key, err)
-				}
-				entry.Secrets[key] = resolved
-				if envVar != "" {
-					envVars = append(envVars, envVar)
-				}
+	// Resolve credential slot field references.
+	for i, slot := range cfg.CredentialSlots {
+		for key, val := range slot.Fields {
+			resolved, envVar, err := resolveRef(val)
+			if err != nil {
+				return nil, fmt.Errorf("credential_slots[%d] (%s) fields.%s: %w", i, slot.ID(), key, err)
 			}
-			cfg.Credentials[pkg][i] = entry
+			slot.Fields[key] = resolved
+			if envVar != "" {
+				envVars = append(envVars, envVar)
+			}
 		}
 	}
 
@@ -660,12 +746,12 @@ func resolveSecrets(cfg *Config) ([]string, error) {
 // resolveRef resolves a single config value. Returns the resolved value and,
 // if an environment variable was read, its name (so callers can scrub it).
 func resolveRef(s string) (string, string, error) {
-	if !strings.HasPrefix(s, secretRefPrefix) || !strings.HasSuffix(s, refSuffix) {
-		// Not a secret reference — use as literal.
+	if !strings.HasPrefix(s, bootRefPrefix) || !strings.HasSuffix(s, refSuffix) {
+		// Not a boot-secret reference — use as literal.
 		return s, "", nil
 	}
 
-	name := s[len(secretRefPrefix) : len(s)-len(refSuffix)]
+	name := s[len(bootRefPrefix) : len(s)-len(refSuffix)]
 	return resolveSecret(name)
 }
 

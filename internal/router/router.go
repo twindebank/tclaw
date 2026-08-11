@@ -61,9 +61,9 @@ type Router struct {
 	// channelRegistry maps channel types to their package implementations.
 	channelRegistry *channelpkg.Registry
 
-	// configCredentials holds pre-configured credential entries from tclaw.yaml.
+	// credentialSlots holds the credential slots declared in tclaw.yaml.
 	// Seeded into credential sets at startup.
-	configCredentials config.CredentialsConfig
+	credentialSlots []config.CredentialSlot
 
 	// configPath is the path to the active tclaw.yaml config file. The deploy
 	// tool copies it into the git checkout so remote builds include the real
@@ -122,19 +122,19 @@ type managedUser struct {
 // Zone 4 (mcp-config/): MCP config files, mounted read-only so the CLI can read --mcp-config.
 //
 // callback may be nil if OAuth is not configured.
-func New(baseDir string, env config.Env, configCredentials config.CredentialsConfig, callback *oauth.CallbackServer, publicURL string, logBuffer *logbuffer.Buffer, configPath string) *Router {
+func New(baseDir string, env config.Env, credentialSlots []config.CredentialSlot, callback *oauth.CallbackServer, publicURL string, logBuffer *logbuffer.Buffer, configPath string) *Router {
 	return &Router{
 		users:      make(map[user.ID]*managedUser),
 		mcpServers: make(map[user.ID]*mcp.Server),
 		baseDir:    baseDir,
 		env:        env,
 		// Provisioner is nil here — set per-user in startUser after telegramclient.RegisterTools.
-		channelRegistry:   channelall.NewRegistry(nil),
-		configCredentials: configCredentials,
-		callback:          callback,
-		publicURL:         publicURL,
-		logBuffer:         logBuffer,
-		configPath:        configPath,
+		channelRegistry: channelall.NewRegistry(nil),
+		credentialSlots: credentialSlots,
+		callback:        callback,
+		publicURL:       publicURL,
+		logBuffer:       logBuffer,
+		configPath:      configPath,
 	}
 }
 
@@ -198,9 +198,9 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	credMgr := credential.NewManager(s, secretStore)
 	mcpHandler := mcp.NewHandler()
 
-	// Seed config-level credentials into credential sets.
-	if err := seedConfigCredentials(ctx, credMgr, r.configCredentials); err != nil {
-		slog.Error("failed to seed config credentials", "user", mu.cfg.ID, "err", err)
+	// Create a credential set for every declared slot, filling any values config supplies.
+	if err := seedCredentialSlots(ctx, credMgr, r.credentialSlots); err != nil {
+		slog.Error("failed to seed credential slots", "user", mu.cfg.ID, "err", err)
 		return
 	}
 
