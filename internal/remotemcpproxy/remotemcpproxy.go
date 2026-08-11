@@ -17,15 +17,12 @@
 package remotemcpproxy
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/hex"
-	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -33,7 +30,6 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"tclaw/internal/mcp/discovery"
@@ -66,6 +62,11 @@ type Config struct {
 	// Refresher exchanges refresh tokens for new access tokens. Optional;
 	// defaults to a discovery-backed implementation.
 	Refresher TokenRefresher
+
+	// ColdStartRetry bounds how long a request waits out an upstream waking from
+	// autostop. Optional; defaults to discovery.DefaultColdStartRetry. Tests
+	// shrink it so exercising the give-up path doesn't burn the real budget.
+	ColdStartRetry discovery.ColdStartRetry
 }
 
 // route carries the resolved upstream target and injected headers from the
@@ -116,6 +117,11 @@ func NewServer(cfg Config) (*Server, error) {
 		refresher = defaultRefresher
 	}
 
+	coldStartRetry := cfg.ColdStartRetry
+	if coldStartRetry.MaxAttempts == 0 {
+		coldStartRetry = discovery.DefaultColdStartRetry
+	}
+
 	s := &Server{
 		store:     cfg.Store,
 		refresher: refresher,
@@ -129,10 +135,10 @@ func NewServer(cfg Config) (*Server, error) {
 		// Custom TLS dial so a per-server cert pin (route.tlsPin) authenticates a
 		// self-signed upstream by exact fingerprint instead of the system trust
 		// store. Only affects https upstreams; plain-http upstreams use the
-		// default DialContext untouched. Wrapped in retryTransport so a sleeping
-		// autostop upstream (e.g. understudy) that resets the connection while it
+		// default DialContext untouched. Wrapped in the shared cold-start retry so
+		// a sleeping autostop upstream that resets the connection while it
 		// cold-starts is retried rather than surfaced as an immediate 502.
-		Transport: &retryTransport{inner: pinAwareTransport()},
+		Transport: discovery.NewColdStartRetryTransport(pinAwareTransport(), coldStartRetry),
 		Director: func(req *http.Request) {
 			rt, ok := req.Context().Value(routeContextKey{}).(*route)
 			if !ok {
@@ -200,77 +206,6 @@ func pinAwareTransport() *http.Transport {
 			return (&tls.Dialer{Config: cfg}).DialContext(ctx, network, addr)
 		},
 	}
-}
-
-// coldStartMaxAttempts and coldStartBackoffCap bound the retry loop: enough
-// attempts spread over ~10s to cover a Fly machine waking from autostop
-// (~2-10s cold start), without hanging a caller whose upstream is truly down.
-const (
-	coldStartMaxAttempts = 6
-	coldStartBackoffCap  = 2 * time.Second
-)
-
-// retryTransport wraps an inner RoundTripper to tolerate the connection-level
-// failures a sleeping upstream produces while it cold-starts. A Fly machine with
-// auto_stop_machines sleeps when idle; the first request wakes it and, until the
-// service is listening, the fly-proxy resets the TCP/TLS connection (EOF /
-// "connection reset by peer" / "connection refused") instead of returning an
-// HTTP status. Those are pre-response transport errors — the upstream never saw
-// the request — so replaying the buffered request is safe. Any error that yields
-// an HTTP response (4xx/5xx) is returned untouched, and a terminal transport
-// error (TLS pin mismatch, caller cancellation) is not retried.
-type retryTransport struct {
-	inner http.RoundTripper
-}
-
-func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Buffer the body up front so a failed cold-start attempt can be replayed;
-	// MCP request bodies are small JSON-RPC messages, so this is cheap. A nil
-	// body (e.g. GET) stays nil and needs no replay.
-	var body []byte
-	if req.Body != nil {
-		b, err := io.ReadAll(req.Body)
-		_ = req.Body.Close()
-		if err != nil {
-			return nil, fmt.Errorf("buffer request body for retry: %w", err)
-		}
-		body = b
-	}
-
-	backoff := 250 * time.Millisecond
-	var lastErr error
-	for attempt := 1; attempt <= coldStartMaxAttempts; attempt++ {
-		if body != nil {
-			req.Body = io.NopCloser(bytes.NewReader(body))
-		}
-
-		resp, err := t.inner.RoundTrip(req)
-		if err == nil {
-			return resp, nil
-		}
-		lastErr = err
-
-		if req.Context().Err() != nil {
-			// The caller gave up (its deadline or cancellation); stop retrying and
-			// report why rather than the transport's derived error.
-			return nil, req.Context().Err()
-		}
-		if !isColdStartError(err) || attempt == coldStartMaxAttempts {
-			return nil, err
-		}
-
-		slog.Warn("remote mcp proxy: upstream not ready, retrying",
-			"attempt", attempt, "max", coldStartMaxAttempts, "err", err)
-		select {
-		case <-req.Context().Done():
-			return nil, req.Context().Err()
-		case <-time.After(backoff):
-		}
-		if backoff < coldStartBackoffCap {
-			backoff *= 2
-		}
-	}
-	return nil, lastErr
 }
 
 // Token returns the benign per-user token clients must present in the
@@ -484,28 +419,6 @@ func defaultRefresher(ctx context.Context, auth *remotemcpstore.RemoteMCPAuth, m
 }
 
 // --- helpers ---
-
-// isColdStartError reports whether err is a transport-level connection failure
-// consistent with an upstream that is still waking from autostop — safe to
-// retry because no response was produced. It deliberately whitelists only
-// recognized connection errors (reset / refused / EOF / dial timeout) so that a
-// deterministic failure like a TLS pin mismatch, which surfaces as a cert error
-// rather than a connection error, is treated as terminal and reported at once.
-func isColdStartError(err error) bool {
-	if errors.Is(err, io.EOF) {
-		return true
-	}
-	if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED) {
-		return true
-	}
-	var netErr *net.OpError
-	if errors.As(err, &netErr) {
-		// A dial/read/write failure while the machine boots — including a
-		// timed-out connect — means the request never reached the upstream.
-		return true
-	}
-	return false
-}
 
 // splitServerName splits "/<name>/<subpath>" into the server name and the
 // remaining subpath (without a leading slash). Returns an empty name for "/".

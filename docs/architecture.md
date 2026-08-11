@@ -72,5 +72,11 @@ Four boundaries protect user data and the host system:
   the `Authorization` / static headers server-side (refreshing an expired OAuth token on demand), and
   pins to registered server names. So no third-party MCP token — including a remote browser's API key —
   ever lands in a sandbox-readable file. The proxy also retries connection-level failures (reset / EOF /
-  refused) so an autostop upstream (e.g. understudy) that resets the connection while it cold-starts from
-  sleep is waited out rather than surfaced to the agent as an immediate 502.
+  refused) so an autostop upstream that resets the connection while it cold-starts from sleep is waited
+  out rather than surfaced to the agent as an immediate 502. Registration (`discovery`) shares the same
+  retry, so adding a sleeping server doesn't fail on the request that wakes it.
+- **Cold-start budget** — the retry spans ~40s (`discovery.DefaultColdStartRetry`), sized for an upstream
+  that boots a browser before it serves rather than a typical web service. The agent subprocess gets a
+  matching `MCP_TIMEOUT`: the claude CLI drops an MCP server whose handshake times out, and it drops it
+  for the whole turn with no error the agent can report — so a budget shorter than the upstream's cold
+  start costs the agent that server's entire tool surface, silently.
