@@ -264,3 +264,19 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 
 	return reg, provisioners
 }
+
+// CredentialSlotTypes returns every valid credential slot type: one per
+// registered tool package, plus the shared git namespace used by repo
+// monitoring, the dev workflow and the knowledge base.
+//
+// Built from a dependency-free registry — Name() is a constant on every
+// package — so callers can validate config before any user session exists.
+func CredentialSlotTypes() []string {
+	reg, _ := NewRegistry(Params{})
+	packages := reg.Packages()
+	types := make([]string, 0, len(packages)+1)
+	for _, pkg := range packages {
+		types = append(types, pkg.Name())
+	}
+	return append(types, config.GitCredentialType)
+}

@@ -249,6 +249,78 @@ func TestValidate_Knowledge(t *testing.T) {
 	})
 }
 
+func TestValidate_CredentialSlots(t *testing.T) {
+	t.Run("accepts a slot with no fields", func(t *testing.T) {
+		// Declaring a slot without a value is the whole point: it can be
+		// referenced now and filled from a phone later.
+		cfg := validConfig()
+		cfg.Users[0].Repos = nil
+		cfg.CredentialSlots = []CredentialSlot{{
+			Type:        "git",
+			Label:       "homeassistant",
+			Description: "Scoped PAT",
+		}}
+		require.NoError(t, validate(cfg))
+	})
+
+	t.Run("accepts channel scoping that names a declared channel", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CredentialSlots = []CredentialSlot{{Type: "google", Label: "work", Channel: "main"}}
+		require.NoError(t, validate(cfg))
+	})
+
+	t.Run("rejects channel scoping that names an unknown channel", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CredentialSlots = []CredentialSlot{{Type: "google", Label: "work", Channel: "nope"}}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), `channel "nope" does not match any channel name`)
+	})
+
+	t.Run("rejects duplicate slots", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CredentialSlots = []CredentialSlot{
+			{Type: "git", Label: "default"},
+			{Type: "git", Label: "default"},
+		}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), `duplicate slot "git/default"`)
+	})
+
+	t.Run("rejects a type or label that is unsafe in a store key", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CredentialSlots = []CredentialSlot{{Type: "git/../etc", Label: "default"}}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "type")
+
+		cfg.CredentialSlots = []CredentialSlot{{Type: "git", Label: "../escape"}}
+		err = validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "label")
+	})
+}
+
+func TestValidateCredentialSlotTypes(t *testing.T) {
+	t.Run("accepts a known type", func(t *testing.T) {
+		require.NoError(t, ValidateCredentialSlotTypes(
+			[]CredentialSlot{{Type: "git", Label: "default"}},
+			[]string{"google", "git"},
+		))
+	})
+
+	t.Run("rejects a type nothing consumes and lists the known ones", func(t *testing.T) {
+		err := ValidateCredentialSlotTypes(
+			[]CredentialSlot{{Type: "gti", Label: "default"}},
+			[]string{"google", "git"},
+		)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), `unknown type "gti"`)
+		require.Contains(t, err.Error(), "google, git")
+	})
+}
+
 func TestValidate_Repos(t *testing.T) {
 	t.Run("expands owner/repo shorthand and defaults the branch", func(t *testing.T) {
 		cfg := validConfig()
