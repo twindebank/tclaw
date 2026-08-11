@@ -69,13 +69,13 @@ func (p *Package) Register(handler *mcp.Handler, ctx toolpkg.RegistrationContext
 }
 
 // CredentialSpec implements toolpkg.CredentialProvider.
+//
+// No fields: repo tooling authenticates from the shared git credential slots
+// rather than a per-package credential set, so there is nothing for a "repo"
+// set to hold. RequiredSecrets still bridges GITHUB_TOKEN_<USER> into the
+// default git slot at boot.
 func (p *Package) CredentialSpec() toolpkg.CredentialSpec {
-	return toolpkg.CredentialSpec{
-		AuthType: toolpkg.AuthAPIKey,
-		Fields: []toolpkg.CredentialField{
-			{Key: credential.GitTokenKey(credential.DefaultLabel), Label: "GitHub Token", Description: "Personal access token for cloning private repositories.", Required: false, EnvVarPrefix: "GITHUB_TOKEN"},
-		},
-	}
+	return toolpkg.CredentialSpec{AuthType: toolpkg.AuthAPIKey}
 }
 
 // OnCredentialSetChange implements toolpkg.CredentialProvider. Currently a

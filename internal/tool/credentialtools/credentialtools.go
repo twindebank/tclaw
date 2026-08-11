@@ -41,7 +41,7 @@ type Deps struct {
 func ToolNames() []string {
 	return []string{
 		ToolCredentialAdd, ToolCredentialList, ToolCredentialRemove,
-		ToolCredentialAuthWait,
+		ToolCredentialClear, ToolCredentialAuthWait,
 	}
 }
 
@@ -50,6 +50,7 @@ func RegisterTools(h *mcp.Handler, deps Deps) {
 	h.Register(credentialListDef(), credentialListHandler(deps))
 	h.Register(credentialAddDef(deps.Registry), credentialAddHandler(deps))
 	h.Register(credentialRemoveDef(), credentialRemoveHandler(deps))
+	h.Register(credentialClearDef(), credentialClearHandler(deps))
 	if deps.Callback != nil {
 		h.Register(credentialAuthWaitDef(), credentialAuthWaitHandler(deps))
 	}

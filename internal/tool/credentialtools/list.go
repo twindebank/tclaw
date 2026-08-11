@@ -40,12 +40,13 @@ type credentialListArgs struct {
 }
 
 type credentialSetInfo struct {
-	ID      credential.CredentialSetID `json:"id"`
-	Package string                     `json:"package"`
-	Label   string                     `json:"label"`
-	Channel string                     `json:"channel,omitempty"`
-	Ready   bool                       `json:"ready"`
-	Fields  []fieldStatus              `json:"fields"`
+	ID          credential.CredentialSetID `json:"id"`
+	Package     string                     `json:"package"`
+	Label       string                     `json:"label"`
+	Channel     string                     `json:"channel,omitempty"`
+	Description string                     `json:"description,omitempty"`
+	Ready       bool                       `json:"ready"`
+	Fields      []fieldStatus              `json:"fields"`
 }
 
 type fieldStatus struct {
@@ -53,6 +54,18 @@ type fieldStatus struct {
 	Label      string `json:"label"`
 	Required   bool   `json:"required"`
 	Configured bool   `json:"configured"`
+
+	// FillWith spells out the secret_form_request target for an unconfigured
+	// field. A form cannot address the cred/ namespace by key, so without this
+	// the way to fill a slot isn't discoverable from the listing.
+	FillWith *fillTarget `json:"fill_with,omitempty"`
+}
+
+// fillTarget mirrors the credential target a secret form accepts.
+type fillTarget struct {
+	Type  string `json:"type"`
+	Label string `json:"label"`
+	Field string `json:"field"`
 }
 
 func credentialListHandler(deps Deps) mcp.ToolHandler {
@@ -82,10 +95,11 @@ func credentialListHandler(deps Deps) mcp.ToolHandler {
 		result := make([]credentialSetInfo, 0, len(sets))
 		for _, s := range sets {
 			info := credentialSetInfo{
-				ID:      s.ID,
-				Package: s.Package,
-				Label:   s.Label,
-				Channel: s.Channel,
+				ID:          s.ID,
+				Package:     s.Package,
+				Label:       s.Label,
+				Channel:     s.Channel,
+				Description: s.Description,
 			}
 
 			spec, hasSpec := specMap[s.Package]
@@ -96,12 +110,16 @@ func credentialListHandler(deps Deps) mcp.ToolHandler {
 					if fieldErr != nil {
 						slog.Warn("failed to check credential field", "set", s.ID, "field", f.Key, "err", fieldErr)
 					}
-					info.Fields = append(info.Fields, fieldStatus{
+					status := fieldStatus{
 						Key:        f.Key,
 						Label:      f.Label,
 						Required:   f.Required,
 						Configured: val != "",
-					})
+					}
+					if !status.Configured {
+						status.FillWith = &fillTarget{Type: s.Package, Label: s.Label, Field: f.Key}
+					}
+					info.Fields = append(info.Fields, status)
 				}
 
 				ready, readyErr := deps.CredentialManager.IsReady(
