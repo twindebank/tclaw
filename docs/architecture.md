@@ -65,6 +65,11 @@ Four boundaries protect user data and the host system:
   `Authorization` server-side and pins requests to the one configured repo; the clone's remote is a
   token-free `http://127.0.0.1:<port>/...` URL. Git's credential helper runs inside the sandbox, so
   injecting auth at the network boundary is the only way to grant push capability without disclosure.
+- **Monitored repo git auth** — repo clones (`internal/tool/repotools`) never need git auth *inside* the
+  sandbox: only tclaw fetches them, and the agent's git use is read-only history inspection. So instead
+  of a proxy they keep a token-free origin and the token is passed per command as an HTTP
+  `Authorization` header. It cannot leak via `.git/config` (which lives in a bound directory) nor via
+  the process table, since the sandbox gets its own PID namespace and `/proc`.
 - **Remote MCP auth** — the same pattern generalizes to every connected remote MCP server
   (`internal/remotemcpproxy`). The `--mcp-config` (bind-mounted read-only into the sandbox) points each
   remote at a token-free `http://127.0.0.1:<port>/<name>` URL carrying only a benign proxy-hop token;

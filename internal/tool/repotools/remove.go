@@ -49,6 +49,14 @@ func repoRemoveHandler(deps Deps) mcp.ToolHandler {
 		if tracked == nil {
 			return nil, fmt.Errorf("no tracked repo named %q", a.Name)
 		}
+		if _, ok := deps.visibleTo(*tracked); !ok {
+			return nil, errNotVisible(a.Name)
+		}
+		if tracked.Managed {
+			// Config is the source of truth for declared repos — removing one
+			// here would just be undone on the next boot.
+			return nil, fmt.Errorf("repo %q is declared in tclaw.yaml — remove it from the config instead", a.Name)
+		}
 
 		// Remove the entire repo directory (the clone).
 		if err := os.RemoveAll(tracked.RepoDir); err != nil {

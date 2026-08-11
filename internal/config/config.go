@@ -107,6 +107,11 @@ type User struct {
 	// agent reads from and writes to as its durable knowledge store.
 	Knowledge *KnowledgeConfig `yaml:"knowledge,omitempty"`
 
+	// Repos declares git repositories cloned on boot and mounted read-only for
+	// the agent to browse. Optional per-repo channel scoping keeps a repo
+	// visible only to the channels that need it.
+	Repos []RepoConfig `yaml:"repos,omitempty"`
+
 	// Telegram holds the user's Telegram identity. All Telegram channels
 	// for this user inherit these settings.
 	Telegram *UserTelegramConfig `yaml:"telegram,omitempty"`
@@ -160,6 +165,57 @@ func normalizeRepoURL(repo string) string {
 		return repo
 	}
 	return "https://github.com/" + strings.TrimSuffix(strings.TrimPrefix(repo, "/"), "/")
+}
+
+// RepoConfig declares a git repository cloned on boot into <user>/repos/<name>
+// and mounted read-only in the agent's sandbox. The clone is a mirror the agent
+// browses — it is reset to the remote on every sync, so local edits never
+// survive. Runtime-added repos (repo_add) use the same directory and tools;
+// declaring one here just makes it survive restarts and volume wipes.
+type RepoConfig struct {
+	// Name is the directory alias under <user>/repos/ and the handle the repo
+	// tools take. Alphanumeric and hyphens only.
+	Name string `yaml:"name"`
+
+	// Repo accepts "owner/repo" shorthand (expanded to a github.com HTTPS URL)
+	// or a full HTTPS URL. Private repos authenticate with the shared
+	// "github_token" secret.
+	Repo string `yaml:"repo"`
+
+	// Branch is the branch to track. Defaults to "main".
+	Branch string `yaml:"branch,omitempty"`
+
+	// Description tells the agent what the repo is for. Surfaced by repo_list.
+	Description string `yaml:"description,omitempty"`
+
+	// Channels restricts the repo to the named channels — its clone is only
+	// mounted for turns on those channels and the repo tools refuse to touch it
+	// elsewhere. Empty means every channel sees it.
+	Channels []string `yaml:"channels,omitempty"`
+}
+
+// validRepoName matches the directory alias a repo is cloned into. Kept in sync
+// with the equivalent check in repotools so config-declared and agent-added
+// repos accept the same names.
+var validRepoName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]*$`)
+
+// normalize fills defaults and expands "owner/repo" shorthand into a full HTTPS
+// URL. Mutates the receiver in place.
+func (r *RepoConfig) normalize() error {
+	if strings.TrimSpace(r.Name) == "" {
+		return fmt.Errorf("name is required")
+	}
+	if !validRepoName.MatchString(r.Name) || len(r.Name) > 64 {
+		return fmt.Errorf("name %q must be alphanumeric/hyphens, max 64 chars", r.Name)
+	}
+	if strings.TrimSpace(r.Repo) == "" {
+		return fmt.Errorf("repo %q: repo is required", r.Name)
+	}
+	if r.Branch == "" {
+		r.Branch = "main"
+	}
+	r.Repo = normalizeRepoURL(r.Repo)
+	return nil
 }
 
 // Channel defines a channel attached to a user.
@@ -513,6 +569,27 @@ func validate(cfg *Config) error {
 				}
 			}
 		}
+
+		// Repos normalize in place — u.Repos shares its backing array with
+		// cfg.Users[i].Repos, so the expanded URLs and defaults are stored.
+		// Validated after channels so channel scoping can be checked against
+		// the declared channel names.
+		repoNames := make(map[string]bool, len(u.Repos))
+		for j := range u.Repos {
+			r := &u.Repos[j]
+			if err := r.normalize(); err != nil {
+				return fmt.Errorf("user %q repos[%d]: %w", u.ID, j, err)
+			}
+			if repoNames[r.Name] {
+				return fmt.Errorf("user %q repos[%d]: duplicate name %q", u.ID, j, r.Name)
+			}
+			repoNames[r.Name] = true
+			for k, chName := range r.Channels {
+				if !chNames[chName] {
+					return fmt.Errorf("user %q repo %q channels[%d]: %q does not match any channel name", u.ID, r.Name, k, chName)
+				}
+			}
+		}
 	}
 
 	return nil
@@ -648,6 +725,16 @@ func (u *User) ToUserConfig() user.Config {
 			CommitEmail: u.Knowledge.CommitEmail,
 		}
 	}
+	var repos []user.Repo
+	for _, r := range u.Repos {
+		repos = append(repos, user.Repo{
+			Name:        r.Name,
+			URL:         r.Repo,
+			Branch:      r.Branch,
+			Description: r.Description,
+			Channels:    r.Channels,
+		})
+	}
 	return user.Config{
 		ID:              u.ID,
 		APIKey:          u.APIKey,
@@ -660,6 +747,7 @@ func (u *User) ToUserConfig() user.Config {
 		SystemPrompt:    u.SystemPrompt,
 		TelegramUserID:  tgUserID,
 		Knowledge:       knowledge,
+		Repos:           repos,
 		MessageDebounce: u.messageDebounceDuration(),
 	}
 }

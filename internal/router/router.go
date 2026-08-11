@@ -401,6 +401,21 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	repoStore := repo.NewStore(s)
 	onboardingStore := onboarding.NewStore(s)
 
+	// Clone the repos declared in config so they're on disk before the first
+	// turn. Non-fatal: a repo that can't be fetched is logged and the session
+	// continues without it.
+	if len(mu.cfg.Repos) > 0 {
+		if err := provisionConfigRepos(ctx, reposProvisionParams{
+			UserID:  mu.cfg.ID,
+			UserDir: userDir,
+			Repos:   mu.cfg.Repos,
+			Store:   repoStore,
+			Secrets: secretStore,
+		}); err != nil {
+			slog.Error("failed to provision config repos", "user", mu.cfg.ID, "err", err)
+		}
+	}
+
 	// Set up cross-channel messaging — lets channels send messages to
 	// each other via declared config links.
 	crossChannelMsgs := make(chan channel.TaggedMessage, 8)
@@ -906,16 +921,20 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			HomeDir:       homeDir,
 			MemoryDir:     memoryDir,
 			AddDirs:       addDirs,
-			AddDirsFunc: func() []string {
+			AddDirsFunc: func(chID channel.ChannelID) []string {
 				// Read from the dev store each turn so worktrees created
 				// mid-session (via dev_start) are immediately accessible.
 				// Always include the parent worktrees dir so bwrap can bind it.
 				// This replaces the static AddDirs (see handle.go), so it must
 				// also carry the knowledge-base clone when it's provisioned.
-				dirs := []string{worktreesDir, reposDir}
+				dirs := []string{worktreesDir}
 				if _, statErr := os.Stat(knowledgeDir); statErr == nil {
 					dirs = append(dirs, knowledgeDir)
 				}
+				// Only the repos this channel may see — the parent repos dir is
+				// bound separately via SandboxDirs, so the --add-dir list is
+				// what scopes the CLI's own file access.
+				dirs = append(dirs, resolveRepoMounts(ctx, repoStore, channelName(channelsFunc(), chID)).Visible...)
 				sessions, err := devStore.ListSessions(ctx)
 				if err != nil {
 					slog.Error("failed to list dev sessions for add-dirs", "err", err)
@@ -925,6 +944,21 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 					dirs = append(dirs, sess.WorktreeDir)
 				}
 				return dirs
+			},
+			// Bind the repos parent so a repo cloned mid-turn (repo_add +
+			// repo_sync) is readable straight away — binds are fixed when the
+			// subprocess spawns, so a clone created afterwards is only visible
+			// through an already-bound parent.
+			SandboxDirs: func(_ channel.ChannelID) []string {
+				return []string{reposDir}
+			},
+			ReadOnlyDirs: func(chID channel.ChannelID) []string {
+				// Repo clones are mirrors — repo_sync resets them to the remote,
+				// so any edit the agent made would vanish without warning.
+				return resolveRepoMounts(ctx, repoStore, channelName(channelsFunc(), chID)).Visible
+			},
+			MaskedDirs: func(chID channel.ChannelID) []string {
+				return resolveRepoMounts(ctx, repoStore, channelName(channelsFunc(), chID)).Masked
 			},
 			Channels: allChMap,
 			// ChannelsFunc provides live channel lookups so hot-added channels

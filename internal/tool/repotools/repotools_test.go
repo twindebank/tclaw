@@ -326,8 +326,130 @@ func TestRepoLog_AfterSync(t *testing.T) {
 	require.NotEmpty(t, logResult["log"])
 }
 
+func TestRepoTools_ChannelScoping(t *testing.T) {
+	t.Run("repo_list shows repos scoped to this channel and unscoped ones", func(t *testing.T) {
+		h, repoStore, userDir := setupOnChannel(t, "homeassistant")
+		seedRepo(t, repoStore, userDir, "ha-config", []string{"homeassistant"})
+		seedRepo(t, repoStore, userDir, "shared", nil)
+
+		var got struct {
+			Repos []struct {
+				Name string `json:"name"`
+			} `json:"repos"`
+		}
+		require.NoError(t, json.Unmarshal(callTool(t, h, "repo_list", map[string]string{}), &got))
+
+		names := []string{}
+		for _, r := range got.Repos {
+			names = append(names, r.Name)
+		}
+		require.ElementsMatch(t, []string{"ha-config", "shared"}, names)
+	})
+
+	t.Run("repo_list hides repos scoped to other channels", func(t *testing.T) {
+		h, repoStore, userDir := setupOnChannel(t, "email")
+		seedRepo(t, repoStore, userDir, "ha-config", []string{"homeassistant"})
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(callTool(t, h, "repo_list", map[string]string{}), &got))
+		require.Empty(t, got["repos"])
+		require.Contains(t, got["message"], "No tracked repos available on this channel")
+	})
+
+	t.Run("scoped repos stay hidden when the channel is unknown", func(t *testing.T) {
+		// Fail closed: a missing turn context must not widen access.
+		h, repoStore, userDir := setupOnChannel(t, "")
+		seedRepo(t, repoStore, userDir, "ha-config", []string{"homeassistant"})
+
+		err := callToolExpectError(t, h, "repo_sync", map[string]string{"name": "ha-config"})
+		require.Contains(t, err.Error(), "no tracked repo named")
+	})
+
+	t.Run("repo_sync refuses a repo scoped to another channel", func(t *testing.T) {
+		h, repoStore, userDir := setupOnChannel(t, "email")
+		seedRepo(t, repoStore, userDir, "ha-config", []string{"homeassistant"})
+
+		err := callToolExpectError(t, h, "repo_sync", map[string]string{"name": "ha-config"})
+		require.Contains(t, err.Error(), "no tracked repo named")
+	})
+
+	t.Run("repo_log refuses a repo scoped to another channel", func(t *testing.T) {
+		h, repoStore, userDir := setupOnChannel(t, "email")
+		seedRepo(t, repoStore, userDir, "ha-config", []string{"homeassistant"})
+
+		err := callToolExpectError(t, h, "repo_log", map[string]string{"name": "ha-config"})
+		require.Contains(t, err.Error(), "no tracked repo named")
+	})
+
+	t.Run("repo_remove refuses a repo scoped to another channel", func(t *testing.T) {
+		h, repoStore, userDir := setupOnChannel(t, "email")
+		seedRepo(t, repoStore, userDir, "ha-config", []string{"homeassistant"})
+
+		err := callToolExpectError(t, h, "repo_remove", map[string]string{"name": "ha-config"})
+		require.Contains(t, err.Error(), "no tracked repo named")
+
+		// The repo must survive the refused removal.
+		still, getErr := repoStore.Get(context.Background(), "ha-config")
+		require.NoError(t, getErr)
+		require.NotNil(t, still)
+	})
+}
+
+func TestRepoRemove_ManagedRepo(t *testing.T) {
+	t.Run("refuses to remove a config-declared repo", func(t *testing.T) {
+		h, repoStore, userDir := setupOnChannel(t, "homeassistant")
+		tracked := seedRepo(t, repoStore, userDir, "ha-config", []string{"homeassistant"})
+		tracked.Managed = true
+		require.NoError(t, repoStore.Put(context.Background(), tracked))
+
+		err := callToolExpectError(t, h, "repo_remove", map[string]string{"name": "ha-config"})
+		require.Contains(t, err.Error(), "declared in tclaw.yaml")
+
+		still, getErr := repoStore.Get(context.Background(), "ha-config")
+		require.NoError(t, getErr)
+		require.NotNil(t, still)
+	})
+
+	t.Run("removes an agent-added repo", func(t *testing.T) {
+		h, repoStore, userDir := setupOnChannel(t, "homeassistant")
+		seedRepo(t, repoStore, userDir, "scratch", nil)
+
+		callTool(t, h, "repo_remove", map[string]string{"name": "scratch"})
+
+		gone, err := repoStore.Get(context.Background(), "scratch")
+		require.NoError(t, err)
+		require.Nil(t, gone)
+	})
+}
+
+// seedRepo registers a tracked repo with its clone directory created, and
+// returns the stored entry.
+func seedRepo(t *testing.T, repoStore *repo.Store, userDir, name string, channels []string) repo.TrackedRepo {
+	t.Helper()
+	repoDir := filepath.Join(userDir, "repos", name)
+	require.NoError(t, os.MkdirAll(repoDir, 0o755))
+
+	tracked := repo.TrackedRepo{
+		Name:     name,
+		URL:      "https://github.com/user/" + name,
+		Branch:   "main",
+		RepoDir:  repoDir,
+		Channels: channels,
+		AddedAt:  time.Now(),
+	}
+	require.NoError(t, repoStore.Put(context.Background(), tracked))
+	return tracked
+}
+
 // setup creates an MCP handler with repo tools wired to a temp directory.
 func setup(t *testing.T) (*mcp.Handler, *repo.Store, string) {
+	t.Helper()
+	return setupOnChannel(t, "")
+}
+
+// setupOnChannel is setup with a named channel as the running turn's channel,
+// for exercising per-channel repo scoping.
+func setupOnChannel(t *testing.T, channelName string) (*mcp.Handler, *repo.Store, string) {
 	t.Helper()
 	userDir := t.TempDir()
 
@@ -339,9 +461,10 @@ func setup(t *testing.T) (*mcp.Handler, *repo.Store, string) {
 
 	handler := mcp.NewHandler()
 	repotools.RegisterTools(handler, repotools.Deps{
-		Store:       repoStore,
-		SecretStore: secrets,
-		UserDir:     userDir,
+		Store:         repoStore,
+		SecretStore:   secrets,
+		UserDir:       userDir,
+		ActiveChannel: func() string { return channelName },
 	})
 
 	return handler, repoStore, userDir
