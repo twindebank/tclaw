@@ -9,15 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"tclaw/internal/credential"
 	"tclaw/internal/mcp"
 )
 
-const (
-	defaultSyncDepth = 50
-
-	// githubTokenKey matches the devtools key so the same token is shared.
-	githubTokenKey = "github_token"
-)
+const defaultSyncDepth = 50
 
 const ToolSync = "repo_sync"
 
@@ -81,7 +77,7 @@ func repoSyncHandler(deps Deps) mcp.ToolHandler {
 		// Read GitHub token for private repos. Public repos work without one,
 		// so a lookup failure is logged and the fetch attempted unauthenticated
 		// rather than failing the whole sync.
-		token, tokenErr := deps.SecretStore.Get(ctx, githubTokenKey)
+		token, tokenErr := deps.SecretStore.Get(ctx, credential.GitTokenKey(tracked.Credential))
 		if tokenErr != nil {
 			slog.Warn("failed to read github token, fetching unauthenticated",
 				"repo", tracked.Name, "err", tokenErr)

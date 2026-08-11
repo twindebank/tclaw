@@ -71,7 +71,7 @@ func devPRChecksHandler(deps Deps) mcp.ToolHandler {
 			return nil, credentialerror.New(
 				"GitHub Configuration",
 				"A Personal Access Token with repo scope is needed for PR checks",
-				credentialerror.Field{Key: githubTokenKey, Label: "GitHub Personal Access Token", Description: "Create at github.com/settings/tokens with 'repo' scope"},
+				gitTokenCredentialField(),
 			)
 		}
 
