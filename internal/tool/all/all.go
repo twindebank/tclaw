@@ -239,6 +239,23 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 			SecretStore:     p.SecretStore,
 			BaseURL:         p.BaseURL,
 			RegisterHandler: p.RegisterHandler,
+			// Forms can only reach a credential slot that is already declared,
+			// which is what keeps operator credentials out of the agent's reach
+			// while still letting the user fill one from a phone.
+			ResolveSlotField: func(ctx context.Context, target secretform.CredentialTarget) (string, error) {
+				if p.CredentialManager == nil {
+					return "", fmt.Errorf("credential manager unavailable")
+				}
+				id := credential.NewCredentialSetID(target.Type, target.Label)
+				set, err := p.CredentialManager.Get(ctx, id)
+				if err != nil {
+					return "", fmt.Errorf("look up credential slot %s: %w", id, err)
+				}
+				if set == nil {
+					return "", fmt.Errorf("no credential slot %s — declare it under credential_slots in tclaw.yaml first (credential_list shows the declared ones)", id)
+				}
+				return credential.FieldKey(id, target.Field), nil
+			},
 		},
 	)
 

@@ -29,6 +29,7 @@ var formTemplate = template.Must(template.New("form").Parse(`<!DOCTYPE html>
   .field { margin-bottom: 20px; }
   label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px; }
   .help { font-size: 12px; color: #888; margin-top: 4px; }
+  .replace-warning { font-size: 12px; color: #a15c00; margin-top: 4px; }
   input[type="text"], input[type="password"] {
     width: 100%; padding: 10px 12px; font-size: 14px;
     border: 1px solid #ddd; border-radius: 8px;
@@ -89,11 +90,12 @@ var formTemplate = template.Must(template.New("form").Parse(`<!DOCTYPE html>
         </label>
         <input
           type="{{if .IsSecret}}password{{else}}text{{end}}"
-          name="{{.Key}}"
+          name="{{.InputName}}"
           {{if .IsRequired}}required{{end}}
           autocomplete="off"
           spellcheck="false"
         >
+        {{if .AlreadySet}}<div class="replace-warning">⚠️ This already has a value. Submitting replaces it.</div>{{end}}
         {{if .Description}}<div class="help">{{.Description}}</div>{{end}}
       </div>
       {{end}}
