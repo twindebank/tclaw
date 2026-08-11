@@ -16,6 +16,7 @@ import (
 
 	"tclaw/internal/channel"
 	"tclaw/internal/claudecli"
+	"tclaw/internal/credential"
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/toolgroup"
 	"tclaw/internal/user"
@@ -110,7 +111,7 @@ func (c CredentialSlot) ID() string {
 // GitCredentialType is the slot type shared by everything that talks to git and
 // GitHub — repo monitoring, the dev workflow and the knowledge base. It is the
 // one slot type that is not a tool package name.
-const GitCredentialType = "git"
+const GitCredentialType = credential.GitType
 
 // slotNamePattern restricts slot types and labels to characters that are safe in
 // a store key path segment.

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"tclaw/internal/claudecli"
+	"tclaw/internal/credential"
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/mcp"
 	"tclaw/internal/repo"
@@ -34,7 +35,10 @@ func (p *Package) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
 func (p *Package) RequiredSecrets() []toolpkg.SecretSpec {
 	return []toolpkg.SecretSpec{
 		{
-			StoreKey:     "github_token",
+			// Seeding the default git slot from GITHUB_TOKEN_<USER> is what
+			// carries an existing deployment across: the Fly secret lands in
+			// the slot on the next boot, with no migration step.
+			StoreKey:     credential.GitTokenKey(credential.DefaultLabel),
 			EnvVarPrefix: "GITHUB_TOKEN",
 			Required:     false,
 			Label:        "GitHub Token",
@@ -69,7 +73,7 @@ func (p *Package) CredentialSpec() toolpkg.CredentialSpec {
 	return toolpkg.CredentialSpec{
 		AuthType: toolpkg.AuthAPIKey,
 		Fields: []toolpkg.CredentialField{
-			{Key: "github_token", Label: "GitHub Token", Description: "Personal access token for cloning private repositories.", Required: false, EnvVarPrefix: "GITHUB_TOKEN"},
+			{Key: credential.GitTokenKey(credential.DefaultLabel), Label: "GitHub Token", Description: "Personal access token for cloning private repositories.", Required: false, EnvVarPrefix: "GITHUB_TOKEN"},
 		},
 	}
 }

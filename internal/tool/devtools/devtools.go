@@ -1,20 +1,32 @@
 package devtools
 
 import (
+	"tclaw/internal/credential"
 	"tclaw/internal/dev"
+	"tclaw/internal/libraries/credentialerror"
 	"tclaw/internal/libraries/logbuffer"
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/mcp"
 	"tclaw/internal/user"
 )
 
-const (
-	// githubTokenKey is the secret store key for the GitHub PAT.
-	githubTokenKey = "github_token"
+// githubTokenKey addresses the default git credential slot. The dev workflow
+// shares its GitHub token with repo monitoring and the knowledge base, so all
+// three read one slot rather than each hardcoding a flat store key.
+var githubTokenKey = credential.GitTokenKey(credential.DefaultLabel)
 
-	// flyTokenKey is the secret store key for the Fly.io API token.
-	flyTokenKey = "fly_api_token"
-)
+// flyTokenKey is the secret store key for the Fly.io API token.
+const flyTokenKey = "fly_api_token"
+
+// gitTokenCredentialField describes the missing GitHub token to the agent. It
+// targets the credential slot rather than a bare key, because a secret form
+// cannot address the cred/ namespace by key.
+func gitTokenCredentialField() credentialerror.Field {
+	field := credentialerror.SlotField(credential.GitType, credential.DefaultLabel,
+		credential.GitTokenField, "GitHub Personal Access Token")
+	field.Description = "Create at github.com/settings/tokens with 'repo' scope"
+	return field
+}
 
 // ToolNames returns all tool name constants in this package.
 func ToolNames() []string {

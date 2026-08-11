@@ -11,14 +11,15 @@ import (
 	"strings"
 
 	"tclaw/internal/agent"
+	"tclaw/internal/credential"
 	"tclaw/internal/knowledgeproxy"
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/user"
 )
 
-// knowledgeTokenSecretKey is the encrypted-store key holding the GitHub token,
-// shared with repotools and devtools.
-const knowledgeTokenSecretKey = "github_token"
+// knowledgeTokenSecretKey addresses the default git credential slot, shared
+// with repotools and devtools so one token covers every GitHub interaction.
+var knowledgeTokenSecretKey = credential.GitTokenKey(credential.DefaultLabel)
 
 // Default git identity used for agent commits when the config doesn't set one.
 const (

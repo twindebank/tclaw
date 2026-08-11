@@ -37,6 +37,11 @@ type TrackedRepo struct {
 	// surfaced to the agent by repo_list so it knows what the repo is for.
 	Description string `json:"description,omitempty"`
 
+	// Credential is the label of the git credential slot used to authenticate
+	// this repo. Empty means the default slot, so a repo needs its own entry
+	// here only when it should be scoped to a narrower token.
+	Credential string `json:"credential,omitempty"`
+
 	AddedAt      time.Time `json:"added_at"`
 	LastSyncedAt time.Time `json:"last_synced_at,omitempty"`
 }
