@@ -48,73 +48,105 @@ do **not** grow the `google_workspace` tool description.
 In local (non-container) dev the baked dir is absent, so seeding is skipped silently; the agent falls
 back to the trimmed tool description and `google_workspace_schema`.
 
+## Credentials
+
+Three categories, distinguished by who creates the key and whether config can name it:
+
+**Boot secrets** — `${boot:NAME}` in `tclaw.yaml`, resolved from the OS keychain locally and Fly
+secrets in prod as config loads, then scrubbed from the environment. Set with `tclaw secret set NAME`
+and pushed with `tclaw deploy secrets`. Keep this set small: almost nothing must exist at boot.
+
+**Credential slots** — declared in config, seeded into the encrypted store at
+`cred/<type>/<label>/<field>`, and the only credentials the rest of the config can reference by name:
+
+```yaml
+credential_slots:
+  - type: git                      # a tool package name, or "git" for repo/dev/vault access
+    label: default
+    description: GitHub PAT — used by any repo that names no other slot
+    fields:
+      token: ${boot:GITHUB_TOKEN}
+
+  - type: git
+    label: homeassistant
+    description: Scoped PAT, Home Assistant config repo only
+    # no fields — declared but unset; fill it from a phone with a secret form
+```
+
+A slot with no `fields:` is created empty. That is the point of declaring one: it can be referenced
+now and filled later via `secret_form_request` with a `credential` target, without a config edit or a
+deploy. `credential_list` shows every slot, whether each field is set, and the exact form target that
+fills it; `credential_clear` drops a value while leaving the slot declared.
+
+**Runtime credentials** — OAuth tokens, per-channel bot tokens, remote MCP headers. Keyed by the
+system, never referenceable from config.
+
+The agent can name a credential and trigger its collection, but never read one. Because agent-facing
+keys forbid slashes, nothing it names can reach the `cred/` namespace.
+
+## Repos
+
+Repos are declared per-user, cloned on boot, and reached through a per-user git proxy that injects
+credentials server-side — no clone holds a token, and the agent uses ordinary git:
+
+```yaml
+repos:
+  - name: homeassistant-config
+    repo: owner/homeassistant-config
+    branch: main
+    description: Live Home Assistant config
+    access: pull_requests_only     # read_only | pull_requests_only | full_write
+    credential: homeassistant      # a credential_slots label with type git; omit for the default
+    visible_to_channels: [homeassistant]
+    fetch_every: 6h
+    drop_to_read_only_at: 2026-12-01T00:00:00Z
+    drop_clone_if_unused_for: 2160h
+```
+
+**Access tiers** are enforced by the proxy, not the tools — the agent runs git itself, so anything
+checked tool-side could be bypassed with raw git:
+
+- `read_only` — fetch only; the clone is mounted read-only and `repo_sync` resets it to the remote.
+- `pull_requests_only` — push any branch except the default one, and open PRs. Writes to the default
+  branch, tags and other non-branch refs are refused.
+- `full_write` — push anywhere.
+
+The agent raises a tier with `repo_request_access`, which prompts you in the chat and applies only on
+your reply; it cannot answer its own prompt. Lowering applies immediately. `drop_to_read_only_at`
+withdraws push access at that instant — the repo and clone stay, only the tier drops, and the channel
+is told. `drop_clone_if_unused_for` is disk hygiene: the clone goes, the entry stays, and the next
+sync recreates it.
+
+**Channel scoping** (`visible_to_channels`) is enforced twice: the per-turn `--add-dir` list carries
+only that channel's repos and bwrap masks the rest behind an empty tmpfs, and the repo tools report
+scoped-out repos as not found. An unknown channel fails closed.
+
+`config_set` cannot change `repos`, `credential_slots`, `users`, `tool_groups`, `allowed_tools`,
+`disallowed_tools` or `creatable_groups` — those are yours to set with `tclaw config push`. Without
+that, the agent could grant itself access directly and the confirmation prompt would be decorative.
+
 ## Personal Knowledge Base
 
-A user can mount a git-backed markdown vault as the agent's durable knowledge store. The agent reads
-it on demand and writes new knowledge back with raw git (pull / commit / push). Enable it per-user in
-`tclaw.yaml`:
+The vault is an ordinary declared repo. `knowledge:` only says which one it is, where it mounts, and
+the git identity for the commits the agent makes:
 
 ```yaml
-users:
-  - id: theo
-    # Let the agent run git against the vault. Scoped so only git is auto-approved.
-    allowed_tools: ["Bash(git *)", "Read", "Edit", "Write"]
-    knowledge:
-      repo: owner/knowledge-base   # owner/repo shorthand or full HTTPS URL
-      branch: main                            # optional, defaults to main
-      commit_name: My Name                    # optional git identity for agent commits
-      commit_email: me@users.noreply.github.com
+repos:
+  - name: knowledge
+    repo: owner/knowledge-base
+    access: full_write
+
+knowledge:
+  repo: knowledge                  # names the repos entry above
+  mount_at: knowledge              # dir under <user>/; keeps ../knowledge valid
+  commit_name: My Name
+  commit_email: me@users.noreply.github.com
 ```
 
-How it works:
-- On boot, tclaw clones the vault to `<user>/knowledge/` and mounts it `--add-dir` (writable in the sandbox).
-- Auth reuses the existing `github_token` secret. The PAT **must have write scope** on the vault
-  (repotools only needs read). Pushes are authenticated by a per-user localhost git-auth proxy, so the
-  token never enters the agent subprocess — see architecture docs (Security Model).
-- Guidance (vault conventions, git workflow) is seeded as a `knowledge` skill in the user's
-  `home/.claude/skills/`; the agent loads it on demand.
-
-## Declarative Repos
-
-Read-only git repos can be declared per-user so they're cloned on boot and always available to the
-agent — no `repo_add` to remember, and they survive a volume wipe. Unlike the knowledge base these are
-**mirrors**: the clone is reset to the remote on every sync, so the agent browses them but never
-writes back.
-
-```yaml
-users:
-  - id: theo
-    repos:
-      - name: ha-config                        # directory alias under <user>/repos/
-        repo: owner/homeassistant-config       # owner/repo shorthand or full HTTPS URL
-        branch: main                           # optional, defaults to main
-        description: Live Home Assistant config mirror
-        channels: [homeassistant]              # optional; omit to expose on every channel
-```
-
-How it works:
-- On boot `provisionConfigRepos` registers each declared repo in the tracked-repo store (marked
-  `managed`) and clones or fetches it. A repo that can't be fetched is logged and skipped — the rest
-  of the session comes up regardless, and the agent can retry with `repo_sync`.
-- Config is the source of truth: dropping a repo from `tclaw.yaml` deletes its store entry and clone on
-  the next boot, and `repo_remove` refuses to delete a declared repo.
-- Repos added by the agent at runtime with `repo_add` keep working and are untouched by reconciliation.
-  They are unscoped, so every channel sees them.
-
-**Channel scoping** (`channels:`) is enforced in two places, since MCP tools have no way to know which
-channel a turn belongs to beyond the active-channel hook:
-- **Mounts** — each turn passes only the repos visible to that channel as `--add-dir`, and bwrap masks
-  the other clones behind an empty tmpfs so an unrestricted `Bash` tool can't read around the list.
-- **Tools** — `repo_list` omits repos scoped elsewhere, and `repo_sync` / `repo_log` / `repo_remove`
-  report them as not found. An unknown channel fails closed: scoped repos stay hidden.
-
-Scoping is not a hard boundary in local (macOS) development, where there is no sandbox — the `--add-dir`
-list still scopes the CLI, but nothing masks the directories on disk.
-
-**Auth**: private repos use the shared `github_token` secret. The token is passed to git per command as
-an HTTP `Authorization` header rather than embedded in the remote URL, because `.git/config` sits inside
-a directory bound into the agent's sandbox. Clones made by earlier versions have their token-bearing
-origin rewritten on the next fetch.
+Validation rejects a `knowledge.repo` that names no declared repo, or one whose tier cannot push —
+the agent commits and pushes the vault every turn, so a read-only vault would silently fail to save.
+Guidance (vault conventions, git workflow) is seeded as a `knowledge` skill in the user's
+`home/.claude/skills/`; the agent loads it on demand, and tclaw auto-syncs after every turn.
 
 ## Message Debounce
 
@@ -141,7 +173,7 @@ users:
 
 ## Secret Management
 - Secrets stored locally in OS keychain via `tclaw secret set NAME value`
-- `tclaw deploy secrets` scans `tclaw.yaml` for `${secret:NAME}` refs across all environments, reads each from keychain, pushes to Fly in one call
+- `tclaw deploy secrets` scans `tclaw.yaml` for `${boot:NAME}` refs across all environments, reads each from keychain, pushes to Fly in one call
 - At runtime: Fly injects secrets as env vars → config resolves them → `main.go` scrubs env vars before spawning Claude subprocesses
 - Per-user tool secrets (GitHub PAT, Fly API token) are deployed as `<PREFIX>_<USER>` Fly secrets and seeded into the encrypted store on boot (see architecture docs for the seeding pattern)
 

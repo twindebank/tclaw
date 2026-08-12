@@ -55,21 +55,43 @@ Four boundaries protect user data and the host system:
 - 1 MiB request body limit, audit logging, permission-gated via `tool_groups`.
 
 ### 4. Secret Boundary
+
+Secrets fall into three categories, distinguished by who creates the key and whether config can
+name it:
+
+- **Boot secrets** (`${boot:NAME}`) — operator-provisioned, resolved from the keychain or Fly as
+  config loads, then scrubbed from the environment. Never enter the store.
+- **Credential slots** (`credential_slots:`) — declared, seeded into `cred/<type>/<label>/<field>`,
+  and the only credentials the rest of the config can reference by name. A slot may be declared
+  without a value and filled later from a secret form, which is what lets a credential be set up
+  without a deploy.
+- **Runtime credentials** — OAuth tokens, per-channel transport tokens, remote MCP headers. Keyed by
+  the system and deliberately unreferenceable, so a repo can never point its auth at one.
+
+Two invariants hold across all three: **the agent may name a secret but never read one** (no tool
+returns a value; consumers read server-side and proxies inject at the network boundary), and
+**agent-facing keys are validated against `^[a-z0-9_]+$`**, which cannot express a slash — so nothing
+the agent names can reach the `cred/` or `channel/` namespaces.
 - NaCl secretbox encryption with per-user HKDF-derived keys. See `libraries/secret/`.
-- Config secrets via `${secret:NAME}` (keychain → env var fallback, then scrubbed).
+- Boot secrets via `${boot:NAME}` (keychain → env var fallback, then scrubbed).
 - Runtime secrets via encrypted store (agent-collected OAuth tokens, API keys).
 - Fly secrets seeded into encrypted store on boot, then scrubbed from env.
-- **Knowledge base git auth** — both the agent (ad-hoc) and the router's background auto-sync run raw
-  git against the knowledge-base clone, but the GitHub token is never exposed to either. A per-user
-  localhost reverse proxy (`internal/knowledgeproxy`) injects
-  `Authorization` server-side and pins requests to the one configured repo; the clone's remote is a
-  token-free `http://127.0.0.1:<port>/...` URL. Git's credential helper runs inside the sandbox, so
-  injecting auth at the network boundary is the only way to grant push capability without disclosure.
-- **Monitored repo git auth** — repo clones (`internal/tool/repotools`) never need git auth *inside* the
-  sandbox: only tclaw fetches them, and the agent's git use is read-only history inspection. So instead
-  of a proxy they keep a token-free origin and the token is passed per command as an HTTP
-  `Authorization` header. It cannot leak via `.git/config` (which lives in a bound directory) nor via
-  the process table, since the sandbox gets its own PID namespace and `/proc`.
+- **Git auth and repo access** — every repo clone, the knowledge vault included, points its origin at a
+  per-user localhost proxy (`internal/gitproxy`) rather than github.com. The proxy resolves the repo by
+  its tracked name, injects `Authorization` server-side from the repo's credential slot, and forwards
+  to a **fixed** github.com upstream — so a credential cannot reach another host whatever URL a repo
+  claims. Git's credential helper runs inside the sandbox, so injecting auth at the network boundary is
+  the only way to grant push capability without disclosure.
+
+  The proxy is also where **access tiers** are enforced, because the agent runs git itself and anything
+  checked tool-side is bypassable with raw git. `read_only` refuses the push advertisement;
+  `pull_requests_only` parses the pkt-line ref commands and refuses any write to the default branch,
+  plus tags and other non-branch refs; `full_write` passes through. A body that cannot be parsed — or
+  carries an encoding we do not decode — refuses the push rather than guessing at its effects.
+
+  Raising a repo's tier needs the user: `repo_request_access` arms a `PendingAction` and sends the
+  prompt straight to the chat, and only a genuine user reply confirms it (`internal/router/done.go`).
+  Confirmations expire, so a late "yes" cannot act on a forgotten prompt.
 - **Remote MCP auth** — the same pattern generalizes to every connected remote MCP server
   (`internal/remotemcpproxy`). The `--mcp-config` (bind-mounted read-only into the sandbox) points each
   remote at a token-free `http://127.0.0.1:<port>/<name>` URL carrying only a benign proxy-hop token;

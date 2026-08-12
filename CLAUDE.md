@@ -70,7 +70,7 @@ the top of `internal/tool/google/definitions.go` for the concrete steps to add o
 - **Deploys happen automatically via GitHub Actions CI** on push to main (`.github/workflows/deploy.yml`)
 - CI builds locally on the GitHub runner (7GB RAM) and pushes to Fly — avoids the remote builder OOM from gotd/td
 - `tclaw.yaml` is gitignored. The `TCLAW_YAML` GitHub secret holds a seed copy for first boot only — it never overwrites the live config on the persistent volume.
-- **NEVER commit or `git add` tclaw.yaml** — it contains `${secret:...}` refs and environment-specific config.
+- **NEVER commit or `git add` tclaw.yaml** — it contains `${boot:...}` refs and environment-specific config.
 - `fly.toml` is also gitignored — copy `fly.example.toml` and update the app name, or run `tclaw init`.
 - `tclaw config push` syncs local config to the remote volume (live) AND updates the seed secret.
 - **Local deploys** still work: `go run . deploy` builds with Docker and deploys via `fly deploy --local-only`
