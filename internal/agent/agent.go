@@ -168,10 +168,28 @@ type Options struct {
 	// If AddDirsFunc is set, it takes precedence over this static list.
 	AddDirs []string
 
-	// AddDirsFunc returns the current list of additional directories to mount.
-	// Called on every turn so newly created worktrees are accessible without
-	// restarting the agent. Falls back to AddDirs if nil.
-	AddDirsFunc func() []string
+	// AddDirsFunc returns the additional directories to mount for a turn on the
+	// given channel. Called on every turn so newly created worktrees are
+	// accessible without restarting the agent, and so channel-scoped mounts
+	// (repos declared for specific channels) can differ between turns. Falls
+	// back to AddDirs if nil.
+	AddDirsFunc func(channel.ChannelID) []string
+
+	// SandboxDirs returns directories bound into the sandbox for a turn but NOT
+	// passed to the CLI as --add-dir. Used for the repos parent directory:
+	// binding it keeps a repo cloned mid-turn immediately readable, while the
+	// --add-dir list stays scoped to the repos this channel may see.
+	SandboxDirs func(channel.ChannelID) []string
+
+	// ReadOnlyDirs returns directories that must be bound read-only for a turn,
+	// overlaying a writable parent. Repo clones use this: they are mirrors that
+	// repo_sync resets to the remote, so a local edit would be silently lost.
+	ReadOnlyDirs func(channel.ChannelID) []string
+
+	// MaskedDirs returns directories hidden behind an empty tmpfs for a turn.
+	// Repo clones scoped to other channels are masked so an unrestricted Bash
+	// tool cannot read around the --add-dir list.
+	MaskedDirs func(channel.ChannelID) []string
 
 	Channels map[channel.ChannelID]channel.Channel
 

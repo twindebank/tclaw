@@ -1,6 +1,7 @@
 package repotools
 
 import (
+	"encoding/base64"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,20 +11,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAuthenticatedURL(t *testing.T) {
-	t.Run("injects token into HTTPS URL", func(t *testing.T) {
-		got := authenticatedURL("https://github.com/user/repo", "ghp_abc123")
-		require.Equal(t, "https://ghp_abc123@github.com/user/repo", got)
+func TestAuthConfigArgs(t *testing.T) {
+	t.Run("carries the token as a Basic auth header", func(t *testing.T) {
+		got := authConfigArgs("ghp_abc123")
+		require.Equal(t, []string{
+			"-c",
+			"http.extraHeader=Authorization: Basic " +
+				base64.StdEncoding.EncodeToString([]byte("x-access-token:ghp_abc123")),
+		}, got)
 	})
 
-	t.Run("returns original URL when token is empty", func(t *testing.T) {
-		got := authenticatedURL("https://github.com/user/repo", "")
-		require.Equal(t, "https://github.com/user/repo", got)
-	})
-
-	t.Run("only replaces first https:// occurrence", func(t *testing.T) {
-		got := authenticatedURL("https://github.com/user/repo?redirect=https://example.com", "tok")
-		require.Equal(t, "https://tok@github.com/user/repo?redirect=https://example.com", got)
+	t.Run("returns no args when token is empty", func(t *testing.T) {
+		require.Nil(t, authConfigArgs(""))
 	})
 }
 
@@ -52,7 +51,7 @@ func TestCloneOrFetch(t *testing.T) {
 		repoDir := filepath.Join(t.TempDir(), "clone")
 		require.NoError(t, os.MkdirAll(repoDir, 0o755))
 
-		require.NoError(t, cloneOrFetch(repoDir, remote, "main", "", 50))
+		require.NoError(t, cloneMain(repoDir, remote))
 
 		_, err := os.Stat(filepath.Join(repoDir, ".git"))
 		require.NoError(t, err)
@@ -71,13 +70,13 @@ func TestCloneOrFetch(t *testing.T) {
 		repoDir := filepath.Join(t.TempDir(), "clone")
 		require.NoError(t, os.MkdirAll(repoDir, 0o755))
 
-		require.NoError(t, cloneOrFetch(repoDir, remote, "main", "", 50))
+		require.NoError(t, cloneMain(repoDir, remote))
 		sha1, err := headCommitSHA(repoDir, "main")
 		require.NoError(t, err)
 
 		addCommitToRemote(t, remote, "main", "second.txt", "second commit")
 
-		require.NoError(t, cloneOrFetch(repoDir, remote, "main", "", 50))
+		require.NoError(t, cloneMain(repoDir, remote))
 		sha2, err := headCommitSHA(repoDir, "main")
 		require.NoError(t, err)
 		require.NotEqual(t, sha1, sha2, "HEAD should advance after fetch")
@@ -97,7 +96,7 @@ func TestCloneOrFetch(t *testing.T) {
 		_, err := os.Stat(filepath.Join(repoDir, ".git"))
 		require.True(t, os.IsNotExist(err), ".git should not exist before clone")
 
-		require.NoError(t, cloneOrFetch(repoDir, remote, "main", "", 50))
+		require.NoError(t, cloneMain(repoDir, remote))
 
 		sha, err := headCommitSHA(repoDir, "main")
 		require.NoError(t, err)
@@ -114,10 +113,42 @@ func TestCloneOrFetch(t *testing.T) {
 		// Simulate a stale file left over from a previous code version.
 		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644))
 
-		require.NoError(t, cloneOrFetch(repoDir, remote, "main", "", 50))
+		require.NoError(t, cloneMain(repoDir, remote))
 
 		_, err := os.Stat(filepath.Join(repoDir, ".git"))
 		require.NoError(t, err, ".git should exist after re-clone")
+	})
+
+	t.Run("token never lands in .git/config", func(t *testing.T) {
+		// The clone directory is bound into the agent's sandbox, so a token in
+		// the remote URL would hand the agent a working GitHub PAT.
+		remote := createTestRemote(t, "main")
+		repoDir := filepath.Join(t.TempDir(), "clone")
+		require.NoError(t, os.MkdirAll(repoDir, 0o755))
+
+		require.NoError(t, cloneWithToken(repoDir, remote, "ghp_secret123"))
+		require.NotContains(t, gitConfigContents(t, repoDir), "ghp_secret123")
+
+		// And again on the fetch path, which rewrites the remote URL.
+		require.NoError(t, cloneWithToken(repoDir, remote, "ghp_secret123"))
+		require.NotContains(t, gitConfigContents(t, repoDir), "ghp_secret123")
+	})
+
+	t.Run("rewrites a token-bearing remote from an older clone", func(t *testing.T) {
+		remote := createTestRemote(t, "main")
+		repoDir := filepath.Join(t.TempDir(), "clone")
+		require.NoError(t, os.MkdirAll(repoDir, 0o755))
+		require.NoError(t, cloneMain(repoDir, remote))
+
+		// Simulate the pre-fix layout: token embedded in origin.
+		setRemoteURL(t, repoDir, "https://ghp_stale@github.com/user/repo")
+		require.Contains(t, gitConfigContents(t, repoDir), "ghp_stale")
+
+		require.NoError(t, cloneWithToken(repoDir, remote, "ghp_secret123"))
+		config := gitConfigContents(t, repoDir)
+		require.NotContains(t, config, "ghp_stale")
+		require.NotContains(t, config, "ghp_secret123")
+		require.Contains(t, config, remote)
 	})
 
 	t.Run("deleted files removed on fetch", func(t *testing.T) {
@@ -126,13 +157,13 @@ func TestCloneOrFetch(t *testing.T) {
 		require.NoError(t, os.MkdirAll(repoDir, 0o755))
 
 		addCommitToRemote(t, remote, "main", "ephemeral.txt", "will be deleted")
-		require.NoError(t, cloneOrFetch(repoDir, remote, "main", "", 50))
+		require.NoError(t, cloneMain(repoDir, remote))
 
 		_, err := os.Stat(filepath.Join(repoDir, "ephemeral.txt"))
 		require.NoError(t, err, "ephemeral.txt should exist after clone")
 
 		deleteFileInRemote(t, remote, "main", "ephemeral.txt")
-		require.NoError(t, cloneOrFetch(repoDir, remote, "main", "", 50))
+		require.NoError(t, cloneMain(repoDir, remote))
 
 		_, err = os.Stat(filepath.Join(repoDir, "ephemeral.txt"))
 		require.True(t, os.IsNotExist(err), "ephemeral.txt should be gone after fetch+reset")
@@ -143,14 +174,14 @@ func TestCommitLogSince(t *testing.T) {
 	remote := createTestRemote(t, "main")
 	repoDir := filepath.Join(t.TempDir(), "clone")
 	require.NoError(t, os.MkdirAll(repoDir, 0o755))
-	require.NoError(t, cloneOrFetch(repoDir, remote, "main", "", 50))
+	require.NoError(t, cloneMain(repoDir, remote))
 
 	firstSHA, err := headCommitSHA(repoDir, "main")
 	require.NoError(t, err)
 
 	addCommitToRemote(t, remote, "main", "a.txt", "commit A")
 	addCommitToRemote(t, remote, "main", "b.txt", "commit B")
-	require.NoError(t, cloneOrFetch(repoDir, remote, "main", "", 50))
+	require.NoError(t, cloneMain(repoDir, remote))
 
 	t.Run("returns commits since a SHA", func(t *testing.T) {
 		logOutput, err := commitLogSince(repoDir, "main", firstSHA, 50)
@@ -182,7 +213,7 @@ func TestCommitLogRecent(t *testing.T) {
 
 	addCommitToRemote(t, remote, "main", "a.txt", "commit A")
 	addCommitToRemote(t, remote, "main", "b.txt", "commit B")
-	require.NoError(t, cloneOrFetch(repoDir, remote, "main", "", 50))
+	require.NoError(t, cloneMain(repoDir, remote))
 
 	logOutput, err := commitLogRecent(repoDir, "main", 2)
 	require.NoError(t, err)
@@ -195,7 +226,7 @@ func TestHeadCommitSHA(t *testing.T) {
 	remote := createTestRemote(t, "main")
 	repoDir := filepath.Join(t.TempDir(), "clone")
 	require.NoError(t, os.MkdirAll(repoDir, 0o755))
-	require.NoError(t, cloneOrFetch(repoDir, remote, "main", "", 50))
+	require.NoError(t, cloneMain(repoDir, remote))
 
 	sha, err := headCommitSHA(repoDir, "main")
 	require.NoError(t, err)
@@ -207,7 +238,7 @@ func TestCountFiles(t *testing.T) {
 		remote := createTestRemote(t, "main")
 		repoDir := filepath.Join(t.TempDir(), "clone")
 		require.NoError(t, os.MkdirAll(repoDir, 0o755))
-		require.NoError(t, cloneOrFetch(repoDir, remote, "main", "", 50))
+		require.NoError(t, cloneMain(repoDir, remote))
 
 		count := countFiles(repoDir)
 		// Should be 1 (init.txt), not 2 (init.txt + .git).
@@ -216,6 +247,32 @@ func TestCountFiles(t *testing.T) {
 }
 
 // --- helpers ---
+
+// cloneMain clones or refreshes the test remote's main branch into repoDir.
+func cloneMain(repoDir, remote string) error {
+	return CloneOrFetch(CloneParams{RepoDir: repoDir, URL: remote, Branch: "main", Depth: 50})
+}
+
+// cloneWithToken is cloneMain with authentication, for asserting where the
+// token does and doesn't end up.
+func cloneWithToken(repoDir, remote, token string) error {
+	return CloneOrFetch(CloneParams{RepoDir: repoDir, URL: remote, Branch: "main", Token: token, Depth: 50})
+}
+
+// gitConfigContents reads the clone's .git/config.
+func gitConfigContents(t *testing.T, repoDir string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoDir, ".git", "config"))
+	require.NoError(t, err)
+	return string(data)
+}
+
+// setRemoteURL points the clone's origin at url.
+func setRemoteURL(t *testing.T, repoDir, url string) {
+	t.Helper()
+	out, err := exec.Command("git", "-C", repoDir, "remote", "set-url", "origin", url).CombinedOutput()
+	require.NoError(t, err, "git remote set-url: %s", string(out))
+}
 
 // createTestRemote creates a non-bare git repo with one commit, usable as a
 // local "remote" for clone/fetch operations.

@@ -282,9 +282,20 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 // the same as the input sessionID or a new one from the first invocation).
 func handle(ctx context.Context, opts Options, sessionID string, msg channel.TaggedMessage) (string, error) {
 	// Resolve add-dirs fresh each turn so worktrees created mid-session
-	// (via dev_start) are immediately accessible in the sandbox.
+	// (via dev_start) are immediately accessible in the sandbox, and so mounts
+	// scoped to this message's channel are the ones bound.
 	if opts.AddDirsFunc != nil {
-		opts.AddDirs = opts.AddDirsFunc()
+		opts.AddDirs = opts.AddDirsFunc(msg.ChannelID)
+	}
+	var sandboxDirs, readOnlyDirs, maskedDirs []string
+	if opts.SandboxDirs != nil {
+		sandboxDirs = opts.SandboxDirs(msg.ChannelID)
+	}
+	if opts.ReadOnlyDirs != nil {
+		readOnlyDirs = opts.ReadOnlyDirs(msg.ChannelID)
+	}
+	if opts.MaskedDirs != nil {
+		maskedDirs = opts.MaskedDirs(msg.ChannelID)
 	}
 
 	slog.Info("handling message", "prompt_len", len(msg.Text), "channel", msg.ChannelID, "session_id", sessionID,
@@ -396,14 +407,16 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 			// creating malicious CLI hooks (SessionStart) via the agent's
 			// file access. The file is pre-seeded during seedUserMemory().
 			settingsPath := filepath.Join(opts.HomeDir, ".claude", "settings.json")
-			readOnlyOverlay := []string{settingsPath}
+			readOnlyOverlay := append([]string{settingsPath}, readOnlyDirs...)
 
 			readWrite := []string{opts.MemoryDir, opts.HomeDir}
 			readWrite = append(readWrite, opts.AddDirs...)
+			readWrite = append(readWrite, sandboxDirs...)
 			paths := sandboxPaths{
 				ReadWrite:       readWrite,
 				ReadOnly:        readOnly,
 				ReadOnlyOverlay: readOnlyOverlay,
+				Masked:          maskedDirs,
 			}
 			cmd = wrapWithSandbox(ctx, cmd, paths)
 		}

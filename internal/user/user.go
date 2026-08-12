@@ -40,6 +40,31 @@ type Config struct {
 	// Knowledge configures the personal knowledge base, or nil if the user
 	// has none.
 	Knowledge *Knowledge
+
+	// Repos are git repositories declared in config, cloned on boot and
+	// mounted read-only for the agent to browse.
+	Repos []Repo
+}
+
+// Repo is a config-declared git repository the agent can browse. Unlike the
+// knowledge base it is a read-only mirror: the clone is refreshed from the
+// remote and any local edit is discarded on the next sync.
+type Repo struct {
+	// Name is the directory alias under <user>/repos/ and the handle the repo
+	// tools take.
+	Name string
+
+	// URL is the full HTTPS clone URL, expanded from config shorthand.
+	URL string
+
+	// Branch is the branch tracked on the remote.
+	Branch string
+
+	// Description tells the agent what the repo is for.
+	Description string
+
+	// Channels restricts the repo to the named channels. Empty means all.
+	Channels []string
 }
 
 // Knowledge holds the resolved personal knowledge base settings for a user.

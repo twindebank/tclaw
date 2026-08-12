@@ -248,3 +248,84 @@ func TestValidate_Knowledge(t *testing.T) {
 		require.Contains(t, err.Error(), "repo is required")
 	})
 }
+
+func TestValidate_Repos(t *testing.T) {
+	t.Run("expands owner/repo shorthand and defaults the branch", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Repos = []RepoConfig{{Name: "ha-config", Repo: "owner/homeassistant-config"}}
+		require.NoError(t, validate(cfg))
+
+		require.Equal(t, "https://github.com/owner/homeassistant-config", cfg.Users[0].Repos[0].Repo)
+		require.Equal(t, "main", cfg.Users[0].Repos[0].Branch)
+	})
+
+	t.Run("accepts channel scoping that names a declared channel", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Repos = []RepoConfig{{
+			Name:     "ha-config",
+			Repo:     "owner/homeassistant-config",
+			Channels: []string{"main"},
+		}}
+		require.NoError(t, validate(cfg))
+	})
+
+	t.Run("rejects channel scoping that names an unknown channel", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Repos = []RepoConfig{{
+			Name:     "ha-config",
+			Repo:     "owner/homeassistant-config",
+			Channels: []string{"nope"},
+		}}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), `"nope" does not match any channel name`)
+	})
+
+	t.Run("rejects a missing repo", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Repos = []RepoConfig{{Name: "ha-config"}}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "repo is required")
+	})
+
+	t.Run("rejects a name that isn't a safe directory name", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Repos = []RepoConfig{{Name: "../escape", Repo: "owner/repo"}}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "alphanumeric/hyphens")
+	})
+
+	t.Run("rejects duplicate names", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Repos = []RepoConfig{
+			{Name: "ha-config", Repo: "owner/one"},
+			{Name: "ha-config", Repo: "owner/two"},
+		}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "duplicate name")
+	})
+}
+
+func TestUser_ToUserConfig_Repos(t *testing.T) {
+	t.Run("carries declared repos through to the user config", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Repos = []RepoConfig{{
+			Name:        "ha-config",
+			Repo:        "owner/homeassistant-config",
+			Description: "Home Assistant config mirror",
+			Channels:    []string{"main"},
+		}}
+		require.NoError(t, validate(cfg))
+
+		got := cfg.Users[0].ToUserConfig()
+		require.Len(t, got.Repos, 1)
+		require.Equal(t, "ha-config", got.Repos[0].Name)
+		require.Equal(t, "https://github.com/owner/homeassistant-config", got.Repos[0].URL)
+		require.Equal(t, "main", got.Repos[0].Branch)
+		require.Equal(t, "Home Assistant config mirror", got.Repos[0].Description)
+		require.Equal(t, []string{"main"}, got.Repos[0].Channels)
+	})
+}

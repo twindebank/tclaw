@@ -13,9 +13,10 @@ import (
 
 // Package implements toolpkg.Package for repository monitoring tools.
 type Package struct {
-	Store       *repo.Store
-	SecretStore secret.Store
-	UserDir     string
+	Store         *repo.Store
+	SecretStore   secret.Store
+	UserDir       string
+	ActiveChannel func() string
 }
 
 func (p *Package) Name() string { return "repo" }
@@ -55,9 +56,10 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 
 func (p *Package) Register(handler *mcp.Handler, ctx toolpkg.RegistrationContext) error {
 	RegisterTools(handler, Deps{
-		Store:       p.Store,
-		SecretStore: p.SecretStore,
-		UserDir:     p.UserDir,
+		Store:         p.Store,
+		SecretStore:   p.SecretStore,
+		UserDir:       p.UserDir,
+		ActiveChannel: p.ActiveChannel,
 	})
 	return nil
 }

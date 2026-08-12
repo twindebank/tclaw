@@ -207,9 +207,10 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 			ActiveChannel: p.ActiveChannel,
 		},
 		&repotools.Package{
-			Store:       p.RepoStore,
-			SecretStore: p.SecretStore,
-			UserDir:     p.UserDir,
+			Store:         p.RepoStore,
+			SecretStore:   p.SecretStore,
+			UserDir:       p.UserDir,
+			ActiveChannel: p.ActiveChannel,
 		},
 
 		// Standard packages.

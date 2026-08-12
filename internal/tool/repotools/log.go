@@ -56,6 +56,9 @@ func repoLogHandler(deps Deps) mcp.ToolHandler {
 		if err != nil {
 			return nil, err
 		}
+		if _, ok := deps.visibleTo(*tracked); !ok {
+			return nil, errNotVisible(tracked.Name)
+		}
 
 		count := a.Count
 		if count <= 0 {

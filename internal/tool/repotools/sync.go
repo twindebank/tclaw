@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -60,6 +61,11 @@ func repoSyncHandler(deps Deps) mcp.ToolHandler {
 		if err != nil {
 			return nil, err
 		}
+		if channelName, ok := deps.visibleTo(*tracked); !ok {
+			slog.Warn("refusing repo_sync for a repo scoped to other channels",
+				"repo", tracked.Name, "channel", channelName)
+			return nil, errNotVisible(tracked.Name)
+		}
 
 		depth := a.Depth
 		if depth <= 0 {
@@ -72,10 +78,22 @@ func repoSyncHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("create repo dir: %w", err)
 		}
 
-		// Read GitHub token for private repos. Public repos work without one.
-		token, _ := deps.SecretStore.Get(ctx, githubTokenKey)
+		// Read GitHub token for private repos. Public repos work without one,
+		// so a lookup failure is logged and the fetch attempted unauthenticated
+		// rather than failing the whole sync.
+		token, tokenErr := deps.SecretStore.Get(ctx, githubTokenKey)
+		if tokenErr != nil {
+			slog.Warn("failed to read github token, fetching unauthenticated",
+				"repo", tracked.Name, "err", tokenErr)
+		}
 
-		if err := cloneOrFetch(tracked.RepoDir, tracked.URL, tracked.Branch, token, depth); err != nil {
+		if err := CloneOrFetch(CloneParams{
+			RepoDir: tracked.RepoDir,
+			URL:     tracked.URL,
+			Branch:  tracked.Branch,
+			Token:   token,
+			Depth:   depth,
+		}); err != nil {
 			return nil, fmt.Errorf("fetch: %w", err)
 		}
 
