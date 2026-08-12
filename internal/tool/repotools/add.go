@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"time"
 
 	"tclaw/internal/mcp"
@@ -65,8 +65,12 @@ func repoAddHandler(deps Deps) mcp.ToolHandler {
 		if !validName.MatchString(a.Name) || len(a.Name) > 64 {
 			return nil, fmt.Errorf("name must be alphanumeric/hyphens, max 64 chars")
 		}
-		if !strings.HasPrefix(a.URL, "https://") {
-			return nil, fmt.Errorf("url must be an HTTPS URL")
+		// Every repo is fetched through the git proxy, which only ever talks to
+		// github.com. Accepting another host would register a repo that could
+		// never be fetched — and before the proxy existed, it was how a crafted
+		// URL could have a GitHub token sent somewhere else entirely.
+		if !isGitHubURL(a.URL) {
+			return nil, fmt.Errorf("url must be a GitHub HTTPS URL (https://github.com/owner/repo)")
 		}
 
 		branch := a.Branch
@@ -108,4 +112,14 @@ func repoAddHandler(deps Deps) mcp.ToolHandler {
 		}
 		return json.Marshal(result)
 	}
+}
+
+// isGitHubURL reports whether the URL points at github.com over HTTPS. Parsed
+// rather than prefix-matched so "https://github.com.evil.test/x" is rejected.
+func isGitHubURL(raw string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return parsed.Scheme == "https" && parsed.Host == "github.com"
 }

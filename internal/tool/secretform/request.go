@@ -32,7 +32,17 @@ func secretFormRequestDef() mcp.ToolDef {
 						"properties": {
 							"key": {
 								"type": "string",
-								"description": "Secret store key (lowercase alphanumeric + underscores only, e.g. 'github_token')"
+								"description": "Secret store key (lowercase alphanumeric + underscores only, e.g. 'resy_api_key'). Use this for a value a tool package declares, or an ad-hoc value you need to store. Exactly one of key or credential must be set."
+							},
+							"credential": {
+								"type": "object",
+								"description": "Fill a field of a credential slot declared in tclaw.yaml — the only way to set an operator credential such as a GitHub PAT. The slot must already exist; credential_list shows the declared ones. Exactly one of key or credential must be set.",
+								"properties": {
+									"type": {"type": "string", "description": "Slot type, e.g. 'git' or a tool package name."},
+									"label": {"type": "string", "description": "Slot label, e.g. 'default'."},
+									"field": {"type": "string", "description": "Field within the slot, e.g. 'token'."}
+								},
+								"required": ["type", "label", "field"]
 							},
 							"label": {
 								"type": "string",
@@ -51,7 +61,7 @@ func secretFormRequestDef() mcp.ToolDef {
 								"description": "If true, the field must be filled before submission. Defaults to true."
 							}
 						},
-						"required": ["key", "label"]
+						"required": ["label"]
 					},
 					"description": "Fields to collect from the user"
 				}
@@ -89,10 +99,10 @@ func secretFormRequestHandler(deps Deps, pending *sync.Map) mcp.ToolHandler {
 		if len(a.Fields) > maxFields {
 			return nil, fmt.Errorf("too many fields (max %d)", maxFields)
 		}
+		// Resolve destinations up front so an undeclared credential slot fails
+		// here rather than after the user has filled the form in.
+		resolved := make([]FormField, 0, len(a.Fields))
 		for i, f := range a.Fields {
-			if err := validateKey(f.Key, i); err != nil {
-				return nil, err
-			}
 			if f.Label == "" {
 				return nil, fmt.Errorf("field %d: label is required", i)
 			}
@@ -102,6 +112,11 @@ func secretFormRequestHandler(deps Deps, pending *sync.Map) mcp.ToolHandler {
 			if len(f.Description) > maxDescLen {
 				return nil, fmt.Errorf("field %d: description exceeds %d characters", i, maxDescLen)
 			}
+			target, err := resolveTarget(ctx, deps, f, i)
+			if err != nil {
+				return nil, err
+			}
+			resolved = append(resolved, target)
 		}
 
 		if deps.BaseURL == "" {
@@ -122,7 +137,7 @@ func secretFormRequestHandler(deps Deps, pending *sync.Map) mcp.ToolHandler {
 			ID:          id,
 			Title:       a.Title,
 			Description: a.Description,
-			Fields:      a.Fields,
+			Fields:      resolved,
 			CreatedAt:   time.Now(),
 			VerifyCode:  verifyCode,
 			Done:        make(chan struct{}),

@@ -26,6 +26,7 @@ import (
 	"tclaw/internal/config"
 	"tclaw/internal/credential"
 	"tclaw/internal/dev"
+	"tclaw/internal/gitproxy"
 	"tclaw/internal/libraries/logbuffer"
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/libraries/store"
@@ -61,9 +62,9 @@ type Router struct {
 	// channelRegistry maps channel types to their package implementations.
 	channelRegistry *channelpkg.Registry
 
-	// configCredentials holds pre-configured credential entries from tclaw.yaml.
+	// credentialSlots holds the credential slots declared in tclaw.yaml.
 	// Seeded into credential sets at startup.
-	configCredentials config.CredentialsConfig
+	credentialSlots []config.CredentialSlot
 
 	// configPath is the path to the active tclaw.yaml config file. The deploy
 	// tool copies it into the git checkout so remote builds include the real
@@ -122,19 +123,19 @@ type managedUser struct {
 // Zone 4 (mcp-config/): MCP config files, mounted read-only so the CLI can read --mcp-config.
 //
 // callback may be nil if OAuth is not configured.
-func New(baseDir string, env config.Env, configCredentials config.CredentialsConfig, callback *oauth.CallbackServer, publicURL string, logBuffer *logbuffer.Buffer, configPath string) *Router {
+func New(baseDir string, env config.Env, credentialSlots []config.CredentialSlot, callback *oauth.CallbackServer, publicURL string, logBuffer *logbuffer.Buffer, configPath string) *Router {
 	return &Router{
 		users:      make(map[user.ID]*managedUser),
 		mcpServers: make(map[user.ID]*mcp.Server),
 		baseDir:    baseDir,
 		env:        env,
 		// Provisioner is nil here — set per-user in startUser after telegramclient.RegisterTools.
-		channelRegistry:   channelall.NewRegistry(nil),
-		configCredentials: configCredentials,
-		callback:          callback,
-		publicURL:         publicURL,
-		logBuffer:         logBuffer,
-		configPath:        configPath,
+		channelRegistry: channelall.NewRegistry(nil),
+		credentialSlots: credentialSlots,
+		callback:        callback,
+		publicURL:       publicURL,
+		logBuffer:       logBuffer,
+		configPath:      configPath,
 	}
 }
 
@@ -198,9 +199,9 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	credMgr := credential.NewManager(s, secretStore)
 	mcpHandler := mcp.NewHandler()
 
-	// Seed config-level credentials into credential sets.
-	if err := seedConfigCredentials(ctx, credMgr, r.configCredentials); err != nil {
-		slog.Error("failed to seed config credentials", "user", mu.cfg.ID, "err", err)
+	// Create a credential set for every declared slot, filling any values config supplies.
+	if err := seedCredentialSlots(ctx, credMgr, r.credentialSlots); err != nil {
+		slog.Error("failed to seed credential slots", "user", mu.cfg.ID, "err", err)
 		return
 	}
 
@@ -237,27 +238,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		return
 	}
 	defer remoteMCPProxy.Stop(context.Background())
-
-	// Personal knowledge base: start the per-user git-auth proxy and provision the
-	// vault clone. The proxy injects the GitHub token server-side, so the agent can
-	// pull/push via raw git without the token entering its subprocess. Failures are
-	// logged, not fatal — the user session continues without the knowledge base.
-	if kc := mu.cfg.Knowledge; kc != nil {
-		if knowledgeProxy, kpErr := startKnowledgeProxy(mu.cfg.ID, kc, secretStore); kpErr != nil {
-			slog.Error("failed to start knowledge proxy", "user", mu.cfg.ID, "err", kpErr)
-		} else {
-			defer knowledgeProxy.Stop(context.Background())
-			if provErr := provisionKnowledgeClone(knowledgeProvisionParams{
-				Dir:         dirs.Knowledge,
-				RemoteURL:   knowledgeProxy.RemoteURL(),
-				Branch:      kc.Branch,
-				CommitName:  kc.CommitName,
-				CommitEmail: kc.CommitEmail,
-			}); provErr != nil {
-				slog.Error("failed to provision knowledge clone", "user", mu.cfg.ID, "err", provErr)
-			}
-		}
-	}
 
 	// buildRemoteMCPEntries lists the connected remote MCPs and returns config
 	// entries pointing at the auth proxy. Credentials are injected by the proxy
@@ -401,18 +381,44 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	repoStore := repo.NewStore(s)
 	onboardingStore := onboarding.NewStore(s)
 
+	// Every repo clone reaches GitHub through this proxy: it injects the token
+	// server-side so none lands in a .git/config the agent can read, and it
+	// enforces each repo's access tier at the transport, where raw git cannot
+	// route around it.
+	gitProxy, gitProxyErr := gitproxy.NewServer(gitproxy.Config{
+		Repos: newGitProxyLookup(repoStore, secretStore),
+	})
+	if gitProxyErr != nil {
+		slog.Error("failed to build git proxy", "user", mu.cfg.ID, "err", gitProxyErr)
+		return
+	}
+	if _, err := gitProxy.Start("127.0.0.1:0"); err != nil {
+		slog.Error("failed to start git proxy", "user", mu.cfg.ID, "err", err)
+		return
+	}
+	defer gitProxy.Stop(context.Background())
+
 	// Clone the repos declared in config so they're on disk before the first
 	// turn. Non-fatal: a repo that can't be fetched is logged and the session
 	// continues without it.
 	if len(mu.cfg.Repos) > 0 {
 		if err := provisionConfigRepos(ctx, reposProvisionParams{
-			UserID:  mu.cfg.ID,
-			UserDir: userDir,
-			Repos:   mu.cfg.Repos,
-			Store:   repoStore,
-			Secrets: secretStore,
+			UserID:    mu.cfg.ID,
+			UserDir:   userDir,
+			Repos:     mu.cfg.Repos,
+			Store:     repoStore,
+			RemoteURL: gitProxy.RemoteURL,
 		}); err != nil {
 			slog.Error("failed to provision config repos", "user", mu.cfg.ID, "err", err)
+		}
+	}
+
+	// The vault is one of those repos; all that remains is the git identity for
+	// the commits the agent makes on every turn. Failures are logged, not fatal
+	// — the session continues without the knowledge base.
+	if kc := mu.cfg.Knowledge; kc != nil {
+		if err := configureGitIdentity(dirs.Knowledge, kc.CommitName, kc.CommitEmail); err != nil {
+			slog.Error("failed to configure knowledge commit identity", "user", mu.cfg.ID, "err", err)
 		}
 	}
 
@@ -464,13 +470,20 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		DevStore:            devStore,
 		LogBuffer:           r.logBuffer,
 		RepoStore:           repoStore,
-		RemoteMCPManager:    remoteMCPMgr,
-		ConfigUpdater:       configUpdater,
-		BaseURL:             secretFormBaseURL,
-		RegisterHandler:     secretFormRegisterHandler,
-		OnboardingStore:     onboardingStore,
-		ModelStore:          s,
-		TelegramUserID:      mu.cfg.TelegramUserID,
+		RepoRemoteURL:       gitProxy.RemoteURL,
+		ArmRepoGrant: newRepoGrantArmer(armRepoGrantParams{
+			RuntimeState:  runtimeState,
+			ActiveChannel: activeChannelFunc,
+			Channels:      channelSet.Snapshot,
+			Send:          messageOutbox.Send,
+		}),
+		RemoteMCPManager: remoteMCPMgr,
+		ConfigUpdater:    configUpdater,
+		BaseURL:          secretFormBaseURL,
+		RegisterHandler:  secretFormRegisterHandler,
+		OnboardingStore:  onboardingStore,
+		ModelStore:       s,
+		TelegramUserID:   mu.cfg.TelegramUserID,
 	})
 
 	regCtx := toolpkg.RegistrationContext{
@@ -505,6 +518,17 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// periodically tears down ephemeral channels that have been idle past
 	// their timeout. Reads channel config each tick via the config writer.
 	go cleanupEphemeralChannels(ctx, mu.cfg.ID, configWriter, runtimeState, activityTracker, secretStore, provisioners, onChannelChange, messageQueue, channelSet.Snapshot, devStore)
+
+	// Repo lifecycle: expire access grants, drop unused clones, refresh mirrors
+	// on their fetch interval. Runs at user lifetime so a grant lapses whether
+	// or not a turn is in flight.
+	go sweepRepoLifecycles(ctx, repoSweepParams{
+		Store:     repoStore,
+		RemoteURL: gitProxy.RemoteURL,
+		Notify: func(ctx context.Context, channelNames []string, text string) {
+			notifyRepoChannels(ctx, channelNames, text, channelSet.Snapshot, messageOutbox.Send)
+		},
+	})
 
 	// knowledgeSyncMu serializes background vault syncs so an OnTurnEnd firing
 	// before the previous sync finished can't run concurrent git commands
@@ -860,10 +884,30 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 							activityTracker.MessageReceivedFrom(ch.Info().Name, source)
 						}
 					}
-					// Intercept messages that are responses to a pending channel_done
-					// confirmation. If the channel has PendingDone set (from a prior
-					// channel_done call), handle it here instead of passing to the agent.
-					if interceptPendingDone(agentCtx, msg, channelsFunc, runtimeState, configWriter, mu.cfg.ID, secretStore, provisioners, onChannelChange, memoryDir) {
+					// Intercept messages answering a confirmation the agent asked
+					// for (channel teardown, a repo access grant). Handled here
+					// rather than passed to the agent, so the agent can never
+					// answer its own prompt.
+					// Confirmation outcomes are reported straight to the chat via
+					// the outbox: the agent isn't running this turn, so there is
+					// nothing else to tell the user what happened.
+					notifyChannel := func(ctx context.Context, chID channel.ChannelID, text string) {
+						if _, sendErr := messageOutbox.Send(ctx, chID, text, channel.SendOpts{}); sendErr != nil {
+							slog.Error("failed to report confirmation outcome", "channel", chID, "err", sendErr)
+						}
+					}
+					if interceptPendingConfirmation(agentCtx, msg, confirmParams{
+						ChannelsFunc:    channelsFunc,
+						RuntimeState:    runtimeState,
+						ConfigWriter:    configWriter,
+						UserID:          mu.cfg.ID,
+						SecretStore:     secretStore,
+						Provisioners:    provisioners,
+						RepoStore:       repoStore,
+						Notify:          notifyChannel,
+						OnChannelChange: onChannelChange,
+						MemoryDir:       memoryDir,
+					}) {
 						continue
 					}
 					select {
@@ -953,9 +997,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				return []string{reposDir}
 			},
 			ReadOnlyDirs: func(chID channel.ChannelID) []string {
-				// Repo clones are mirrors — repo_sync resets them to the remote,
-				// so any edit the agent made would vanish without warning.
-				return resolveRepoMounts(ctx, repoStore, channelName(channelsFunc(), chID)).Visible
+				// A read-only repo is a mirror that repo_sync resets to the
+				// remote, so an edit would vanish without warning. A repo the
+				// agent may push from stays writable — committing needs it.
+				return resolveRepoMounts(ctx, repoStore, channelName(channelsFunc(), chID)).ReadOnly
 			},
 			MaskedDirs: func(chID channel.ChannelID) []string {
 				return resolveRepoMounts(ctx, repoStore, channelName(channelsFunc(), chID)).Masked

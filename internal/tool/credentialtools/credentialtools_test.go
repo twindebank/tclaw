@@ -31,7 +31,7 @@ func TestCredentialList_ShowsSets(t *testing.T) {
 	h, credMgr := setup(t)
 	ctx := context.Background()
 
-	_, err := credMgr.Add(ctx, "stub_api", "default", "")
+	_, err := credMgr.Add(ctx, credential.AddParams{Package: "stub_api", Label: "default"})
 	require.NoError(t, err)
 
 	result := callTool(t, h, "credential_list", map[string]any{})
@@ -48,9 +48,9 @@ func TestCredentialList_FilterByPackage(t *testing.T) {
 	h, credMgr := setup(t)
 	ctx := context.Background()
 
-	_, err := credMgr.Add(ctx, "stub_api", "default", "")
+	_, err := credMgr.Add(ctx, credential.AddParams{Package: "stub_api", Label: "default"})
 	require.NoError(t, err)
-	_, err = credMgr.Add(ctx, "stub_oauth", "work", "admin")
+	_, err = credMgr.Add(ctx, credential.AddParams{Package: "stub_oauth", Label: "work", Channel: "admin"})
 	require.NoError(t, err)
 
 	result := callTool(t, h, "credential_list", map[string]any{
@@ -102,7 +102,7 @@ func TestCredentialRemove(t *testing.T) {
 	h, credMgr := setup(t)
 	ctx := context.Background()
 
-	_, err := credMgr.Add(ctx, "stub_api", "default", "")
+	_, err := credMgr.Add(ctx, credential.AddParams{Package: "stub_api", Label: "default"})
 	require.NoError(t, err)
 
 	result := callTool(t, h, "credential_remove", map[string]any{
@@ -244,4 +244,53 @@ func (m *memorySecretStore) Set(_ context.Context, key, value string) error {
 func (m *memorySecretStore) Delete(_ context.Context, key string) error {
 	delete(m.data, key)
 	return nil
+}
+
+func TestCredentialClear(t *testing.T) {
+	t.Run("clears a value but keeps the credential declared", func(t *testing.T) {
+		h, credMgr := setup(t)
+		ctx := context.Background()
+
+		set, err := credMgr.Add(ctx, credential.AddParams{Package: "stub_api", Label: "default"})
+		require.NoError(t, err)
+		require.NoError(t, credMgr.SetField(ctx, set.ID, "api_key", "sk-live"))
+
+		result := callTool(t, h, "credential_clear", map[string]any{
+			"credential_set_id": "stub_api/default",
+			"field":             "api_key",
+		})
+
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(result, &got))
+		require.Equal(t, "cleared", got["status"])
+		require.Contains(t, got["message"], "secret_form_request", "should say how to refill it")
+
+		value, err := credMgr.GetField(ctx, set.ID, "api_key")
+		require.NoError(t, err)
+		require.Empty(t, value)
+
+		// The declaration must survive, otherwise anything referencing it breaks.
+		still, err := credMgr.Get(ctx, set.ID)
+		require.NoError(t, err)
+		require.NotNil(t, still)
+	})
+
+	t.Run("rejects an unknown credential set", func(t *testing.T) {
+		h, _ := setup(t)
+
+		err := callToolExpectError(t, h, "credential_clear", map[string]any{
+			"credential_set_id": "git/nope",
+			"field":             "token",
+		})
+		require.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("requires a field", func(t *testing.T) {
+		h, _ := setup(t)
+
+		err := callToolExpectError(t, h, "credential_clear", map[string]any{
+			"credential_set_id": "stub_api/default",
+		})
+		require.Contains(t, err.Error(), "field is required")
+	})
 }

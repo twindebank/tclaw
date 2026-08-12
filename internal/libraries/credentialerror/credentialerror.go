@@ -6,11 +6,16 @@
 //
 //	if apiKey == "" {
 //	    return nil, credentialerror.New(
-//	        "GitHub Configuration",
-//	        "A Personal Access Token with repo scope is needed",
-//	        credentialerror.Field{Key: "github_token", Label: "GitHub PAT"},
+//	        "Resy Configuration",
+//	        "An API key is needed",
+//	        credentialerror.Field{Key: "resy_api_key", Label: "Resy API key"},
 //	    )
 //	}
+//
+// For a credential held in a declared slot — anything under cred/ — use
+// SlotField instead of Key, since a form cannot address a slot by bare key:
+//
+//	credentialerror.SlotField("git", "default", "token", "GitHub PAT")
 package credentialerror
 
 import (
@@ -19,11 +24,29 @@ import (
 )
 
 // Field describes a single credential the user needs to provide.
-// These map directly to secret_form_request field definitions.
+// These map directly to secret_form_request field definitions: either a bare
+// store key, or a credential slot target.
 type Field struct {
-	Key         string `json:"key"`
-	Label       string `json:"label"`
-	Description string `json:"description,omitempty"`
+	Key         string           `json:"key,omitempty"`
+	Credential  *CredentialField `json:"credential,omitempty"`
+	Label       string           `json:"label"`
+	Description string           `json:"description,omitempty"`
+}
+
+// CredentialField addresses a field of a declared credential slot, mirroring
+// the credential target a secret form accepts.
+type CredentialField struct {
+	Type  string `json:"type"`
+	Label string `json:"label"`
+	Field string `json:"field"`
+}
+
+// SlotField builds a Field targeting a declared credential slot.
+func SlotField(slotType, slotLabel, field, label string) Field {
+	return Field{
+		Credential: &CredentialField{Type: slotType, Label: slotLabel, Field: field},
+		Label:      label,
+	}
 }
 
 // New returns an error with the CREDENTIALS_NEEDED marker. The agent's system

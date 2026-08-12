@@ -441,6 +441,33 @@ func seedRepo(t *testing.T, repoStore *repo.Store, userDir, name string, channel
 	return tracked
 }
 
+// setupWithGrants is setupOnChannel with grant requests captured rather than
+// sent, so a test can assert what the user would have been asked to confirm.
+func setupWithGrants(t *testing.T, channelName string) (*mcp.Handler, *repo.Store, string, *[]repotools.GrantRequest) {
+	t.Helper()
+	userDir := t.TempDir()
+
+	s, err := store.NewFS(filepath.Join(userDir, "state"))
+	require.NoError(t, err)
+
+	repoStore := repo.NewStore(s)
+	armed := &[]repotools.GrantRequest{}
+
+	handler := mcp.NewHandler()
+	repotools.RegisterTools(handler, repotools.Deps{
+		Store:         repoStore,
+		SecretStore:   &memorySecretStore{data: make(map[string]string)},
+		UserDir:       userDir,
+		ActiveChannel: func() string { return channelName },
+		ArmGrant: func(_ context.Context, request repotools.GrantRequest) error {
+			*armed = append(*armed, request)
+			return nil
+		},
+	})
+
+	return handler, repoStore, userDir, armed
+}
+
 // setup creates an MCP handler with repo tools wired to a temp directory.
 func setup(t *testing.T) (*mcp.Handler, *repo.Store, string) {
 	t.Helper()
@@ -555,4 +582,118 @@ func (m *memorySecretStore) Set(_ context.Context, key, value string) error {
 func (m *memorySecretStore) Delete(_ context.Context, key string) error {
 	delete(m.data, key)
 	return nil
+}
+
+func TestRepoRequestAccess(t *testing.T) {
+	t.Run("raising access asks the user and changes nothing yet", func(t *testing.T) {
+		h, repoStore, userDir, armed := setupWithGrants(t, "homeassistant")
+		seedRepo(t, repoStore, userDir, "ha-config", nil)
+
+		result := callTool(t, h, "repo_request_access", map[string]any{
+			"name":   "ha-config",
+			"access": "pull_requests_only",
+			"reason": "propose a fix to the thermostat automation",
+		})
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(result, &got))
+		require.Equal(t, "awaiting_confirmation", got["status"])
+		require.Len(t, *armed, 1)
+		require.Equal(t, repo.AccessPullRequestsOnly, (*armed)[0].Access)
+
+		// Nothing may change until the user actually answers.
+		unchanged, err := repoStore.Get(context.Background(), "ha-config")
+		require.NoError(t, err)
+		require.Empty(t, unchanged.Access)
+	})
+
+	t.Run("lowering access applies immediately", func(t *testing.T) {
+		h, repoStore, userDir, armed := setupWithGrants(t, "homeassistant")
+		tracked := seedRepo(t, repoStore, userDir, "ha-config", nil)
+		tracked.Access = repo.AccessFullWrite
+		require.NoError(t, repoStore.Put(context.Background(), tracked))
+
+		result := callTool(t, h, "repo_request_access", map[string]any{
+			"name":   "ha-config",
+			"access": "read_only",
+			"reason": "done with the change",
+		})
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(result, &got))
+		require.Equal(t, "applied", got["status"])
+		require.Empty(t, *armed, "giving up access needs no confirmation")
+
+		lowered, err := repoStore.Get(context.Background(), "ha-config")
+		require.NoError(t, err)
+		require.Equal(t, repo.AccessReadOnly, lowered.Access)
+	})
+
+	t.Run("converts a relative expiry to an instant", func(t *testing.T) {
+		h, repoStore, userDir, armed := setupWithGrants(t, "homeassistant")
+		seedRepo(t, repoStore, userDir, "ha-config", nil)
+
+		callTool(t, h, "repo_request_access", map[string]any{
+			"name":       "ha-config",
+			"access":     "pull_requests_only",
+			"reason":     "short-lived change",
+			"expires_in": "30d",
+		})
+
+		require.Len(t, *armed, 1)
+		expiry := (*armed)[0].DropToReadOnlyAt
+		require.WithinDuration(t, time.Now().Add(30*24*time.Hour), expiry, time.Minute)
+	})
+
+	t.Run("rejects an unknown tier, a missing reason and a bad expiry", func(t *testing.T) {
+		h, repoStore, userDir, _ := setupWithGrants(t, "homeassistant")
+		seedRepo(t, repoStore, userDir, "ha-config", nil)
+
+		err := callToolExpectError(t, h, "repo_request_access", map[string]any{
+			"name": "ha-config", "access": "write_everything", "reason": "because",
+		})
+		require.Contains(t, err.Error(), "unknown access")
+
+		err = callToolExpectError(t, h, "repo_request_access", map[string]any{
+			"name": "ha-config", "access": "full_write",
+		})
+		require.Contains(t, err.Error(), "reason is required")
+
+		err = callToolExpectError(t, h, "repo_request_access", map[string]any{
+			"name": "ha-config", "access": "full_write", "reason": "x", "expires_in": "soon",
+		})
+		require.Contains(t, err.Error(), "invalid expires_in")
+	})
+
+	t.Run("refuses a repo scoped to another channel", func(t *testing.T) {
+		h, repoStore, userDir, armed := setupWithGrants(t, "email")
+		seedRepo(t, repoStore, userDir, "ha-config", []string{"homeassistant"})
+
+		err := callToolExpectError(t, h, "repo_request_access", map[string]any{
+			"name": "ha-config", "access": "full_write", "reason": "x",
+		})
+		require.Contains(t, err.Error(), "no tracked repo named")
+		require.Empty(t, *armed)
+	})
+}
+
+func TestRepoAdd_RejectsNonGitHubRemotes(t *testing.T) {
+	// Every repo is fetched through the proxy, which only talks to github.com;
+	// before it existed, a crafted URL was how the PAT could be sent elsewhere.
+	tests := []struct{ name, url string }{
+		{name: "another host", url: "https://evil.example/x/y"},
+		{name: "lookalike host", url: "https://github.com.evil.example/x/y"},
+		{name: "plain http", url: "http://github.com/x/y"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, _, _ := setup(t)
+
+			err := callToolExpectError(t, h, "repo_add", map[string]string{
+				"name": "sneaky", "url": tt.url,
+			})
+			require.Contains(t, err.Error(), "GitHub HTTPS URL")
+		})
+	}
 }

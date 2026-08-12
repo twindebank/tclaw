@@ -37,7 +37,7 @@ local:
   users:
     - id: {{.UserID}}
       {{- if .APIKey}}
-      api_key: ${secret:ANTHROPIC_API_KEY}
+      api_key: ${boot:ANTHROPIC_API_KEY}
       {{- end}}
       model: {{.Model}}
       permission_mode: dontAsk

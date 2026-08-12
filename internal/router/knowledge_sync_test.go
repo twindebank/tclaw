@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -22,9 +23,7 @@ func TestSyncKnowledgeVault(t *testing.T) {
 		gitRun(t, remote, "config", "receive.denyCurrentBranch", "updateInstead")
 
 		dir := filepath.Join(t.TempDir(), "knowledge")
-		require.NoError(t, provisionKnowledgeClone(knowledgeProvisionParams{
-			Dir: dir, RemoteURL: remote, Branch: "main",
-		}))
+		cloneVault(t, dir, remote)
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "note.md"), []byte("hello"), 0o644))
 
 		syncKnowledgeVault(context.Background(), knowledgeSyncParams{
@@ -40,9 +39,7 @@ func TestSyncKnowledgeVault(t *testing.T) {
 	t.Run("pulls remote changes when there is nothing local to commit", func(t *testing.T) {
 		remote := createTestRemote(t, "main")
 		dir := filepath.Join(t.TempDir(), "knowledge")
-		require.NoError(t, provisionKnowledgeClone(knowledgeProvisionParams{
-			Dir: dir, RemoteURL: remote, Branch: "main",
-		}))
+		cloneVault(t, dir, remote)
 
 		// Someone else advances the vault directly on the remote.
 		require.NoError(t, os.WriteFile(filepath.Join(remote, "other.md"), []byte("from elsewhere"), 0o644))
@@ -61,9 +58,7 @@ func TestSyncKnowledgeVault(t *testing.T) {
 	t.Run("aborts a conflicted rebase and sends a notification-only alert", func(t *testing.T) {
 		remote := createTestRemote(t, "main")
 		dir := filepath.Join(t.TempDir(), "knowledge")
-		require.NoError(t, provisionKnowledgeClone(knowledgeProvisionParams{
-			Dir: dir, RemoteURL: remote, Branch: "main",
-		}))
+		cloneVault(t, dir, remote)
 
 		// Remote and local both edit the same line of the same file, guaranteeing
 		// a rebase conflict rather than a clean fast-forward or auto-merge.
@@ -109,9 +104,7 @@ func TestGitRebaseInProgress(t *testing.T) {
 	t.Run("false for an ordinary clone", func(t *testing.T) {
 		remote := createTestRemote(t, "main")
 		dir := filepath.Join(t.TempDir(), "knowledge")
-		require.NoError(t, provisionKnowledgeClone(knowledgeProvisionParams{
-			Dir: dir, RemoteURL: remote, Branch: "main",
-		}))
+		cloneVault(t, dir, remote)
 
 		require.False(t, gitRebaseInProgress(dir))
 	})
@@ -164,7 +157,17 @@ func (c *conflictRecordingChannel) Send(_ context.Context, text string, opts cha
 	return "msg-1", nil
 }
 func (c *conflictRecordingChannel) Edit(context.Context, channel.MessageID, string) error { return nil }
-func (c *conflictRecordingChannel) Done(context.Context) error                           { return nil }
+func (c *conflictRecordingChannel) Done(context.Context) error                            { return nil }
 func (c *conflictRecordingChannel) SplitStatusMessages() bool                             { return false }
 func (c *conflictRecordingChannel) Markup() channel.Markup                                { return channel.MarkupMarkdown }
 func (c *conflictRecordingChannel) StatusWrap() channel.StatusWrap                        { return channel.StatusWrap{} }
+
+// cloneVault clones a test remote into dir with the commit identity set,
+// standing in for what boot provisioning does for the vault repo.
+func cloneVault(t *testing.T, dir, remote string) {
+	t.Helper()
+	out, err := exec.Command("git", "-c", "core.hooksPath=/dev/null",
+		"clone", "--branch", "main", remote, dir).CombinedOutput()
+	require.NoError(t, err, "git clone: %s", string(out))
+	require.NoError(t, configureGitIdentity(dir, "", ""))
+}

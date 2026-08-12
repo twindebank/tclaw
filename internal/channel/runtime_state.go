@@ -22,10 +22,10 @@ type RuntimeState struct {
 	// TeardownState holds platform-specific cleanup info (e.g. Telegram bot username).
 	TeardownState TeardownState `json:"teardown_state,omitempty"`
 
-	// PendingDone is true when the agent has called channel_done and sent a
-	// confirmation prompt. The router intercepts the next inbound message:
-	// "yes" triggers teardown, anything else clears the flag.
-	PendingDone bool `json:"pending_done,omitempty"`
+	// PendingAction is set when the agent has asked the user to confirm
+	// something and sent the prompt. The router intercepts the next inbound
+	// message: "yes" performs the action, anything else clears it.
+	PendingAction *PendingAction `json:"pending_action,omitempty"`
 
 	// LastMessageAt is the time the most recent inbound message was received.
 	// Persisted so ephemeral cleanup can survive process restarts.
@@ -34,6 +34,59 @@ type RuntimeState struct {
 	// LastMessageSource is who sent the most recent message (e.g. "user", "schedule").
 	// Persisted alongside LastMessageAt for observability.
 	LastMessageSource MessageSource `json:"last_message_source,omitempty"`
+}
+
+// PendingActionKind identifies what a pending confirmation will do.
+type PendingActionKind string
+
+const (
+	// PendingChannelDone tears the channel down.
+	PendingChannelDone PendingActionKind = "channel_done"
+
+	// PendingRepoGrant raises a repo's access tier.
+	PendingRepoGrant PendingActionKind = "repo_grant"
+)
+
+// PendingAction is a confirmation the user has been asked for but has not yet
+// answered. It is the one boundary the agent cannot cross on its own: the
+// prompt is sent straight to the chat rather than through the agent, and only a
+// genuine user reply confirms it.
+type PendingAction struct {
+	// Kind selects which handler runs on confirmation.
+	Kind PendingActionKind `json:"kind"`
+
+	// Payload carries the kind's own parameters (e.g. which repo and tier).
+	// Opaque here so channel doesn't need to know about every caller.
+	Payload json.RawMessage `json:"payload,omitempty"`
+
+	// RequestedAt is when the prompt was sent.
+	RequestedAt time.Time `json:"requested_at"`
+
+	// ExpiresAt is when the confirmation stops being valid. A "yes" arriving
+	// after this is treated as an ordinary message, so a stale prompt answered
+	// hours later cannot silently grant something.
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// Expired reports whether the confirmation window has passed.
+func (p PendingAction) Expired(now time.Time) bool {
+	return !p.ExpiresAt.IsZero() && now.After(p.ExpiresAt)
+}
+
+// PendingConfirmationTTL is how long a confirmation prompt stays answerable.
+// Long enough for a reply from a phone, short enough that a "yes" typed into a
+// forgotten thread the next day doesn't act on a prompt the user has lost track of.
+const PendingConfirmationTTL = 30 * time.Minute
+
+// NewPendingAction builds a pending action armed for the standard window.
+func NewPendingAction(kind PendingActionKind, payload json.RawMessage) *PendingAction {
+	now := time.Now()
+	return &PendingAction{
+		Kind:        kind,
+		Payload:     payload,
+		RequestedAt: now,
+		ExpiresAt:   now.Add(PendingConfirmationTTL),
+	}
 }
 
 // RuntimeStateStore manages per-channel runtime state backed by the user's
