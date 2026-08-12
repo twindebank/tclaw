@@ -151,6 +151,25 @@ func TestCloneOrFetch(t *testing.T) {
 		require.Contains(t, config, remote)
 	})
 
+	t.Run("keeps local work when not resetting to the remote", func(t *testing.T) {
+		// A repo the agent can push from must survive a sync: resetting would
+		// discard the branch it is part-way through.
+		remote := createTestRemote(t, "main")
+		repoDir := filepath.Join(t.TempDir(), "clone")
+		require.NoError(t, os.MkdirAll(repoDir, 0o755))
+		require.NoError(t, cloneMain(repoDir, remote))
+
+		inProgress := filepath.Join(repoDir, "work-in-progress.txt")
+		require.NoError(t, os.WriteFile(inProgress, []byte("half-written"), 0o644))
+
+		require.NoError(t, CloneOrFetch(CloneParams{
+			RepoDir: repoDir, URL: remote, Branch: "main", Depth: 50,
+		}))
+
+		_, err := os.Stat(inProgress)
+		require.NoError(t, err, "uncommitted work must survive a fetch")
+	})
+
 	t.Run("deleted files removed on fetch", func(t *testing.T) {
 		remote := createTestRemote(t, "main")
 		repoDir := filepath.Join(t.TempDir(), "clone")
@@ -248,15 +267,16 @@ func TestCountFiles(t *testing.T) {
 
 // --- helpers ---
 
-// cloneMain clones or refreshes the test remote's main branch into repoDir.
+// cloneMain clones or refreshes the test remote's main branch into repoDir,
+// with mirror semantics: the working tree follows the remote exactly.
 func cloneMain(repoDir, remote string) error {
-	return CloneOrFetch(CloneParams{RepoDir: repoDir, URL: remote, Branch: "main", Depth: 50})
+	return CloneOrFetch(CloneParams{RepoDir: repoDir, URL: remote, Branch: "main", Depth: 50, ResetToRemote: true})
 }
 
 // cloneWithToken is cloneMain with authentication, for asserting where the
 // token does and doesn't end up.
 func cloneWithToken(repoDir, remote, token string) error {
-	return CloneOrFetch(CloneParams{RepoDir: repoDir, URL: remote, Branch: "main", Token: token, Depth: 50})
+	return CloneOrFetch(CloneParams{RepoDir: repoDir, URL: remote, Branch: "main", Token: token, Depth: 50, ResetToRemote: true})
 }
 
 // gitConfigContents reads the clone's .git/config.

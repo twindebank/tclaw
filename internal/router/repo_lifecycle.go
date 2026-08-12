@@ -138,10 +138,11 @@ func refreshRepo(ctx context.Context, tracked repo.TrackedRepo, now time.Time, p
 	}
 
 	if err := repotools.CloneOrFetch(repotools.CloneParams{
-		RepoDir: tracked.RepoDir,
-		URL:     params.RemoteURL(tracked.Name),
-		Branch:  tracked.Branch,
-		Depth:   configRepoSyncDepth,
+		RepoDir:       tracked.RepoDir,
+		URL:           params.RemoteURL(tracked.Name),
+		Branch:        tracked.Branch,
+		Depth:         configRepoSyncDepth,
+		ResetToRemote: !tracked.EffectiveAccess(now).AllowsPush(),
 	}); err != nil {
 		slog.Warn("repo sweep: background fetch failed", "repo", tracked.Name, "err", err)
 		return
