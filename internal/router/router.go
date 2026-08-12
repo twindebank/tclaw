@@ -398,30 +398,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	}
 	defer gitProxy.Stop(context.Background())
 
-	// Clone the repos declared in config so they're on disk before the first
-	// turn. Non-fatal: a repo that can't be fetched is logged and the session
-	// continues without it.
-	if len(mu.cfg.Repos) > 0 {
-		if err := provisionConfigRepos(ctx, reposProvisionParams{
-			UserID:    mu.cfg.ID,
-			UserDir:   userDir,
-			Repos:     mu.cfg.Repos,
-			Store:     repoStore,
-			RemoteURL: gitProxy.RemoteURL,
-		}); err != nil {
-			slog.Error("failed to provision config repos", "user", mu.cfg.ID, "err", err)
-		}
-	}
-
-	// The vault is one of those repos; all that remains is the git identity for
-	// the commits the agent makes on every turn. Failures are logged, not fatal
-	// — the session continues without the knowledge base.
-	if kc := mu.cfg.Knowledge; kc != nil {
-		if err := configureGitIdentity(dirs.Knowledge, kc.CommitName, kc.CommitEmail); err != nil {
-			slog.Error("failed to configure knowledge commit identity", "user", mu.cfg.ID, "err", err)
-		}
-	}
-
 	// Set up cross-channel messaging — lets channels send messages to
 	// each other via declared config links.
 	crossChannelMsgs := make(chan channel.TaggedMessage, 8)
@@ -504,6 +480,36 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Register all tool packages via the registry. This calls Register() on
 	// each package and auto-generates info tools.
 	registerCredentialSystem(ctx, mcpHandler, toolRegistry, credMgr, regCtx, string(mu.cfg.ID))
+
+	// Clone the repos declared in config so they're on disk before the first
+	// turn. Non-fatal: a repo that can't be fetched is logged and the session
+	// continues without it.
+	//
+	// After credential seeding, not before: the clones authenticate through the
+	// git proxy, which reads the token from its credential slot. Cloning first
+	// means fetching with an empty slot on the boot that introduces a new
+	// credential, and git answers a 401 by prompting for a username it will
+	// never get.
+	if len(mu.cfg.Repos) > 0 {
+		if err := provisionConfigRepos(ctx, reposProvisionParams{
+			UserID:    mu.cfg.ID,
+			UserDir:   userDir,
+			Repos:     mu.cfg.Repos,
+			Store:     repoStore,
+			RemoteURL: gitProxy.RemoteURL,
+		}); err != nil {
+			slog.Error("failed to provision config repos", "user", mu.cfg.ID, "err", err)
+		}
+	}
+
+	// The vault is one of those repos; all that remains is the git identity for
+	// the commits the agent makes on every turn. Failures are logged, not fatal
+	// — the session continues without the knowledge base.
+	if kc := mu.cfg.Knowledge; kc != nil {
+		if err := configureGitIdentity(dirs.Knowledge, kc.CommitName, kc.CommitEmail); err != nil {
+			slog.Error("failed to configure knowledge commit identity", "user", mu.cfg.ID, "err", err)
+		}
+	}
 
 	// Signal that all notifiers are registered so the notification manager
 	// can safely resubscribe persisted subscriptions.
