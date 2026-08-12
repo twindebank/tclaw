@@ -26,6 +26,7 @@ import (
 	"tclaw/internal/config"
 	"tclaw/internal/credential"
 	"tclaw/internal/dev"
+	"tclaw/internal/gitproxy"
 	"tclaw/internal/libraries/logbuffer"
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/libraries/store"
@@ -401,16 +402,33 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	repoStore := repo.NewStore(s)
 	onboardingStore := onboarding.NewStore(s)
 
+	// Every repo clone reaches GitHub through this proxy: it injects the token
+	// server-side so none lands in a .git/config the agent can read, and it
+	// enforces each repo's access tier at the transport, where raw git cannot
+	// route around it.
+	gitProxy, gitProxyErr := gitproxy.NewServer(gitproxy.Config{
+		Repos: newGitProxyLookup(repoStore, secretStore),
+	})
+	if gitProxyErr != nil {
+		slog.Error("failed to build git proxy", "user", mu.cfg.ID, "err", gitProxyErr)
+		return
+	}
+	if _, err := gitProxy.Start("127.0.0.1:0"); err != nil {
+		slog.Error("failed to start git proxy", "user", mu.cfg.ID, "err", err)
+		return
+	}
+	defer gitProxy.Stop(context.Background())
+
 	// Clone the repos declared in config so they're on disk before the first
 	// turn. Non-fatal: a repo that can't be fetched is logged and the session
 	// continues without it.
 	if len(mu.cfg.Repos) > 0 {
 		if err := provisionConfigRepos(ctx, reposProvisionParams{
-			UserID:  mu.cfg.ID,
-			UserDir: userDir,
-			Repos:   mu.cfg.Repos,
-			Store:   repoStore,
-			Secrets: secretStore,
+			UserID:    mu.cfg.ID,
+			UserDir:   userDir,
+			Repos:     mu.cfg.Repos,
+			Store:     repoStore,
+			RemoteURL: gitProxy.RemoteURL,
 		}); err != nil {
 			slog.Error("failed to provision config repos", "user", mu.cfg.ID, "err", err)
 		}
@@ -464,13 +482,20 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		DevStore:            devStore,
 		LogBuffer:           r.logBuffer,
 		RepoStore:           repoStore,
-		RemoteMCPManager:    remoteMCPMgr,
-		ConfigUpdater:       configUpdater,
-		BaseURL:             secretFormBaseURL,
-		RegisterHandler:     secretFormRegisterHandler,
-		OnboardingStore:     onboardingStore,
-		ModelStore:          s,
-		TelegramUserID:      mu.cfg.TelegramUserID,
+		RepoRemoteURL:       gitProxy.RemoteURL,
+		ArmRepoGrant: newRepoGrantArmer(armRepoGrantParams{
+			RuntimeState:  runtimeState,
+			ActiveChannel: activeChannelFunc,
+			Channels:      channelSet.Snapshot,
+			Send:          messageOutbox.Send,
+		}),
+		RemoteMCPManager: remoteMCPMgr,
+		ConfigUpdater:    configUpdater,
+		BaseURL:          secretFormBaseURL,
+		RegisterHandler:  secretFormRegisterHandler,
+		OnboardingStore:  onboardingStore,
+		ModelStore:       s,
+		TelegramUserID:   mu.cfg.TelegramUserID,
 	})
 
 	regCtx := toolpkg.RegistrationContext{
@@ -505,6 +530,17 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// periodically tears down ephemeral channels that have been idle past
 	// their timeout. Reads channel config each tick via the config writer.
 	go cleanupEphemeralChannels(ctx, mu.cfg.ID, configWriter, runtimeState, activityTracker, secretStore, provisioners, onChannelChange, messageQueue, channelSet.Snapshot, devStore)
+
+	// Repo lifecycle: expire access grants, drop unused clones, refresh mirrors
+	// on their fetch interval. Runs at user lifetime so a grant lapses whether
+	// or not a turn is in flight.
+	go sweepRepoLifecycles(ctx, repoSweepParams{
+		Store:     repoStore,
+		RemoteURL: gitProxy.RemoteURL,
+		Notify: func(ctx context.Context, channelNames []string, text string) {
+			notifyRepoChannels(ctx, channelNames, text, channelSet.Snapshot, messageOutbox.Send)
+		},
+	})
 
 	// knowledgeSyncMu serializes background vault syncs so an OnTurnEnd firing
 	// before the previous sync finished can't run concurrent git commands
@@ -973,9 +1009,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				return []string{reposDir}
 			},
 			ReadOnlyDirs: func(chID channel.ChannelID) []string {
-				// Repo clones are mirrors — repo_sync resets them to the remote,
-				// so any edit the agent made would vanish without warning.
-				return resolveRepoMounts(ctx, repoStore, channelName(channelsFunc(), chID)).Visible
+				// A read-only repo is a mirror that repo_sync resets to the
+				// remote, so an edit would vanish without warning. A repo the
+				// agent may push from stays writable — committing needs it.
+				return resolveRepoMounts(ctx, repoStore, channelName(channelsFunc(), chID)).ReadOnly
 			},
 			MaskedDirs: func(chID channel.ChannelID) []string {
 				return resolveRepoMounts(ctx, repoStore, channelName(channelsFunc(), chID)).Masked

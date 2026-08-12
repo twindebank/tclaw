@@ -18,6 +18,8 @@ type Package struct {
 	SecretStore   secret.Store
 	UserDir       string
 	ActiveChannel func() string
+	RemoteURL     func(name string) string
+	ArmGrant      func(ctx context.Context, params GrantRequest) error
 }
 
 func (p *Package) Name() string { return "repo" }
@@ -64,6 +66,8 @@ func (p *Package) Register(handler *mcp.Handler, ctx toolpkg.RegistrationContext
 		SecretStore:   p.SecretStore,
 		UserDir:       p.UserDir,
 		ActiveChannel: p.ActiveChannel,
+		RemoteURL:     p.RemoteURL,
+		ArmGrant:      p.ArmGrant,
 	})
 	return nil
 }

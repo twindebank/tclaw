@@ -95,6 +95,13 @@ type Params struct {
 	// Repo tools.
 	RepoStore *repo.Store
 
+	// RepoRemoteURL returns the git proxy remote for a repo, so fetches carry
+	// no credentials of their own.
+	RepoRemoteURL func(name string) string
+
+	// ArmRepoGrant asks the user to confirm an access grant.
+	ArmRepoGrant func(ctx context.Context, params repotools.GrantRequest) error
+
 	// Remote MCP tools.
 	RemoteMCPManager *remotemcpstore.Manager
 	ConfigUpdater    func(context.Context) error
@@ -211,6 +218,8 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 			SecretStore:   p.SecretStore,
 			UserDir:       p.UserDir,
 			ActiveChannel: p.ActiveChannel,
+			RemoteURL:     p.RepoRemoteURL,
+			ArmGrant:      p.ArmRepoGrant,
 		},
 
 		// Standard packages.
