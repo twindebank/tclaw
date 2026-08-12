@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"tclaw/internal/channel"
+	"tclaw/internal/repo"
 
 	"github.com/stretchr/testify/require"
 )
@@ -334,9 +335,9 @@ func TestValidate_Repos(t *testing.T) {
 	t.Run("accepts channel scoping that names a declared channel", func(t *testing.T) {
 		cfg := validConfig()
 		cfg.Users[0].Repos = []RepoConfig{{
-			Name:     "ha-config",
-			Repo:     "owner/homeassistant-config",
-			Channels: []string{"main"},
+			Name:              "ha-config",
+			Repo:              "owner/homeassistant-config",
+			VisibleToChannels: []string{"main"},
 		}}
 		require.NoError(t, validate(cfg))
 	})
@@ -344,9 +345,9 @@ func TestValidate_Repos(t *testing.T) {
 	t.Run("rejects channel scoping that names an unknown channel", func(t *testing.T) {
 		cfg := validConfig()
 		cfg.Users[0].Repos = []RepoConfig{{
-			Name:     "ha-config",
-			Repo:     "owner/homeassistant-config",
-			Channels: []string{"nope"},
+			Name:              "ha-config",
+			Repo:              "owner/homeassistant-config",
+			VisibleToChannels: []string{"nope"},
 		}}
 		err := validate(cfg)
 		require.Error(t, err)
@@ -379,16 +380,78 @@ func TestValidate_Repos(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "duplicate name")
 	})
+
+	t.Run("defaults access to read_only", func(t *testing.T) {
+		// Least privilege by default: push access is only ever explicit.
+		cfg := validConfig()
+		cfg.Users[0].Repos = []RepoConfig{{Name: "ha-config", Repo: "owner/repo"}}
+		require.NoError(t, validate(cfg))
+		require.Equal(t, repo.AccessReadOnly, cfg.Users[0].Repos[0].Access)
+	})
+
+	t.Run("rejects an unknown access tier", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Repos = []RepoConfig{{Name: "ha-config", Repo: "owner/repo", Access: "write_everything"}}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unknown access")
+	})
+
+	t.Run("accepts a credential naming a declared git slot", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CredentialSlots = []CredentialSlot{{Type: "git", Label: "homeassistant"}}
+		cfg.Users[0].Repos = []RepoConfig{{Name: "ha-config", Repo: "owner/repo", Credential: "homeassistant"}}
+		require.NoError(t, validate(cfg))
+	})
+
+	t.Run("rejects a credential with no matching slot", func(t *testing.T) {
+		// Otherwise this fails much later as an unhelpful auth error at fetch time.
+		cfg := validConfig()
+		cfg.Users[0].Repos = []RepoConfig{{Name: "ha-config", Repo: "owner/repo", Credential: "nope"}}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "does not match any credential_slots entry")
+	})
+
+	t.Run("parses the lifecycle timings", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Repos = []RepoConfig{{
+			Name:                 "ha-config",
+			Repo:                 "owner/repo",
+			FetchEvery:           "6h",
+			DropToReadOnlyAt:     "2026-12-01T00:00:00Z",
+			DropCloneIfUnusedFor: "2160h",
+		}}
+		require.NoError(t, validate(cfg))
+
+		got := cfg.Users[0].ToUserConfig().Repos[0]
+		require.Equal(t, 6*time.Hour, got.FetchEvery)
+		require.Equal(t, 2160*time.Hour, got.DropCloneIfUnusedFor)
+		require.Equal(t, 2026, got.DropToReadOnlyAt.Year())
+	})
+
+	t.Run("rejects malformed lifecycle timings", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Repos = []RepoConfig{{Name: "r", Repo: "owner/repo", FetchEvery: "soon"}}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "fetch_every")
+
+		cfg.Users[0].Repos = []RepoConfig{{Name: "r", Repo: "owner/repo", DropToReadOnlyAt: "next tuesday"}}
+		err = validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "drop_to_read_only_at")
+	})
 }
 
 func TestUser_ToUserConfig_Repos(t *testing.T) {
 	t.Run("carries declared repos through to the user config", func(t *testing.T) {
 		cfg := validConfig()
 		cfg.Users[0].Repos = []RepoConfig{{
-			Name:        "ha-config",
-			Repo:        "owner/homeassistant-config",
-			Description: "Home Assistant config mirror",
-			Channels:    []string{"main"},
+			Name:              "ha-config",
+			Repo:              "owner/homeassistant-config",
+			Description:       "Home Assistant config mirror",
+			VisibleToChannels: []string{"main"},
 		}}
 		require.NoError(t, validate(cfg))
 

@@ -83,18 +83,24 @@ func provisionConfigRepos(ctx context.Context, params reposProvisionParams) erro
 		// Preserve the sync cursor across restarts so repo_sync keeps reporting
 		// only what's new, rather than replaying recent history every boot.
 		entry := repo.TrackedRepo{
-			Name:        r.Name,
-			URL:         r.URL,
-			Branch:      r.Branch,
-			RepoDir:     repoDir,
-			Managed:     true,
-			Channels:    r.Channels,
-			Description: r.Description,
-			AddedAt:     time.Now(),
+			Name:                 r.Name,
+			URL:                  r.URL,
+			Branch:               r.Branch,
+			RepoDir:              repoDir,
+			Managed:              true,
+			Channels:             r.Channels,
+			Description:          r.Description,
+			Access:               r.Access,
+			Credential:           r.Credential,
+			FetchEvery:           r.FetchEvery,
+			DropToReadOnlyAt:     r.DropToReadOnlyAt,
+			DropCloneIfUnusedFor: r.DropCloneIfUnusedFor,
+			AddedAt:              time.Now(),
 		}
 		if existing, ok := tracked[r.Name]; ok {
 			entry.LastSeenCommit = existing.LastSeenCommit
 			entry.LastSyncedAt = existing.LastSyncedAt
+			entry.LastUsedAt = existing.LastUsedAt
 			entry.AddedAt = existing.AddedAt
 		}
 		if err := params.Store.Put(ctx, entry); err != nil {

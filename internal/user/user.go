@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"tclaw/internal/claudecli"
+	"tclaw/internal/repo"
 )
 
 // ID uniquely identifies a user across the system.
@@ -65,6 +66,24 @@ type Repo struct {
 
 	// Channels restricts the repo to the named channels. Empty means all.
 	Channels []string
+
+	// Access is what the agent may do with the remote.
+	Access repo.Access
+
+	// Credential is the git credential slot label authenticating this repo.
+	// Empty uses the default slot.
+	Credential string
+
+	// FetchEvery refreshes the clone in the background at this interval.
+	// Zero means it only refreshes on repo_sync.
+	FetchEvery time.Duration
+
+	// DropToReadOnlyAt withdraws push access at this instant. Zero never expires.
+	DropToReadOnlyAt time.Time
+
+	// DropCloneIfUnusedFor removes the clone from disk after this long unused.
+	// Zero keeps it indefinitely.
+	DropCloneIfUnusedFor time.Duration
 }
 
 // Knowledge holds the resolved personal knowledge base settings for a user.

@@ -18,6 +18,7 @@ import (
 	"tclaw/internal/claudecli"
 	"tclaw/internal/credential"
 	"tclaw/internal/libraries/secret"
+	"tclaw/internal/repo"
 	"tclaw/internal/toolgroup"
 	"tclaw/internal/user"
 
@@ -132,6 +133,18 @@ func ValidateCredentialSlotTypes(slots []CredentialSlot, knownTypes []string) er
 		}
 	}
 	return nil
+}
+
+// gitSlotLabels returns the labels of every declared git credential slot, which
+// is the set a repo's `credential` may name.
+func gitSlotLabels(cfg *Config) map[string]bool {
+	labels := make(map[string]bool)
+	for _, slot := range cfg.CredentialSlots {
+		if slot.Type == GitCredentialType {
+			labels[slot.Label] = true
+		}
+	}
+	return labels
 }
 
 // validateCredentialSlots checks slot shape and uniqueness, and that any channel
@@ -270,10 +283,69 @@ type RepoConfig struct {
 	// Description tells the agent what the repo is for. Surfaced by repo_list.
 	Description string `yaml:"description,omitempty"`
 
-	// Channels restricts the repo to the named channels — its clone is only
-	// mounted for turns on those channels and the repo tools refuse to touch it
-	// elsewhere. Empty means every channel sees it.
-	Channels []string `yaml:"channels,omitempty"`
+	// VisibleToChannels restricts the repo to the named channels — its clone is
+	// only mounted for turns on those channels and the repo tools refuse to
+	// touch it elsewhere. Empty means every channel sees it.
+	VisibleToChannels []string `yaml:"visible_to_channels,omitempty"`
+
+	// Access is what the agent may do with the remote: read_only,
+	// pull_requests_only, or full_write. Defaults to read_only.
+	Access repo.Access `yaml:"access,omitempty"`
+
+	// Credential names a credential_slots entry with type "git". Empty uses the
+	// default slot, so a repo needs its own only to be scoped to a narrower token.
+	Credential string `yaml:"credential,omitempty"`
+
+	// FetchEvery refreshes the clone in the background at this interval (Go
+	// duration, e.g. "6h"). Unset means the clone only refreshes on repo_sync.
+	FetchEvery string `yaml:"fetch_every,omitempty"`
+
+	// DropToReadOnlyAt withdraws push access at this instant (RFC3339). The repo
+	// and its clone stay; only the tier drops. An absolute time rather than a
+	// duration so it means the same thing on every boot instead of silently
+	// re-arming on restart.
+	DropToReadOnlyAt string `yaml:"drop_to_read_only_at,omitempty"`
+
+	// DropCloneIfUnusedFor removes the clone from disk after this long without
+	// use (Go duration). Disk hygiene only: the entry survives and the clone is
+	// recreated on the next sync.
+	DropCloneIfUnusedFor string `yaml:"drop_clone_if_unused_for,omitempty"`
+}
+
+// Lifecycle holds the parsed lifecycle timings of a repo declaration.
+type Lifecycle struct {
+	FetchEvery           time.Duration
+	DropToReadOnlyAt     time.Time
+	DropCloneIfUnusedFor time.Duration
+}
+
+// Lifecycle parses the repo's timing fields. Validation has already rejected
+// malformed values, so a parse failure here would be a bug; it returns zero
+// values for anything unset.
+func (r *RepoConfig) Lifecycle() (Lifecycle, error) {
+	var parsed Lifecycle
+	if r.FetchEvery != "" {
+		d, err := time.ParseDuration(r.FetchEvery)
+		if err != nil {
+			return Lifecycle{}, fmt.Errorf("fetch_every: %w", err)
+		}
+		parsed.FetchEvery = d
+	}
+	if r.DropCloneIfUnusedFor != "" {
+		d, err := time.ParseDuration(r.DropCloneIfUnusedFor)
+		if err != nil {
+			return Lifecycle{}, fmt.Errorf("drop_clone_if_unused_for: %w", err)
+		}
+		parsed.DropCloneIfUnusedFor = d
+	}
+	if r.DropToReadOnlyAt != "" {
+		at, err := time.Parse(time.RFC3339, r.DropToReadOnlyAt)
+		if err != nil {
+			return Lifecycle{}, fmt.Errorf("drop_to_read_only_at: %w", err)
+		}
+		parsed.DropToReadOnlyAt = at
+	}
+	return parsed, nil
 }
 
 // validRepoName matches the directory alias a repo is cloned into. Kept in sync
@@ -295,6 +367,17 @@ func (r *RepoConfig) normalize() error {
 	}
 	if r.Branch == "" {
 		r.Branch = "main"
+	}
+	if r.Access == "" {
+		// Least privilege by default: a repo only gains push access when
+		// someone says so explicitly.
+		r.Access = repo.AccessReadOnly
+	}
+	if !repo.ValidAccess(r.Access) {
+		return fmt.Errorf("repo %q: unknown access %q (known: %v)", r.Name, r.Access, repo.ValidAccessTiers())
+	}
+	if _, err := r.Lifecycle(); err != nil {
+		return fmt.Errorf("repo %q: %w", r.Name, err)
 	}
 	r.Repo = normalizeRepoURL(r.Repo)
 	return nil
@@ -670,10 +753,16 @@ func validate(cfg *Config) error {
 				return fmt.Errorf("user %q repos[%d]: duplicate name %q", u.ID, j, r.Name)
 			}
 			repoNames[r.Name] = true
-			for k, chName := range r.Channels {
+			for k, chName := range r.VisibleToChannels {
 				if !chNames[chName] {
-					return fmt.Errorf("user %q repo %q channels[%d]: %q does not match any channel name", u.ID, r.Name, k, chName)
+					return fmt.Errorf("user %q repo %q visible_to_channels[%d]: %q does not match any channel name", u.ID, r.Name, k, chName)
 				}
+			}
+			// A repo naming a credential slot that isn't declared would fail
+			// silently at fetch time with an unhelpful auth error.
+			if r.Credential != "" && !gitSlotLabels(cfg)[r.Credential] {
+				return fmt.Errorf("user %q repo %q: credential %q does not match any credential_slots entry with type %q",
+					u.ID, r.Name, r.Credential, GitCredentialType)
 			}
 		}
 	}
@@ -814,12 +903,24 @@ func (u *User) ToUserConfig() user.Config {
 	}
 	var repos []user.Repo
 	for _, r := range u.Repos {
+		// Validation has already rejected malformed timings, so a failure here
+		// would be a bug; log it and carry the repo through without them rather
+		// than dropping the repo entirely.
+		lifecycle, err := r.Lifecycle()
+		if err != nil {
+			slog.Error("config: unparseable repo lifecycle after validation", "repo", r.Name, "err", err)
+		}
 		repos = append(repos, user.Repo{
-			Name:        r.Name,
-			URL:         r.Repo,
-			Branch:      r.Branch,
-			Description: r.Description,
-			Channels:    r.Channels,
+			Name:                 r.Name,
+			URL:                  r.Repo,
+			Branch:               r.Branch,
+			Description:          r.Description,
+			Channels:             r.VisibleToChannels,
+			Access:               r.Access,
+			Credential:           r.Credential,
+			FetchEvery:           lifecycle.FetchEvery,
+			DropToReadOnlyAt:     lifecycle.DropToReadOnlyAt,
+			DropCloneIfUnusedFor: lifecycle.DropCloneIfUnusedFor,
 		})
 	}
 	return user.Config{
