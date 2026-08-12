@@ -1,5 +1,5 @@
-// Package config handles YAML configuration loading, validation, and secret resolution. Secrets
-// referenced as ${secret:NAME} are resolved from the OS keychain or environment variables.
+// Package config handles YAML configuration loading, validation, and secret resolution. Boot secrets
+// referenced as ${boot:NAME} are resolved from the OS keychain or environment variables.
 // config.Writer provides atomic read-modify-write mutations (temp file + rename) for runtime
 // changes made by channel and config tools.
 package config
@@ -484,7 +484,7 @@ type ChannelLink = channel.Link
 // TelegramChannelConfig holds Telegram-specific channel configuration.
 type TelegramChannelConfig struct {
 	// Token is the Telegram bot token from @BotFather.
-	// Supports secret references: ${secret:NAME}.
+	// Supports boot-secret references: ${boot:NAME}.
 	Token string `yaml:"token"`
 }
 
@@ -819,7 +819,7 @@ const (
 //
 // Supported syntax:
 //
-//	${secret:NAME}  — tries OS keychain for NAME, falls back to env var NAME
+//	${boot:NAME}  — tries OS keychain for NAME, falls back to env var NAME
 //	literal         — used as-is
 func resolveSecrets(cfg *Config) ([]string, error) {
 	var envVars []string
