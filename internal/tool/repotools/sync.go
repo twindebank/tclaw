@@ -87,6 +87,9 @@ func repoSyncHandler(deps Deps) mcp.ToolHandler {
 			URL:     remote,
 			Branch:  tracked.Branch,
 			Depth:   depth,
+			// Only a mirror is reset to the remote. Doing it to a repo the
+			// agent can push from would discard the branch it is working on.
+			ResetToRemote: !tracked.EffectiveAccess(time.Now()).AllowsPush(),
 		}); err != nil {
 			return nil, fmt.Errorf("fetch: %w", err)
 		}

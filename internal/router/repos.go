@@ -108,10 +108,11 @@ func provisionConfigRepos(ctx context.Context, params reposProvisionParams) erro
 		}
 
 		if err := repotools.CloneOrFetch(repotools.CloneParams{
-			RepoDir: repoDir,
-			URL:     params.RemoteURL(r.Name),
-			Branch:  r.Branch,
-			Depth:   configRepoSyncDepth,
+			RepoDir:       repoDir,
+			URL:           params.RemoteURL(r.Name),
+			Branch:        r.Branch,
+			Depth:         configRepoSyncDepth,
+			ResetToRemote: !entry.EffectiveAccess(time.Now()).AllowsPush(),
 		}); err != nil {
 			slog.Error("failed to clone config repo", "user", params.UserID, "repo", r.Name, "err", err)
 			continue
