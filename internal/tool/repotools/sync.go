@@ -12,12 +12,7 @@ import (
 	"tclaw/internal/mcp"
 )
 
-const (
-	defaultSyncDepth = 50
-
-	// githubTokenKey matches the devtools key so the same token is shared.
-	githubTokenKey = "github_token"
-)
+const defaultSyncDepth = 50
 
 const ToolSync = "repo_sync"
 
@@ -28,7 +23,7 @@ func repoSyncDef() mcp.ToolDef {
 			"Returns repo_dir — a full git clone where you can browse files with Read/Grep/Glob and run git commands (log, diff, blame, show) directly. " +
 			"Tracks the last-seen commit automatically — each sync reports only new commits since the previous check. " +
 			"Combine with schedule_create for periodic monitoring (e.g. daily sync + summarize). " +
-			"Public repos work without a token. Private repos need the GitHub token (same one used by dev workflow).",
+			"Fetches through tclaw's git proxy, which supplies the repo's credential — you never handle a token.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -78,21 +73,23 @@ func repoSyncHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("create repo dir: %w", err)
 		}
 
-		// Read GitHub token for private repos. Public repos work without one,
-		// so a lookup failure is logged and the fetch attempted unauthenticated
-		// rather than failing the whole sync.
-		token, tokenErr := deps.SecretStore.Get(ctx, githubTokenKey)
-		if tokenErr != nil {
-			slog.Warn("failed to read github token, fetching unauthenticated",
-				"repo", tracked.Name, "err", tokenErr)
+		// Fetch through the git proxy, which injects the repo's credential
+		// server-side. Nothing here handles a token, so none can reach the
+		// clone's .git/config — which lives in a directory bound into the
+		// sandbox.
+		remote := tracked.URL
+		if deps.RemoteURL != nil {
+			remote = deps.RemoteURL(tracked.Name)
 		}
 
 		if err := CloneOrFetch(CloneParams{
 			RepoDir: tracked.RepoDir,
-			URL:     tracked.URL,
+			URL:     remote,
 			Branch:  tracked.Branch,
-			Token:   token,
 			Depth:   depth,
+			// Only a mirror is reset to the remote. Doing it to a repo the
+			// agent can push from would discard the branch it is working on.
+			ResetToRemote: !tracked.EffectiveAccess(time.Now()).AllowsPush(),
 		}); err != nil {
 			return nil, fmt.Errorf("fetch: %w", err)
 		}
@@ -132,6 +129,8 @@ func repoSyncHandler(deps Deps) mcp.ToolHandler {
 		// Persist updated cursor.
 		tracked.LastSeenCommit = newHead
 		tracked.LastSyncedAt = time.Now()
+		// Freshness for the disk-hygiene sweep: a repo being synced is in use.
+		tracked.LastUsedAt = tracked.LastSyncedAt
 		if err := deps.Store.Put(ctx, *tracked); err != nil {
 			return nil, fmt.Errorf("save repo: %w", err)
 		}

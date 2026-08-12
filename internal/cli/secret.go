@@ -17,7 +17,7 @@ Commands:
   get <name>                      Retrieve a secret from the OS keychain
   delete <name>                   Remove a secret from the OS keychain
 
-Secrets stored here are resolved by ${secret:NAME} references in tclaw.yaml.
+Secrets stored here are resolved by ${boot:NAME} references in tclaw.yaml.
 `
 
 // Keychain namespace for config-level secrets (matches config/config.go).

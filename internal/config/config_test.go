@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"tclaw/internal/channel"
+	"tclaw/internal/repo"
 
 	"github.com/stretchr/testify/require"
 )
@@ -219,33 +220,117 @@ func TestUser_MessageDebounceDuration(t *testing.T) {
 }
 
 func TestValidate_Knowledge(t *testing.T) {
-	t.Run("expands owner/repo shorthand and defaults the branch", func(t *testing.T) {
+	withVault := func(access repo.Access) *Config {
 		cfg := validConfig()
-		cfg.Users[0].Knowledge = &KnowledgeConfig{Repo: "owner/knowledge-base"}
+		cfg.Users[0].Repos = []RepoConfig{{Name: "knowledge", Repo: "owner/personal-knowledge", Access: access}}
+		cfg.Users[0].Knowledge = &KnowledgeConfig{Repo: "knowledge"}
+		return cfg
+	}
+
+	t.Run("resolves the reference and mounts the vault at its default path", func(t *testing.T) {
+		cfg := withVault(repo.AccessFullWrite)
 		require.NoError(t, validate(cfg))
 
-		require.Equal(t, "https://github.com/owner/knowledge-base", cfg.Users[0].Knowledge.Repo)
-		require.Equal(t, "main", cfg.Users[0].Knowledge.Branch)
+		require.Equal(t, defaultKnowledgeMountAt, cfg.Users[0].Knowledge.MountAt)
+		require.Equal(t, defaultKnowledgeMountAt, cfg.Users[0].Repos[0].MountAt,
+			"the vault repo should clone to the knowledge path, not under repos/")
 	})
 
-	t.Run("leaves an explicit URL and branch untouched", func(t *testing.T) {
+	t.Run("rejects a reference to no declared repo", func(t *testing.T) {
 		cfg := validConfig()
-		cfg.Users[0].Knowledge = &KnowledgeConfig{
-			Repo:   "https://github.com/owner/knowledge-base.git",
-			Branch: "trunk",
-		}
-		require.NoError(t, validate(cfg))
-
-		require.Equal(t, "https://github.com/owner/knowledge-base.git", cfg.Users[0].Knowledge.Repo)
-		require.Equal(t, "trunk", cfg.Users[0].Knowledge.Branch)
+		cfg.Users[0].Knowledge = &KnowledgeConfig{Repo: "not-declared"}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "does not match any repos entry")
 	})
 
-	t.Run("rejects an empty repo", func(t *testing.T) {
+	t.Run("rejects a vault that cannot push", func(t *testing.T) {
+		// The agent commits and pushes the vault every turn, so a read-only
+		// tier would leave it silently failing to save.
+		cfg := withVault(repo.AccessReadOnly)
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "must be able to push")
+	})
+
+	t.Run("rejects an empty repo reference", func(t *testing.T) {
 		cfg := validConfig()
 		cfg.Users[0].Knowledge = &KnowledgeConfig{Repo: "  "}
 		err := validate(cfg)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "repo is required")
+	})
+}
+
+func TestValidate_CredentialSlots(t *testing.T) {
+	t.Run("accepts a slot with no fields", func(t *testing.T) {
+		// Declaring a slot without a value is the whole point: it can be
+		// referenced now and filled from a phone later.
+		cfg := validConfig()
+		cfg.Users[0].Repos = nil
+		cfg.CredentialSlots = []CredentialSlot{{
+			Type:        "git",
+			Label:       "homeassistant",
+			Description: "Scoped PAT",
+		}}
+		require.NoError(t, validate(cfg))
+	})
+
+	t.Run("accepts channel scoping that names a declared channel", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CredentialSlots = []CredentialSlot{{Type: "google", Label: "work", Channel: "main"}}
+		require.NoError(t, validate(cfg))
+	})
+
+	t.Run("rejects channel scoping that names an unknown channel", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CredentialSlots = []CredentialSlot{{Type: "google", Label: "work", Channel: "nope"}}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), `channel "nope" does not match any channel name`)
+	})
+
+	t.Run("rejects duplicate slots", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CredentialSlots = []CredentialSlot{
+			{Type: "git", Label: "default"},
+			{Type: "git", Label: "default"},
+		}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), `duplicate slot "git/default"`)
+	})
+
+	t.Run("rejects a type or label that is unsafe in a store key", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CredentialSlots = []CredentialSlot{{Type: "git/../etc", Label: "default"}}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "type")
+
+		cfg.CredentialSlots = []CredentialSlot{{Type: "git", Label: "../escape"}}
+		err = validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "label")
+	})
+}
+
+func TestValidateCredentialSlotTypes(t *testing.T) {
+	t.Run("accepts a known type", func(t *testing.T) {
+		require.NoError(t, ValidateCredentialSlotTypes(
+			[]CredentialSlot{{Type: "git", Label: "default"}},
+			[]string{"google", "git"},
+		))
+	})
+
+	t.Run("rejects a type nothing consumes and lists the known ones", func(t *testing.T) {
+		err := ValidateCredentialSlotTypes(
+			[]CredentialSlot{{Type: "gti", Label: "default"}},
+			[]string{"google", "git"},
+		)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), `unknown type "gti"`)
+		require.Contains(t, err.Error(), "google, git")
 	})
 }
 
@@ -262,9 +347,9 @@ func TestValidate_Repos(t *testing.T) {
 	t.Run("accepts channel scoping that names a declared channel", func(t *testing.T) {
 		cfg := validConfig()
 		cfg.Users[0].Repos = []RepoConfig{{
-			Name:     "ha-config",
-			Repo:     "owner/homeassistant-config",
-			Channels: []string{"main"},
+			Name:              "ha-config",
+			Repo:              "owner/homeassistant-config",
+			VisibleToChannels: []string{"main"},
 		}}
 		require.NoError(t, validate(cfg))
 	})
@@ -272,9 +357,9 @@ func TestValidate_Repos(t *testing.T) {
 	t.Run("rejects channel scoping that names an unknown channel", func(t *testing.T) {
 		cfg := validConfig()
 		cfg.Users[0].Repos = []RepoConfig{{
-			Name:     "ha-config",
-			Repo:     "owner/homeassistant-config",
-			Channels: []string{"nope"},
+			Name:              "ha-config",
+			Repo:              "owner/homeassistant-config",
+			VisibleToChannels: []string{"nope"},
 		}}
 		err := validate(cfg)
 		require.Error(t, err)
@@ -307,16 +392,78 @@ func TestValidate_Repos(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "duplicate name")
 	})
+
+	t.Run("defaults access to read_only", func(t *testing.T) {
+		// Least privilege by default: push access is only ever explicit.
+		cfg := validConfig()
+		cfg.Users[0].Repos = []RepoConfig{{Name: "ha-config", Repo: "owner/repo"}}
+		require.NoError(t, validate(cfg))
+		require.Equal(t, repo.AccessReadOnly, cfg.Users[0].Repos[0].Access)
+	})
+
+	t.Run("rejects an unknown access tier", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Repos = []RepoConfig{{Name: "ha-config", Repo: "owner/repo", Access: "write_everything"}}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unknown access")
+	})
+
+	t.Run("accepts a credential naming a declared git slot", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CredentialSlots = []CredentialSlot{{Type: "git", Label: "homeassistant"}}
+		cfg.Users[0].Repos = []RepoConfig{{Name: "ha-config", Repo: "owner/repo", Credential: "homeassistant"}}
+		require.NoError(t, validate(cfg))
+	})
+
+	t.Run("rejects a credential with no matching slot", func(t *testing.T) {
+		// Otherwise this fails much later as an unhelpful auth error at fetch time.
+		cfg := validConfig()
+		cfg.Users[0].Repos = []RepoConfig{{Name: "ha-config", Repo: "owner/repo", Credential: "nope"}}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "does not match any credential_slots entry")
+	})
+
+	t.Run("parses the lifecycle timings", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Repos = []RepoConfig{{
+			Name:                 "ha-config",
+			Repo:                 "owner/repo",
+			FetchEvery:           "6h",
+			DropToReadOnlyAt:     "2026-12-01T00:00:00Z",
+			DropCloneIfUnusedFor: "2160h",
+		}}
+		require.NoError(t, validate(cfg))
+
+		got := cfg.Users[0].ToUserConfig().Repos[0]
+		require.Equal(t, 6*time.Hour, got.FetchEvery)
+		require.Equal(t, 2160*time.Hour, got.DropCloneIfUnusedFor)
+		require.Equal(t, 2026, got.DropToReadOnlyAt.Year())
+	})
+
+	t.Run("rejects malformed lifecycle timings", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Repos = []RepoConfig{{Name: "r", Repo: "owner/repo", FetchEvery: "soon"}}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "fetch_every")
+
+		cfg.Users[0].Repos = []RepoConfig{{Name: "r", Repo: "owner/repo", DropToReadOnlyAt: "next tuesday"}}
+		err = validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "drop_to_read_only_at")
+	})
 }
 
 func TestUser_ToUserConfig_Repos(t *testing.T) {
 	t.Run("carries declared repos through to the user config", func(t *testing.T) {
 		cfg := validConfig()
 		cfg.Users[0].Repos = []RepoConfig{{
-			Name:        "ha-config",
-			Repo:        "owner/homeassistant-config",
-			Description: "Home Assistant config mirror",
-			Channels:    []string{"main"},
+			Name:              "ha-config",
+			Repo:              "owner/homeassistant-config",
+			Description:       "Home Assistant config mirror",
+			VisibleToChannels: []string{"main"},
 		}}
 		require.NoError(t, validate(cfg))
 

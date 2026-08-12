@@ -199,8 +199,8 @@ func extractImage(statusOutput string) string {
 	return ""
 }
 
-// secretRefPattern matches ${secret:NAME} references in config files.
-var secretRefPattern = regexp.MustCompile(`\$\{secret:([^}]+)\}`)
+// secretRefPattern matches ${boot:NAME} references in config files.
+var secretRefPattern = regexp.MustCompile(`\$\{boot:([^}]+)\}`)
 
 func deploySecrets() {
 	configPath := "tclaw.yaml"
@@ -217,10 +217,10 @@ func deploySecrets() {
 		os.Exit(1)
 	}
 
-	// Find all unique ${secret:NAME} references.
+	// Find all unique ${boot:NAME} references.
 	matches := secretRefPattern.FindAllStringSubmatch(string(data), -1)
 	if len(matches) == 0 {
-		fmt.Println("no ${secret:...} references found in config")
+		fmt.Println("no ${boot:...} references found in config")
 		return
 	}
 

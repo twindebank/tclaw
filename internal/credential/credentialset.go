@@ -36,6 +36,10 @@ type CredentialSet struct {
 	// means available on all channels.
 	Channel string `json:"channel,omitempty"`
 
+	// Description explains what the credential is for, carried over from the
+	// slot that declared it so credential_list can say why it exists.
+	Description string `json:"description,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -52,4 +56,29 @@ func (t OAuthTokens) Expired() bool {
 		return false
 	}
 	return time.Now().After(t.ExpiresAt.Add(-1 * time.Minute))
+}
+
+// The git credential namespace. Unlike every other type, "git" is not a tool
+// package: repo monitoring, the dev workflow and the knowledge base all talk to
+// the same GitHub account, so they share one set of slots rather than each
+// hardcoding a flat store key.
+const (
+	// GitType is the credential slot type for git and GitHub access.
+	GitType = "git"
+
+	// GitTokenField is the field within a git slot holding the personal access token.
+	GitTokenField = "token"
+
+	// DefaultLabel is the slot label used when a consumer names none.
+	DefaultLabel = "default"
+)
+
+// GitTokenKey returns the secret store key holding the GitHub token for a git
+// slot. An empty label resolves to the default slot, which is what a repo that
+// names no credential of its own uses.
+func GitTokenKey(label string) string {
+	if label == "" {
+		label = DefaultLabel
+	}
+	return FieldKey(NewCredentialSetID(GitType, label), GitTokenField)
 }

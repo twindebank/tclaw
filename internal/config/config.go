@@ -1,5 +1,5 @@
-// Package config handles YAML configuration loading, validation, and secret resolution. Secrets
-// referenced as ${secret:NAME} are resolved from the OS keychain or environment variables.
+// Package config handles YAML configuration loading, validation, and secret resolution. Boot secrets
+// referenced as ${boot:NAME} are resolved from the OS keychain or environment variables.
 // config.Writer provides atomic read-modify-write mutations (temp file + rename) for runtime
 // changes made by channel and config tools.
 package config
@@ -16,7 +16,9 @@ import (
 
 	"tclaw/internal/channel"
 	"tclaw/internal/claudecli"
+	"tclaw/internal/credential"
 	"tclaw/internal/libraries/secret"
+	"tclaw/internal/repo"
 	"tclaw/internal/toolgroup"
 	"tclaw/internal/user"
 
@@ -52,10 +54,9 @@ type Config struct {
 	// Server configures the HTTP server (health checks, OAuth callbacks, webhooks).
 	Server ServerConfig `yaml:"server"`
 
-	// Credentials provides pre-configured OAuth client credentials keyed by
-	// tool package name (e.g. "google", "monzo"). These are seeded into the
-	// credential system at startup so the agent doesn't need to collect them.
-	Credentials CredentialsConfig `yaml:"credentials"`
+	// CredentialSlots declares the credentials tclaw may hold and what may
+	// reference them. Seeded into the credential system at startup.
+	CredentialSlots []CredentialSlot `yaml:"credential_slots"`
 
 	Users []User `yaml:"users"`
 }
@@ -72,16 +73,110 @@ type ServerConfig struct {
 	PublicURL string `yaml:"public_url"`
 }
 
-// CredentialsConfig maps tool package names to lists of credential entries.
-// Each key (e.g. "google", "monzo") matches the tool package's Name().
-// Entries are seeded into credential sets at startup.
-type CredentialsConfig map[string][]CredentialEntry
+// CredentialSlot declares a named place a credential goes. Declaring a slot says
+// how the credential is found and who may reference it — the value itself may not
+// be there yet, which is what lets a credential be declared here and filled later
+// from a phone via a secret form or an OAuth flow.
+//
+// Slots are the only credentials the rest of the config can name (a repo's
+// `credential:`, for instance). Everything else tclaw holds — OAuth tokens,
+// per-channel transport tokens, remote MCP headers — is keyed by the system and
+// deliberately unreferenceable.
+type CredentialSlot struct {
+	// Type is the subsystem the credential belongs to: a tool package name
+	// (e.g. "google"), or "git" for the namespace shared by repo tooling, the
+	// dev workflow and the knowledge base.
+	Type string `yaml:"type"`
 
-// CredentialEntry is a single credential set definition from the config file.
-type CredentialEntry struct {
-	Label   string            `yaml:"label"`
-	Channel string            `yaml:"channel,omitempty"`
-	Secrets map[string]string `yaml:"secrets"`
+	// Label distinguishes slots of the same type (e.g. "default", "work").
+	// Type and Label together form the credential set ID.
+	Label string `yaml:"label"`
+
+	// Channel restricts the slot to a single channel. Empty means every channel.
+	Channel string `yaml:"channel,omitempty"`
+
+	// Description explains what the credential is for. Surfaced by credential_list.
+	Description string `yaml:"description,omitempty"`
+
+	// Fields holds values keyed by the field names the consuming package
+	// declares (e.g. "token", "client_id"), usually as ${boot:NAME} references.
+	// Optional: a slot with no fields is created empty and filled at runtime.
+	Fields map[string]string `yaml:"fields,omitempty"`
+}
+
+// ID returns the credential set identifier this slot seeds, as "<type>/<label>".
+func (c CredentialSlot) ID() string {
+	return c.Type + "/" + c.Label
+}
+
+// GitCredentialType is the slot type shared by everything that talks to git and
+// GitHub — repo monitoring, the dev workflow and the knowledge base. It is the
+// one slot type that is not a tool package name.
+const GitCredentialType = credential.GitType
+
+// slotNamePattern restricts slot types and labels to characters that are safe in
+// a store key path segment.
+var slotNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+
+// ValidateCredentialSlotTypes checks every declared slot against the types that
+// actually consume credentials. Kept separate from validate because only the
+// tool registry knows the valid names, and config cannot import it.
+func ValidateCredentialSlotTypes(slots []CredentialSlot, knownTypes []string) error {
+	known := make(map[string]bool, len(knownTypes))
+	for _, t := range knownTypes {
+		known[t] = true
+	}
+	for i, slot := range slots {
+		if !known[slot.Type] {
+			return fmt.Errorf("credential_slots[%d]: unknown type %q (known: %s)",
+				i, slot.Type, strings.Join(knownTypes, ", "))
+		}
+	}
+	return nil
+}
+
+// gitSlotLabels returns the labels of every declared git credential slot, which
+// is the set a repo's `credential` may name.
+func gitSlotLabels(cfg *Config) map[string]bool {
+	labels := make(map[string]bool)
+	for _, slot := range cfg.CredentialSlots {
+		if slot.Type == GitCredentialType {
+			labels[slot.Label] = true
+		}
+	}
+	return labels
+}
+
+// validateCredentialSlots checks slot shape and uniqueness, and that any channel
+// scoping names a channel some user actually declares. The slot's type is checked
+// against the registered tool packages later, at seeding time, since only the
+// tool registry knows the valid names.
+func validateCredentialSlots(cfg *Config) error {
+	channelNames := make(map[string]bool)
+	for _, u := range cfg.Users {
+		for _, ch := range u.Channels {
+			channelNames[ch.Name] = true
+		}
+	}
+
+	seen := make(map[string]bool, len(cfg.CredentialSlots))
+	for i, slot := range cfg.CredentialSlots {
+		if !slotNamePattern.MatchString(slot.Type) {
+			return fmt.Errorf("credential_slots[%d]: type %q must match %s", i, slot.Type, slotNamePattern.String())
+		}
+		if !slotNamePattern.MatchString(slot.Label) {
+			return fmt.Errorf("credential_slots[%d] (%s): label %q must match %s", i, slot.ID(), slot.Label, slotNamePattern.String())
+		}
+		if seen[slot.ID()] {
+			return fmt.Errorf("credential_slots[%d]: duplicate slot %q", i, slot.ID())
+		}
+		seen[slot.ID()] = true
+
+		if slot.Channel != "" && !channelNames[slot.Channel] {
+			return fmt.Errorf("credential_slots[%d] (%s): channel %q does not match any channel name", i, slot.ID(), slot.Channel)
+		}
+	}
+	return nil
 }
 
 // User defines per-user agent configuration.
@@ -131,12 +226,15 @@ type UserTelegramConfig struct {
 // authenticated server-side (see internal/knowledgeproxy) so the token never
 // reaches the agent subprocess. Auth reuses the shared "github_token" secret.
 type KnowledgeConfig struct {
-	// Repo is the vault repository. Accepts "owner/repo" shorthand (expanded to
-	// https://github.com/owner/repo) or a full HTTPS URL.
+	// Repo names a repos[] entry — the vault is an ordinary declared repo, so
+	// its URL, branch, access and credential are configured there like any
+	// other. What remains here is only what is genuinely vault-specific.
 	Repo string `yaml:"repo"`
 
-	// Branch is the branch the agent reads and pushes to. Defaults to "main".
-	Branch string `yaml:"branch,omitempty"`
+	// MountAt is the directory under <user>/ the vault is cloned into.
+	// Defaults to "knowledge", which is the path the system prompt and the
+	// knowledge skill refer to.
+	MountAt string `yaml:"mount_at,omitempty"`
 
 	// CommitName and CommitEmail set the git identity used for agent commits.
 	// Optional; a tclaw noreply identity is used when empty.
@@ -144,18 +242,21 @@ type KnowledgeConfig struct {
 	CommitEmail string `yaml:"commit_email,omitempty"`
 }
 
-// normalize fills defaults and expands "owner/repo" shorthand into a full HTTPS
-// URL. Mutates the receiver in place.
+// normalize fills defaults. Mutates the receiver in place.
 func (k *KnowledgeConfig) normalize() error {
 	if strings.TrimSpace(k.Repo) == "" {
-		return fmt.Errorf("repo is required")
+		return fmt.Errorf("repo is required — name a repos entry to use as the vault")
 	}
-	if k.Branch == "" {
-		k.Branch = "main"
+	if k.MountAt == "" {
+		k.MountAt = defaultKnowledgeMountAt
 	}
-	k.Repo = normalizeRepoURL(k.Repo)
 	return nil
 }
+
+// defaultKnowledgeMountAt is where the vault lands under the user directory.
+// The system prompt refers to it as ../knowledge, so moving it means changing
+// that too.
+const defaultKnowledgeMountAt = "knowledge"
 
 // normalizeRepoURL expands an "owner/repo" shorthand to a github.com HTTPS URL,
 // leaving explicit http(s) URLs untouched.
@@ -188,10 +289,74 @@ type RepoConfig struct {
 	// Description tells the agent what the repo is for. Surfaced by repo_list.
 	Description string `yaml:"description,omitempty"`
 
-	// Channels restricts the repo to the named channels — its clone is only
-	// mounted for turns on those channels and the repo tools refuse to touch it
-	// elsewhere. Empty means every channel sees it.
-	Channels []string `yaml:"channels,omitempty"`
+	// VisibleToChannels restricts the repo to the named channels — its clone is
+	// only mounted for turns on those channels and the repo tools refuse to
+	// touch it elsewhere. Empty means every channel sees it.
+	VisibleToChannels []string `yaml:"visible_to_channels,omitempty"`
+
+	// Access is what the agent may do with the remote: read_only,
+	// pull_requests_only, or full_write. Defaults to read_only.
+	Access repo.Access `yaml:"access,omitempty"`
+
+	// Credential names a credential_slots entry with type "git". Empty uses the
+	// default slot, so a repo needs its own only to be scoped to a narrower token.
+	Credential string `yaml:"credential,omitempty"`
+
+	// FetchEvery refreshes the clone in the background at this interval (Go
+	// duration, e.g. "6h"). Unset means the clone only refreshes on repo_sync.
+	FetchEvery string `yaml:"fetch_every,omitempty"`
+
+	// DropToReadOnlyAt withdraws push access at this instant (RFC3339). The repo
+	// and its clone stay; only the tier drops. An absolute time rather than a
+	// duration so it means the same thing on every boot instead of silently
+	// re-arming on restart.
+	DropToReadOnlyAt string `yaml:"drop_to_read_only_at,omitempty"`
+
+	// DropCloneIfUnusedFor removes the clone from disk after this long without
+	// use (Go duration). Disk hygiene only: the entry survives and the clone is
+	// recreated on the next sync.
+	DropCloneIfUnusedFor string `yaml:"drop_clone_if_unused_for,omitempty"`
+
+	// MountAt clones this repo into <user>/<mount_at> instead of the usual
+	// <user>/repos/<name>. Set by the knowledge config for the vault, whose
+	// path the system prompt and skill refer to directly.
+	MountAt string `yaml:"-"`
+}
+
+// Lifecycle holds the parsed lifecycle timings of a repo declaration.
+type Lifecycle struct {
+	FetchEvery           time.Duration
+	DropToReadOnlyAt     time.Time
+	DropCloneIfUnusedFor time.Duration
+}
+
+// Lifecycle parses the repo's timing fields. Validation has already rejected
+// malformed values, so a parse failure here would be a bug; it returns zero
+// values for anything unset.
+func (r *RepoConfig) Lifecycle() (Lifecycle, error) {
+	var parsed Lifecycle
+	if r.FetchEvery != "" {
+		d, err := time.ParseDuration(r.FetchEvery)
+		if err != nil {
+			return Lifecycle{}, fmt.Errorf("fetch_every: %w", err)
+		}
+		parsed.FetchEvery = d
+	}
+	if r.DropCloneIfUnusedFor != "" {
+		d, err := time.ParseDuration(r.DropCloneIfUnusedFor)
+		if err != nil {
+			return Lifecycle{}, fmt.Errorf("drop_clone_if_unused_for: %w", err)
+		}
+		parsed.DropCloneIfUnusedFor = d
+	}
+	if r.DropToReadOnlyAt != "" {
+		at, err := time.Parse(time.RFC3339, r.DropToReadOnlyAt)
+		if err != nil {
+			return Lifecycle{}, fmt.Errorf("drop_to_read_only_at: %w", err)
+		}
+		parsed.DropToReadOnlyAt = at
+	}
+	return parsed, nil
 }
 
 // validRepoName matches the directory alias a repo is cloned into. Kept in sync
@@ -213,6 +378,17 @@ func (r *RepoConfig) normalize() error {
 	}
 	if r.Branch == "" {
 		r.Branch = "main"
+	}
+	if r.Access == "" {
+		// Least privilege by default: a repo only gains push access when
+		// someone says so explicitly.
+		r.Access = repo.AccessReadOnly
+	}
+	if !repo.ValidAccess(r.Access) {
+		return fmt.Errorf("repo %q: unknown access %q (known: %v)", r.Name, r.Access, repo.ValidAccessTiers())
+	}
+	if _, err := r.Lifecycle(); err != nil {
+		return fmt.Errorf("repo %q: %w", r.Name, err)
 	}
 	r.Repo = normalizeRepoURL(r.Repo)
 	return nil
@@ -308,7 +484,7 @@ type ChannelLink = channel.Link
 // TelegramChannelConfig holds Telegram-specific channel configuration.
 type TelegramChannelConfig struct {
 	// Token is the Telegram bot token from @BotFather.
-	// Supports secret references: ${secret:NAME}.
+	// Supports boot-secret references: ${boot:NAME}.
 	Token string `yaml:"token"`
 }
 
@@ -412,6 +588,10 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("no users defined")
 	}
 
+	if err := validateCredentialSlots(cfg); err != nil {
+		return err
+	}
+
 	seen := make(map[user.ID]bool)
 	for i, u := range cfg.Users {
 		if u.ID == "" {
@@ -449,11 +629,6 @@ func validate(cfg *Config) error {
 
 		// Knowledge is a pointer shared with cfg.Users[i], so normalizing through
 		// u.Knowledge also updates the stored config.
-		if u.Knowledge != nil {
-			if err := u.Knowledge.normalize(); err != nil {
-				return fmt.Errorf("user %q knowledge: %w", u.ID, err)
-			}
-		}
 
 		if len(u.Channels) == 0 {
 			return fmt.Errorf("user %q: no channels defined", u.ID)
@@ -584,11 +759,46 @@ func validate(cfg *Config) error {
 				return fmt.Errorf("user %q repos[%d]: duplicate name %q", u.ID, j, r.Name)
 			}
 			repoNames[r.Name] = true
-			for k, chName := range r.Channels {
+			for k, chName := range r.VisibleToChannels {
 				if !chNames[chName] {
-					return fmt.Errorf("user %q repo %q channels[%d]: %q does not match any channel name", u.ID, r.Name, k, chName)
+					return fmt.Errorf("user %q repo %q visible_to_channels[%d]: %q does not match any channel name", u.ID, r.Name, k, chName)
 				}
 			}
+			if r.MountAt != "" && r.MountAt != defaultKnowledgeMountAt && strings.ContainsAny(r.MountAt, `/\`) {
+				return fmt.Errorf("user %q repo %q: mount_at %q must be a single directory name", u.ID, r.Name, r.MountAt)
+			}
+			// A repo naming a credential slot that isn't declared would fail
+			// silently at fetch time with an unhelpful auth error.
+			if r.Credential != "" && !gitSlotLabels(cfg)[r.Credential] {
+				return fmt.Errorf("user %q repo %q: credential %q does not match any credential_slots entry with type %q",
+					u.ID, r.Name, r.Credential, GitCredentialType)
+			}
+		}
+
+		// The vault is an ordinary declared repo; knowledge only says which one
+		// it is and where it lands. Resolved after repos so the reference can be
+		// checked against them.
+		if u.Knowledge != nil {
+			if err := u.Knowledge.normalize(); err != nil {
+				return fmt.Errorf("user %q knowledge: %w", u.ID, err)
+			}
+			vault := -1
+			for j := range u.Repos {
+				if u.Repos[j].Name == u.Knowledge.Repo {
+					vault = j
+					break
+				}
+			}
+			if vault < 0 {
+				return fmt.Errorf("user %q knowledge: repo %q does not match any repos entry", u.ID, u.Knowledge.Repo)
+			}
+			// The agent commits and pushes the vault on every turn, so a tier
+			// that cannot push would leave it silently failing to save.
+			if !u.Repos[vault].Access.AllowsPush() {
+				return fmt.Errorf("user %q knowledge: repo %q has access %q, but the vault must be able to push (%q)",
+					u.ID, u.Knowledge.Repo, u.Repos[vault].Access, repo.AccessFullWrite)
+			}
+			u.Repos[vault].MountAt = u.Knowledge.MountAt
 		}
 	}
 
@@ -596,8 +806,12 @@ func validate(cfg *Config) error {
 }
 
 const (
-	secretRefPrefix = "${secret:"
-	refSuffix       = "}"
+	// bootRefPrefix marks a value supplied outside tclaw — the OS keychain
+	// locally, a Fly secret in prod — resolved as config loads and then
+	// scrubbed from the environment. Named for the category rather than
+	// "secret", which the credential slots below also use.
+	bootRefPrefix = "${boot:"
+	refSuffix     = "}"
 )
 
 // resolveSecrets expands secret references in config fields and returns the
@@ -605,7 +819,7 @@ const (
 //
 // Supported syntax:
 //
-//	${secret:NAME}  — tries OS keychain for NAME, falls back to env var NAME
+//	${boot:NAME}  — tries OS keychain for NAME, falls back to env var NAME
 //	literal         — used as-is
 func resolveSecrets(cfg *Config) ([]string, error) {
 	var envVars []string
@@ -637,20 +851,17 @@ func resolveSecrets(cfg *Config) ([]string, error) {
 		}
 	}
 
-	// Resolve credential secret references.
-	for pkg, entries := range cfg.Credentials {
-		for i, entry := range entries {
-			for key, val := range entry.Secrets {
-				resolved, envVar, err := resolveRef(val)
-				if err != nil {
-					return nil, fmt.Errorf("credentials.%s[%d].secrets.%s: %w", pkg, i, key, err)
-				}
-				entry.Secrets[key] = resolved
-				if envVar != "" {
-					envVars = append(envVars, envVar)
-				}
+	// Resolve credential slot field references.
+	for i, slot := range cfg.CredentialSlots {
+		for key, val := range slot.Fields {
+			resolved, envVar, err := resolveRef(val)
+			if err != nil {
+				return nil, fmt.Errorf("credential_slots[%d] (%s) fields.%s: %w", i, slot.ID(), key, err)
 			}
-			cfg.Credentials[pkg][i] = entry
+			slot.Fields[key] = resolved
+			if envVar != "" {
+				envVars = append(envVars, envVar)
+			}
 		}
 	}
 
@@ -660,12 +871,12 @@ func resolveSecrets(cfg *Config) ([]string, error) {
 // resolveRef resolves a single config value. Returns the resolved value and,
 // if an environment variable was read, its name (so callers can scrub it).
 func resolveRef(s string) (string, string, error) {
-	if !strings.HasPrefix(s, secretRefPrefix) || !strings.HasSuffix(s, refSuffix) {
-		// Not a secret reference — use as literal.
+	if !strings.HasPrefix(s, bootRefPrefix) || !strings.HasSuffix(s, refSuffix) {
+		// Not a boot-secret reference — use as literal.
 		return s, "", nil
 	}
 
-	name := s[len(secretRefPrefix) : len(s)-len(refSuffix)]
+	name := s[len(bootRefPrefix) : len(s)-len(refSuffix)]
 	return resolveSecret(name)
 }
 
@@ -720,19 +931,31 @@ func (u *User) ToUserConfig() user.Config {
 	if u.Knowledge != nil {
 		knowledge = &user.Knowledge{
 			Repo:        u.Knowledge.Repo,
-			Branch:      u.Knowledge.Branch,
 			CommitName:  u.Knowledge.CommitName,
 			CommitEmail: u.Knowledge.CommitEmail,
 		}
 	}
 	var repos []user.Repo
 	for _, r := range u.Repos {
+		// Validation has already rejected malformed timings, so a failure here
+		// would be a bug; log it and carry the repo through without them rather
+		// than dropping the repo entirely.
+		lifecycle, err := r.Lifecycle()
+		if err != nil {
+			slog.Error("config: unparseable repo lifecycle after validation", "repo", r.Name, "err", err)
+		}
 		repos = append(repos, user.Repo{
-			Name:        r.Name,
-			URL:         r.Repo,
-			Branch:      r.Branch,
-			Description: r.Description,
-			Channels:    r.Channels,
+			Name:                 r.Name,
+			URL:                  r.Repo,
+			Branch:               r.Branch,
+			Description:          r.Description,
+			Channels:             r.VisibleToChannels,
+			Access:               r.Access,
+			Credential:           r.Credential,
+			MountAt:              r.MountAt,
+			FetchEvery:           lifecycle.FetchEvery,
+			DropToReadOnlyAt:     lifecycle.DropToReadOnlyAt,
+			DropCloneIfUnusedFor: lifecycle.DropCloneIfUnusedFor,
 		})
 	}
 	return user.Config{

@@ -136,7 +136,7 @@ func (r *Registry) SeedCredentials(ctx context.Context, userID string, credMgr *
 				return fmt.Errorf("check credential set %s: %w", id, err)
 			}
 			if existing == nil {
-				if _, err := credMgr.Add(ctx, pkg.Name(), "default", ""); err != nil {
+				if _, err := credMgr.Add(ctx, credential.AddParams{Package: pkg.Name(), Label: "default"}); err != nil {
 					return fmt.Errorf("create default credential set for %s: %w", pkg.Name(), err)
 				}
 			}

@@ -95,6 +95,13 @@ type Params struct {
 	// Repo tools.
 	RepoStore *repo.Store
 
+	// RepoRemoteURL returns the git proxy remote for a repo, so fetches carry
+	// no credentials of their own.
+	RepoRemoteURL func(name string) string
+
+	// ArmRepoGrant asks the user to confirm an access grant.
+	ArmRepoGrant func(ctx context.Context, params repotools.GrantRequest) error
+
 	// Remote MCP tools.
 	RemoteMCPManager *remotemcpstore.Manager
 	ConfigUpdater    func(context.Context) error
@@ -211,6 +218,8 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 			SecretStore:   p.SecretStore,
 			UserDir:       p.UserDir,
 			ActiveChannel: p.ActiveChannel,
+			RemoteURL:     p.RepoRemoteURL,
+			ArmGrant:      p.ArmRepoGrant,
 		},
 
 		// Standard packages.
@@ -239,6 +248,23 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 			SecretStore:     p.SecretStore,
 			BaseURL:         p.BaseURL,
 			RegisterHandler: p.RegisterHandler,
+			// Forms can only reach a credential slot that is already declared,
+			// which is what keeps operator credentials out of the agent's reach
+			// while still letting the user fill one from a phone.
+			ResolveSlotField: func(ctx context.Context, target secretform.CredentialTarget) (string, error) {
+				if p.CredentialManager == nil {
+					return "", fmt.Errorf("credential manager unavailable")
+				}
+				id := credential.NewCredentialSetID(target.Type, target.Label)
+				set, err := p.CredentialManager.Get(ctx, id)
+				if err != nil {
+					return "", fmt.Errorf("look up credential slot %s: %w", id, err)
+				}
+				if set == nil {
+					return "", fmt.Errorf("no credential slot %s — declare it under credential_slots in tclaw.yaml first (credential_list shows the declared ones)", id)
+				}
+				return credential.FieldKey(id, target.Field), nil
+			},
 		},
 	)
 
@@ -246,4 +272,20 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 	credPkg.Registry = reg
 
 	return reg, provisioners
+}
+
+// CredentialSlotTypes returns every valid credential slot type: one per
+// registered tool package, plus the shared git namespace used by repo
+// monitoring, the dev workflow and the knowledge base.
+//
+// Built from a dependency-free registry — Name() is a constant on every
+// package — so callers can validate config before any user session exists.
+func CredentialSlotTypes() []string {
+	reg, _ := NewRegistry(Params{})
+	packages := reg.Packages()
+	types := make([]string, 0, len(packages)+1)
+	for _, pkg := range packages {
+		types = append(types, pkg.Name())
+	}
+	return append(types, config.GitCredentialType)
 }

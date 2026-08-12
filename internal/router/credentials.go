@@ -12,36 +12,46 @@ import (
 	"tclaw/internal/tool/toolpkg"
 )
 
-// seedConfigCredentials creates credential sets and writes secrets from the
-// config file's credentials section. Runs every startup — idempotent because
-// it overwrites existing field values with the config values.
-func seedConfigCredentials(ctx context.Context, credMgr *credential.Manager, cfg config.CredentialsConfig) error {
-	for pkg, entries := range cfg {
-		for _, entry := range entries {
-			label := entry.Label
-			if label == "" {
-				label = "default"
-			}
+// seedCredentialSlots creates a credential set for every slot declared in config
+// and writes any field values it supplies. Runs every startup — idempotent
+// because it overwrites existing field values with the config values.
+//
+// A slot with no fields is still created. That is the point of declaring one:
+// the set exists and can be referenced and filled later (secret form, OAuth
+// flow) without a config edit or a deploy.
+func seedCredentialSlots(ctx context.Context, credMgr *credential.Manager, slots []config.CredentialSlot) error {
+	for _, slot := range slots {
+		label := slot.Label
+		if label == "" {
+			label = "default"
+		}
 
-			setID := credential.NewCredentialSetID(pkg, label)
+		setID := credential.NewCredentialSetID(slot.Type, label)
 
-			existing, err := credMgr.Get(ctx, setID)
-			if err != nil {
-				return fmt.Errorf("check credential set %s: %w", setID, err)
+		existing, err := credMgr.Get(ctx, setID)
+		if err != nil {
+			return fmt.Errorf("check credential slot %s: %w", setID, err)
+		}
+		if existing == nil {
+			if _, err := credMgr.Add(ctx, credential.AddParams{
+				Package:     slot.Type,
+				Label:       label,
+				Channel:     slot.Channel,
+				Description: slot.Description,
+			}); err != nil {
+				return fmt.Errorf("create credential slot %s: %w", setID, err)
 			}
-			if existing == nil {
-				if _, err := credMgr.Add(ctx, pkg, label, entry.Channel); err != nil {
-					return fmt.Errorf("create credential set %s: %w", setID, err)
-				}
-			}
+		}
 
-			for key, val := range entry.Secrets {
-				if val == "" {
-					continue
-				}
-				if err := credMgr.SetField(ctx, setID, key, val); err != nil {
-					return fmt.Errorf("set field %s on %s: %w", key, setID, err)
-				}
+		for key, val := range slot.Fields {
+			// An empty value leaves whatever is already stored alone, so a
+			// boot secret that has gone missing doesn't wipe a working
+			// credential the user filled in by hand.
+			if val == "" {
+				continue
+			}
+			if err := credMgr.SetField(ctx, setID, key, val); err != nil {
+				return fmt.Errorf("set field %s on %s: %w", key, setID, err)
 			}
 		}
 	}

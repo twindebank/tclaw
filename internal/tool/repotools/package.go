@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"tclaw/internal/claudecli"
+	"tclaw/internal/credential"
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/mcp"
 	"tclaw/internal/repo"
@@ -17,6 +18,8 @@ type Package struct {
 	SecretStore   secret.Store
 	UserDir       string
 	ActiveChannel func() string
+	RemoteURL     func(name string) string
+	ArmGrant      func(ctx context.Context, params GrantRequest) error
 }
 
 func (p *Package) Name() string { return "repo" }
@@ -34,7 +37,10 @@ func (p *Package) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
 func (p *Package) RequiredSecrets() []toolpkg.SecretSpec {
 	return []toolpkg.SecretSpec{
 		{
-			StoreKey:     "github_token",
+			// Seeding the default git slot from GITHUB_TOKEN_<USER> is what
+			// carries an existing deployment across: the Fly secret lands in
+			// the slot on the next boot, with no migration step.
+			StoreKey:     credential.GitTokenKey(credential.DefaultLabel),
 			EnvVarPrefix: "GITHUB_TOKEN",
 			Required:     false,
 			Label:        "GitHub Token",
@@ -60,18 +66,20 @@ func (p *Package) Register(handler *mcp.Handler, ctx toolpkg.RegistrationContext
 		SecretStore:   p.SecretStore,
 		UserDir:       p.UserDir,
 		ActiveChannel: p.ActiveChannel,
+		RemoteURL:     p.RemoteURL,
+		ArmGrant:      p.ArmGrant,
 	})
 	return nil
 }
 
 // CredentialSpec implements toolpkg.CredentialProvider.
+//
+// No fields: repo tooling authenticates from the shared git credential slots
+// rather than a per-package credential set, so there is nothing for a "repo"
+// set to hold. RequiredSecrets still bridges GITHUB_TOKEN_<USER> into the
+// default git slot at boot.
 func (p *Package) CredentialSpec() toolpkg.CredentialSpec {
-	return toolpkg.CredentialSpec{
-		AuthType: toolpkg.AuthAPIKey,
-		Fields: []toolpkg.CredentialField{
-			{Key: "github_token", Label: "GitHub Token", Description: "Personal access token for cloning private repositories.", Required: false, EnvVarPrefix: "GITHUB_TOKEN"},
-		},
-	}
+	return toolpkg.CredentialSpec{AuthType: toolpkg.AuthAPIKey}
 }
 
 // OnCredentialSetChange implements toolpkg.CredentialProvider. Currently a

@@ -16,6 +16,10 @@ type Package struct {
 	SecretStore     secret.Store
 	BaseURL         string
 	RegisterHandler func(string, http.Handler)
+
+	// ResolveSlotField lets forms fill a declared credential slot. Nil leaves
+	// forms able to write bare keys only.
+	ResolveSlotField ResolveSlotField
 }
 
 func (p *Package) Name() string { return "secret_form" }
@@ -45,9 +49,10 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 
 func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationContext) error {
 	deps := Deps{
-		SecretStore:     p.SecretStore,
-		BaseURL:         p.BaseURL,
-		RegisterHandler: p.RegisterHandler,
+		SecretStore:      p.SecretStore,
+		BaseURL:          p.BaseURL,
+		RegisterHandler:  p.RegisterHandler,
+		ResolveSlotField: p.ResolveSlotField,
 	}
 
 	RegisterTools(handler, deps)

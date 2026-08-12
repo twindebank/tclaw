@@ -20,6 +20,7 @@ import (
 	"tclaw/internal/libraries/logbuffer"
 	"tclaw/internal/oauth"
 	"tclaw/internal/router"
+	"tclaw/internal/tool/all"
 	"tclaw/internal/version"
 	"tclaw/internal/watchdog"
 )
@@ -147,7 +148,15 @@ func runServe() {
 		go watchdog.Run(ctx, watchdog.Config{HealthURL: healthProbeURL(callback.Addr())})
 	}
 
-	r := router.New(cfg.BaseDir, cfg.Env, cfg.Credentials, callback, cfg.Server.PublicURL, logBuf, activeConfigPath)
+	// Slot types name the subsystem that consumes the credential, so an
+	// unknown one means a credential nothing will ever read — fail here rather
+	// than let it look configured.
+	if err := config.ValidateCredentialSlotTypes(cfg.CredentialSlots, all.CredentialSlotTypes()); err != nil {
+		slog.Error("invalid credential slot config", "err", err)
+		os.Exit(1)
+	}
+
+	r := router.New(cfg.BaseDir, cfg.Env, cfg.CredentialSlots, callback, cfg.Server.PublicURL, logBuf, activeConfigPath)
 	defer r.StopAll()
 
 	for _, u := range cfg.Users {

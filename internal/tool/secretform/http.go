@@ -94,19 +94,21 @@ func handleFormPOST(w http.ResponseWriter, r *http.Request, req *PendingRequest,
 
 	// Server-side required field validation.
 	for _, field := range req.Fields {
-		if field.IsRequired() && strings.TrimSpace(r.PostFormValue(field.Key)) == "" {
+		if field.IsRequired() && strings.TrimSpace(r.PostFormValue(field.InputName)) == "" {
 			http.Error(w, "required field missing: "+field.Label, http.StatusBadRequest)
 			return
 		}
 	}
 
 	for _, field := range req.Fields {
-		value := r.PostFormValue(field.Key)
+		value := r.PostFormValue(field.InputName)
 		if value == "" {
 			continue
 		}
-		if err := secretStore.Set(r.Context(), field.Key, value); err != nil {
-			slog.Error("store secret form value", "key", field.Key, "err", err)
+		// StoreKey was resolved when the request was created, so an undeclared
+		// credential slot never reaches this point.
+		if err := secretStore.Set(r.Context(), field.StoreKey, value); err != nil {
+			slog.Error("store secret form value", "key", field.StoreKey, "err", err)
 			http.Error(w, "failed to store value", http.StatusInternalServerError)
 			return
 		}

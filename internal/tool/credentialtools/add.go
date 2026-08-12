@@ -95,7 +95,11 @@ func credentialAddHandler(deps Deps) mcp.ToolHandler {
 		spec := cp.CredentialSpec()
 
 		// Create the credential set.
-		set, err := deps.CredentialManager.Add(ctx, a.Package, a.Label, a.Channel)
+		set, err := deps.CredentialManager.Add(ctx, credential.AddParams{
+			Package: a.Package,
+			Label:   a.Label,
+			Channel: a.Channel,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("add credential set: %w", err)
 		}

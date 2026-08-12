@@ -26,6 +26,12 @@ type CloneParams struct {
 
 	// Depth caps how much history is fetched (shallow clone).
 	Depth int
+
+	// ResetToRemote discards the working tree and moves the branch to the
+	// remote tip after fetching. Right for a read-only mirror, where local
+	// state is meaningless; wrong for a repo the agent can push from, where it
+	// would silently destroy work in progress.
+	ResetToRemote bool
 }
 
 // CloneOrFetch ensures a non-bare clone exists at RepoDir tracking the given
@@ -82,11 +88,14 @@ func CloneOrFetch(params CloneParams) error {
 		return fmt.Errorf("git fetch: %s: %w", sanitizeGitOutput(string(out), params.Token), err)
 	}
 
-	// Reset the working tree to match the remote branch tip. This is a
-	// read-only monitoring clone so there's nothing to preserve.
-	cmd = exec.Command("git", "-C", params.RepoDir, "reset", "--hard", "origin/"+params.Branch)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git reset: %s: %w", sanitizeGitOutput(string(out), params.Token), err)
+	if params.ResetToRemote {
+		// Reset the working tree to match the remote branch tip. Only for a
+		// read-only mirror: there is nothing local to preserve, and stale files
+		// would otherwise linger after a deletion upstream.
+		cmd = exec.Command("git", "-C", params.RepoDir, "reset", "--hard", "origin/"+params.Branch)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("git reset: %s: %w", sanitizeGitOutput(string(out), params.Token), err)
+		}
 	}
 
 	return nil

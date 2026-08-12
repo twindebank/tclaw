@@ -29,8 +29,8 @@ func TestProvisionConfigRepos(t *testing.T) {
 				Description: "Home Assistant config mirror",
 				Channels:    []string{"homeassistant"},
 			}},
-			Store:   repoStore,
-			Secrets: &memorySecretStore{data: map[string]string{}},
+			Store:     repoStore,
+			RemoteURL: directRemote(remote),
 		}))
 
 		repoDir := filepath.Join(userDir, "repos", "ha-config")
@@ -52,11 +52,11 @@ func TestProvisionConfigRepos(t *testing.T) {
 		repoStore := newRepoStore(t, userDir)
 		declared := []user.Repo{{Name: "ha-config", URL: remote, Branch: "main"}}
 		params := reposProvisionParams{
-			UserID:  "alice",
-			UserDir: userDir,
-			Repos:   declared,
-			Store:   repoStore,
-			Secrets: &memorySecretStore{data: map[string]string{}},
+			UserID:    "alice",
+			UserDir:   userDir,
+			Repos:     declared,
+			Store:     repoStore,
+			RemoteURL: directRemote(remote),
 		}
 
 		require.NoError(t, provisionConfigRepos(context.Background(), params))
@@ -79,22 +79,21 @@ func TestProvisionConfigRepos(t *testing.T) {
 		remote := createTestRemote(t, "main")
 		userDir := t.TempDir()
 		repoStore := newRepoStore(t, userDir)
-		secrets := &memorySecretStore{data: map[string]string{}}
 
 		require.NoError(t, provisionConfigRepos(context.Background(), reposProvisionParams{
-			UserID:  "alice",
-			UserDir: userDir,
-			Repos:   []user.Repo{{Name: "ha-config", URL: remote, Branch: "main"}},
-			Store:   repoStore,
-			Secrets: secrets,
+			UserID:    "alice",
+			UserDir:   userDir,
+			Repos:     []user.Repo{{Name: "ha-config", URL: remote, Branch: "main"}},
+			Store:     repoStore,
+			RemoteURL: directRemote(remote),
 		}))
 
 		require.NoError(t, provisionConfigRepos(context.Background(), reposProvisionParams{
-			UserID:  "alice",
-			UserDir: userDir,
-			Repos:   nil,
-			Store:   repoStore,
-			Secrets: secrets,
+			UserID:    "alice",
+			UserDir:   userDir,
+			Repos:     nil,
+			Store:     repoStore,
+			RemoteURL: directRemote(remote),
 		}))
 
 		gone, err := repoStore.Get(context.Background(), "ha-config")
@@ -117,11 +116,11 @@ func TestProvisionConfigRepos(t *testing.T) {
 		require.NoError(t, repoStore.Put(context.Background(), adhoc))
 
 		require.NoError(t, provisionConfigRepos(context.Background(), reposProvisionParams{
-			UserID:  "alice",
-			UserDir: userDir,
-			Repos:   nil,
-			Store:   repoStore,
-			Secrets: &memorySecretStore{data: map[string]string{}},
+			UserID:    "alice",
+			UserDir:   userDir,
+			Repos:     nil,
+			Store:     repoStore,
+			RemoteURL: directRemote(""),
 		}))
 
 		still, err := repoStore.Get(context.Background(), "scratch")
@@ -141,8 +140,11 @@ func TestProvisionConfigRepos(t *testing.T) {
 				{Name: "broken", URL: filepath.Join(t.TempDir(), "does-not-exist"), Branch: "main"},
 				{Name: "ha-config", URL: remote, Branch: "main"},
 			},
-			Store:   repoStore,
-			Secrets: &memorySecretStore{data: map[string]string{}},
+			Store: repoStore,
+			RemoteURL: remotesByName(map[string]string{
+				"broken":    filepath.Join(t.TempDir(), "does-not-exist"),
+				"ha-config": remote,
+			}),
 		}))
 
 		_, err := os.Stat(filepath.Join(userDir, "repos", "ha-config", "index.md"))
@@ -216,4 +218,16 @@ func putRepo(t *testing.T, repoStore *repo.Store, name, userDir string, channels
 		RepoDir:  filepath.Join(userDir, "repos", name),
 		Channels: channels,
 	}))
+}
+
+// directRemote points every repo at one remote, for tests with a single repo.
+// Provisioning fetches through the proxy in production; a local path stands in
+// for it here, since what is being tested is the reconciliation, not transport.
+func directRemote(url string) func(string) string {
+	return func(string) string { return url }
+}
+
+// remotesByName maps each repo to its own remote, for tests where they differ.
+func remotesByName(remotes map[string]string) func(string) string {
+	return func(name string) string { return remotes[name] }
 }

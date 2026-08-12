@@ -3,6 +3,7 @@ package secretform_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -150,6 +151,89 @@ func TestSecretFormRequest(t *testing.T) {
 			"fields": fields,
 		})
 		require.Contains(t, err.Error(), "too many fields")
+	})
+
+	t.Run("writes a credential target into the slot's store key", func(t *testing.T) {
+		h, ts := setup(t)
+
+		requestResult := callTool(t, h, "secret_form_request", map[string]any{
+			"title": "GitHub PAT",
+			"fields": []map[string]any{{
+				"label":      "Token",
+				"credential": map[string]any{"type": "git", "label": "default", "field": "token"},
+			}},
+		})
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(requestResult, &got))
+
+		submitFormValues(t, got["url"], got["verify_code"], map[string]string{
+			"cred_git_default_token": "ghp_from_the_form",
+		})
+
+		stored := getSecretStore(t, ts)
+		value, err := stored.Get(context.Background(), "cred/git/default/token")
+		require.NoError(t, err)
+		require.Equal(t, "ghp_from_the_form", value)
+	})
+
+	t.Run("rejects a credential target for an undeclared slot", func(t *testing.T) {
+		h, _ := setup(t)
+
+		err := callToolExpectError(t, h, "secret_form_request", map[string]any{
+			"title": "GitHub PAT",
+			"fields": []map[string]any{{
+				"label":      "Token",
+				"credential": map[string]any{"type": "git", "label": "nope", "field": "token"},
+			}},
+		})
+		require.Contains(t, err.Error(), "no credential slot")
+	})
+
+	t.Run("rejects a field setting both key and credential", func(t *testing.T) {
+		h, _ := setup(t)
+
+		err := callToolExpectError(t, h, "secret_form_request", map[string]any{
+			"title": "Ambiguous",
+			"fields": []map[string]any{{
+				"label":      "Token",
+				"key":        "some_key",
+				"credential": map[string]any{"type": "git", "label": "default", "field": "token"},
+			}},
+		})
+		require.Contains(t, err.Error(), "only one of key or credential")
+	})
+
+	t.Run("warns on the form when a value would be replaced", func(t *testing.T) {
+		h, ts := setup(t)
+		stored := getSecretStore(t, ts)
+		require.NoError(t, stored.Set(context.Background(), "cred/git/default/token", "existing"))
+
+		result := callTool(t, h, "secret_form_request", map[string]any{
+			"title": "GitHub PAT",
+			"fields": []map[string]any{{
+				"label":      "Token",
+				"credential": map[string]any{"type": "git", "label": "default", "field": "token"},
+			}},
+		})
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(result, &got))
+
+		page := fetchForm(t, got["url"])
+		require.Contains(t, page, "Submitting replaces it")
+	})
+
+	t.Run("does not warn for an unset destination", func(t *testing.T) {
+		h, _ := setup(t)
+
+		result := callTool(t, h, "secret_form_request", map[string]any{
+			"title":  "Resy",
+			"fields": []map[string]any{{"key": "resy_api_key", "label": "API key"}},
+		})
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(result, &got))
+
+		page := fetchForm(t, got["url"])
+		require.NotContains(t, page, "Submitting replaces it")
 	})
 }
 
@@ -425,9 +509,42 @@ func setup(t *testing.T) (*mcp.Handler, *httptest.Server) {
 			httpHandler = h
 			httpHandlerMu.Unlock()
 		},
+		// Stands in for the credential manager: only git/default is declared,
+		// so anything else must be refused before a form is issued.
+		ResolveSlotField: func(_ context.Context, target secretform.CredentialTarget) (string, error) {
+			if target.Type != "git" || target.Label != "default" {
+				return "", fmt.Errorf("no credential slot %s/%s", target.Type, target.Label)
+			}
+			return "cred/" + target.Type + "/" + target.Label + "/" + target.Field, nil
+		},
 	})
 
 	return handler, ts
+}
+
+// fetchForm GETs a form page and returns its HTML.
+func fetchForm(t *testing.T, formURL string) string {
+	t.Helper()
+	resp, err := http.Get(formURL)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	return string(body)
+}
+
+// submitFormValues POSTs named values to a form, asserting the submission is accepted.
+func submitFormValues(t *testing.T, formURL, verifyCode string, values map[string]string) {
+	t.Helper()
+	form := url.Values{"_verify_code": {verifyCode}}
+	for name, value := range values {
+		form.Set(name, value)
+	}
+	resp, err := http.PostForm(formURL, form)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
 var testServers sync.Map
