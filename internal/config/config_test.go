@@ -220,28 +220,40 @@ func TestUser_MessageDebounceDuration(t *testing.T) {
 }
 
 func TestValidate_Knowledge(t *testing.T) {
-	t.Run("expands owner/repo shorthand and defaults the branch", func(t *testing.T) {
+	withVault := func(access repo.Access) *Config {
 		cfg := validConfig()
-		cfg.Users[0].Knowledge = &KnowledgeConfig{Repo: "owner/knowledge-base"}
+		cfg.Users[0].Repos = []RepoConfig{{Name: "knowledge", Repo: "owner/personal-knowledge", Access: access}}
+		cfg.Users[0].Knowledge = &KnowledgeConfig{Repo: "knowledge"}
+		return cfg
+	}
+
+	t.Run("resolves the reference and mounts the vault at its default path", func(t *testing.T) {
+		cfg := withVault(repo.AccessFullWrite)
 		require.NoError(t, validate(cfg))
 
-		require.Equal(t, "https://github.com/owner/knowledge-base", cfg.Users[0].Knowledge.Repo)
-		require.Equal(t, "main", cfg.Users[0].Knowledge.Branch)
+		require.Equal(t, defaultKnowledgeMountAt, cfg.Users[0].Knowledge.MountAt)
+		require.Equal(t, defaultKnowledgeMountAt, cfg.Users[0].Repos[0].MountAt,
+			"the vault repo should clone to the knowledge path, not under repos/")
 	})
 
-	t.Run("leaves an explicit URL and branch untouched", func(t *testing.T) {
+	t.Run("rejects a reference to no declared repo", func(t *testing.T) {
 		cfg := validConfig()
-		cfg.Users[0].Knowledge = &KnowledgeConfig{
-			Repo:   "https://github.com/owner/knowledge-base.git",
-			Branch: "trunk",
-		}
-		require.NoError(t, validate(cfg))
-
-		require.Equal(t, "https://github.com/owner/knowledge-base.git", cfg.Users[0].Knowledge.Repo)
-		require.Equal(t, "trunk", cfg.Users[0].Knowledge.Branch)
+		cfg.Users[0].Knowledge = &KnowledgeConfig{Repo: "not-declared"}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "does not match any repos entry")
 	})
 
-	t.Run("rejects an empty repo", func(t *testing.T) {
+	t.Run("rejects a vault that cannot push", func(t *testing.T) {
+		// The agent commits and pushes the vault every turn, so a read-only
+		// tier would leave it silently failing to save.
+		cfg := withVault(repo.AccessReadOnly)
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "must be able to push")
+	})
+
+	t.Run("rejects an empty repo reference", func(t *testing.T) {
 		cfg := validConfig()
 		cfg.Users[0].Knowledge = &KnowledgeConfig{Repo: "  "}
 		err := validate(cfg)
