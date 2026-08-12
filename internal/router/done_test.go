@@ -2,17 +2,21 @@ package router
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"tclaw/internal/channel"
 	"tclaw/internal/channel/telegramchannel"
 	"tclaw/internal/config"
+	"tclaw/internal/libraries/secret"
 	"tclaw/internal/libraries/store"
+	"tclaw/internal/repo"
 	"tclaw/internal/user"
 )
 
@@ -24,7 +28,7 @@ func TestInterceptPendingDone(t *testing.T) {
 		prov := &mockDoneProvisioner{}
 		var changeCalled bool
 
-		consumed := interceptPendingDone(
+		consumed := interceptDone(
 			context.Background(),
 			doneTaggedMsg("mychan-id", "yes"),
 			doneChannelsFunc("mychan-id", "mychan", channel.TypeSocket),
@@ -44,7 +48,7 @@ func TestInterceptPendingDone(t *testing.T) {
 
 		// Set pending done + teardown state in runtime state.
 		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
-			s.PendingDone = true
+			s.PendingAction = channel.NewPendingAction(channel.PendingChannelDone, nil)
 			s.TeardownState = telegramchannel.NewTeardownState("tclaw_test_bot")
 		}))
 		require.NoError(t, ss.Set(context.Background(), channel.ChannelSecretKey("ephemeral"), "fake-token"))
@@ -57,7 +61,7 @@ func TestInterceptPendingDone(t *testing.T) {
 		prov := &mockDoneProvisioner{}
 		var changeCalled bool
 
-		consumed := interceptPendingDone(
+		consumed := interceptDone(
 			context.Background(),
 			doneTaggedMsg("ephemeral-id", "yes"),
 			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeTelegram),
@@ -81,7 +85,7 @@ func TestInterceptPendingDone(t *testing.T) {
 		rs, ss, cw := setupDoneTest(t)
 
 		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
-			s.PendingDone = true
+			s.PendingAction = channel.NewPendingAction(channel.PendingChannelDone, nil)
 			s.PlatformState = telegramchannel.NewPlatformState(12345)
 			s.TeardownState = telegramchannel.NewTeardownState("tclaw_test_bot")
 		}))
@@ -92,7 +96,7 @@ func TestInterceptPendingDone(t *testing.T) {
 
 		prov := &mockDoneProvisioner{}
 
-		consumed := interceptPendingDone(
+		consumed := interceptDone(
 			context.Background(),
 			doneTaggedMsg("ephemeral-id", "yes"),
 			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeTelegram),
@@ -111,13 +115,13 @@ func TestInterceptPendingDone(t *testing.T) {
 		rs, ss, cw := setupDoneTest(t)
 
 		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
-			s.PendingDone = true
+			s.PendingAction = channel.NewPendingAction(channel.PendingChannelDone, nil)
 		}))
 
 		prov := &mockDoneProvisioner{}
 		var changeCalled bool
 
-		consumed := interceptPendingDone(
+		consumed := interceptDone(
 			context.Background(),
 			doneTaggedMsg("ephemeral-id", "no"),
 			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeSocket),
@@ -131,17 +135,17 @@ func TestInterceptPendingDone(t *testing.T) {
 		require.False(t, prov.teardownCalled)
 		require.False(t, changeCalled)
 
-		// PendingDone should be cleared.
+		// The confirmation should be disarmed.
 		state, err := rs.Get(context.Background(), "ephemeral")
 		require.NoError(t, err)
-		require.False(t, state.PendingDone)
+		require.Nil(t, state.PendingAction)
 	})
 
 	t.Run("accepts y as confirmation", func(t *testing.T) {
 		rs, ss, cw := setupDoneTest(t)
 
 		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
-			s.PendingDone = true
+			s.PendingAction = channel.NewPendingAction(channel.PendingChannelDone, nil)
 			s.TeardownState = telegramchannel.NewTeardownState("tclaw_test_bot")
 		}))
 		require.NoError(t, ss.Set(context.Background(), channel.ChannelSecretKey("ephemeral"), "fake-token"))
@@ -151,7 +155,7 @@ func TestInterceptPendingDone(t *testing.T) {
 
 		prov := &mockDoneProvisioner{}
 
-		consumed := interceptPendingDone(
+		consumed := interceptDone(
 			context.Background(),
 			doneTaggedMsg("ephemeral-id", "y"),
 			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeTelegram),
@@ -170,7 +174,7 @@ func TestInterceptPendingDone(t *testing.T) {
 				rs, ss, cw := setupDoneTest(t)
 
 				require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
-					s.PendingDone = true
+					s.PendingAction = channel.NewPendingAction(channel.PendingChannelDone, nil)
 					s.TeardownState = telegramchannel.NewTeardownState("tclaw_test_bot")
 				}))
 				require.NoError(t, ss.Set(context.Background(), channel.ChannelSecretKey("ephemeral"), "fake-token"))
@@ -178,7 +182,7 @@ func TestInterceptPendingDone(t *testing.T) {
 					Type: channel.TypeTelegram, Name: "ephemeral", Description: "test",
 				}))
 
-				consumed := interceptPendingDone(
+				consumed := interceptDone(
 					context.Background(),
 					doneTaggedMsg("ephemeral-id", input),
 					doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeTelegram),
@@ -198,10 +202,10 @@ func TestInterceptPendingDone(t *testing.T) {
 				rs, _, cw := setupDoneTest(t)
 
 				require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
-					s.PendingDone = true
+					s.PendingAction = channel.NewPendingAction(channel.PendingChannelDone, nil)
 				}))
 
-				consumed := interceptPendingDone(
+				consumed := interceptDone(
 					context.Background(),
 					doneTaggedMsg("ephemeral-id", input),
 					doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeSocket),
@@ -212,10 +216,10 @@ func TestInterceptPendingDone(t *testing.T) {
 
 				require.False(t, consumed, "input %q should NOT be accepted as confirmation", input)
 
-				// PendingDone should be cleared.
+				// The confirmation should be disarmed.
 				state, err := rs.Get(context.Background(), "ephemeral")
 				require.NoError(t, err)
-				require.False(t, state.PendingDone)
+				require.Nil(t, state.PendingAction)
 			})
 		}
 	})
@@ -230,7 +234,7 @@ func TestInterceptPendingDone(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(knowledgeDir, "CLAUDE.md"), []byte("test"), 0o600))
 
 		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
-			s.PendingDone = true
+			s.PendingAction = channel.NewPendingAction(channel.PendingChannelDone, nil)
 			s.TeardownState = telegramchannel.NewTeardownState("tclaw_test_bot")
 		}))
 		require.NoError(t, ss.Set(context.Background(), channel.ChannelSecretKey("ephemeral"), "fake-token"))
@@ -238,7 +242,7 @@ func TestInterceptPendingDone(t *testing.T) {
 			Type: channel.TypeTelegram, Name: "ephemeral", Description: "test",
 		}))
 
-		consumed := interceptPendingDone(
+		consumed := interceptDone(
 			context.Background(),
 			doneTaggedMsg("ephemeral-id", "yes"),
 			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeTelegram),
@@ -258,7 +262,7 @@ func TestInterceptPendingDone(t *testing.T) {
 		rs, ss, cw := setupDoneTest(t)
 
 		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
-			s.PendingDone = true
+			s.PendingAction = channel.NewPendingAction(channel.PendingChannelDone, nil)
 			s.TeardownState = telegramchannel.NewTeardownState("tclaw_test_bot")
 		}))
 		require.NoError(t, cw.AddChannel(testUserID, config.Channel{
@@ -268,7 +272,7 @@ func TestInterceptPendingDone(t *testing.T) {
 		prov := &mockDoneProvisioner{teardownErr: fmt.Errorf("BotFather unreachable")}
 		var changeCalled bool
 
-		consumed := interceptPendingDone(
+		consumed := interceptDone(
 			context.Background(),
 			doneTaggedMsg("ephemeral-id", "yes"),
 			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeTelegram),
@@ -292,7 +296,7 @@ func TestInterceptPendingDone(t *testing.T) {
 		rs, ss, cw := setupDoneTest(t)
 
 		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
-			s.PendingDone = true
+			s.PendingAction = channel.NewPendingAction(channel.PendingChannelDone, nil)
 			s.TeardownState = telegramchannel.NewTeardownState("tclaw_test_bot")
 		}))
 		require.NoError(t, ss.Set(context.Background(), channel.ChannelSecretKey("ephemeral"), "fake-token"))
@@ -304,7 +308,7 @@ func TestInterceptPendingDone(t *testing.T) {
 
 		// A notification (or any non-user source) that happens to say "yes" must
 		// not be able to confirm the teardown — only a real user can.
-		consumed := interceptPendingDone(
+		consumed := interceptDone(
 			context.Background(),
 			doneTaggedMsgFrom("ephemeral-id", "yes", channel.SourceNotification),
 			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeTelegram),
@@ -316,20 +320,20 @@ func TestInterceptPendingDone(t *testing.T) {
 		require.False(t, consumed, "non-user message must be forwarded, not consumed as confirmation")
 		require.False(t, prov.teardownCalled, "non-user yes must not trigger teardown")
 
-		// PendingDone stays armed so the user's real reply still lands.
+		// The confirmation stays armed so the user's real reply still lands.
 		state, err := rs.Get(context.Background(), "ephemeral")
 		require.NoError(t, err)
-		require.True(t, state.PendingDone, "pending_done must remain set after a non-user message")
+		require.NotNil(t, state.PendingAction, "the confirmation must remain armed after a non-user message")
 	})
 
 	t.Run("does not let a non-user message cancel a pending teardown", func(t *testing.T) {
 		rs, ss, cw := setupDoneTest(t)
 
 		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
-			s.PendingDone = true
+			s.PendingAction = channel.NewPendingAction(channel.PendingChannelDone, nil)
 		}))
 
-		consumed := interceptPendingDone(
+		consumed := interceptDone(
 			context.Background(),
 			doneTaggedMsgFrom("ephemeral-id", "some cross-channel update", channel.SourceChannel),
 			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeSocket),
@@ -344,7 +348,7 @@ func TestInterceptPendingDone(t *testing.T) {
 		// notification would silently cancel the pending teardown.
 		state, err := rs.Get(context.Background(), "ephemeral")
 		require.NoError(t, err)
-		require.True(t, state.PendingDone)
+		require.NotNil(t, state.PendingAction)
 	})
 }
 
@@ -392,7 +396,7 @@ func doneTaggedMsg(channelID, text string) channel.TaggedMessage {
 }
 
 // doneTaggedMsgFrom builds a message tagged with a specific source so the
-// user-vs-automated gating in interceptPendingDone can be exercised.
+// user-vs-automated gating in the confirmation intercept can be exercised.
 func doneTaggedMsgFrom(channelID, text string, source channel.MessageSource) channel.TaggedMessage {
 	return channel.TaggedMessage{
 		ChannelID:  channel.ChannelID(channelID),
@@ -468,4 +472,137 @@ func (m *memDoneSecretStore) Set(_ context.Context, key, value string) error {
 func (m *memDoneSecretStore) Delete(_ context.Context, key string) error {
 	delete(m.data, key)
 	return nil
+}
+
+// --- confirmation dispatch helpers ---
+
+// interceptDone adapts the positional call the channel_done tests were written
+// against onto the generalised confirmation dispatcher.
+func interceptDone(
+	ctx context.Context,
+	msg channel.TaggedMessage,
+	channelsFunc func() map[channel.ChannelID]channel.Channel,
+	runtimeState *channel.RuntimeStateStore,
+	configWriter *config.Writer,
+	userID user.ID,
+	secretStore secret.Store,
+	provisioners channel.ProvisionerLookup,
+	onChannelChange func(),
+	memoryDir string,
+) bool {
+	return interceptPendingConfirmation(ctx, msg, confirmParams{
+		ChannelsFunc:    channelsFunc,
+		RuntimeState:    runtimeState,
+		ConfigWriter:    configWriter,
+		UserID:          userID,
+		SecretStore:     secretStore,
+		Provisioners:    provisioners,
+		OnChannelChange: onChannelChange,
+		MemoryDir:       memoryDir,
+	})
+}
+
+func TestInterceptPendingConfirmation_Expiry(t *testing.T) {
+	t.Run("an expired confirmation is not acted on", func(t *testing.T) {
+		// A "yes" typed into a forgotten thread must not act on an old prompt.
+		rs, ss, cw := setupDoneTest(t)
+		prov := &mockDoneProvisioner{}
+
+		require.NoError(t, rs.Update(context.Background(), "mychan", func(s *channel.RuntimeState) {
+			s.PendingAction = &channel.PendingAction{
+				Kind:        channel.PendingChannelDone,
+				RequestedAt: time.Now().Add(-2 * time.Hour),
+				ExpiresAt:   time.Now().Add(-time.Hour),
+			}
+		}))
+
+		consumed := interceptDone(
+			context.Background(),
+			doneTaggedMsg("mychan-id", "yes"),
+			doneChannelsFunc("mychan-id", "mychan", channel.TypeSocket),
+			rs, cw, testUserID, ss,
+			provLookup(channel.TypeSocket, prov),
+			func() {}, "",
+		)
+
+		require.False(t, consumed, "an expired confirmation must fall through to the agent")
+		require.False(t, prov.teardownCalled)
+
+		state, err := rs.Get(context.Background(), "mychan")
+		require.NoError(t, err)
+		require.Nil(t, state.PendingAction, "the stale confirmation should be disarmed")
+	})
+}
+
+func TestConfirmRepoGrant(t *testing.T) {
+	newGrant := func(t *testing.T, payload RepoGrantPayload) channel.PendingAction {
+		t.Helper()
+		raw, err := json.Marshal(payload)
+		require.NoError(t, err)
+		return *channel.NewPendingAction(channel.PendingRepoGrant, raw)
+	}
+
+	t.Run("applies the tier that was described in the prompt", func(t *testing.T) {
+		userDir := t.TempDir()
+		repoStore := newRepoStore(t, userDir)
+		putRepo(t, repoStore, "ha-config", userDir, nil)
+
+		var notified string
+		consumed := confirmRepoGrant(context.Background(), "chan-id", "homeassistant",
+			newGrant(t, RepoGrantPayload{
+				Repo:       "ha-config",
+				Access:     repo.AccessPullRequestsOnly,
+				Credential: "homeassistant",
+			}),
+			confirmParams{
+				RepoStore: repoStore,
+				Notify:    func(_ context.Context, _ channel.ChannelID, text string) { notified = text },
+			})
+
+		require.True(t, consumed)
+		granted, err := repoStore.Get(context.Background(), "ha-config")
+		require.NoError(t, err)
+		require.Equal(t, repo.AccessPullRequestsOnly, granted.Access)
+		require.Equal(t, "homeassistant", granted.Credential)
+		require.Contains(t, notified, "pull_requests_only")
+	})
+
+	t.Run("refuses a repo scoped away from the confirming channel", func(t *testing.T) {
+		// Scoping can change between prompt and reply; the grant must not
+		// escape the channel that is allowed to see the repo.
+		userDir := t.TempDir()
+		repoStore := newRepoStore(t, userDir)
+		putRepo(t, repoStore, "ha-config", userDir, []string{"homeassistant"})
+
+		var notified string
+		consumed := confirmRepoGrant(context.Background(), "chan-id", "email",
+			newGrant(t, RepoGrantPayload{Repo: "ha-config", Access: repo.AccessFullWrite}),
+			confirmParams{
+				RepoStore: repoStore,
+				Notify:    func(_ context.Context, _ channel.ChannelID, text string) { notified = text },
+			})
+
+		require.True(t, consumed)
+		require.Contains(t, notified, "isn't available on this channel")
+
+		unchanged, err := repoStore.Get(context.Background(), "ha-config")
+		require.NoError(t, err)
+		require.Empty(t, unchanged.Access)
+	})
+
+	t.Run("reports a repo that vanished between prompt and reply", func(t *testing.T) {
+		userDir := t.TempDir()
+		repoStore := newRepoStore(t, userDir)
+
+		var notified string
+		consumed := confirmRepoGrant(context.Background(), "chan-id", "homeassistant",
+			newGrant(t, RepoGrantPayload{Repo: "gone", Access: repo.AccessFullWrite}),
+			confirmParams{
+				RepoStore: repoStore,
+				Notify:    func(_ context.Context, _ channel.ChannelID, text string) { notified = text },
+			})
+
+		require.True(t, consumed)
+		require.Contains(t, notified, "no longer tracked")
+	})
 }

@@ -938,10 +938,11 @@ func TestChannelDone(t *testing.T) {
 		require.True(t, th.provisioner.sendTeardownPromptCalled)
 		require.False(t, th.provisioner.teardownCalled)
 
-		// PendingDone should be set in runtime state.
+		// The teardown confirmation should be armed.
 		rs, err := th.runtimeState.Get(context.Background(), "confirm-test")
 		require.NoError(t, err)
-		require.True(t, rs.PendingDone)
+		require.NotNil(t, rs.PendingAction)
+		require.Equal(t, channel.PendingChannelDone, rs.PendingAction.Kind)
 	})
 
 	t.Run("returns error if sending teardown prompt fails", func(t *testing.T) {
@@ -966,10 +967,10 @@ func TestChannelDone(t *testing.T) {
 		})
 		require.Contains(t, toolErr.Error(), "send teardown prompt")
 
-		// PendingDone should NOT have been set.
+		// Nothing should be left armed for a prompt the user never saw.
 		rs, err := th.runtimeState.Get(context.Background(), "prompt-fail-test")
 		require.NoError(t, err)
-		require.False(t, rs.PendingDone)
+		require.Nil(t, rs.PendingAction)
 		require.False(t, th.provisioner.teardownCalled)
 	})
 }

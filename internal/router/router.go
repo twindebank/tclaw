@@ -860,10 +860,30 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 							activityTracker.MessageReceivedFrom(ch.Info().Name, source)
 						}
 					}
-					// Intercept messages that are responses to a pending channel_done
-					// confirmation. If the channel has PendingDone set (from a prior
-					// channel_done call), handle it here instead of passing to the agent.
-					if interceptPendingDone(agentCtx, msg, channelsFunc, runtimeState, configWriter, mu.cfg.ID, secretStore, provisioners, onChannelChange, memoryDir) {
+					// Intercept messages answering a confirmation the agent asked
+					// for (channel teardown, a repo access grant). Handled here
+					// rather than passed to the agent, so the agent can never
+					// answer its own prompt.
+					// Confirmation outcomes are reported straight to the chat via
+					// the outbox: the agent isn't running this turn, so there is
+					// nothing else to tell the user what happened.
+					notifyChannel := func(ctx context.Context, chID channel.ChannelID, text string) {
+						if _, sendErr := messageOutbox.Send(ctx, chID, text, channel.SendOpts{}); sendErr != nil {
+							slog.Error("failed to report confirmation outcome", "channel", chID, "err", sendErr)
+						}
+					}
+					if interceptPendingConfirmation(agentCtx, msg, confirmParams{
+						ChannelsFunc:    channelsFunc,
+						RuntimeState:    runtimeState,
+						ConfigWriter:    configWriter,
+						UserID:          mu.cfg.ID,
+						SecretStore:     secretStore,
+						Provisioners:    provisioners,
+						RepoStore:       repoStore,
+						Notify:          notifyChannel,
+						OnChannelChange: onChannelChange,
+						MemoryDir:       memoryDir,
+					}) {
 						continue
 					}
 					select {
