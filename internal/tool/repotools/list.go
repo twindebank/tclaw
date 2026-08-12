@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"tclaw/internal/mcp"
+	"tclaw/internal/repo"
 )
 
 const ToolList = "repo_list"
@@ -47,6 +48,9 @@ func repoListHandler(deps Deps) mcp.ToolHandler {
 			Age            string `json:"age"`
 			Description    string `json:"description,omitempty"`
 			Managed        bool   `json:"managed,omitempty"`
+			Access         string `json:"access"`
+			Credential     string `json:"credential,omitempty"`
+			AccessEndsAt   string `json:"access_ends_at,omitempty"`
 		}
 
 		var infos []repoInfo
@@ -77,6 +81,9 @@ func repoListHandler(deps Deps) mcp.ToolHandler {
 				Age:            time.Since(r.AddedAt).Truncate(time.Minute).String(),
 				Description:    r.Description,
 				Managed:        r.Managed,
+				Access:         string(r.EffectiveAccess(time.Now())),
+				Credential:     r.Credential,
+				AccessEndsAt:   accessEndsAt(r),
 			})
 		}
 
@@ -94,4 +101,13 @@ func repoListHandler(deps Deps) mcp.ToolHandler {
 		}
 		return json.Marshal(result)
 	}
+}
+
+// accessEndsAt renders a pending downgrade, so the agent can see that push
+// access is temporary rather than discovering it has lapsed mid-task.
+func accessEndsAt(r repo.TrackedRepo) string {
+	if r.DropToReadOnlyAt.IsZero() || !r.EffectiveAccess(time.Now()).AllowsPush() {
+		return ""
+	}
+	return r.DropToReadOnlyAt.Format(time.RFC3339)
 }

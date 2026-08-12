@@ -6,9 +6,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"tclaw/internal/channel"
+	"tclaw/internal/credential"
+	"tclaw/internal/gitproxy"
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/repo"
 	"tclaw/internal/tool/repotools"
@@ -26,7 +29,11 @@ type reposProvisionParams struct {
 	UserDir string
 	Repos   []user.Repo
 	Store   *repo.Store
-	Secrets secret.Store
+
+	// RemoteURL returns the proxy remote a clone should point at. Every clone
+	// is fetched through the proxy, including tclaw's own, so there is one
+	// authentication path and no credential in any .git/config.
+	RemoteURL func(name string) string
 }
 
 // provisionConfigRepos reconciles the tracked-repo store against the repos
@@ -63,14 +70,6 @@ func provisionConfigRepos(ctx context.Context, params reposProvisionParams) erro
 		if err := params.Store.Delete(ctx, name); err != nil {
 			slog.Error("failed to delete undeclared repo from store", "user", params.UserID, "repo", name, "err", err)
 		}
-	}
-
-	// A missing token is not an error — public repos clone without one, and a
-	// private repo surfaces the failure per-repo below.
-	token, err := params.Secrets.Get(ctx, knowledgeTokenSecretKey)
-	if err != nil {
-		slog.Warn("failed to read github token for config repos, cloning unauthenticated",
-			"user", params.UserID, "err", err)
 	}
 
 	for _, r := range params.Repos {
@@ -110,16 +109,15 @@ func provisionConfigRepos(ctx context.Context, params reposProvisionParams) erro
 
 		if err := repotools.CloneOrFetch(repotools.CloneParams{
 			RepoDir: repoDir,
-			URL:     r.URL,
+			URL:     params.RemoteURL(r.Name),
 			Branch:  r.Branch,
-			Token:   token,
 			Depth:   configRepoSyncDepth,
 		}); err != nil {
 			slog.Error("failed to clone config repo", "user", params.UserID, "repo", r.Name, "err", err)
 			continue
 		}
 		slog.Info("config repo ready", "user", params.UserID, "repo", r.Name,
-			"dir", repoDir, "channels", r.Channels)
+			"dir", repoDir, "access", entry.Access, "channels", r.Channels)
 	}
 
 	return nil
@@ -143,6 +141,11 @@ type repoMounts struct {
 	// Visible clones are readable by this channel and passed as --add-dir.
 	Visible []string
 
+	// ReadOnly clones are bound read-only: they are mirrors that repo_sync
+	// resets to the remote, so an edit would be silently discarded. A repo the
+	// agent may push from is writable, since committing needs a writable clone.
+	ReadOnly []string
+
 	// Masked clones belong to other channels and are hidden behind a tmpfs.
 	Masked []string
 }
@@ -164,6 +167,7 @@ func resolveRepoMounts(ctx context.Context, store *repo.Store, channelName strin
 		return repoMounts{}
 	}
 
+	now := time.Now()
 	var mounts repoMounts
 	for _, r := range repos {
 		if _, statErr := os.Stat(r.RepoDir); statErr != nil {
@@ -171,11 +175,53 @@ func resolveRepoMounts(ctx context.Context, store *repo.Store, channelName strin
 				"repo", r.Name, "dir", r.RepoDir, "err", statErr)
 			continue
 		}
-		if r.VisibleTo(channelName) {
-			mounts.Visible = append(mounts.Visible, r.RepoDir)
+		if !r.VisibleTo(channelName) {
+			mounts.Masked = append(mounts.Masked, r.RepoDir)
 			continue
 		}
-		mounts.Masked = append(mounts.Masked, r.RepoDir)
+		mounts.Visible = append(mounts.Visible, r.RepoDir)
+		if !r.EffectiveAccess(now).AllowsPush() {
+			mounts.ReadOnly = append(mounts.ReadOnly, r.RepoDir)
+		}
 	}
 	return mounts
+}
+
+// newGitProxyLookup resolves a tracked repo name to what the proxy needs to
+// serve it: the upstream path, the tier in force, and the token from the repo's
+// credential slot.
+//
+// Called per request, so a tier granted mid-session or a token filled from a
+// phone takes effect on the next git operation without a restart.
+func newGitProxyLookup(repoStore *repo.Store, secretStore secret.Store) gitproxy.Lookup {
+	return func(ctx context.Context, name string) (*gitproxy.Repo, error) {
+		tracked, err := repoStore.Get(ctx, name)
+		if err != nil {
+			return nil, fmt.Errorf("look up repo %q: %w", name, err)
+		}
+		if tracked == nil {
+			return nil, nil
+		}
+
+		path, err := repoPathFromURL(tracked.URL)
+		if err != nil {
+			return nil, fmt.Errorf("derive upstream path for %q: %w", name, err)
+		}
+
+		// A missing token is not fatal: public repos fetch without one, and a
+		// private repo surfaces a clear 401 from GitHub rather than a confusing
+		// proxy error.
+		token, err := secretStore.Get(ctx, credential.GitTokenKey(tracked.Credential))
+		if err != nil {
+			slog.Warn("failed to read git token for repo, proceeding unauthenticated",
+				"repo", name, "credential", tracked.Credential, "err", err)
+		}
+
+		return &gitproxy.Repo{
+			Path:          path,
+			Access:        tracked.EffectiveAccess(time.Now()),
+			DefaultBranch: tracked.Branch,
+			Token:         strings.TrimSpace(token),
+		}, nil
+	}
 }

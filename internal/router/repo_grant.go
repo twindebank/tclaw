@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"tclaw/internal/channel"
 	"tclaw/internal/repo"
+	"tclaw/internal/tool/repotools"
 )
 
 // RepoGrantPayload describes the access change a pending repo_grant will apply.
@@ -100,4 +102,100 @@ func confirmRepoGrant(
 	}
 	notify(message)
 	return true
+}
+
+// armRepoGrantParams holds what arming a grant needs.
+type armRepoGrantParams struct {
+	RuntimeState  *channel.RuntimeStateStore
+	ActiveChannel func() string
+	Channels      func() map[channel.ChannelID]channel.Channel
+	Send          func(context.Context, channel.ChannelID, string, channel.SendOpts) (channel.MessageID, error)
+}
+
+// newRepoGrantArmer returns the hook repo_request_access calls to ask the user
+// for an access grant.
+//
+// The prompt goes to the chat directly rather than through the agent, and the
+// pending action is written before it is sent: if the prompt went first, a fast
+// "yes" could arrive while nothing was armed, slip past the intercept and reach
+// the agent — which would then answer its own prompt.
+func newRepoGrantArmer(params armRepoGrantParams) func(context.Context, repotools.GrantRequest) error {
+	return func(ctx context.Context, request repotools.GrantRequest) error {
+		chName := ""
+		if params.ActiveChannel != nil {
+			chName = params.ActiveChannel()
+		}
+		if chName == "" {
+			return fmt.Errorf("no active channel to ask for confirmation on")
+		}
+
+		var chID channel.ChannelID
+		for id, ch := range params.Channels() {
+			if ch.Info().Name == chName {
+				chID = id
+				break
+			}
+		}
+		if chID == "" {
+			return fmt.Errorf("channel %q is not live, so nobody can be asked", chName)
+		}
+
+		payload, err := json.Marshal(RepoGrantPayload{
+			Repo:             request.Repo,
+			Access:           request.Access,
+			Credential:       request.Credential,
+			DropToReadOnlyAt: request.DropToReadOnlyAt,
+		})
+		if err != nil {
+			return fmt.Errorf("encode grant: %w", err)
+		}
+
+		if err := params.RuntimeState.Update(ctx, chName, func(rs *channel.RuntimeState) {
+			rs.PendingAction = channel.NewPendingAction(channel.PendingRepoGrant, payload)
+		}); err != nil {
+			return fmt.Errorf("arm grant confirmation: %w", err)
+		}
+
+		if _, err := params.Send(ctx, chID, repoGrantPrompt(request), channel.SendOpts{}); err != nil {
+			// Roll back so the channel isn't left armed for a grant the user
+			// was never actually asked about.
+			if clearErr := params.RuntimeState.Update(ctx, chName, func(rs *channel.RuntimeState) {
+				rs.PendingAction = nil
+			}); clearErr != nil {
+				slog.Error("failed to disarm grant after prompt send failure",
+					"channel", chName, "repo", request.Repo, "err", clearErr)
+			}
+			return fmt.Errorf("send confirmation prompt: %w", err)
+		}
+
+		slog.Info("repo grant confirmation sent", "repo", request.Repo,
+			"access", request.Access, "channel", chName)
+		return nil
+	}
+}
+
+// repoGrantPrompt describes the change in the user's terms, so they are
+// deciding on something specific rather than a bare yes/no.
+func repoGrantPrompt(request repotools.GrantRequest) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "🔑 Grant %s access to %s?\n\n", request.Access, request.Repo)
+
+	switch request.Access {
+	case repo.AccessPullRequestsOnly:
+		b.WriteString("This lets me push branches and open pull requests. " +
+			"Pushing to the default branch stays blocked.\n")
+	case repo.AccessFullWrite:
+		b.WriteString("⚠️ This lets me push anywhere, including the default branch.\n")
+	}
+
+	fmt.Fprintf(&b, "\nWhy: %s\n", request.Reason)
+	if request.Credential != "" {
+		fmt.Fprintf(&b, "Using credential: %s\n", request.Credential)
+	}
+	if !request.DropToReadOnlyAt.IsZero() {
+		fmt.Fprintf(&b, "Reverts to read-only: %s\n", request.DropToReadOnlyAt.Format(time.RFC1123))
+	}
+
+	b.WriteString("\nReply \"yes\" to grant it. Anything else declines.")
+	return b.String()
 }
