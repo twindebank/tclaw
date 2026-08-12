@@ -226,12 +226,15 @@ type UserTelegramConfig struct {
 // authenticated server-side (see internal/knowledgeproxy) so the token never
 // reaches the agent subprocess. Auth reuses the shared "github_token" secret.
 type KnowledgeConfig struct {
-	// Repo is the vault repository. Accepts "owner/repo" shorthand (expanded to
-	// https://github.com/owner/repo) or a full HTTPS URL.
+	// Repo names a repos[] entry — the vault is an ordinary declared repo, so
+	// its URL, branch, access and credential are configured there like any
+	// other. What remains here is only what is genuinely vault-specific.
 	Repo string `yaml:"repo"`
 
-	// Branch is the branch the agent reads and pushes to. Defaults to "main".
-	Branch string `yaml:"branch,omitempty"`
+	// MountAt is the directory under <user>/ the vault is cloned into.
+	// Defaults to "knowledge", which is the path the system prompt and the
+	// knowledge skill refer to.
+	MountAt string `yaml:"mount_at,omitempty"`
 
 	// CommitName and CommitEmail set the git identity used for agent commits.
 	// Optional; a tclaw noreply identity is used when empty.
@@ -239,18 +242,21 @@ type KnowledgeConfig struct {
 	CommitEmail string `yaml:"commit_email,omitempty"`
 }
 
-// normalize fills defaults and expands "owner/repo" shorthand into a full HTTPS
-// URL. Mutates the receiver in place.
+// normalize fills defaults. Mutates the receiver in place.
 func (k *KnowledgeConfig) normalize() error {
 	if strings.TrimSpace(k.Repo) == "" {
-		return fmt.Errorf("repo is required")
+		return fmt.Errorf("repo is required — name a repos entry to use as the vault")
 	}
-	if k.Branch == "" {
-		k.Branch = "main"
+	if k.MountAt == "" {
+		k.MountAt = defaultKnowledgeMountAt
 	}
-	k.Repo = normalizeRepoURL(k.Repo)
 	return nil
 }
+
+// defaultKnowledgeMountAt is where the vault lands under the user directory.
+// The system prompt refers to it as ../knowledge, so moving it means changing
+// that too.
+const defaultKnowledgeMountAt = "knowledge"
 
 // normalizeRepoURL expands an "owner/repo" shorthand to a github.com HTTPS URL,
 // leaving explicit http(s) URLs untouched.
@@ -310,6 +316,11 @@ type RepoConfig struct {
 	// use (Go duration). Disk hygiene only: the entry survives and the clone is
 	// recreated on the next sync.
 	DropCloneIfUnusedFor string `yaml:"drop_clone_if_unused_for,omitempty"`
+
+	// MountAt clones this repo into <user>/<mount_at> instead of the usual
+	// <user>/repos/<name>. Set by the knowledge config for the vault, whose
+	// path the system prompt and skill refer to directly.
+	MountAt string `yaml:"-"`
 }
 
 // Lifecycle holds the parsed lifecycle timings of a repo declaration.
@@ -618,11 +629,6 @@ func validate(cfg *Config) error {
 
 		// Knowledge is a pointer shared with cfg.Users[i], so normalizing through
 		// u.Knowledge also updates the stored config.
-		if u.Knowledge != nil {
-			if err := u.Knowledge.normalize(); err != nil {
-				return fmt.Errorf("user %q knowledge: %w", u.ID, err)
-			}
-		}
 
 		if len(u.Channels) == 0 {
 			return fmt.Errorf("user %q: no channels defined", u.ID)
@@ -758,12 +764,41 @@ func validate(cfg *Config) error {
 					return fmt.Errorf("user %q repo %q visible_to_channels[%d]: %q does not match any channel name", u.ID, r.Name, k, chName)
 				}
 			}
+			if r.MountAt != "" && r.MountAt != defaultKnowledgeMountAt && strings.ContainsAny(r.MountAt, `/\`) {
+				return fmt.Errorf("user %q repo %q: mount_at %q must be a single directory name", u.ID, r.Name, r.MountAt)
+			}
 			// A repo naming a credential slot that isn't declared would fail
 			// silently at fetch time with an unhelpful auth error.
 			if r.Credential != "" && !gitSlotLabels(cfg)[r.Credential] {
 				return fmt.Errorf("user %q repo %q: credential %q does not match any credential_slots entry with type %q",
 					u.ID, r.Name, r.Credential, GitCredentialType)
 			}
+		}
+
+		// The vault is an ordinary declared repo; knowledge only says which one
+		// it is and where it lands. Resolved after repos so the reference can be
+		// checked against them.
+		if u.Knowledge != nil {
+			if err := u.Knowledge.normalize(); err != nil {
+				return fmt.Errorf("user %q knowledge: %w", u.ID, err)
+			}
+			vault := -1
+			for j := range u.Repos {
+				if u.Repos[j].Name == u.Knowledge.Repo {
+					vault = j
+					break
+				}
+			}
+			if vault < 0 {
+				return fmt.Errorf("user %q knowledge: repo %q does not match any repos entry", u.ID, u.Knowledge.Repo)
+			}
+			// The agent commits and pushes the vault on every turn, so a tier
+			// that cannot push would leave it silently failing to save.
+			if !u.Repos[vault].Access.AllowsPush() {
+				return fmt.Errorf("user %q knowledge: repo %q has access %q, but the vault must be able to push (%q)",
+					u.ID, u.Knowledge.Repo, u.Repos[vault].Access, repo.AccessFullWrite)
+			}
+			u.Repos[vault].MountAt = u.Knowledge.MountAt
 		}
 	}
 
@@ -896,7 +931,6 @@ func (u *User) ToUserConfig() user.Config {
 	if u.Knowledge != nil {
 		knowledge = &user.Knowledge{
 			Repo:        u.Knowledge.Repo,
-			Branch:      u.Knowledge.Branch,
 			CommitName:  u.Knowledge.CommitName,
 			CommitEmail: u.Knowledge.CommitEmail,
 		}
@@ -918,6 +952,7 @@ func (u *User) ToUserConfig() user.Config {
 			Channels:             r.VisibleToChannels,
 			Access:               r.Access,
 			Credential:           r.Credential,
+			MountAt:              r.MountAt,
 			FetchEvery:           lifecycle.FetchEvery,
 			DropToReadOnlyAt:     lifecycle.DropToReadOnlyAt,
 			DropCloneIfUnusedFor: lifecycle.DropCloneIfUnusedFor,

@@ -73,7 +73,7 @@ func provisionConfigRepos(ctx context.Context, params reposProvisionParams) erro
 	}
 
 	for _, r := range params.Repos {
-		repoDir := filepath.Join(params.UserDir, "repos", r.Name)
+		repoDir := repoCloneDir(params.UserDir, r)
 		if err := os.MkdirAll(repoDir, 0o755); err != nil {
 			slog.Error("failed to create repo dir", "user", params.UserID, "repo", r.Name, "err", err)
 			continue
@@ -122,6 +122,16 @@ func provisionConfigRepos(ctx context.Context, params reposProvisionParams) erro
 	}
 
 	return nil
+}
+
+// repoCloneDir is where a declared repo is cloned. Most land under repos/;
+// the knowledge vault overrides this so it keeps the path the system prompt
+// and the knowledge skill refer to.
+func repoCloneDir(userDir string, r user.Repo) string {
+	if r.MountAt != "" {
+		return filepath.Join(userDir, r.MountAt)
+	}
+	return filepath.Join(userDir, "repos", r.Name)
 }
 
 // channelName resolves a channel ID to its configured name, which is what repo

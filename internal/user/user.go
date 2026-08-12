@@ -84,13 +84,19 @@ type Repo struct {
 	// DropCloneIfUnusedFor removes the clone from disk after this long unused.
 	// Zero keeps it indefinitely.
 	DropCloneIfUnusedFor time.Duration
+
+	// MountAt clones this repo into <user>/<mount_at> instead of the usual
+	// <user>/repos/<name>. Used by the knowledge vault.
+	MountAt string
 }
 
 // Knowledge holds the resolved personal knowledge base settings for a user.
 // Repo is a full clone URL; Branch defaults are applied during config load.
 type Knowledge struct {
-	Repo        string
-	Branch      string
+	// Repo names the declared repo used as the vault.
+	Repo string
+
+	// CommitName and CommitEmail are the git identity for agent commits.
 	CommitName  string
 	CommitEmail string
 }

@@ -239,27 +239,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	}
 	defer remoteMCPProxy.Stop(context.Background())
 
-	// Personal knowledge base: start the per-user git-auth proxy and provision the
-	// vault clone. The proxy injects the GitHub token server-side, so the agent can
-	// pull/push via raw git without the token entering its subprocess. Failures are
-	// logged, not fatal — the user session continues without the knowledge base.
-	if kc := mu.cfg.Knowledge; kc != nil {
-		if knowledgeProxy, kpErr := startKnowledgeProxy(mu.cfg.ID, kc, secretStore); kpErr != nil {
-			slog.Error("failed to start knowledge proxy", "user", mu.cfg.ID, "err", kpErr)
-		} else {
-			defer knowledgeProxy.Stop(context.Background())
-			if provErr := provisionKnowledgeClone(knowledgeProvisionParams{
-				Dir:         dirs.Knowledge,
-				RemoteURL:   knowledgeProxy.RemoteURL(),
-				Branch:      kc.Branch,
-				CommitName:  kc.CommitName,
-				CommitEmail: kc.CommitEmail,
-			}); provErr != nil {
-				slog.Error("failed to provision knowledge clone", "user", mu.cfg.ID, "err", provErr)
-			}
-		}
-	}
-
 	// buildRemoteMCPEntries lists the connected remote MCPs and returns config
 	// entries pointing at the auth proxy. Credentials are injected by the proxy
 	// at request time, so none are read (or written to the config) here.
@@ -431,6 +410,15 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			RemoteURL: gitProxy.RemoteURL,
 		}); err != nil {
 			slog.Error("failed to provision config repos", "user", mu.cfg.ID, "err", err)
+		}
+	}
+
+	// The vault is one of those repos; all that remains is the git identity for
+	// the commits the agent makes on every turn. Failures are logged, not fatal
+	// — the session continues without the knowledge base.
+	if kc := mu.cfg.Knowledge; kc != nil {
+		if err := configureGitIdentity(dirs.Knowledge, kc.CommitName, kc.CommitEmail); err != nil {
+			slog.Error("failed to configure knowledge commit identity", "user", mu.cfg.ID, "err", err)
 		}
 	}
 
