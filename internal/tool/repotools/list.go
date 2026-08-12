@@ -45,10 +45,17 @@ func repoListHandler(deps Deps) mcp.ToolHandler {
 			LastSeenCommit string `json:"last_seen_commit"`
 			RepoDir        string `json:"repo_dir"`
 			Age            string `json:"age"`
+			Description    string `json:"description,omitempty"`
+			Managed        bool   `json:"managed,omitempty"`
 		}
 
 		var infos []repoInfo
 		for _, r := range repos {
+			// Repos scoped to other channels are omitted entirely — this
+			// channel has no clone mounted for them either.
+			if _, ok := deps.visibleTo(r); !ok {
+				continue
+			}
 			lastSynced := "never"
 			if !r.LastSyncedAt.IsZero() {
 				lastSynced = r.LastSyncedAt.Format(time.RFC3339)
@@ -68,7 +75,17 @@ func repoListHandler(deps Deps) mcp.ToolHandler {
 				LastSeenCommit: commit,
 				RepoDir:        r.RepoDir,
 				Age:            time.Since(r.AddedAt).Truncate(time.Minute).String(),
+				Description:    r.Description,
+				Managed:        r.Managed,
 			})
+		}
+
+		if len(infos) == 0 {
+			result := map[string]any{
+				"repos":   []any{},
+				"message": "No tracked repos available on this channel. Use repo_add to start monitoring a repo.",
+			}
+			return json.Marshal(result)
 		}
 
 		result := map[string]any{

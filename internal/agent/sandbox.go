@@ -24,6 +24,12 @@ type sandboxPaths struct {
 	// Use this to lock down individual files (e.g. settings.json) inside
 	// an otherwise writable directory.
 	ReadOnlyOverlay []string
+
+	// Masked paths are replaced with an empty tmpfs, hiding their contents from
+	// the subprocess. Used to blank out sibling directories inside a bound
+	// parent — a repo clone scoped to another channel stays on disk but reads
+	// as empty for this turn.
+	Masked []string
 }
 
 // systemReadOnlyPaths are the minimal system paths needed for the claude CLI
@@ -75,6 +81,12 @@ func wrapWithSandbox(ctx context.Context, original *exec.Cmd, paths sandboxPaths
 	// making the files immutable even though their parent dir is writable.
 	for _, p := range paths.ReadOnlyOverlay {
 		bwrapArgs = append(bwrapArgs, "--ro-bind-try", p, p)
+	}
+
+	// Masked paths — an empty tmpfs over a directory inside a bound parent,
+	// hiding its contents. Applied last so it wins over any earlier bind.
+	for _, p := range paths.Masked {
+		bwrapArgs = append(bwrapArgs, "--tmpfs", p)
 	}
 
 	// Kernel filesystems and private /tmp.

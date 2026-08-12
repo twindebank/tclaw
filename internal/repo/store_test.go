@@ -141,6 +141,27 @@ func TestStore_PutOverwrites(t *testing.T) {
 	require.Equal(t, "develop", got.Branch)
 }
 
+func TestTrackedRepo_VisibleTo(t *testing.T) {
+	t.Run("an unscoped repo is visible on every channel", func(t *testing.T) {
+		r := repo.TrackedRepo{Name: "shared"}
+		require.True(t, r.VisibleTo("homeassistant"))
+		require.True(t, r.VisibleTo("email"))
+		require.True(t, r.VisibleTo(""))
+	})
+
+	t.Run("a scoped repo is visible only on a listed channel", func(t *testing.T) {
+		r := repo.TrackedRepo{Name: "ha-config", Channels: []string{"homeassistant", "admin"}}
+		require.True(t, r.VisibleTo("homeassistant"))
+		require.True(t, r.VisibleTo("admin"))
+		require.False(t, r.VisibleTo("email"))
+	})
+
+	t.Run("a scoped repo is hidden when the channel is unknown", func(t *testing.T) {
+		r := repo.TrackedRepo{Name: "ha-config", Channels: []string{"homeassistant"}}
+		require.False(t, r.VisibleTo(""), "missing turn context must not widen access")
+	})
+}
+
 func newStore(t *testing.T) *repo.Store {
 	t.Helper()
 	s, err := store.NewFS(filepath.Join(t.TempDir(), "state"))
