@@ -11,11 +11,6 @@ import (
 	"tclaw/internal/mcp"
 )
 
-// workspaceDownloadsSubdir is where the gws subprocess writes binary output
-// (e.g. "drive files get" with alt=media) for commands run through the
-// generic passthrough tool, so the agent sandbox can actually reach it.
-const workspaceDownloadsSubdir = "downloads"
-
 type workspaceArgs struct {
 	CredentialSet string `json:"credential_set"`
 	Command       string `json:"command"`
@@ -24,11 +19,6 @@ type workspaceArgs struct {
 }
 
 func workspaceHandler(depsMap map[credential.CredentialSetID]Deps, memoryDir string) mcp.ToolHandler {
-	downloadDir := ""
-	if memoryDir != "" {
-		downloadDir = filepath.Join(memoryDir, workspaceDownloadsSubdir)
-	}
-
 	return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var a workspaceArgs
 		if err := json.Unmarshal(raw, &a); err != nil {
@@ -45,23 +35,28 @@ func workspaceHandler(depsMap map[credential.CredentialSetID]Deps, memoryDir str
 		}
 
 		cmd := gws.Raw(a.Command, a.Params, a.JSON)
-		cmd.Dir = downloadDir
+		// The gws CLI's own path validation requires any file it touches (downloaded
+		// binaries, -a attachment sources) to resolve under its working directory. Pointing
+		// Dir at the whole memory sandbox — rather than a narrower subdir — lets both
+		// directions work: downloads land somewhere the agent can read, and attachments
+		// already living anywhere under the memory dir (e.g. media/) pass gws's check.
+		cmd.Dir = memoryDir
 
 		result, err := runGWS(ctx, deps, cmd)
 		if err != nil {
 			return nil, err
 		}
 
-		return resolveSavedFilePath(result, downloadDir), nil
+		return resolveSavedFilePath(result, memoryDir), nil
 	}
 }
 
 // resolveSavedFilePath rewrites a gws response's "saved_file" field (a
 // filename relative to the subprocess's working directory) into the absolute
 // path the caller can actually read. Responses without a "saved_file" string
-// field, or with no downloadDir configured, are returned unchanged.
-func resolveSavedFilePath(raw json.RawMessage, downloadDir string) json.RawMessage {
-	if downloadDir == "" {
+// field, or with no memoryDir configured, are returned unchanged.
+func resolveSavedFilePath(raw json.RawMessage, memoryDir string) json.RawMessage {
+	if memoryDir == "" {
 		return raw
 	}
 
@@ -76,7 +71,7 @@ func resolveSavedFilePath(raw json.RawMessage, downloadDir string) json.RawMessa
 		return raw
 	}
 
-	payload["saved_file"] = filepath.Join(downloadDir, savedFile)
+	payload["saved_file"] = filepath.Join(memoryDir, savedFile)
 	rewritten, err := json.Marshal(payload)
 	if err != nil {
 		// Marshaling a map we just unmarshaled cannot fail; fall back defensively.

@@ -18,8 +18,10 @@ type Deps = providerutil.Deps
 // Call this each time a Google credential set is added or removed. memoryDir
 // is the user's sandboxed memory directory — google_workspace uses it as the
 // gws subprocess's working directory so downloaded files (e.g. Drive binaries)
-// land somewhere the agent sandbox can read; empty disables this (downloads
-// fall back to the process's own CWD and are unreachable by the agent).
+// land somewhere the agent sandbox can read, and so -a attachment paths already
+// living under the memory dir pass gws's own "must resolve under CWD" check;
+// empty disables this (downloads fall back to the process's own CWD and are
+// unreachable by the agent, and absolute attachment paths are likely rejected).
 func RegisterTools(handler *mcp.Handler, depsMap map[credential.CredentialSetID]Deps, memoryDir string) {
 	setIDs := make([]credential.CredentialSetID, 0, len(depsMap))
 	for id := range depsMap {
