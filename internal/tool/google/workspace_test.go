@@ -51,4 +51,14 @@ func TestResolveSavedFilePath(t *testing.T) {
 
 		require.JSONEq(t, string(raw), string(got))
 	})
+
+	t.Run("relative saved_file with subdirectory joins correctly", func(t *testing.T) {
+		raw := json.RawMessage(`{"saved_file":"media/download.pdf"}`)
+
+		got := resolveSavedFilePath(raw, "/data/tclaw/theo/memory")
+
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(got, &payload))
+		require.Equal(t, filepath.Join("/data/tclaw/theo/memory", "media", "download.pdf"), payload["saved_file"])
+	})
 }
