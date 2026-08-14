@@ -1,7 +1,6 @@
 package gitproxy
 
 import (
-	"bufio"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -45,7 +44,12 @@ func (c refCommand) IsDelete() bool {
 // Any deviation is an error rather than a best guess: the caller refuses the
 // push, since a body we cannot read is a body whose effects we cannot bound.
 func parseRefCommands(body io.Reader) (commands []refCommand, consumed []byte, err error) {
-	reader := bufio.NewReader(io.LimitReader(body, commandSectionLimit))
+	// Deliberately unbuffered: a bufio.Reader here would read ahead into the
+	// packfile that follows the commands, and those read-ahead bytes would be
+	// lost once this function returns and the buffer goes out of scope,
+	// corrupting the push forwarded upstream. io.ReadFull already loops over
+	// partial reads on a plain reader, so buffering buys nothing.
+	reader := io.LimitReader(body, commandSectionLimit)
 	var seen []byte
 
 	for {
