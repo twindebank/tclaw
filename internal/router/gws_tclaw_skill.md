@@ -96,7 +96,10 @@ These are quirks observed in production that the generated skills don't cover:
   `textFormatRuns` (`[{startIndex:0, format:{link:{uri:"…"}}}]`) with
   `fields='userEnteredValue,textFormatRuns'`. This matches how Sheets stores "Insert Link".
 
-### Reading PDF attachments from Gmail
+### Reading PDF or image attachments from Gmail
+**No Python interpreter in the sandbox — only `node`.** Never reach for `python`/`python3`
+for decoding or scripting steps below; the command doesn't exist and the call will fail.
+
 1. `google_workspace` with `gmail users messages get`, format=full — result is saved to a
    file (too large for context).
 2. Use node to parse the file and find attachment IDs: iterate `payload.parts` recursively,
@@ -104,5 +107,7 @@ These are quirks observed in production that the generated skills don't cover:
 3. `google_workspace` with `gmail users messages attachments get`, params
    `{userId:"me", messageId:"…", id:"<attachmentId>"}` — also saved to a file.
 4. Use node to base64-decode: `obj.data.replace(/-/g,'+').replace(/_/g,'/')`, then
-   `Buffer.from(b64,'base64')`, write to `/tmp/filename.pdf`.
-5. Use the Read tool on the saved PDF — Claude can view it directly as multimodal input.
+   `Buffer.from(b64,'base64')`, write to `/tmp/filename.pdf` (or `.jpg`/`.png` for images —
+   same steps, just a different extension).
+5. Use the Read tool on the saved file — Claude can view PDFs and images directly as
+   multimodal input.
