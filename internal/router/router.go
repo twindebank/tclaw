@@ -741,6 +741,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		addDirs := promptResult.AddDirs
 		worktreesDir := filepath.Join(userDir, "worktrees")
 		reposDir := filepath.Join(userDir, "repos")
+		devRepoDir := filepath.Join(userDir, "repo")
 		knowledgeDir := dirs.Knowledge
 
 		// Load persisted queue state (queued messages + interrupted marker)
@@ -998,9 +999,12 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			// Bind the repos parent so a repo cloned mid-turn (repo_add +
 			// repo_sync) is readable straight away — binds are fixed when the
 			// subprocess spawns, so a clone created afterwards is only visible
-			// through an already-bound parent.
+			// through an already-bound parent. Also bind the dev bare repo dir:
+			// each worktree checkout's .git file points at
+			// <devRepoDir>/worktrees/<name>, so git commands inside a worktree
+			// fail with "not a git repository" unless that gitdir is mounted too.
 			SandboxDirs: func(_ channel.ChannelID) []string {
-				return []string{reposDir}
+				return []string{reposDir, devRepoDir}
 			},
 			ReadOnlyDirs: func(chID channel.ChannelID) []string {
 				// A read-only repo is a mirror that repo_sync resets to the
