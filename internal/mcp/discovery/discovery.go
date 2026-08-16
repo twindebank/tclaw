@@ -44,6 +44,23 @@ type RemoteCredentials struct {
 	ExpiresIn    int // seconds
 }
 
+// DiscoverAuthOption customises DiscoverAuth's HTTP behaviour.
+type DiscoverAuthOption func(*discoverAuthConfig)
+
+type discoverAuthConfig struct {
+	client *http.Client
+}
+
+// WithDiscoverAuthHTTPClient overrides the default SSRF-safe HTTP client used
+// for every request DiscoverAuth makes (the initial probe, and the
+// resource/auth-server metadata fetches) AND skips the SSRF URL validation on
+// all of them — the caller is presumed to have pinned their own trust.
+// Mirrors ListTools's WithHTTPClient; primarily for tests that want to talk
+// to httptest.NewTLSServer instances on 127.0.0.1.
+func WithDiscoverAuthHTTPClient(c *http.Client) DiscoverAuthOption {
+	return func(cfg *discoverAuthConfig) { cfg.client = c }
+}
+
 // DiscoverAuth probes an MCP server URL to determine whether OAuth is required.
 // It sends a minimal JSON-RPC initialize request; if the server returns 401 with
 // a WWW-Authenticate header, it follows the OAuth 2.1 discovery chain:
@@ -52,11 +69,31 @@ type RemoteCredentials struct {
 //  2. Fetch protected resource metadata → get authorization_servers[0]
 //  3. Fetch auth server's .well-known/oauth-authorization-server → get endpoints
 //
-// Returns nil metadata (no error) if the server does not require auth (2xx response).
-func DiscoverAuth(ctx context.Context, mcpURL string) (*AuthMetadata, error) {
-	// Validate the MCP URL before making any outbound requests.
-	if err := validateExternalURL(mcpURL); err != nil {
-		return nil, fmt.Errorf("unsafe MCP URL: %w", err)
+// Returns nil metadata (no error) if the server does not require auth (2xx
+// response) to the initial probe.
+//
+// A non-nil error means discovery could not determine the auth requirement
+// (network failure, an unexpected status code, or a malformed/incomplete
+// metadata chain) — callers MUST NOT treat this the same as "no auth
+// required". Some servers (e.g. those sitting behind a WAF or bot-protection
+// layer) reject every request, authenticated or not, with a bare non-2xx
+// status and no WWW-Authenticate header at all; silently registering those as
+// auth-free produces a permanently broken, zero-tool registration.
+func DiscoverAuth(ctx context.Context, mcpURL string, opts ...DiscoverAuthOption) (*AuthMetadata, error) {
+	cfg := discoverAuthConfig{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	client := cfg.client
+	skipValidation := client != nil
+	if client == nil {
+		client = safeClient
+	}
+	if !skipValidation {
+		// Validate the MCP URL before making any outbound requests.
+		if err := validateExternalURL(mcpURL); err != nil {
+			return nil, fmt.Errorf("unsafe MCP URL: %w", err)
+		}
 	}
 
 	// Send a minimal MCP initialize request to provoke a 401 if auth is needed.
@@ -83,7 +120,7 @@ func DiscoverAuth(ctx context.Context, mcpURL string) (*AuthMetadata, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 
-	resp, err := safeClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("probe MCP server: %w", err)
 	}
@@ -105,14 +142,16 @@ func DiscoverAuth(ctx context.Context, mcpURL string) (*AuthMetadata, error) {
 		return nil, fmt.Errorf("parse WWW-Authenticate: %w", err)
 	}
 
-	// Validate the resource metadata URL before fetching (SSRF protection —
-	// this URL comes from the remote server's WWW-Authenticate header).
-	if err := validateExternalURL(resourceMetaURL); err != nil {
-		return nil, fmt.Errorf("unsafe resource metadata URL: %w", err)
+	if !skipValidation {
+		// Validate the resource metadata URL before fetching (SSRF protection —
+		// this URL comes from the remote server's WWW-Authenticate header).
+		if err := validateExternalURL(resourceMetaURL); err != nil {
+			return nil, fmt.Errorf("unsafe resource metadata URL: %w", err)
+		}
 	}
 
 	// Fetch protected resource metadata to find the authorization server.
-	resourceMeta, err := fetchJSON[protectedResourceMeta](ctx, resourceMetaURL)
+	resourceMeta, err := fetchJSON[protectedResourceMeta](ctx, client, resourceMetaURL)
 	if err != nil {
 		return nil, fmt.Errorf("fetch protected resource metadata: %w", err)
 	}
@@ -128,13 +167,15 @@ func DiscoverAuth(ctx context.Context, mcpURL string) (*AuthMetadata, error) {
 		return nil, fmt.Errorf("build auth server well-known URL: %w", err)
 	}
 
-	// Validate the well-known URL (SSRF protection — derived from
-	// authorization_servers[0] in the resource metadata response).
-	if err := validateExternalURL(wellKnownURL); err != nil {
-		return nil, fmt.Errorf("unsafe auth server URL: %w", err)
+	if !skipValidation {
+		// Validate the well-known URL (SSRF protection — derived from
+		// authorization_servers[0] in the resource metadata response).
+		if err := validateExternalURL(wellKnownURL); err != nil {
+			return nil, fmt.Errorf("unsafe auth server URL: %w", err)
+		}
 	}
 
-	asMeta, err := fetchJSON[authServerMeta](ctx, wellKnownURL)
+	asMeta, err := fetchJSON[authServerMeta](ctx, client, wellKnownURL)
 	if err != nil {
 		return nil, fmt.Errorf("fetch auth server metadata: %w", err)
 	}
@@ -333,14 +374,14 @@ func buildWellKnownURL(authServerURL string) (string, error) {
 
 // fetchJSON GETs a URL and decodes the JSON response into T.
 // Response bodies are capped at maxResponseBodyBytes to prevent memory exhaustion.
-func fetchJSON[T any](ctx context.Context, rawURL string) (*T, error) {
+func fetchJSON[T any](ctx context.Context, client *http.Client, rawURL string) (*T, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request for %s: %w", rawURL, err)
 	}
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := safeClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch %s: %w", rawURL, err)
 	}

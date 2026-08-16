@@ -190,6 +190,78 @@ func TestRemoteMCPAdd_CapturesInstructions(t *testing.T) {
 	})
 }
 
+// TestRemoteMCPAdd_AuthDiscovery exercises remote_mcp_add without
+// skip_auth_discovery, i.e. the path that probes the server to decide
+// whether OAuth is required. Regression coverage for a bug where a
+// discovery failure (e.g. an unexpected status code with no
+// WWW-Authenticate header, as returned by Strava's hosted MCP server) was
+// silently treated the same as "no auth needed" — registering the server
+// with zero tools and no way to ever authorize it.
+func TestRemoteMCPAdd_AuthDiscovery(t *testing.T) {
+	t.Run("registers successfully when the probe reports no auth required", func(t *testing.T) {
+		server := fakeMCPServer(t, []string{"open_tool_a", "open_tool_b"})
+		h, mgr, updated := setup(t, withHTTPClient(server.Client()))
+
+		result := callTool(t, h, "remote_mcp_add", map[string]any{
+			"name":    "open-mcp",
+			"url":     server.URL + "/mcp",
+			"channel": "desktop",
+		})
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(result, &got))
+		require.Equal(t, "ready", got["status"])
+
+		entry, err := mgr.GetRemoteMCP(context.Background(), "open-mcp")
+		require.NoError(t, err)
+		require.NotNil(t, entry)
+		require.Equal(t, []string{"open_tool_a", "open_tool_b"}, entry.ToolNames)
+		require.Equal(t, 1, *updated)
+	})
+
+	t.Run("does not register the server when the probe returns an unexpected status", func(t *testing.T) {
+		// Simulates a server whose endpoint is blocked by a WAF/bot layer and
+		// returns a bare 403 (no WWW-Authenticate header) for every request,
+		// regardless of whether the caller is authenticated — the Strava
+		// repro. This must NOT be treated as "no auth needed".
+		server := fakeStatusServer(t, http.StatusForbidden)
+		h, mgr, updated := setup(t, withHTTPClient(server.Client()))
+
+		err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
+			"name":    "strava",
+			"url":     server.URL + "/mcp",
+			"channel": "running",
+		})
+		require.Contains(t, err.Error(), "could not determine whether remote MCP")
+		require.Contains(t, err.Error(), "skip_auth_discovery=true")
+
+		mcps, listErr := mgr.ListRemoteMCPs(context.Background())
+		require.NoError(t, listErr)
+		require.Empty(t, mcps, "a failed auth-discovery probe must not leave a broken zero-tool registration behind")
+		require.Equal(t, 0, *updated, "config must not be regenerated for a registration that never completed")
+	})
+
+	t.Run("does not register the server when the probe is unreachable", func(t *testing.T) {
+		server := fakeMCPServer(t, []string{"ignored"})
+		client := server.Client()
+		server.Close() // immediately close so the probe fails outright
+
+		h, mgr, updated := setup(t, withHTTPClient(client))
+
+		err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
+			"name":    "dead-server",
+			"url":     server.URL + "/mcp",
+			"channel": "desktop",
+		})
+		require.Contains(t, err.Error(), "could not determine whether remote MCP")
+
+		mcps, listErr := mgr.ListRemoteMCPs(context.Background())
+		require.NoError(t, listErr)
+		require.Empty(t, mcps, "failed registration must not leave state behind")
+		require.Equal(t, 0, *updated)
+	})
+}
+
 func TestRemoteMCPAdd_PrivateHostHTTP(t *testing.T) {
 	t.Run("allows http past the https gate for a Fly private host", func(t *testing.T) {
 		h, _, _ := setup(t)
