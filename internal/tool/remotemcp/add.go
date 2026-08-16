@@ -165,8 +165,6 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 		// MCP tools, so without an explicit list it refuses every tool call.
 		// Failing the add on an unreachable server is correct: it keeps the
 		// store clean and surfaces the real error to the user now, not later.
-		var toolNames []string
-		var instructions string
 		if a.SkipAuthDiscovery {
 			listOpts := listToolsOpts(deps)
 			// When a pin is set and no client was injected (i.e. real use, not a
@@ -186,25 +184,20 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 			if len(discovered.ToolNames) == 0 {
 				return nil, fmt.Errorf("remote MCP %q exposed no tools", a.Name)
 			}
-			toolNames = discovered.ToolNames
-			instructions = discovered.Instructions
-		}
 
-		// Store the remote MCP entry.
-		entry, err := deps.Manager.AddRemoteMCP(ctx, remotemcpstore.AddRemoteMCPParams{
-			Name:         a.Name,
-			URL:          resolvedURL,
-			Channel:      a.Channel,
-			URLSensitive: a.URLSecretKey != "",
-			ToolNames:    toolNames,
-			TLSPinSHA256: a.TLSPinSHA256,
-			Instructions: instructions,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("add remote mcp: %w", err)
-		}
+			entry, err := deps.Manager.AddRemoteMCP(ctx, remotemcpstore.AddRemoteMCPParams{
+				Name:         a.Name,
+				URL:          resolvedURL,
+				Channel:      a.Channel,
+				URLSensitive: a.URLSecretKey != "",
+				ToolNames:    discovered.ToolNames,
+				TLSPinSHA256: a.TLSPinSHA256,
+				Instructions: discovered.Instructions,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("add remote mcp: %w", err)
+			}
 
-		if a.SkipAuthDiscovery {
 			if len(mergedHeaders) > 0 {
 				authData := &remotemcpstore.RemoteMCPAuth{StaticHeaders: mergedHeaders}
 				if err := deps.Manager.SetRemoteMCPAuth(ctx, a.Name, authData); err != nil {
@@ -221,49 +214,55 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 				deps.OnChannelChange()
 			}
 			result := buildAddResponse(entry, "ready",
-				fmt.Sprintf("Remote MCP %q added with %d tool(s) and %d static header(s) attached. Its tools will be available on the next message.", a.Name, len(toolNames), len(mergedHeaders)))
+				fmt.Sprintf("Remote MCP %q added with %d tool(s) and %d static header(s) attached. Its tools will be available on the next message.", a.Name, len(discovered.ToolNames), len(mergedHeaders)))
 			return json.Marshal(result)
 		}
 
 		slog.Info("discovering auth for remote MCP", "name", a.Name, "host", parsed.Host)
 
-		// Discover whether OAuth is required.
-		authMeta, err := discovery.DiscoverAuth(ctx, resolvedURL)
+		// Discover whether OAuth is required. Run this BEFORE touching the
+		// store: a discovery failure must not silently register the server as
+		// "no auth needed" with zero tools and no way to authorize it later —
+		// that leaves the user permanently stuck (e.g. a server whose probe
+		// endpoint is blocked by a WAF/bot-protection layer and returns a
+		// bare, non-compliant status with no WWW-Authenticate header at all,
+		// such as Strava's hosted MCP server). Fail loudly instead so the
+		// agent can retry with skip_auth_discovery=true if it knows the real
+		// auth scheme, or surface the failure to the user.
+		authMeta, err := discovery.DiscoverAuth(ctx, resolvedURL, discoverAuthOpts(deps)...)
 		if err != nil {
-			slog.Warn("auth discovery failed, adding without auth", "name", a.Name, "err", err)
-			if updateErr := deps.ConfigUpdater(ctx); updateErr != nil {
-				return nil, fmt.Errorf("remote MCP %q added but config update failed — tools won't be available until next restart: %w", a.Name, updateErr)
-			}
-			result := buildAddResponse(entry, "ready",
-				fmt.Sprintf("Remote MCP %q added (no auth or discovery failed). Its tools will be available on the next message.", a.Name))
-			return json.Marshal(result)
+			return nil, fmt.Errorf("could not determine whether remote MCP %q requires authentication — auth discovery probe failed: %w. Nothing was registered. If you know this server needs no auth, or uses a non-OAuth scheme (static token, custom header, etc.), retry with skip_auth_discovery=true and attach credentials via 'headers'/'header_secret_keys' if needed", a.Name, err)
 		}
 
-		// No auth needed — fetch the tool list and update the config.
+		// No auth needed — fetch the tool list and register.
 		if authMeta == nil {
-			discovered, listErr := discovery.ListTools(ctx, resolvedURL, nil)
+			discovered, listErr := discovery.ListTools(ctx, resolvedURL, nil, listToolsOpts(deps)...)
 			if listErr != nil {
 				return nil, fmt.Errorf("failed to list tools from remote MCP %q: %w", a.Name, listErr)
 			}
 			if len(discovered.ToolNames) == 0 {
 				return nil, fmt.Errorf("remote MCP %q exposed no tools", a.Name)
 			}
-			if setErr := deps.Manager.SetToolNames(ctx, a.Name, discovered.ToolNames); setErr != nil {
-				return nil, fmt.Errorf("persist tool names: %w", setErr)
-			}
-			if setErr := deps.Manager.SetInstructions(ctx, a.Name, discovered.Instructions); setErr != nil {
-				return nil, fmt.Errorf("persist instructions: %w", setErr)
+			entry, err := deps.Manager.AddRemoteMCP(ctx, remotemcpstore.AddRemoteMCPParams{
+				Name:         a.Name,
+				URL:          resolvedURL,
+				Channel:      a.Channel,
+				URLSensitive: a.URLSecretKey != "",
+				ToolNames:    discovered.ToolNames,
+				TLSPinSHA256: a.TLSPinSHA256,
+				Instructions: discovered.Instructions,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("add remote mcp: %w", err)
 			}
 			if updateErr := deps.ConfigUpdater(ctx); updateErr != nil {
 				return nil, fmt.Errorf("remote MCP %q added but config update failed — tools won't be available until next restart: %w", a.Name, updateErr)
 			}
-			entry.ToolNames = discovered.ToolNames
-			entry.Instructions = discovered.Instructions
 			if deps.OnChannelChange != nil {
 				deps.OnChannelChange()
 			}
 			result := buildAddResponse(entry, "ready",
-				fmt.Sprintf("Remote MCP %q added with %d tool(s). Its tools will be available on the next message.", a.Name, len(toolNames)))
+				fmt.Sprintf("Remote MCP %q added with %d tool(s). Its tools will be available on the next message.", a.Name, len(discovered.ToolNames)))
 			return json.Marshal(result)
 		}
 
@@ -286,6 +285,22 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 			slog.Info("registered OAuth client", "name", a.Name, "client_id", reg.ClientID)
 		} else {
 			return nil, fmt.Errorf("remote MCP %q requires OAuth but does not support dynamic client registration — manual client_id configuration not yet supported", a.Name)
+		}
+
+		// Store the entry now that auth is confirmed required — it must
+		// exist before the OAuth callback arrives (a separate, later
+		// request) so remote_mcp_auth_wait can find it and attach the tool
+		// list once the token exchange completes. Tool names are unknown
+		// until after authorization, so they're left empty here.
+		entry, err := deps.Manager.AddRemoteMCP(ctx, remotemcpstore.AddRemoteMCPParams{
+			Name:         a.Name,
+			URL:          resolvedURL,
+			Channel:      a.Channel,
+			URLSensitive: a.URLSecretKey != "",
+			TLSPinSHA256: a.TLSPinSHA256,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("add remote mcp: %w", err)
 		}
 
 		// Store the auth metadata and registration before starting the flow,
@@ -467,6 +482,15 @@ func listToolsOpts(deps Deps) []discovery.ListToolsOption {
 		return nil
 	}
 	return []discovery.ListToolsOption{discovery.WithHTTPClient(deps.HTTPClient)}
+}
+
+// discoverAuthOpts translates Deps into functional options for
+// discovery.DiscoverAuth, mirroring listToolsOpts.
+func discoverAuthOpts(deps Deps) []discovery.DiscoverAuthOption {
+	if deps.HTTPClient == nil {
+		return nil
+	}
+	return []discovery.DiscoverAuthOption{discovery.WithDiscoverAuthHTTPClient(deps.HTTPClient)}
 }
 
 // redactURL returns a URL suitable for logging — preserves scheme and host but

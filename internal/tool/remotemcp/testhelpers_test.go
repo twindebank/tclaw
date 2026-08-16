@@ -28,6 +28,20 @@ func fakeMCPServerWithInstructions(t *testing.T, toolNames []string, instruction
 	return server
 }
 
+// fakeStatusServer returns an httptest.NewTLSServer that answers every
+// request with the given status code, an empty body, and no
+// WWW-Authenticate header — simulating a server that rejects all requests,
+// authenticated or not, with a bare status (e.g. a WAF/bot-protection layer
+// sitting in front of the real MCP server).
+func fakeStatusServer(t *testing.T, status int) *httptest.Server {
+	t.Helper()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
 // withRecordedHeaders wraps fakeMCPServer so tests can assert what headers
 // landed on each request. The returned snapshot function returns a clone of
 // every request's Header at time of snapshot.
