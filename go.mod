@@ -7,7 +7,7 @@ require (
 	github.com/go-telegram/bot v1.22.0
 	github.com/gotd/td v0.159.0
 	github.com/robfig/cron/v3 v3.0.1
-	github.com/stretchr/testify v1.11.1
+	github.com/stretchr/testify v1.12.0
 	github.com/zalando/go-keyring v0.2.6
 	go.jetify.com/typeid v1.3.0
 	golang.org/x/crypto v0.53.0
@@ -45,6 +45,7 @@ require (
 	github.com/refraction-networking/utls v1.8.2 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
+	github.com/twindebank/garmin-settings v0.0.0-20260817220335-fc2ec63a4605 // indirect
 	github.com/yuin/goldmark v1.8.2 // indirect
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect

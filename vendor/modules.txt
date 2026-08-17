@@ -27,7 +27,6 @@ github.com/creack/pty/v2
 github.com/danieljoos/wincred
 # github.com/davecgh/go-spew v1.1.1
 ## explicit
-github.com/davecgh/go-spew/spew
 # github.com/dlclark/regexp2 v1.12.0
 ## explicit; go 1.13
 github.com/dlclark/regexp2
@@ -160,7 +159,6 @@ github.com/ogen-go/ogen/uri
 github.com/ogen-go/ogen/validate
 # github.com/pmezard/go-difflib v1.0.0
 ## explicit
-github.com/pmezard/go-difflib/difflib
 # github.com/refraction-networking/utls v1.8.2
 ## explicit; go 1.24
 github.com/refraction-networking/utls
@@ -190,11 +188,17 @@ github.com/segmentio/asm/internal/unsafebytes
 # github.com/shopspring/decimal v1.4.0
 ## explicit; go 1.10
 github.com/shopspring/decimal
-# github.com/stretchr/testify v1.11.1
+# github.com/stretchr/testify v1.12.0
 ## explicit; go 1.17
 github.com/stretchr/testify/assert
 github.com/stretchr/testify/assert/yaml
+github.com/stretchr/testify/internal/difflib
+github.com/stretchr/testify/internal/spew
 github.com/stretchr/testify/require
+# github.com/twindebank/garmin-settings v0.0.0-20260817220335-fc2ec63a4605
+## explicit; go 1.25.0
+github.com/twindebank/garmin-settings/garmin
+github.com/twindebank/garmin-settings/settings
 # github.com/yuin/goldmark v1.8.2
 ## explicit; go 1.22
 github.com/yuin/goldmark
