@@ -26,11 +26,20 @@ WG_DNS="${MULLVAD_DNS:-10.64.0.1}"
 
 umask 077
 mkdir -p /etc/wireguard
+# Table = off stops wg-quick installing its own policy routing and kill-switch.
+# That machinery needs the CONNMARK iptables extension, which Fly's kernel does
+# not carry — leaving it on makes wg-quick tear the interface straight back
+# down. Routing is therefore set up by hand below.
+#
+# AllowedIPs covers IPv4 only, on purpose: Fly's private 6PN is IPv6, and the
+# flycast address plus health checks must keep using it. Upstream traffic is
+# forced onto IPv4 by the proxy itself, so nothing user-facing escapes the
+# tunnel via v6.
 cat > /etc/wireguard/wg0.conf <<EOF
 [Interface]
 PrivateKey = ${MULLVAD_WG_PRIVATE_KEY}
 Address = ${MULLVAD_WG_ADDRESS}
-DNS = ${WG_DNS}
+Table = off
 
 [Peer]
 PublicKey = ${MULLVAD_RELAY_PUBKEY}
@@ -46,14 +55,27 @@ export WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go
 export WG_SUDO=1
 wg-quick up wg0
 
-# Fly's internal 6PN must keep bypassing the tunnel or the machine falls off
-# the private network the health check and flycast address depend on.
-ip -6 route add fdaa::/16 dev eth0 2>/dev/null || echo "note: no fdaa::/16 route added (may already exist)"
+# The tunnel endpoint itself must stay reachable over the physical interface,
+# or sending its own handshake through the tunnel would deadlock the route.
+RELAY_IP="${MULLVAD_RELAY_ENDPOINT%%:*}"
+DEFAULT_GW=$(ip -4 route show default | awk '/default/ {print $3; exit}')
+DEFAULT_DEV=$(ip -4 route show default | awk '/default/ {print $5; exit}')
+if [ -z "$DEFAULT_GW" ] || [ -z "$DEFAULT_DEV" ]; then
+	echo "FATAL: could not determine the original IPv4 default route" >&2
+	exit 1
+fi
+echo "pinning relay ${RELAY_IP} via ${DEFAULT_GW} dev ${DEFAULT_DEV}"
+ip -4 route add "${RELAY_IP}/32" via "$DEFAULT_GW" dev "$DEFAULT_DEV"
+
+# Everything else on IPv4 goes through the tunnel.
+ip -4 route replace default dev wg0
 
 echo "verifying egress actually leaves through the tunnel"
 EGRESS_IP=""
 for attempt in 1 2 3 4 5 6 7 8 9 10; do
-	EGRESS_IP=$(curl -s --max-time 10 https://api.ipify.org || true)
+	# -4 matches how the proxy dials: the check must exercise the same path
+	# the real traffic will take, or it proves nothing.
+	EGRESS_IP=$(curl -4 -s --max-time 10 https://api.ipify.org || true)
 	if [ -n "$EGRESS_IP" ]; then
 		break
 	fi

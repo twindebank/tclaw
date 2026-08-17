@@ -127,7 +127,11 @@ func (c *config) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upstream, err := net.DialTimeout("tcp", target, dialTimeout)
+	// tcp4, not tcp: the WireGuard tunnel carries IPv4 only, because Fly's
+	// private 6PN is IPv6 and has to keep working. Dialling v6 here would
+	// leave through Fly's own address — the one the upstream blocks — and
+	// would do it silently.
+	upstream, err := net.DialTimeout("tcp4", target, dialTimeout)
 	if err != nil {
 		slog.Error("upstream dial failed", "target", target, "err", err)
 		http.Error(w, "upstream unreachable", http.StatusBadGateway)
