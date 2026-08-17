@@ -102,6 +102,25 @@ the agent names can reach the `cred/` or `channel/` namespaces.
   refused) so an autostop upstream that resets the connection while it cold-starts from sleep is waited
   out rather than surfaced to the agent as an immediate 502. Registration (`discovery`) shares the same
   retry, so adding a sleeping server doesn't fail on the request that wakes it.
+- **Remote MCP OAuth quirks** — the discovery chain follows RFC 8414 literally, including inserting
+  `/.well-known/oauth-authorization-server` **between host and path** for an issuer that has one
+  (`https://www.strava.com/mcp-issuer`); appending to the origin instead 404s and breaks discovery
+  before it starts. Registration sends `client_name`, because some issuers implement "dynamic"
+  registration as an allowlist of recognised clients over one pre-provisioned app and reject anything
+  else as `invalid_client_metadata`. Scopes come from the **resource** metadata's `scopes_supported`,
+  not the auth server's — the resource is what refuses an under-scoped token.
+- **Loopback OAuth (manual paste)** — an authorization server may accept any `redirect_uri` at
+  registration and only enforce its real allowlist at the authorization endpoint. Strava allows
+  loopback addresses only, so tclaw's hosted `https://<app>/oauth/callback` is refused outright and no
+  callback can ever arrive. `remote_mcp_add` therefore probes the authorization endpoint before
+  committing the user to a flow (`discovery.RedirectURIAccepted`); on a 4xx it retries with a loopback
+  redirect and returns `pending_manual_auth` instead. The user approves in their browser, lands on a
+  page that fails to load, and pastes that URL back — `remote_mcp_auth_complete` verifies the state,
+  redeems the code with the stored PKCE verifier, and finishes the registration. The verifier lives in
+  the encrypted store (`RemoteMCPAuth.PendingExchange`, 30-minute TTL) because the paste arrives on a
+  later turn in a different subprocess. A probe that cannot reach the server keeps the hosted callback:
+  downgrading a working server to a manual paste on a transient network error would be worse than the
+  error. Refresh is unaffected — it never involves a redirect URI.
 - **Cold-start budget** — the retry spans ~40s (`discovery.DefaultColdStartRetry`), sized for an upstream
   that boots a browser before it serves rather than a typical web service. The agent subprocess gets a
   matching `MCP_TIMEOUT`: the claude CLI drops an MCP server whose handshake times out, and it drops it
