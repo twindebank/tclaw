@@ -68,11 +68,46 @@ type RemoteMCPAuth struct {
 	RefreshToken string    `json:"refresh_token,omitempty"`
 	TokenExpiry  time.Time `json:"token_expiry,omitempty"`
 
+	// PendingExchange holds the in-flight authorization-code state for a
+	// manual (loopback) OAuth flow. The user pastes the callback URL back on
+	// a later turn, in a different agent subprocess, so the verifier cannot
+	// live in memory the way the hosted-callback flow's does. Cleared once
+	// the code is exchanged.
+	PendingExchange *PendingExchange `json:"pending_exchange,omitempty"`
+
 	// StaticHeaders are sent verbatim on every request. Used for credentials
 	// that aren't OAuth Bearer tokens — e.g. Cloudflare Access service tokens
 	// (CF-Access-Client-Id / CF-Access-Client-Secret). Stored encrypted because
 	// they are secrets.
 	StaticHeaders map[string]string `json:"static_headers,omitempty"`
+}
+
+// PendingExchange is the state a manual OAuth flow must carry from the turn
+// that built the authorization URL to the turn that receives the pasted code.
+type PendingExchange struct {
+	// CodeVerifier is the PKCE verifier whose challenge went out on the
+	// authorization URL. Secret — it is what stops an intercepted code from
+	// being redeemed by anyone else.
+	CodeVerifier string `json:"code_verifier"`
+
+	// State is the CSRF token embedded in the authorization URL. The pasted
+	// callback must echo it back.
+	State string `json:"state"`
+
+	// RedirectURI must be replayed verbatim on the token request; the
+	// authorization server compares it against the one it authorized.
+	RedirectURI string `json:"redirect_uri"`
+
+	StartedAt time.Time `json:"started_at"`
+}
+
+// pendingExchangeTTL bounds how long a pasted callback stays redeemable, so a
+// forgotten authorization URL cannot be completed days later.
+const pendingExchangeTTL = 30 * time.Minute
+
+// Expired reports whether the pending exchange is too old to complete.
+func (p PendingExchange) Expired() bool {
+	return time.Since(p.StartedAt) > pendingExchangeTTL
 }
 
 // TokenExpired reports whether the access token has expired (with 1-minute buffer).
