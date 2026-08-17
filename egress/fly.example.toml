@@ -1,0 +1,43 @@
+# Copy to egress/fly.toml and set your app name. The real file is gitignored,
+# matching tclaw's own fly.toml — this repo is public and the app name is not
+# published.
+#
+# The app deliberately has NO public IP. Allocate none, and reach it only over
+# Fly's private network at <app>.flycast:8000.
+#
+#   fly apps create <your-egress-app>
+#   fly deploy -c egress/fly.toml --dockerfile egress/Dockerfile
+#   fly ips list -a <your-egress-app>    # must be empty
+
+app = "your-egress-app"
+primary_region = "lhr"
+
+[build]
+
+[env]
+  EGRESS_LISTEN_ADDR = ":8000"
+  # Only these destinations may be tunnelled. mcp.strava.com is the blocked
+  # host; www.strava.com carries the OAuth metadata and token endpoints, which
+  # are reachable from Fly directly but travel the same path here so the whole
+  # flow presents one consistent egress IP.
+  EGRESS_ALLOWED_HOSTS = "mcp.strava.com:443,www.strava.com:443"
+
+# A private service: flycast reaches internal_port over the 6PN. No handlers
+# and no ports block means nothing is published to the internet.
+[[services]]
+  internal_port = 8000
+  protocol = "tcp"
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+# Liveness only. The proxy refuses to start at all if the tunnel is down, so a
+# responding /healthz already implies a working egress path.
+[[services.tcp_checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "30s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
