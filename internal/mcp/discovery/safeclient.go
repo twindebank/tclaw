@@ -26,13 +26,29 @@ const (
 // private/loopback IP addresses, preventing SSRF attacks during MCP discovery.
 // Its transport retries cold starts so registering an autostopped server does
 // not fail on the request that wakes it.
+var safeTransport = &http.Transport{
+	DialContext:           safeDialContext,
+	TLSHandshakeTimeout:   10 * time.Second,
+	ResponseHeaderTimeout: 10 * time.Second,
+}
+
 var safeClient = &http.Client{
-	Timeout: httpTimeout,
-	Transport: NewColdStartRetryTransport(&http.Transport{
-		DialContext:           safeDialContext,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: 10 * time.Second,
-	}, DefaultColdStartRetry),
+	Timeout:   httpTimeout,
+	Transport: NewColdStartRetryTransport(safeTransport, DefaultColdStartRetry),
+}
+
+// SetEgressProxy routes discovery's outbound requests for selected hosts
+// through a CONNECT proxy. The router calls it once at startup, before any
+// discovery happens, mirroring toolgroup.SetPackageTools.
+//
+// Discovery needs this as much as the runtime proxy does: an upstream that
+// blocks tclaw's address blocks the OAuth probe and metadata fetches too, so
+// registration would fail long before a tool call could be attempted.
+//
+// A nil proxyFunc leaves every request on its direct path.
+func SetEgressProxy(proxyFunc func(*http.Request) (*url.URL, error), connectHeader http.Header) {
+	safeTransport.Proxy = proxyFunc
+	safeTransport.ProxyConnectHeader = connectHeader
 }
 
 // safeDialContext resolves DNS and validates that the target IP is not

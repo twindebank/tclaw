@@ -26,11 +26,13 @@ import (
 	"tclaw/internal/config"
 	"tclaw/internal/credential"
 	"tclaw/internal/dev"
+	"tclaw/internal/egressproxy"
 	"tclaw/internal/gitproxy"
 	"tclaw/internal/libraries/logbuffer"
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/libraries/store"
 	"tclaw/internal/mcp"
+	"tclaw/internal/mcp/discovery"
 	"tclaw/internal/notification"
 	"tclaw/internal/oauth"
 	"tclaw/internal/onboarding"
@@ -61,6 +63,11 @@ type Router struct {
 
 	// channelRegistry maps channel types to their package implementations.
 	channelRegistry *channelpkg.Registry
+
+	// egressProxy routes outbound requests for configured hosts through a
+	// CONNECT proxy. Nil when no egress proxy is configured, which leaves
+	// every request on its direct path.
+	egressProxy *egressproxy.Proxy
 
 	// credentialSlots holds the credential slots declared in tclaw.yaml.
 	// Seeded into credential sets at startup.
@@ -123,6 +130,20 @@ type managedUser struct {
 // Zone 4 (mcp-config/): MCP config files, mounted read-only so the CLI can read --mcp-config.
 //
 // callback may be nil if OAuth is not configured.
+// SetEgressProxy routes outbound requests for the proxy's configured hosts
+// through it, for both discovery and the per-user remote-MCP proxy. Call it
+// once at startup, before Run — it also installs the route into the discovery
+// package's shared client, which registration uses.
+//
+// A nil proxy is a no-op, leaving every request on its direct path.
+func (r *Router) SetEgressProxy(p *egressproxy.Proxy) {
+	r.egressProxy = p
+	if p == nil {
+		return
+	}
+	discovery.SetEgressProxy(p.ProxyFunc(), p.ConnectHeader())
+}
+
 func New(baseDir string, env config.Env, credentialSlots []config.CredentialSlot, callback *oauth.CallbackServer, publicURL string, logBuffer *logbuffer.Buffer, configPath string) *Router {
 	return &Router{
 		users:      make(map[user.ID]*managedUser),
@@ -227,7 +248,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Remote-MCP auth proxy: fronts every connected remote MCP server on localhost
 	// and injects each server's credentials server-side, so tokens never enter the
 	// sandbox-readable --mcp-config. Same rationale as the knowledge proxy for git.
-	remoteMCPProxy, err := remotemcpproxy.NewServer(remotemcpproxy.Config{Store: remoteMCPMgr})
+	remoteMCPProxy, err := remotemcpproxy.NewServer(remotemcpproxy.Config{
+		Store:       remoteMCPMgr,
+		EgressProxy: r.egressProxy,
+	})
 	if err != nil {
 		slog.Error("failed to create remote mcp proxy", "user", mu.cfg.ID, "err", err)
 		return
