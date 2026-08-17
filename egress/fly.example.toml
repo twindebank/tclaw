@@ -1,0 +1,53 @@
+# Copy to egress/fly.toml and set your app name. The real file is gitignored,
+# matching tclaw's own fly.toml — this repo is public and the app name is not
+# published.
+#
+#   fly apps create <your-egress-app>
+#   fly secrets set -a <your-egress-app> EGRESS_TOKEN=... MULLVAD_WG_PRIVATE_KEY=... \
+#       MULLVAD_WG_ADDRESS=... MULLVAD_RELAY_ENDPOINT=... MULLVAD_RELAY_PUBKEY=... \
+#       EXPECTED_EGRESS_PREFIX=...
+#   fly deploy -c egress/fly.toml --dockerfile egress/Dockerfile --local-only
+#
+# IMPORTANT: `fly deploy` allocates public IPs automatically when an app defines
+# services. This app must have none — release them and confirm the list is empty:
+#
+#   fly ips list -a <your-egress-app>
+#   fly ips release <each-public-ip> -a <your-egress-app>
+#
+# tclaw reaches the proxy directly over Fly's private 6PN at
+# <your-egress-app>.internal:8000. That needs no allocated address at all, so a
+# public IP is pure exposure with nothing to gain.
+
+app = "your-egress-app"
+primary_region = "lhr"
+
+[build]
+
+[env]
+  EGRESS_LISTEN_ADDR = ":8000"
+  # Only these destinations may be tunnelled. The first is the host that blocks
+  # datacenter IPs; the second carries the OAuth metadata and token endpoints,
+  # which travel the same path so the whole flow presents one egress IP.
+  EGRESS_ALLOWED_HOSTS = "mcp.strava.com:443,www.strava.com:443"
+
+# Declared so Fly runs a health check against the port. Note there is no
+# [[services.ports]] block: nothing is published, and with no public IP
+# allocated the only route in is the 6PN.
+[[services]]
+  internal_port = 8000
+  protocol = "tcp"
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+# Liveness only. The entrypoint refuses to start the proxy unless the tunnel is
+# verifiably carrying traffic, so a listening port already implies a working
+# egress path.
+[[services.tcp_checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "30s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
