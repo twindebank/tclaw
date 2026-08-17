@@ -58,7 +58,29 @@ type Config struct {
 	// reference them. Seeded into the credential system at startup.
 	CredentialSlots []CredentialSlot `yaml:"credential_slots"`
 
+	// EgressProxy optionally routes outbound requests for named hosts through
+	// a CONNECT proxy. Set it when an upstream refuses this host's IP —
+	// some services answer datacenter addresses with a blanket 403.
+	//
+	// Operator-only, and deliberately not settable via config_set: an
+	// agent-chosen proxy could redirect an authenticated upstream to a
+	// listener of its choosing.
+	EgressProxy *EgressProxyConfig `yaml:"egress_proxy"`
+
 	Users []User `yaml:"users"`
+}
+
+// EgressProxyConfig declares an authenticated CONNECT proxy and the hosts that
+// must use it. Everything else keeps its direct route.
+type EgressProxyConfig struct {
+	// URL of the proxy, e.g. "http://your-egress-app.internal:8000".
+	URL string `yaml:"url"`
+
+	// Token authenticates tclaw to the proxy. Use a ${boot:NAME} reference.
+	Token string `yaml:"token"`
+
+	// Hosts to route through the proxy, matched exactly on hostname.
+	Hosts []string `yaml:"hosts"`
 }
 
 // ServerConfig holds settings for the HTTP server that handles health checks,

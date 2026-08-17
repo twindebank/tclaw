@@ -32,6 +32,7 @@ import (
 	"sync"
 	"time"
 
+	"tclaw/internal/egressproxy"
 	"tclaw/internal/mcp/discovery"
 	"tclaw/internal/remotemcpstore"
 )
@@ -67,6 +68,10 @@ type Config struct {
 	// autostop. Optional; defaults to discovery.DefaultColdStartRetry. Tests
 	// shrink it so exercising the give-up path doesn't burn the real budget.
 	ColdStartRetry discovery.ColdStartRetry
+
+	// EgressProxy routes upstreams whose host it names through a CONNECT
+	// proxy. Nil leaves every upstream on its direct path.
+	EgressProxy *egressproxy.Proxy
 }
 
 // route carries the resolved upstream target and injected headers from the
@@ -138,7 +143,7 @@ func NewServer(cfg Config) (*Server, error) {
 		// default DialContext untouched. Wrapped in the shared cold-start retry so
 		// a sleeping autostop upstream that resets the connection while it
 		// cold-starts is retried rather than surfaced as an immediate 502.
-		Transport: discovery.NewColdStartRetryTransport(pinAwareTransport(), coldStartRetry),
+		Transport: discovery.NewColdStartRetryTransport(pinAwareTransport(cfg.EgressProxy), coldStartRetry),
 		Director: func(req *http.Request) {
 			rt, ok := req.Context().Value(routeContextKey{}).(*route)
 			if !ok {
@@ -178,8 +183,13 @@ func NewServer(cfg Config) (*Server, error) {
 // the system trust store — the runtime counterpart of the pinned discovery
 // client. Upstreams without a pin get ordinary hostname/chain verification;
 // plain-http upstreams never reach here (they use the default DialContext).
-func pinAwareTransport() *http.Transport {
-	return &http.Transport{
+// egress, when non-nil, sends the hosts it names through a CONNECT proxy.
+// Note this is mutually exclusive with pinning for those hosts: Go ignores
+// DialTLSContext on a proxied request. That is not a conflict in practice —
+// a pinned upstream is a private self-signed host, which is exactly the kind
+// that has no reason to be routed through an external egress.
+func pinAwareTransport(egress *egressproxy.Proxy) *http.Transport {
+	transport := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 60 * time.Second,
@@ -206,6 +216,11 @@ func pinAwareTransport() *http.Transport {
 			return (&tls.Dialer{Config: cfg}).DialContext(ctx, network, addr)
 		},
 	}
+
+	// Applied last so it overrides Proxy: an explicitly configured egress
+	// route is more specific than whatever the environment happens to say.
+	egress.Apply(transport)
+	return transport
 }
 
 // Token returns the benign per-user token clients must present in the

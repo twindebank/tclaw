@@ -17,6 +17,7 @@ import (
 
 	"tclaw/internal/agent"
 	"tclaw/internal/config"
+	"tclaw/internal/egressproxy"
 	"tclaw/internal/libraries/logbuffer"
 	"tclaw/internal/oauth"
 	"tclaw/internal/router"
@@ -157,6 +158,24 @@ func runServe() {
 	}
 
 	r := router.New(cfg.BaseDir, cfg.Env, cfg.CredentialSlots, callback, cfg.Server.PublicURL, logBuf, activeConfigPath)
+
+	// An upstream that blocks this host's IP needs another way out. Configured
+	// here rather than defaulted, and fatal if malformed: silently falling back
+	// to the direct path would resurface later as an unexplained 403 from the
+	// very upstream this exists to reach.
+	if cfg.EgressProxy != nil {
+		proxy, egressErr := egressproxy.New(egressproxy.Config{
+			URL:   cfg.EgressProxy.URL,
+			Token: cfg.EgressProxy.Token,
+			Hosts: cfg.EgressProxy.Hosts,
+		})
+		if egressErr != nil {
+			slog.Error("invalid egress proxy config", "err", egressErr)
+			os.Exit(1)
+		}
+		r.SetEgressProxy(proxy)
+		slog.Info("egress proxy configured", "hosts", cfg.EgressProxy.Hosts)
+	}
 	defer r.StopAll()
 
 	for _, u := range cfg.Users {
