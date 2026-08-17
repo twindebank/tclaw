@@ -42,7 +42,8 @@ type Deps struct {
 // ToolNames returns all tool name constants in this package.
 func ToolNames() []string {
 	return []string{
-		ToolRemoteMCPList, ToolRemoteMCPAdd, ToolRemoteMCPRemove, ToolRemoteMCPAuthWait,
+		ToolRemoteMCPList, ToolRemoteMCPAdd, ToolRemoteMCPRemove,
+		ToolRemoteMCPAuthWait, ToolRemoteMCPAuthComplete,
 	}
 }
 
@@ -53,7 +54,10 @@ func RegisterTools(h *mcp.Handler, deps Deps) {
 	h.Register(remoteMCPRemoveDef(), remoteMCPRemoveHandler(deps))
 }
 
-// RegisterAuthWaitTool adds the remote_mcp_auth_wait tool.
+// RegisterAuthWaitTool adds the OAuth completion tools: remote_mcp_auth_wait
+// for the hosted-callback flow, and remote_mcp_auth_complete for servers that
+// only redirect to loopback and need the user to paste the callback back.
 func RegisterAuthWaitTool(h *mcp.Handler, deps Deps) {
 	h.Register(remoteMCPAuthWaitDef(), remoteMCPAuthWaitHandler(deps))
+	h.Register(remoteMCPAuthCompleteDef(), remoteMCPAuthCompleteHandler(deps))
 }

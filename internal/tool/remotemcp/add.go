@@ -2,11 +2,14 @@ package remotemcp
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/url"
 	"regexp"
+	"time"
 
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/mcp"
@@ -30,6 +33,22 @@ var (
 )
 
 const ToolRemoteMCPAdd = "remote_mcp_add"
+
+// oauthClientName is sent as `client_name` on RFC 7591 dynamic registration.
+// Some authorization servers treat registration as an allowlist rather than
+// true dynamic registration and reject any name they do not recognise —
+// Strava's MCP issuer answers `invalid_client_metadata` for an unknown one and
+// maps every accepted registration onto a single pre-provisioned app. tclaw
+// runs the Claude Code CLI, so this names the client the user is actually
+// authorizing.
+const oauthClientName = "Claude Code"
+
+// manualRedirectURI is the loopback callback offered to authorization servers
+// that refuse tclaw's hosted HTTPS callback. Nothing listens on it: the point
+// is only that the browser lands on a URL carrying the code, which the user
+// copies back. The port is arbitrary and deliberately high to avoid colliding
+// with anything the user might actually be running.
+const manualRedirectURI = "http://localhost:47821/callback"
 
 func remoteMCPAddDef() mcp.ToolDef {
 	return mcp.ToolDef{
@@ -75,6 +94,10 @@ func remoteMCPAddDef() mcp.ToolDef {
 					"description": "Headers whose values are resolved from the secret store at registration time. Map of HTTP header name → secret store key. The referenced keys must already be set via a prior secret_form_request. Requires skip_auth_discovery=true.",
 					"additionalProperties": {"type": "string"}
 				},
+				"manual_auth": {
+					"type": "boolean",
+					"description": "Force the manual (loopback) OAuth flow, where the user pastes the callback URL back instead of tclaw receiving it. Normally unnecessary — tclaw detects a server that refuses its hosted callback and switches automatically. Set it only if a server accepts the hosted callback at the authorization endpoint but still fails to deliver the callback."
+				},
 				"tls_pin_sha256": {
 					"type": "string",
 					"description": "Pin the server's TLS certificate by its SHA-256 fingerprint (hex, e.g. from 'openssl x509 -fingerprint -sha256'). Use for a self-signed https server on a Fly private host (*.flycast/*.internal) where no public CA applies — it authenticates the server by exact cert, not the system trust store. Non-secret. Requires an https URL."
@@ -94,6 +117,7 @@ type remoteMCPAddArgs struct {
 	Headers           map[string]string `json:"headers,omitempty"`
 	HeaderSecretKeys  map[string]string `json:"header_secret_keys,omitempty"`
 	TLSPinSHA256      string            `json:"tls_pin_sha256,omitempty"`
+	ManualAuth        bool              `json:"manual_auth,omitempty"`
 }
 
 func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
@@ -278,13 +302,33 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 		// Dynamic client registration if supported.
 		var reg *discovery.ClientRegistration
 		if authMeta.RegistrationEndpoint != "" {
-			reg, err = discovery.RegisterClient(ctx, authMeta, callbackURL)
+			reg, err = discovery.RegisterClient(ctx, discovery.RegisterClientParams{
+				Meta:        authMeta,
+				RedirectURI: callbackURL,
+				ClientName:  oauthClientName,
+			}, discoverAuthOpts(deps)...)
 			if err != nil {
 				return nil, fmt.Errorf("dynamic client registration: %w", err)
 			}
 			slog.Info("registered OAuth client", "name", a.Name, "client_id", reg.ClientID)
 		} else {
 			return nil, fmt.Errorf("remote MCP %q requires OAuth but does not support dynamic client registration — manual client_id configuration not yet supported", a.Name)
+		}
+
+		// Some authorization servers accept any redirect_uri at registration
+		// but only permit a loopback address at the authorization endpoint.
+		// Detect that here rather than letting the user discover it as a dead
+		// end in their browser.
+		redirectURI, manual, err := chooseRedirectURI(ctx, chooseRedirectParams{
+			authMeta:    authMeta,
+			reg:         reg,
+			mcpURL:      resolvedURL,
+			hostedURL:   callbackURL,
+			forceManual: a.ManualAuth,
+			opts:        discoverAuthOpts(deps),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("determine redirect uri for %q: %w", a.Name, err)
 		}
 
 		// Store the entry now that auth is confirmed required — it must
@@ -313,12 +357,51 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 			ClientID:              reg.ClientID,
 			ClientSecret:          reg.ClientSecret,
 		}
+		if manual {
+			// The authorization server will only redirect to loopback, which
+			// reaches the user's own machine and never this process. Persist
+			// the PKCE verifier so a later turn can redeem the code the user
+			// pastes back.
+			state, err := generateState()
+			if err != nil {
+				return nil, fmt.Errorf("generate oauth state: %w", err)
+			}
+			authURL, codeVerifier := discovery.BuildAuthURLWithPKCE(discovery.AuthURLParams{
+				Meta: authMeta, Reg: reg, State: state,
+				RedirectURI: redirectURI, MCPURL: resolvedURL,
+			})
+			authData.PendingExchange = &remotemcpstore.PendingExchange{
+				CodeVerifier: codeVerifier,
+				State:        state,
+				RedirectURI:  redirectURI,
+				StartedAt:    time.Now(),
+			}
+			if err := deps.Manager.SetRemoteMCPAuth(ctx, a.Name, authData); err != nil {
+				return nil, fmt.Errorf("store auth metadata: %w", err)
+			}
+
+			slog.Info("remote MCP requires manual OAuth paste", "name", a.Name, "redirect_uri", redirectURI)
+
+			result := buildAddResponse(entry, "pending_manual_auth", fmt.Sprintf(
+				"This server only redirects to a loopback address, so its callback cannot reach tclaw. "+
+					"Send the authorization URL to the user and tell them: after approving, the browser will "+
+					"land on a %s page that FAILS TO LOAD — that is expected. They must copy the full URL from "+
+					"the address bar and send it back. Then call remote_mcp_auth_complete with name=%q and that "+
+					"URL. Do NOT use remote_mcp_auth_wait for this server; no callback will ever arrive.",
+				redirectURI, a.Name))
+			result["auth_url"] = authURL
+			result["redirect_uri"] = redirectURI
+			return json.Marshal(result)
+		}
+
 		if err := deps.Manager.SetRemoteMCPAuth(ctx, a.Name, authData); err != nil {
 			return nil, fmt.Errorf("store auth metadata: %w", err)
 		}
 
 		// Build PKCE auth URL and create the pending flow.
-		_, codeVerifier := discovery.BuildAuthURLWithPKCE(authMeta, reg, "", callbackURL, resolvedURL)
+		_, codeVerifier := discovery.BuildAuthURLWithPKCE(discovery.AuthURLParams{
+			Meta: authMeta, Reg: reg, RedirectURI: redirectURI, MCPURL: resolvedURL,
+		})
 
 		flow := &pendingRemoteMCPFlow{
 			name:          a.Name,
@@ -338,14 +421,87 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("register oauth flow: %w", err)
 		}
 
-		// Rebuild the auth URL with the actual state token.
-		authURL, _ := discovery.BuildAuthURLWithPKCE(authMeta, reg, state, callbackURL, resolvedURL)
+		// Rebuild the auth URL with the actual state token, reusing the
+		// verifier already handed to the flow so challenge and verifier stay
+		// in step.
+		authURL, _ := discovery.BuildAuthURLWithPKCE(discovery.AuthURLParams{
+			Meta: authMeta, Reg: reg, State: state, RedirectURI: redirectURI,
+			MCPURL: resolvedURL, CodeVerifier: codeVerifier,
+		})
 
 		result := buildAddResponse(entry, "pending_auth",
 			fmt.Sprintf("Send this authorization URL to the user. After they authorize, use remote_mcp_auth_wait with name=%q to confirm completion. Once authorized, the remote MCP's tools will be available on the next message.", a.Name))
 		result["auth_url"] = authURL
 		return json.Marshal(result)
 	}
+}
+
+type chooseRedirectParams struct {
+	authMeta    *discovery.AuthMetadata
+	reg         *discovery.ClientRegistration
+	mcpURL      string
+	hostedURL   string
+	forceManual bool
+	opts        []discovery.DiscoverAuthOption
+}
+
+// chooseRedirectURI decides whether this authorization server can redirect
+// back to tclaw's hosted callback, falling back to a loopback address the user
+// relays by hand when it cannot.
+//
+// The probe uses a throwaway state and PKCE verifier: it never reaches the
+// point of issuing a code, so nothing it builds needs to be kept.
+//
+// A probe that fails to reach the server is NOT treated as rejection — the
+// hosted callback is kept, because downgrading a working server to a manual
+// paste on a transient network error would be worse than the error itself.
+func chooseRedirectURI(ctx context.Context, p chooseRedirectParams) (redirectURI string, manual bool, err error) {
+	if p.forceManual {
+		return manualRedirectURI, true, nil
+	}
+
+	probeURL, _ := discovery.BuildAuthURLWithPKCE(discovery.AuthURLParams{
+		Meta: p.authMeta, Reg: p.reg, State: "probe",
+		RedirectURI: p.hostedURL, MCPURL: p.mcpURL,
+	})
+
+	accepted, probeErr := discovery.RedirectURIAccepted(ctx, probeURL, p.opts...)
+	switch {
+	case probeErr != nil:
+		slog.Warn("could not probe authorize endpoint, assuming hosted callback works",
+			"err", probeErr)
+		return p.hostedURL, false, nil
+	case accepted:
+		return p.hostedURL, false, nil
+	}
+
+	// The hosted callback was refused. A loopback address is the redirect
+	// such servers do allow; verify before committing the user to a flow
+	// that would dead-end anyway.
+	loopbackProbeURL, _ := discovery.BuildAuthURLWithPKCE(discovery.AuthURLParams{
+		Meta: p.authMeta, Reg: p.reg, State: "probe",
+		RedirectURI: manualRedirectURI, MCPURL: p.mcpURL,
+	})
+	loopbackOK, probeErr := discovery.RedirectURIAccepted(ctx, loopbackProbeURL, p.opts...)
+	if probeErr != nil {
+		return "", false, fmt.Errorf("hosted callback %s was rejected and the loopback fallback could not be probed: %w", p.hostedURL, probeErr)
+	}
+	if !loopbackOK {
+		return "", false, fmt.Errorf("authorization server rejected both tclaw's callback (%s) and a loopback redirect (%s) — it likely requires a redirect URI registered out of band", p.hostedURL, manualRedirectURI)
+	}
+
+	return manualRedirectURI, true, nil
+}
+
+// generateState creates the OAuth CSRF state token for a manual flow. The
+// hosted flow gets its state from the callback server, which also tracks it;
+// a manual flow has no callback server involved, so it mints and stores its own.
+func generateState() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("read random bytes: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 // buildAddResponse assembles a remote_mcp_add response using urlResponseFields
