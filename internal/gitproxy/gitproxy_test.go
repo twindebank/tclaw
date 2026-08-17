@@ -94,6 +94,23 @@ func TestProxy_PushByTier(t *testing.T) {
 		require.Equal(t, pushBody, seen.body(), "the inspected bytes must still reach the upstream intact")
 	})
 
+	t.Run("pull_requests_only forwards the packfile that follows the commands intact", func(t *testing.T) {
+		// A real push always has packfile bytes after the flush packet. The
+		// command-parsing read must not consume or drop any of them.
+		upstream, seen := newUpstream(t)
+		addr := start(t, upstream.URL, gitproxy.Repo{
+			Path: "owner/config", Access: repo.AccessPullRequestsOnly, DefaultBranch: "main",
+		})
+
+		packfile := strings.Repeat("PACK-not-a-real-packfile-but-stands-in-for-one", 20)
+		body := pushBody + packfile
+		resp := post(t, fmt.Sprintf("http://%s/ha.git/git-receive-pack", addr), []byte(body), "")
+		defer resp.Body.Close()
+
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Equal(t, body, seen.body(), "the packfile bytes after the flush packet must reach the upstream intact")
+	})
+
 	t.Run("pull_requests_only refuses the default branch", func(t *testing.T) {
 		upstream, _ := newUpstream(t)
 		addr := start(t, upstream.URL, gitproxy.Repo{
