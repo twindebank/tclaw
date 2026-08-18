@@ -76,6 +76,9 @@ func TestSyncKnowledgeVault(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		ob.Start(ctx)
+		// Stop, not just cancel: a delivery goroutine persists the queue as it exits, and that
+		// write races t.TempDir's RemoveAll. Stop waits for the goroutines to finish first.
+		defer ob.Stop()
 
 		syncKnowledgeVault(ctx, knowledgeSyncParams{
 			Dir:          dir,
