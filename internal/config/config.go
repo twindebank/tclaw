@@ -1013,3 +1013,53 @@ func (u *User) messageDebounceDuration() time.Duration {
 	}
 	return d
 }
+
+// bootSecretRefPattern matches ${boot:NAME} references in a config file.
+var bootSecretRefPattern = regexp.MustCompile(`\$\{boot:([^}]+)\}`)
+
+// BootSecretRefs returns the unique ${boot:NAME} references declared under a
+// single environment, in first-seen order.
+//
+// Scoping to one environment matters for correctness, not just tidiness: the
+// environments hold different secrets under the same names — a local dev bot
+// token and a production bot token are both TELEGRAM_BOT_TOKEN — so scanning
+// the whole file would push a dev credential to production, and would fail
+// outright on any machine that only holds one environment's secrets.
+func BootSecretRefs(path string, env Env) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+
+	var envMap map[string]yaml.Node
+	if err := yaml.Unmarshal(data, &envMap); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+
+	node, ok := envMap[string(env)]
+	if !ok {
+		var available []string
+		for k := range envMap {
+			available = append(available, k)
+		}
+		return nil, fmt.Errorf("environment %q not found in config (available: %v)", env, available)
+	}
+
+	// Re-marshal just this environment so the scan cannot see any other's
+	// references.
+	envYAML, err := yaml.Marshal(&node)
+	if err != nil {
+		return nil, fmt.Errorf("marshal env %q: %w", env, err)
+	}
+
+	var names []string
+	seen := make(map[string]bool)
+	for _, m := range bootSecretRefPattern.FindAllStringSubmatch(string(envYAML), -1) {
+		name := m[1]
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	return names, nil
+}
