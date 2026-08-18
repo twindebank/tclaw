@@ -212,7 +212,7 @@ func deploySecrets() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := syncBootSecrets(ctx, configPath); err != nil {
+	if _, err := syncBootSecrets(ctx, configPath, false); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -230,18 +230,27 @@ func deploySecrets() {
 //
 // Every value is resolved before anything is sent, so a missing secret aborts
 // with nothing pushed rather than leaving Fly holding a partial set.
-func syncBootSecrets(ctx context.Context, configPath string) error {
+//
+// stage defers applying the secrets instead of restarting the app immediately.
+// config push needs that: an immediate restart leaves the machine briefly with
+// no started VM, and the volume write that follows fails against it. Staged
+// secrets are applied once at the end, so the whole push costs one restart
+// rather than racing its own.
+//
+// Returns how many secrets were actually sent, so a caller can skip applying
+// when there was nothing to apply.
+func syncBootSecrets(ctx context.Context, configPath string, stage bool) (int, error) {
 	names, err := config.BootSecretRefs(configPath, config.EnvProd)
 	if err != nil {
-		return fmt.Errorf("read boot secret refs: %w", err)
+		return 0, fmt.Errorf("read boot secret refs: %w", err)
 	}
 	if len(names) == 0 {
 		fmt.Println("no ${boot:...} references found in the prod config")
-		return nil
+		return 0, nil
 	}
 
 	if !secret.KeychainAvailable() {
-		return fmt.Errorf("OS keychain not available")
+		return 0, fmt.Errorf("OS keychain not available")
 	}
 	store := secret.NewKeychainStore(configNamespace)
 
@@ -251,7 +260,7 @@ func syncBootSecrets(ctx context.Context, configPath string) error {
 	for _, name := range names {
 		val, getErr := store.Get(ctx, name)
 		if getErr != nil {
-			return fmt.Errorf("read %q from keychain: %w", name, getErr)
+			return 0, fmt.Errorf("read %q from keychain: %w", name, getErr)
 		}
 		if val == "" {
 			missing = append(missing, name)
@@ -267,7 +276,7 @@ func syncBootSecrets(ctx context.Context, configPath string) error {
 	if len(missing) > 0 {
 		onFly, listErr := flySecretNames(ctx)
 		if listErr != nil {
-			return fmt.Errorf("secrets not in keychain (%s) and could not check which are already on Fly: %w",
+			return 0, fmt.Errorf("secrets not in keychain (%s) and could not check which are already on Fly: %w",
 				strings.Join(missing, ", "), listErr)
 		}
 		var absent []string
@@ -279,14 +288,14 @@ func syncBootSecrets(ctx context.Context, configPath string) error {
 			fmt.Printf("  - %s (not in keychain; already set on Fly, leaving as-is)\n", name)
 		}
 		if len(absent) > 0 {
-			return fmt.Errorf("secrets missing from both the keychain and Fly: %s\n  set each with: tclaw secret set <NAME> <value>",
+			return 0, fmt.Errorf("secrets missing from both the keychain and Fly: %s\n  set each with: tclaw secret set <NAME> <value>",
 				strings.Join(absent, ", "))
 		}
 	}
 
 	if len(values) == 0 {
 		fmt.Println("  all prod secrets already set on Fly, nothing to push")
-		return nil
+		return 0, nil
 	}
 
 	args := []string{"secrets", "set"}
@@ -301,13 +310,29 @@ func syncBootSecrets(ctx context.Context, configPath string) error {
 		pushed++
 	}
 	args = append(args, "-a", flyApp)
+	if stage {
+		args = append(args, "--stage")
+	}
 
 	fmt.Printf("\npushing %d secrets to fly app %q...\n", pushed, flyApp)
 	flyCmd := exec.CommandContext(ctx, "fly", args...)
 	flyCmd.Stdout = os.Stdout
 	flyCmd.Stderr = os.Stderr
 	if err := flyCmd.Run(); err != nil {
-		return fmt.Errorf("fly secrets set failed: %w", err)
+		return 0, fmt.Errorf("fly secrets set failed: %w", err)
+	}
+	return pushed, nil
+}
+
+// applyStagedSecrets activates secrets pushed with --stage, restarting the app
+// once. Only call it when something was actually staged; with nothing pending
+// Fly treats it as an error.
+func applyStagedSecrets(ctx context.Context) error {
+	cmd := exec.CommandContext(ctx, "fly", "secrets", "deploy", "-a", flyApp)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("fly secrets deploy: %w", err)
 	}
 	return nil
 }

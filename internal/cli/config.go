@@ -66,8 +66,12 @@ func configPush() {
 	// other two skipped, reported only as an error about a missing keychain
 	// entry. Syncing first means the most failure-prone step either succeeds or
 	// aborts before anything has changed.
+	// Staged, not applied: applying restarts the app, and the volume write
+	// below needs a started VM to land on. Everything is applied together at
+	// the end, so a push costs one restart instead of racing its own.
 	fmt.Println("-> syncing secrets...")
-	if err := syncBootSecrets(ctx, localPath); err != nil {
+	staged, err := syncBootSecrets(ctx, localPath, true)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "error syncing secrets: %v\n", err)
 		fmt.Fprintln(os.Stderr, "nothing was pushed — the remote config is unchanged")
 		os.Exit(1)
@@ -86,6 +90,17 @@ func configPush() {
 		fmt.Fprintf(os.Stderr, "error updating GitHub secret: %v\n", err)
 		fmt.Fprintln(os.Stderr, "the live volume config WAS updated; only the first-boot seed is stale")
 		os.Exit(1)
+	}
+
+	// Applied last so the single restart it causes picks up both the new
+	// secrets and the config already written to the volume.
+	if staged > 0 {
+		fmt.Println("-> applying staged secrets (restarts the app)...")
+		if err := applyStagedSecrets(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "error applying staged secrets: %v\n", err)
+			fmt.Fprintln(os.Stderr, "config and secrets are on the remote; they take effect on the next restart")
+			os.Exit(1)
+		}
 	}
 
 	fmt.Println("done: config pushed")
