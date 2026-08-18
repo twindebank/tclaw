@@ -2,14 +2,15 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
-	"regexp"
 	"strings"
 	"syscall"
 
+	"tclaw/internal/config"
 	"tclaw/internal/libraries/secret"
 )
 
@@ -199,9 +200,9 @@ func extractImage(statusOutput string) string {
 	return ""
 }
 
-// secretRefPattern matches ${boot:NAME} references in config files.
-var secretRefPattern = regexp.MustCompile(`\$\{boot:([^}]+)\}`)
-
+// deploySecrets is the `tclaw deploy secrets` entry point. Failures exit
+// non-zero; callers that need to sequence work around the sync use
+// syncBootSecrets directly.
 func deploySecrets() {
 	configPath := "tclaw.yaml"
 	if len(os.Args) >= 4 {
@@ -211,60 +212,124 @@ func deploySecrets() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error reading config: %v\n", err)
+	if err := syncBootSecrets(ctx, configPath); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+	fmt.Println("done")
+}
 
-	// Find all unique ${boot:NAME} references.
-	matches := secretRefPattern.FindAllStringSubmatch(string(data), -1)
-	if len(matches) == 0 {
-		fmt.Println("no ${boot:...} references found in config")
-		return
+// syncBootSecrets pushes the ${boot:NAME} secrets declared under the prod
+// environment from the OS keychain to the Fly app.
+//
+// Only the prod environment is scanned. The environments reuse secret names
+// for different values — the local dev bot and the production bot are both
+// TELEGRAM_BOT_TOKEN — so scanning the whole file would push a dev credential
+// to production, and would fail on any machine holding only one environment's
+// secrets.
+//
+// Every value is resolved before anything is sent, so a missing secret aborts
+// with nothing pushed rather than leaving Fly holding a partial set.
+func syncBootSecrets(ctx context.Context, configPath string) error {
+	names, err := config.BootSecretRefs(configPath, config.EnvProd)
+	if err != nil {
+		return fmt.Errorf("read boot secret refs: %w", err)
 	}
-
-	seen := make(map[string]bool)
-	var names []string
-	for _, m := range matches {
-		name := m[1]
-		if !seen[name] {
-			seen[name] = true
-			names = append(names, name)
-		}
+	if len(names) == 0 {
+		fmt.Println("no ${boot:...} references found in the prod config")
+		return nil
 	}
 
 	if !secret.KeychainAvailable() {
-		fmt.Fprintln(os.Stderr, "error: OS keychain not available")
-		os.Exit(1)
+		return fmt.Errorf("OS keychain not available")
 	}
 	store := secret.NewKeychainStore(configNamespace)
 
-	// Build fly secrets set args: NAME=VALUE pairs.
-	var args []string
-	args = append(args, "secrets", "set")
+	// Resolve everything up front — see the partial-push note above.
+	values := make(map[string]string, len(names))
+	var missing []string
 	for _, name := range names {
-		val, err := store.Get(ctx, name)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error reading %q from keychain: %v\n", name, err)
-			os.Exit(1)
+		val, getErr := store.Get(ctx, name)
+		if getErr != nil {
+			return fmt.Errorf("read %q from keychain: %w", name, getErr)
 		}
 		if val == "" {
-			fmt.Fprintf(os.Stderr, "error: secret %q not found in keychain\n", name)
-			os.Exit(1)
+			missing = append(missing, name)
+			continue
+		}
+		values[name] = val
+	}
+	// A secret absent locally but already set on Fly is fine: it was pushed
+	// from another machine and is unchanged. Demanding a local copy of every
+	// prod secret would make this command unusable from any machine that does
+	// not hold the full set — which is most of them. Only a secret missing in
+	// both places is fatal, because nothing would ever supply it.
+	if len(missing) > 0 {
+		onFly, listErr := flySecretNames(ctx)
+		if listErr != nil {
+			return fmt.Errorf("secrets not in keychain (%s) and could not check which are already on Fly: %w",
+				strings.Join(missing, ", "), listErr)
+		}
+		var absent []string
+		for _, name := range missing {
+			if !onFly[name] {
+				absent = append(absent, name)
+				continue
+			}
+			fmt.Printf("  - %s (not in keychain; already set on Fly, leaving as-is)\n", name)
+		}
+		if len(absent) > 0 {
+			return fmt.Errorf("secrets missing from both the keychain and Fly: %s\n  set each with: tclaw secret set <NAME> <value>",
+				strings.Join(absent, ", "))
+		}
+	}
+
+	if len(values) == 0 {
+		fmt.Println("  all prod secrets already set on Fly, nothing to push")
+		return nil
+	}
+
+	args := []string{"secrets", "set"}
+	pushed := 0
+	for _, name := range names {
+		val, ok := values[name]
+		if !ok {
+			continue
 		}
 		args = append(args, fmt.Sprintf("%s=%s", name, val))
 		fmt.Printf("  ✓ %s (from keychain)\n", name)
+		pushed++
 	}
 	args = append(args, "-a", flyApp)
 
-	fmt.Printf("\npushing %d secrets to fly app %q...\n", len(names), flyApp)
+	fmt.Printf("\npushing %d secrets to fly app %q...\n", pushed, flyApp)
 	flyCmd := exec.CommandContext(ctx, "fly", args...)
 	flyCmd.Stdout = os.Stdout
 	flyCmd.Stderr = os.Stderr
 	if err := flyCmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: fly secrets set failed: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("fly secrets set failed: %w", err)
 	}
-	fmt.Println("done")
+	return nil
+}
+
+// flySecretNames returns the secret names already set on the Fly app. Only
+// names are available from Fly — values are write-only — which is all this
+// needs to tell "already provisioned elsewhere" from "nothing will ever set
+// this".
+func flySecretNames(ctx context.Context) (map[string]bool, error) {
+	out, err := exec.CommandContext(ctx, "fly", "secrets", "list", "-a", flyApp, "--json").Output()
+	if err != nil {
+		return nil, fmt.Errorf("fly secrets list: %w", err)
+	}
+	var entries []struct {
+		Name string `json:"Name"`
+	}
+	if err := json.Unmarshal(out, &entries); err != nil {
+		return nil, fmt.Errorf("parse fly secrets list: %w", err)
+	}
+	names := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		names[e.Name] = true
+	}
+	return names, nil
 }
