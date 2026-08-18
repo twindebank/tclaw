@@ -114,8 +114,17 @@ func (c *config) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !c.authorized(r) {
-		// Deliberately terse: an unauthenticated caller learns nothing
-		// about what this proxy fronts.
+		// Logged because a silent refusal is indistinguishable from the
+		// request never arriving, which turns a wrong token into a puzzling
+		// 403 with nothing to correlate against. The credential itself is
+		// never logged — only that one was presented, and its length, which
+		// is enough to tell an unresolved placeholder from a real token.
+		slog.Warn("refused unauthorized CONNECT",
+			"target", r.Host,
+			"credential_presented", presentedCredential(r) != "",
+			"credential_length", len(presentedCredential(r)))
+		// Deliberately terse to the caller: an unauthenticated client learns
+		// nothing about what this proxy fronts.
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -165,16 +174,27 @@ func (c *config) handle(w http.ResponseWriter, r *http.Request) {
 // (what an HTTP client sends to a proxy) and Authorization are accepted, since
 // callers differ in which they set.
 func (c *config) authorized(r *http.Request) bool {
+	presented := presentedCredential(r)
+	if presented == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(presented), []byte(c.token)) == 1
+}
+
+// presentedCredential extracts the bearer credential from either header a
+// client might use, returning empty when none is present or the Bearer prefix
+// is missing.
+func presentedCredential(r *http.Request) string {
 	header := r.Header.Get("Proxy-Authorization")
 	if header == "" {
 		header = r.Header.Get("Authorization")
 	}
-	presented := strings.TrimPrefix(header, "Bearer ")
-	if presented == header {
+	trimmed := strings.TrimPrefix(header, "Bearer ")
+	if trimmed == header {
 		// No Bearer prefix — not a form we accept.
-		return false
+		return ""
 	}
-	return subtle.ConstantTimeCompare([]byte(presented), []byte(c.token)) == 1
+	return trimmed
 }
 
 // allowed reports whether target ("host:port") is in the allowlist. Entries
