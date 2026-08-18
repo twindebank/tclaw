@@ -27,6 +27,7 @@ import (
 	"tclaw/internal/tool/channeltools"
 	"tclaw/internal/tool/credentialtools"
 	"tclaw/internal/tool/devtools"
+	garmintools "tclaw/internal/tool/garmintools"
 	"tclaw/internal/tool/google"
 	"tclaw/internal/tool/modeltools"
 	"tclaw/internal/tool/monzo"
@@ -198,6 +199,7 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 		&google.Package{NotificationManager: p.NotificationManager},
 		&monzo.Package{},
 		&tfl.Package{SecretStore: p.SecretStore},
+		&garmintools.Package{SecretStore: p.SecretStore},
 		&restauranttools.Package{SecretStore: p.SecretStore},
 		&bankingtools.Package{
 			SecretStore: p.SecretStore,
