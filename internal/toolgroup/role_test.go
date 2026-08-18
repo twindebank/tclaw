@@ -21,6 +21,7 @@ func seedTestPackageTools() {
 		GroupGSuiteRead:        {"mcp__tclaw__google_gmail_list", "mcp__tclaw__google_gmail_read", "mcp__tclaw__google_workspace", "mcp__tclaw__google_workspace_schema"},
 		GroupGSuiteWrite:       {MCPToolGoogleAll},
 		GroupPersonalServices:  {MCPToolTflAll, MCPToolRestaurantAll, "mcp__tclaw__banking_*", MCPToolMonzoAll},
+		GroupFitness:           {MCPToolGarminAll},
 		GroupConnections:       {MCPToolCredentialAll, MCPToolRemoteMCPAll},
 		GroupTelegramClient:    {MCPToolTelegramClientAll},
 		GroupNotifications:     {MCPToolNotificationAll},

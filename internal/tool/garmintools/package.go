@@ -1,8 +1,3 @@
-// Package garmintools exposes Garmin Connect device settings as MCP tools.
-//
-// The Garmin API work lives in github.com/twindebank/garmin-settings; this package is a thin
-// adapter that maps those calls onto MCP tools, keeps the OAuth token in tclaw's encrypted store
-// rather than on disk, and holds a pending MFA challenge in memory between turns.
 package garmintools
 
 import (
@@ -28,11 +23,11 @@ func (p *Package) Description() string {
 		"the device syncs — there is no way to force a sync."
 }
 
-func (p *Package) Group() toolgroup.ToolGroup { return toolgroup.GroupPersonalServices }
+func (p *Package) Group() toolgroup.ToolGroup { return toolgroup.GroupFitness }
 
 func (p *Package) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
 	return map[toolgroup.ToolGroup][]claudecli.Tool{
-		p.Group(): {"mcp__tclaw__garmin_*"},
+		p.Group(): {toolgroup.MCPToolGarminAll},
 	}
 }
 
@@ -63,7 +58,7 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 		Group:       p.Group(),
 		GroupInfo: toolgroup.GroupInfo{
 			Group:       p.Group(),
-			Description: "Personal service integrations: TfL transport, restaurant reservations, banking, Monzo.",
+			Description: "Fitness devices: read and write Garmin watch and bike computer settings, including activity data screens. Writes reach the device on its next sync.",
 		},
 		Credentials: toolpkg.CheckCredentialStatus(ctx, secretStore, p.RequiredSecrets()),
 		Tools:       ToolNames(),
