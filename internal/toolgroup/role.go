@@ -53,6 +53,7 @@ const (
 	MCPToolGoogleAll         claudecli.Tool = "mcp__tclaw__google_*"
 	MCPToolMonzoAll          claudecli.Tool = "mcp__tclaw__monzo_*"
 	MCPToolTflAll            claudecli.Tool = "mcp__tclaw__tfl_*"
+	MCPToolGarminAll         claudecli.Tool = "mcp__tclaw__garmin_*"
 	MCPToolModelAll          claudecli.Tool = "mcp__tclaw__model_*"
 	MCPToolOnboardingAll     claudecli.Tool = "mcp__tclaw__onboarding_*"
 	MCPToolRepoAll           claudecli.Tool = "mcp__tclaw__repo_*"

@@ -49,7 +49,7 @@ When the user asks to set up a new channel:
 **Kicking off new channels:** Always use the `initial_message` parameter on `channel_create` to deliver a kick-off message. It's mandatory for every new channel — without it the channel boots silent (telegram bots drop the auto-start `/start`, ephemeral channels sit idle until they're reaped). The agent restarts after `channel_create`, so a follow-up `channel_send` won't arrive in time — the `initial_message` is delivered exactly once when the channel first comes online.
 
 **Tool groups** are additive — you start with nothing and add what the channel needs. Use `tool_group_list` to see all groups, what tools they contain, and their descriptions. Common combinations:
-- Full access: `[core_tools, all_builtins, channel_management, channel_messaging, scheduling, dev_workflow, repo_monitoring, gsuite_read, gsuite_write, personal_services, connections, onboarding, secret_form]`
+- Full access: `[core_tools, all_builtins, channel_management, channel_messaging, scheduling, dev_workflow, repo_monitoring, gsuite_read, gsuite_write, personal_services, fitness, connections, onboarding, secret_form]`
 - Dev work: `[core_tools, all_builtins, channel_messaging, scheduling, dev_workflow, repo_monitoring]` — include `scheduling` so the channel can schedule its own CI re-checks after opening a PR (see Dev Workflow); without it there is no way to follow up on CI.
 - Monitor/schedule: `[core_tools, safe_builtins, channel_management, channel_messaging, scheduling]`
 
