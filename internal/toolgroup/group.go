@@ -23,6 +23,7 @@ const (
 	GroupGSuiteRead        ToolGroup = "gsuite_read"
 	GroupGSuiteWrite       ToolGroup = "gsuite_write"
 	GroupPersonalServices  ToolGroup = "personal_services"
+	GroupFitness           ToolGroup = "fitness"
 	GroupConnections       ToolGroup = "connections"
 	GroupTelegramClient    ToolGroup = "telegram_client"
 	GroupNotifications     ToolGroup = "notifications"
@@ -51,6 +52,7 @@ func AllGroups() []GroupInfo {
 		{GroupGSuiteRead, "Google Workspace read-only: list and read emails, list calendar events, read workspace data. Cannot send emails or create events."},
 		{GroupGSuiteWrite, "Google Workspace full access: send emails, create/update calendar events, edit docs and sheets. Includes all read capabilities."},
 		{GroupPersonalServices, "Personal service integrations: TfL transport, restaurant reservations, banking (Open Banking), Monzo."},
+		{GroupFitness, "Fitness devices: read and write Garmin watch and bike computer settings, including activity data screens. Writes reach the device on its next sync."},
 		{GroupConnections, "Manage OAuth connections to external services and remote MCP server connections."},
 		{GroupTelegramClient, "Telegram Client API (MTProto): authenticate, configure bots via BotFather, manage chats, read message history."},
 		{GroupNotifications, "Subscribe to and manage push notifications (new emails, PR merges, etc.). Discover available notification types, subscribe channels, and list active subscriptions."},

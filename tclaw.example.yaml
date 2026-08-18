@@ -46,6 +46,7 @@ local:
         - gsuite_read
         - gsuite_write
         - personal_services
+        - fitness
         - connections
         - telegram_client
         - notifications
