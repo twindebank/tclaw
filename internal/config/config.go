@@ -873,6 +873,18 @@ func resolveSecrets(cfg *Config) ([]string, error) {
 		}
 	}
 
+	// Resolve the egress proxy token.
+	if cfg.EgressProxy != nil {
+		val, envVar, err := resolveRef(cfg.EgressProxy.Token)
+		if err != nil {
+			return nil, fmt.Errorf("egress_proxy.token: %w", err)
+		}
+		cfg.EgressProxy.Token = val
+		if envVar != "" {
+			envVars = append(envVars, envVar)
+		}
+	}
+
 	// Resolve credential slot field references.
 	for i, slot := range cfg.CredentialSlots {
 		for key, val := range slot.Fields {
@@ -887,7 +899,42 @@ func resolveSecrets(cfg *Config) ([]string, error) {
 		}
 	}
 
+	if err := assertNoUnresolvedRefs(cfg); err != nil {
+		return nil, err
+	}
+
 	return envVars, nil
+}
+
+// assertNoUnresolvedRefs fails if any ${boot:NAME} reference survived
+// resolution.
+//
+// resolveSecrets walks named fields, so a newly added config field carrying a
+// boot reference is silently left as its literal placeholder — which is
+// non-empty, so field-level "is it set?" validation still passes and the
+// literal string gets used as if it were the secret. That is exactly how the
+// egress proxy token shipped broken: tclaw sent "${boot:EGRESS_TOKEN}" as its
+// bearer credential and the proxy answered 403. This sweep turns that class of
+// mistake into a startup failure instead of a puzzling runtime rejection.
+func assertNoUnresolvedRefs(cfg *Config) error {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config for unresolved-reference check: %w", err)
+	}
+	matches := bootSecretRefPattern.FindAllStringSubmatch(string(data), -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var names []string
+	for _, m := range matches {
+		if !seen[m[1]] {
+			seen[m[1]] = true
+			names = append(names, m[1])
+		}
+	}
+	return fmt.Errorf("unresolved ${boot:...} references after secret resolution: %s\n"+
+		"  a config field carrying a boot reference is not wired into resolveSecrets", strings.Join(names, ", "))
 }
 
 // resolveRef resolves a single config value. Returns the resolved value and,
