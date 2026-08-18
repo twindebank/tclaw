@@ -173,7 +173,9 @@ users:
 
 ## Secret Management
 - Secrets stored locally in OS keychain via `tclaw secret set NAME value`
-- `tclaw deploy secrets` scans `tclaw.yaml` for `${boot:NAME}` refs across all environments, reads each from keychain, pushes to Fly in one call
+- `tclaw deploy secrets` scans the **prod** environment of `tclaw.yaml` for `${boot:NAME}` refs, reads each from the keychain, and pushes them to Fly in one call. Only prod is scanned: the environments reuse names for different values (the local dev bot and the production bot are both a Telegram token), so scanning the whole file would push a dev credential to production.
+- A ref that is missing locally but **already set on Fly** is left alone, not treated as an error — it was pushed from another machine and is unchanged. Only a secret missing from both is fatal. Without this, the command would be unusable from any machine not holding the full prod set.
+- Every value is resolved before anything is sent, so a missing secret aborts with nothing pushed. `tclaw config push` syncs secrets **first** for the same reason: it performs three writes (volume config, Fly secrets, seed secret) and must not leave the volume updated with the rest skipped.
 - At runtime: Fly injects secrets as env vars → config resolves them → `main.go` scrubs env vars before spawning Claude subprocesses
 - Per-user tool secrets (GitHub PAT, Fly API token) are deployed as `<PREFIX>_<USER>` Fly secrets and seeded into the encrypted store on boot (see architecture docs for the seeding pattern)
 

@@ -61,20 +61,30 @@ func configPush() {
 		os.Exit(1)
 	}
 
+	// Secrets first. A push is three writes — volume config, Fly secrets, seed
+	// secret — and failing partway used to leave the volume updated with the
+	// other two skipped, reported only as an error about a missing keychain
+	// entry. Syncing first means the most failure-prone step either succeeds or
+	// aborts before anything has changed.
+	fmt.Println("-> syncing secrets...")
+	if err := syncBootSecrets(ctx, localPath); err != nil {
+		fmt.Fprintf(os.Stderr, "error syncing secrets: %v\n", err)
+		fmt.Fprintln(os.Stderr, "nothing was pushed — the remote config is unchanged")
+		os.Exit(1)
+	}
+
 	fmt.Println("-> pushing local config to remote volume...")
 	if err := writeRemoteFile(ctx, remoteConfigPath, localData); err != nil {
 		fmt.Fprintf(os.Stderr, "error writing remote config: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Println("-> syncing secrets...")
-	deploySecrets()
-
 	// Update the seed config GitHub secret so first boot after a volume wipe
 	// starts from the latest config. This never overwrites the live volume config.
 	fmt.Println("-> updating TCLAW_YAML seed secret...")
 	if err := updateGitHubConfigSecret(ctx, localData); err != nil {
 		fmt.Fprintf(os.Stderr, "error updating GitHub secret: %v\n", err)
+		fmt.Fprintln(os.Stderr, "the live volume config WAS updated; only the first-boot seed is stale")
 		os.Exit(1)
 	}
 
