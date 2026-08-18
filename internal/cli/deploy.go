@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"tclaw/internal/config"
 	"tclaw/internal/libraries/secret"
@@ -212,7 +213,7 @@ func deploySecrets() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if _, err := syncBootSecrets(ctx, configPath, false); err != nil {
+	if _, err := syncBootSecrets(ctx, configPath); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -231,15 +232,9 @@ func deploySecrets() {
 // Every value is resolved before anything is sent, so a missing secret aborts
 // with nothing pushed rather than leaving Fly holding a partial set.
 //
-// stage defers applying the secrets instead of restarting the app immediately.
-// config push needs that: an immediate restart leaves the machine briefly with
-// no started VM, and the volume write that follows fails against it. Staged
-// secrets are applied once at the end, so the whole push costs one restart
-// rather than racing its own.
-//
-// Returns how many secrets were actually sent, so a caller can skip applying
-// when there was nothing to apply.
-func syncBootSecrets(ctx context.Context, configPath string, stage bool) (int, error) {
+// Returns how many secrets were actually sent, so a caller can tell whether
+// the app was restarted as a result.
+func syncBootSecrets(ctx context.Context, configPath string) (int, error) {
 	names, err := config.BootSecretRefs(configPath, config.EnvProd)
 	if err != nil {
 		return 0, fmt.Errorf("read boot secret refs: %w", err)
@@ -310,9 +305,6 @@ func syncBootSecrets(ctx context.Context, configPath string, stage bool) (int, e
 		pushed++
 	}
 	args = append(args, "-a", flyApp)
-	if stage {
-		args = append(args, "--stage")
-	}
 
 	fmt.Printf("\npushing %d secrets to fly app %q...\n", pushed, flyApp)
 	flyCmd := exec.CommandContext(ctx, "fly", args...)
@@ -324,17 +316,39 @@ func syncBootSecrets(ctx context.Context, configPath string, stage bool) (int, e
 	return pushed, nil
 }
 
-// applyStagedSecrets activates secrets pushed with --stage, restarting the app
-// once. Only call it when something was actually staged; with nothing pending
-// Fly treats it as an error.
-func applyStagedSecrets(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "fly", "secrets", "deploy", "-a", flyApp)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("fly secrets deploy: %w", err)
+// waitForStartedMachine blocks until the app has a started machine, or the
+// timeout expires.
+//
+// Setting a secret restarts the app, and for a brief window afterwards there is
+// no started VM — long enough that a `fly ssh` immediately after fails with
+// "app has no started VMs". Staging the secrets instead is not an option:
+// applying them needs a full `fly deploy`, which belongs to CI, and neither
+// `fly secrets deploy` nor a machine restart clears a staged secret.
+func waitForStartedMachine(ctx context.Context, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		out, err := exec.CommandContext(ctx, "fly", "machine", "list", "-a", flyApp, "--json").Output()
+		if err == nil {
+			var machines []struct {
+				State string `json:"state"`
+			}
+			if json.Unmarshal(out, &machines) == nil {
+				for _, m := range machines {
+					if m.State == "started" {
+						return nil
+					}
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("no started machine on %q after %s", flyApp, timeout)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
 	}
-	return nil
 }
 
 // flySecretNames returns the secret names already set on the Fly app. Only
