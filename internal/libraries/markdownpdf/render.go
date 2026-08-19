@@ -232,14 +232,13 @@ func writeTable(pdf *fpdf.Fpdf, block Block) {
 	widths := columnWidths(pdf, block, columns)
 
 	writeTableRow(pdf, block.Header, widths, true)
-	page := pdf.PageNo()
 	for _, row := range block.Rows {
-		writeTableRow(pdf, row, widths, false)
-		if pdf.PageNo() != page {
-			// a table carried onto a new page repeats its header there
-			page = pdf.PageNo()
+		if linesThatFit(pdf, tableLine, 2.4) < 1 {
+			// the row would start on the next page, so its header goes there first
+			pdf.AddPage()
 			writeTableRow(pdf, block.Header, widths, true)
 		}
+		writeTableRow(pdf, row, widths, false)
 	}
 	pdf.Ln(3)
 }
@@ -252,12 +251,12 @@ func columnWidths(pdf *fpdf.Fpdf, block Block, columns int) []float64 {
 	natural := make([]float64, columns)
 	floor := make([]float64, columns)
 
-	measure := func(cells []string) {
+	measure := func(cells []([]Run)) {
 		for i, cell := range cells {
 			if i >= columns {
 				continue
 			}
-			plain := runText(parseInline(cell))
+			plain := runText(cell)
 			if w := pdf.GetStringWidth(plain) + tableCellPad; w > natural[i] {
 				natural[i] = w
 			}
@@ -332,35 +331,30 @@ func runText(runs []Run) string {
 	return joined.String()
 }
 
-func writeTableRow(pdf *fpdf.Fpdf, cells []string, widths []float64, header bool) {
+func writeTableRow(pdf *fpdf.Fpdf, cells []([]Run), widths []float64, header bool) {
 	wrapped := make([][][]Run, len(widths))
-	rowHeight := 0.0
+	tallest := 0
 	for i := range widths {
-		cell := ""
+		var runs []Run
 		if i < len(cells) {
-			cell = cells[i]
+			runs = cells[i]
 		}
-		runs := parseInline(cell)
 		if header {
-			for j := range runs {
-				runs[j].Bold = true
+			bold := make([]Run, len(runs))
+			for j, run := range runs {
+				bold[j] = run
+				bold[j].Bold = true
 			}
+			runs = bold
 		}
 		wrapped[i] = wrapRuns(pdf, runs, widths[i]-tableCellPad, tableSize)
-		if h := float64(len(wrapped[i])) * tableLine; h > rowHeight {
-			rowHeight = h
-		}
-	}
-	rowHeight += 2.4
-
-	// a row taller than the page is drawn in chunks, because drawing past the
-	// page break would make every line after it start its own page
-	tallest := 0
-	for i := range wrapped {
 		if len(wrapped[i]) > tallest {
 			tallest = len(wrapped[i])
 		}
 	}
+
+	// a row taller than the page is drawn in chunks, because drawing past the
+	// page break would make every line after it start its own page
 	for drawn := 0; drawn < tallest; {
 		fit := linesThatFit(pdf, tableLine, 2.4)
 		if fit < 1 {
@@ -605,11 +599,13 @@ func drawRunLine(pdf *fpdf.Fpdf, line []Run, x, y, lineHeight, baseSize float64)
 	for _, run := range line {
 		applyRunFont(pdf, run, baseSize)
 		width := pdf.GetStringWidth(run.Text)
-		if run.Link != "" {
-			pdf.WriteLinkString(lineHeight, run.Text, run.Link)
-			continue
-		}
+		// a cell, never Write: flowing would wrap at the page margin rather than
+		// the box, and could fire a page break the caller has already measured around
+		x, y := pdf.GetX(), pdf.GetY()
 		pdf.CellFormat(width, lineHeight, run.Text, "", 0, "L", false, 0, "")
+		if run.Link != "" {
+			pdf.LinkString(x, y, width, lineHeight, run.Link)
+		}
 	}
 }
 

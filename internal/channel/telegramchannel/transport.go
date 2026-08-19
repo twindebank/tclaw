@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/go-telegram/bot"
@@ -384,9 +385,30 @@ func (t *Telegram) Send(ctx context.Context, text string, opts channel.SendOpts)
 	return channel.MessageID(strconv.Itoa(msg.ID)), nil
 }
 
-// telegramCaptionLimit is what the Bot API accepts on a document, well below
-// the 4096 a plain message allows.
+// telegramCaptionLimit is what the Bot API accepts on a document, counted in
+// UTF-16 units, well below the 4096 a plain message allows.
 const telegramCaptionLimit = 1024
+
+// trimToUTF16Units cuts text to the limit Telegram measures in, which counts a
+// non-BMP character such as an emoji as two.
+func trimToUTF16Units(text string, limit int) (string, bool) {
+	if len(utf16.Encode([]rune(text))) <= limit {
+		return text, false
+	}
+	used := 0
+	for i, r := range text {
+		width := 1
+		if r > 0xFFFF {
+			width = 2
+		}
+		// one unit held back for the ellipsis that marks the cut
+		if used+width > limit-1 {
+			return text[:i] + "…", true
+		}
+		used += width
+	}
+	return text, false
+}
 
 // SendFile uploads content as a Telegram document.
 func (t *Telegram) SendFile(ctx context.Context, p channel.SendFileParams) (channel.MessageID, error) {
@@ -416,11 +438,11 @@ func (t *Telegram) SendFile(ctx context.Context, p channel.SendFileParams) (chan
 		slog.Warn("telegram send file: stripping invalid UTF-8 bytes from caption", "channel", t.name)
 		caption = tgsdk.SanitizeUTF8(caption)
 	}
-	if runes := []rune(caption); len(runes) > telegramCaptionLimit {
+	if trimmed, cut := trimToUTF16Units(caption, telegramCaptionLimit); cut {
 		// a caption over the limit is a 400 the HTML fallback does not match,
 		// and the document may have cost a credential to build
-		slog.Warn("telegram send file: truncating caption", "channel", t.name, "runes", len(runes))
-		caption = string(runes[:telegramCaptionLimit-1]) + "…"
+		slog.Warn("telegram send file: truncating caption", "channel", t.name)
+		caption = trimmed
 	}
 
 	document := func() models.InputFile {

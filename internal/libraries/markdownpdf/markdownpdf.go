@@ -39,9 +39,9 @@ func Render(p RenderParams) ([]byte, error) {
 		return nil, fmt.Errorf("markdown is empty")
 	}
 
-	// the sign is styling, not text: it marks a callout and is then removed, so
-	// one written inside a list item or a table cell does not fail the render
-	blocks := mapBlockText(Parse(p.Markdown), stripWarningSign)
+	// the sign is prose styling: it marks a callout and is then removed, so one
+	// written inside a list item or a table cell does not fail the render
+	blocks := mapProseText(Parse(p.Markdown), stripWarningSign)
 	if unsupported := unencodableRunes(blocks); len(unsupported) > 0 {
 		return nil, fmt.Errorf("cannot render these characters: %s", strings.Join(unsupported, ", "))
 	}
@@ -104,22 +104,34 @@ func CredentialKeys(markdown string) []string {
 	return keys
 }
 
-// mapBlockText returns a copy of the blocks with every piece of user-visible
-// text passed through transform.
+// mapProseText passes only the prose through transform, leaving code bodies and
+// link targets untouched.
+func mapProseText(blocks []Block, transform func(string) string) []Block {
+	return mapText(blocks, transform, false)
+}
+
+// mapBlockText passes every piece of text through transform, code and link
+// targets included.
 func mapBlockText(blocks []Block, transform func(string) string) []Block {
+	return mapText(blocks, transform, true)
+}
+
+func mapText(blocks []Block, transform func(string) string, includeVerbatim bool) []Block {
 	mapRuns := func(runs []Run) []Run {
 		out := make([]Run, len(runs))
 		for i, run := range runs {
 			out[i] = run
 			out[i].Text = transform(run.Text)
-			out[i].Link = transform(run.Link)
+			if includeVerbatim {
+				out[i].Link = transform(run.Link)
+			}
 		}
 		return out
 	}
-	mapCells := func(cells []string) []string {
-		out := make([]string, len(cells))
+	mapCells := func(cells []([]Run)) []([]Run) {
+		out := make([]([]Run), len(cells))
 		for i, cell := range cells {
-			out[i] = transform(cell)
+			out[i] = mapRuns(cell)
 		}
 		return out
 	}
@@ -128,8 +140,10 @@ func mapBlockText(blocks []Block, transform func(string) string) []Block {
 	for i, block := range blocks {
 		out[i] = block
 		out[i].Runs = mapRuns(block.Runs)
-		out[i].Text = transform(block.Text)
 		out[i].Alt = transform(block.Alt)
+		if includeVerbatim {
+			out[i].Text = transform(block.Text)
+		}
 		out[i].Header = mapCells(block.Header)
 
 		out[i].Items = make([]ListItem, len(block.Items))
@@ -138,7 +152,7 @@ func mapBlockText(blocks []Block, transform func(string) string) []Block {
 			out[i].Items[j].Runs = mapRuns(item.Runs)
 		}
 
-		out[i].Rows = make([][]string, len(block.Rows))
+		out[i].Rows = make([][]([]Run), len(block.Rows))
 		for j, row := range block.Rows {
 			out[i].Rows[j] = mapCells(row)
 		}
@@ -189,11 +203,11 @@ func unencodableRunes(blocks []Block) []string {
 			checkRuns(item.Runs)
 		}
 		for _, cell := range block.Header {
-			check(cell)
+			checkRuns(cell)
 		}
 		for _, row := range block.Rows {
 			for _, cell := range row {
-				check(cell)
+				checkRuns(cell)
 			}
 		}
 	}
