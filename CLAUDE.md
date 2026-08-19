@@ -20,6 +20,7 @@
 - **Prefer stateless functions over stateful structs** — exceptions: I/O resources and top-level orchestrators (Router) where someone must own goroutine lifecycles
 - Use emojis in user-facing status messages (thinking, ready, tool use, etc.) for visual clarity
 - Don't shorten/abbreviate names — use full words for packages, variables, functions (e.g. `credentialtools` not `credmgmt`)
+- **Secrets/keys during dev are always handled via 1Password (`op` CLI)** — never ask the user to paste or `export` a key by hand. Resolve pointers into a variable in a single subshell (`KEY="$(op read 'op://<vault>/<item>/<field>' --account my.1password.com)"`) and pass via env/header; never echo, print, or commit a value. New keys get stored as an `op://Personal Infra/...` item first, then read from there.
 
 ## Architecture
 - Spawns the `claude` CLI binary directly — does NOT use `claude-agent-sdk-go`
@@ -88,6 +89,7 @@ the top of `internal/tool/google/definitions.go` for the concrete steps to add o
 - **Local deploys** still work: `go run . deploy` builds with Docker and deploys via `fly deploy --local-only`
 - **The `deploy` MCP tool is status-only** — it checks what's deployed vs main, does NOT deploy. Deploys are CI's job.
 - **Config sync**: `tclaw config push` pushes local config to remote Fly volume. `tclaw config pull` pulls remote to local. `tclaw config diff` shows differences.
+- **ALWAYS `tclaw config pull` before `tclaw config push`** — push *overwrites* the remote volume config with the local file. The agent creates channels at runtime and they live **only** on the volume until pulled, so pushing a stale local config silently deletes them. Running `config diff` first is not enough: if the diff shows anything present remotely but not locally, pull and merge before pushing. This has already destroyed a live channel once.
 - **Logs**: `go run . deploy logs` (or `go run . logs`) to view recent production logs
 - Never deploy (`go run . deploy` or any deploy command) without the user explicitly asking to deploy. Committing code does not imply permission to deploy.
 
