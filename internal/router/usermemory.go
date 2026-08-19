@@ -67,9 +67,12 @@ func seedUserMemory(userID user.ID, memoryDir, homeDir string) {
 func seedHooks(userID user.ID, settingsPath string) {
 	binary, err := exec.LookPath(hooks.BinaryName)
 	if err != nil {
-		// Absent in local dev, where the image has not been built. The agent
-		// runs unhooked rather than failing every tool call on a missing binary.
-		slog.Debug("hook binary not found, skipping hook registration", "user", userID, "err", err)
+		// The agent runs unhooked rather than failing every tool call on a missing
+		// binary. Said at WARN because an absent guard looks identical to a guard
+		// with nothing to complain about: without this line, rulebooks would appear
+		// to be enforced while the agent could rewrite any of them.
+		slog.Warn("hook binary not found — rulebooks are NOT enforced this run; build it with `tclaw install`",
+			"user", userID, "binary", hooks.BinaryName, "err", err)
 		return
 	}
 
