@@ -12,6 +12,10 @@ RUN test -n "${COMMIT}" || (echo "ERROR: COMMIT build arg is required" && false)
 
 RUN CGO_ENABLED=0 go build -ldflags "-X tclaw/internal/version.Commit=${COMMIT}" -o /bin/tclaw .
 
+# The hook binary runs on every tool call inside the sandbox, so it is separate:
+# starting the whole server to answer one hook would be paid for on each one.
+RUN CGO_ENABLED=0 go build -o /bin/tclaw-hooks ./cmd/tclaw-hooks
+
 # ---
 
 FROM node:22-trixie-slim
@@ -51,6 +55,12 @@ RUN mkdir -p /etc/tclaw/gws-skills \
 
 # Copy the Go binary.
 COPY --from=builder /bin/tclaw /usr/local/bin/tclaw
+COPY --from=builder /bin/tclaw-hooks /usr/local/bin/tclaw-hooks
+
+# The hooks are registered by path at boot. A missing binary would mean every
+# tool call in every session fails on a command that is not there, so it is
+# checked here rather than discovered in production.
+RUN test -x /usr/local/bin/tclaw-hooks || (echo "ERROR: tclaw-hooks missing from the image" && false)
 
 # Seed config for first boot. Written from the TCLAW_YAML GitHub secret in CI,
 # or present locally for local deploys. Only used when the persistent volume

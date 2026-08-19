@@ -1,11 +1,14 @@
 package router
 
 import (
+	"encoding/json"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"tclaw/internal/agent"
+	"tclaw/internal/hooks"
 	"tclaw/internal/user"
 )
 
@@ -50,4 +53,56 @@ func seedUserMemory(userID user.ID, memoryDir, homeDir string) {
 			slog.Debug("seeded settings.json", "user", userID, "path", settingsPath)
 		}
 	}
+
+	seedHooks(userID, settingsPath)
+}
+
+// seedHooks writes tclaw's hook registrations into the user's settings.json on
+// every boot, so a hook added to the manifest reaches an existing user and one
+// removed from it stops running. Every other key in the file is preserved.
+//
+// Registration belongs to tclaw rather than the agent: the file is mounted
+// read-only in the sandbox, which is what stops a prompt injection from turning
+// hooks off or pointing one somewhere else.
+func seedHooks(userID user.ID, settingsPath string) {
+	binary, err := exec.LookPath(hooks.BinaryName)
+	if err != nil {
+		// Absent in local dev, where the image has not been built. The agent
+		// runs unhooked rather than failing every tool call on a missing binary.
+		slog.Debug("hook binary not found, skipping hook registration", "user", userID, "err", err)
+		return
+	}
+
+	block, err := hooks.SettingsBlock(binary)
+	if err != nil {
+		slog.Error("failed to build hook registrations", "user", userID, "err", err)
+		return
+	}
+
+	settings := map[string]json.RawMessage{}
+	raw, err := os.ReadFile(settingsPath)
+	switch {
+	case os.IsNotExist(err):
+		// A fresh user, or a home directory that was reset: start from nothing.
+	case err != nil:
+		slog.Error("failed to read settings.json for hook registration", "user", userID, "err", err)
+		return
+	default:
+		if unmarshalErr := json.Unmarshal(raw, &settings); unmarshalErr != nil {
+			slog.Error("settings.json is not valid JSON, leaving it alone", "user", userID, "err", unmarshalErr)
+			return
+		}
+	}
+
+	settings["hooks"] = block
+	merged, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		slog.Error("failed to encode settings.json", "user", userID, "err", err)
+		return
+	}
+	if err := os.WriteFile(settingsPath, append(merged, '\n'), 0o600); err != nil {
+		slog.Error("failed to write hook registrations", "user", userID, "err", err)
+		return
+	}
+	slog.Debug("registered hooks", "user", userID, "count", len(hooks.Manifest), "binary", binary)
 }

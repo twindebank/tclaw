@@ -36,6 +36,7 @@ import (
 	"tclaw/internal/tool/remotemcp"
 	"tclaw/internal/tool/repotools"
 	"tclaw/internal/tool/restauranttools"
+	"tclaw/internal/tool/ruletools"
 	"tclaw/internal/tool/scheduletools"
 	"tclaw/internal/tool/secretform"
 	"tclaw/internal/tool/telegramclient"
@@ -102,6 +103,9 @@ type Params struct {
 
 	// ArmRepoGrant asks the user to confirm an access grant.
 	ArmRepoGrant func(ctx context.Context, params repotools.GrantRequest) error
+
+	// ArmRuleWrite asks the user to confirm a proposed rulebook change.
+	ArmRuleWrite func(ctx context.Context, params ruletools.RuleWriteRequest) error
 
 	// Remote MCP tools.
 	RemoteMCPManager *remotemcpstore.Manager
@@ -222,6 +226,10 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 			ActiveChannel: p.ActiveChannel,
 			RemoteURL:     p.RepoRemoteURL,
 			ArmGrant:      p.ArmRepoGrant,
+		},
+
+		&ruletools.Package{
+			ArmRuleWrite: p.ArmRuleWrite,
 		},
 
 		// Standard packages.

@@ -133,7 +133,7 @@ func startSetupToken(ctx context.Context, opts Options, flow *pendingAuth, chann
 		defer func() { notify <- channelID }()
 
 		cmd := exec.CommandContext(tokenCtx, "claude", "setup-token")
-		cmd.Env = buildEnv(opts)
+		cmd.Env = buildEnv(opts, "")
 
 		// Use a pty so the CLI sees a real TTY on all fds and opens the
 		// browser for interactive OAuth. A plain bytes.Buffer on stdout
@@ -408,7 +408,7 @@ func handleAuthStatus(ctx context.Context, opts Options, ch channel.Channel, chI
 // checkAuthStatus runs `claude auth status --json` and parses the result.
 func checkAuthStatus(ctx context.Context, opts Options) (*authStatus, error) {
 	cmd := exec.CommandContext(ctx, "claude", "auth", "status", "--json")
-	cmd.Env = buildEnv(opts)
+	cmd.Env = buildEnv(opts, "")
 
 	output, err := cmd.Output()
 	if err != nil {
