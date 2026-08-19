@@ -52,7 +52,6 @@ Documentation lives close to the code. Three layers, strictly separated:
 
 ### Keeping Docs Up to Date
 - **New MCP tools** → write tool descriptions in `definitions.go`. Add to system prompt only for cross-cutting behavioral rules.
-- **New packages** → add package doc comment on the primary `.go` file.
 - **Agent behavior changes** → update `internal/agent/system_prompt.md`
 - **Deployment/config changes** → update @docs/deployment.md
 - **Go conventions** → update @docs/go-patterns.md
