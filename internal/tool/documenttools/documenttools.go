@@ -62,24 +62,8 @@ func (p *Package) Register(handler *mcp.Handler, ctx toolpkg.RegistrationContext
 		MemoryDir:   memoryDir,
 		SecretStore: secretStore,
 		SendFile:    p.SendFile,
-		SystemKeys:  systemKeys(ctx.Registry),
 	})
 	return nil
-}
-
-// systemKeys collects every store key the tool packages provision for
-// themselves, so a document can never read one back out.
-func systemKeys(registry *toolpkg.Registry) map[string]bool {
-	keys := map[string]bool{}
-	if registry == nil {
-		return keys
-	}
-	for _, pkg := range registry.Packages() {
-		for _, spec := range pkg.RequiredSecrets() {
-			keys[spec.StoreKey] = true
-		}
-	}
-	return keys
 }
 
 // ToolNames lists the tools this package registers.

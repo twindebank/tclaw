@@ -92,8 +92,7 @@ func splitFlagArgs(args []string, takesValue map[string]bool) splitArgs {
 		}
 		split.Flags = append(split.Flags, arg)
 		name := strings.TrimLeft(arg, "-")
-		if before, _, found := strings.Cut(name, "="); found {
-			name = before
+		if _, _, found := strings.Cut(name, "="); found {
 			continue
 		}
 		if takesValue[name] && i+1 < len(args) {

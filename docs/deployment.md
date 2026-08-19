@@ -229,6 +229,12 @@ the chat. It is in the `channel_messaging` tool group, so any channel that alrea
 Delivery needs a transport that implements `channel.FileSender`. Telegram does; socket and stdio do not,
 and the tool says which transport refused rather than failing quietly.
 
+A document can carry a credential the agent cannot read: `${cred:wifi_password}` in the markdown resolves
+the store key `doc_wifi_password` as the PDF is built. Only `doc_`-prefixed keys are reachable, so nothing
+tclaw provisions for itself can be printed into a document. Set one with `secret_form_request` using the
+full key. On a laptop the equivalent is a 1Password reference filled in by `op inject`; tclaw has no
+1Password access, so the value has to be put into its own store once.
+
 The renderer (`internal/libraries/markdownpdf`) is pure Go and deliberately not a browser: the image has
 no chromium and no python, and the VM has little spare memory once the CLI's V8 heap is accounted for.
 `tclaw render-pdf` puts the same engine behind a CLI command, so a document rendered on a laptop and one

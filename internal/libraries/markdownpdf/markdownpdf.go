@@ -39,7 +39,9 @@ func Render(p RenderParams) ([]byte, error) {
 		return nil, fmt.Errorf("markdown is empty")
 	}
 
-	blocks := Parse(p.Markdown)
+	// the sign is styling, not text: it marks a callout and is then removed, so
+	// one written inside a list item or a table cell does not fail the render
+	blocks := mapBlockText(Parse(p.Markdown), stripWarningSign)
 	if unsupported := unencodableRunes(blocks); len(unsupported) > 0 {
 		return nil, fmt.Errorf("cannot render these characters: %s", strings.Join(unsupported, ", "))
 	}
@@ -144,10 +146,15 @@ func mapBlockText(blocks []Block, transform func(string) string) []Block {
 	return out
 }
 
+// stripWarningSign removes the sign and its variation selector wherever they
+// appear, and tidies the space a leading one leaves behind.
 func stripWarningSign(text string) string {
-	trimmed := strings.TrimPrefix(text, warningSign)
-	trimmed = strings.TrimPrefix(trimmed, variationSelector)
-	return strings.TrimSpace(trimmed)
+	if !strings.Contains(text, warningSign) {
+		return text
+	}
+	stripped := strings.ReplaceAll(text, warningSign, "")
+	stripped = strings.ReplaceAll(stripped, variationSelector, "")
+	return strings.TrimSpace(stripped)
 }
 
 // unencodableRunes returns a sorted, human-readable description of every rune
