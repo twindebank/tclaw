@@ -14,6 +14,11 @@ type channelFileSenderParams struct {
 
 // newChannelFileSender returns the hook document tools call to deliver a file
 // to whichever channel the turn is running on.
+//
+// It goes straight to the transport rather than through the outbox, which
+// persists its queue to disk. A document can be built from a credential the
+// agent may not read, so it must not be written anywhere. The cost is that a
+// file can overtake text queued earlier in the same turn.
 func newChannelFileSender(params channelFileSenderParams) func(context.Context, channel.SendFileParams) (channel.MessageID, error) {
 	return func(ctx context.Context, file channel.SendFileParams) (channel.MessageID, error) {
 		if params.ActiveChannel == nil || params.Channels == nil {
