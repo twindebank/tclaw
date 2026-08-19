@@ -10,7 +10,10 @@ func runBuild() {
 	fmt.Println("→ building...")
 	run("go", "build", "-o", "bin/tclaw", ".")
 	runInDir("cmd/chat", "go", "build", "-o", "../../bin/tclaw-chat", ".")
-	fmt.Println("✓ bin/tclaw  bin/tclaw-chat")
+	// The hooks binary is looked up on PATH at boot. Without it the rulebook guards
+	// are simply absent, which looks exactly like a session with nothing to correct.
+	run("go", "build", "-o", "bin/tclaw-hooks", "./cmd/tclaw-hooks")
+	fmt.Println("✓ bin/tclaw  bin/tclaw-chat  bin/tclaw-hooks")
 }
 
 func runInstall() {
@@ -18,7 +21,9 @@ func runInstall() {
 	run("go", "install", ".")
 	fmt.Println("→ installing tclaw-chat...")
 	runInDir("cmd/chat", "go", "install", ".")
-	fmt.Println("✓ installed tclaw, tclaw-chat")
+	fmt.Println("→ installing tclaw-hooks...")
+	run("go", "install", "./cmd/tclaw-hooks")
+	fmt.Println("✓ installed tclaw, tclaw-chat, tclaw-hooks")
 }
 
 func runTidy() {
