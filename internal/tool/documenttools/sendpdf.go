@@ -40,10 +40,10 @@ type SendPDFParams struct {
 	AssetsDir    string `json:"assets_dir"`
 }
 
-// SendPDFResponse tells the agent what was sent without echoing the content.
+// SendPDFResponse tells the agent what was sent. It carries no size, because a
+// document's length varies with the credentials in it.
 type SendPDFResponse struct {
 	Filename       string   `json:"filename"`
-	Bytes          int      `json:"bytes"`
 	MessageID      string   `json:"message_id"`
 	CredentialsSet []string `json:"credentials_filled,omitempty"`
 }
@@ -157,7 +157,6 @@ func sendPDFHandler(deps Deps) mcp.ToolHandler {
 
 		return json.Marshal(SendPDFResponse{
 			Filename:       p.Filename,
-			Bytes:          len(pdf),
 			MessageID:      string(messageID),
 			CredentialsSet: filled,
 		})

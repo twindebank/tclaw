@@ -29,8 +29,8 @@ func TestDocumentSendPDF(t *testing.T) {
 		var got documenttools.SendPDFResponse
 		require.NoError(t, json.Unmarshal(result, &got))
 		require.Equal(t, "guide.pdf", got.Filename)
-		require.Greater(t, got.Bytes, 500, "a rendered guide should not be near-empty")
 		require.Equal(t, "42", got.MessageID, "the transport's message id is passed back")
+		require.Greater(t, len(h.Sent.calls[0].Content), 500, "a rendered guide should not be near-empty")
 
 		require.Len(t, h.Sent.calls, 1, "exactly one file sent")
 		require.Equal(t, "guide.pdf", h.Sent.calls[0].Filename)

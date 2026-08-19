@@ -230,6 +230,28 @@ func TestRender(t *testing.T) {
 			"a pipe in a value must not become a column break")
 	})
 
+	t.Run("a credential inside a fenced code block is filled", func(t *testing.T) {
+		out, err := markdownpdf.Render(markdownpdf.RenderParams{
+			Markdown:    "# WiFi\n\n```\nPassword: ${cred:wifi}\n```\n",
+			Credentials: map[string]string{"wifi": "correct-horse"},
+		})
+
+		require.NoError(t, err)
+		text := strings.Join(pdfText(t, out), "\n")
+		require.Contains(t, text, "correct-horse", "a fenced password is a natural thing to write")
+		require.NotContains(t, text, "${cred:", "a delivered document must never show a raw placeholder")
+	})
+
+	t.Run("a warning sign mid-sentence does not glue the words together", func(t *testing.T) {
+		out, err := markdownpdf.Render(markdownpdf.RenderParams{
+			Markdown: "Use **the app** ⚠️ then leave.\n",
+		})
+
+		require.NoError(t, err)
+		require.NotContains(t, strings.Join(pdfText(t, out), ""), "appthen",
+			"stripping the sign must leave the space either side of it")
+	})
+
 	t.Run("refuses a credential placed in a link target", func(t *testing.T) {
 		_, err := markdownpdf.Render(markdownpdf.RenderParams{
 			Markdown:    "Tap [here](https://example.com/?q=${cred:wifi}) to join.\n",
@@ -429,6 +451,16 @@ func TestParse_LooseLists(t *testing.T) {
 		require.Equal(t, []int{1, 2, 3}, []int{
 			blocks[0].Items[0].Number, blocks[0].Items[1].Number, blocks[0].Items[2].Number,
 		}, "a blank line between items must not restart the count")
+	})
+
+	t.Run("a loose nested list nests one level, not two", func(t *testing.T) {
+		loose := markdownpdf.Parse("- top\n\n    - nested\n\n- back\n")
+		tight := markdownpdf.Parse("- top\n    - nested\n- back\n")
+
+		require.Len(t, loose, 1, "one list")
+		depths := []int{loose[0].Items[0].Depth, loose[0].Items[1].Depth, loose[0].Items[2].Depth}
+		require.Equal(t, []int{tight[0].Items[0].Depth, tight[0].Items[1].Depth, tight[0].Items[2].Depth}, depths,
+			"blank lines between items must not change how deep they nest")
 	})
 
 	t.Run("a blank line before a different kind of list starts a new one", func(t *testing.T) {

@@ -56,6 +56,13 @@ func runRenderPDF() {
 		documentTitle = filepath.Base(source)
 	}
 
+	if keys := markdownpdf.CredentialKeys(string(markdown)); len(keys) > 0 {
+		fmt.Fprintf(os.Stderr,
+			"⚠️  %s has credential placeholders (%s) and this command cannot fill them — they will print literally.\n"+
+				"    Resolve them first, or render through the document_send_pdf tool.\n",
+			source, strings.Join(keys, ", "))
+	}
+
 	pdf, err := markdownpdf.Render(markdownpdf.RenderParams{
 		Markdown:  string(markdown),
 		Title:     documentTitle,
