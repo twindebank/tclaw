@@ -218,7 +218,25 @@ tclaw deploy resume      # Spin up (scale to 1)
 tclaw config push        # Push local config to remote Fly volume
 tclaw config pull        # Pull remote config to local
 tclaw config diff        # Show differences between local and remote config
+tclaw render-pdf a.md b.pdf   # Render a markdown file to PDF with the same engine the agent uses
 ```
+
+## Documents
+
+`document_send_pdf` renders a markdown file from the user's memory directory into a PDF and sends it to
+the chat. It is in the `channel_messaging` tool group, so any channel that already sends messages has it.
+
+Delivery needs a transport that implements `channel.FileSender`. Telegram does; socket and stdio do not,
+and the tool says which transport refused rather than failing quietly.
+
+The renderer (`internal/libraries/markdownpdf`) is pure Go and deliberately not a browser: the image has
+no chromium and no python, and the VM has little spare memory once the CLI's V8 heap is accounted for.
+`tclaw render-pdf` puts the same engine behind a CLI command, so a document rendered on a laptop and one
+rendered in production look identical.
+
+Text is limited to what the PDF core fonts cover (Windows-1252). Ordinary punctuation is fine — em
+dashes, en dashes, degree signs, accented letters. Emoji are not, and a render fails naming the character
+instead of dropping it.
 
 ## Config Lifecycle
 
