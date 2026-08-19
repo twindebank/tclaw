@@ -125,6 +125,29 @@ scoped-out repos as not found. An unknown channel fails closed.
 `disallowed_tools` or `creatable_groups` — those are yours to set with `tclaw config push`. Without
 that, the agent could grant itself access directly and the confirmation prompt would be decorative.
 
+## Rulebooks
+
+Standing decisions — how a task is done on a given channel — live in `<user>/memory/rules/`, one file
+per area, shared across channels. Nothing needs configuring: the directory is created on first use and
+the `channel-rules` skill is seeded into every user's `home/.claude/skills/`.
+
+Each channel's `memory/channels/<name>/CLAUDE.md` decides what loads there:
+
+- `@../../rules/<file>.md` pulls a rulebook into context on every turn of that channel.
+- Anything else is listed by name, and read on demand.
+
+Every rulebook is readable from every channel either way; the lists only decide what arrives without
+being asked for. `rule_list` shows what exists and where each one is referenced.
+
+**Changing one needs you.** The agent calls `rule_propose` with the complete proposed text, you get the
+text in the chat, and it is written on your "yes" — by tclaw, outside the sandbox. Direct writes to the
+rules directory are refused by the `rules-gate` hook, so there is no other route. Editing which
+rulebooks a channel loads is ordinary agent memory work and needs no approval.
+
+Hooks are registered in each user's `settings.json` at boot from `hooks.Manifest`, pointing at
+`/usr/local/bin/tclaw-hooks` in the image. The Dockerfile fails the build if that binary is missing,
+because a registration pointing at nothing would fail on every tool call in every session.
+
 ## Personal Knowledge Base
 
 The vault is an ordinary declared repo. `knowledge:` only says which one it is, where it mounts, and

@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"tclaw/internal/channel"
+	"tclaw/internal/memorylayout"
 )
 
 // mockChannel records Send/Edit calls and can be configured to fail.
@@ -320,7 +321,7 @@ func TestBuildEnv(t *testing.T) {
 			defer os.Unsetenv(k)
 		}
 
-		env := buildEnv(Options{})
+		env := buildEnv(Options{}, "")
 
 		envMap := make(map[string]string)
 		for _, kv := range env {
@@ -354,7 +355,7 @@ func TestBuildEnv(t *testing.T) {
 			defer os.Unsetenv(k)
 		}
 
-		env := buildEnv(Options{})
+		env := buildEnv(Options{}, "")
 
 		envMap := make(map[string]string)
 		for _, kv := range env {
@@ -374,7 +375,7 @@ func TestBuildEnv(t *testing.T) {
 			HomeDir:    "/home/test",
 			APIKey:     "sk-ant-test",
 			SetupToken: "sk-ant-oat01-test",
-		})
+		}, "")
 
 		envMap := make(map[string]string)
 		for _, kv := range env {
@@ -395,7 +396,7 @@ func TestBuildEnv(t *testing.T) {
 
 	t.Run("sets NODE_OPTIONS when env var present", func(t *testing.T) {
 		t.Setenv("NODE_MAX_HEAP_MB", "128")
-		env := buildEnv(Options{})
+		env := buildEnv(Options{}, "")
 		envMap := make(map[string]string)
 		for _, kv := range env {
 			key, val, _ := strings.Cut(kv, "=")
@@ -406,8 +407,23 @@ func TestBuildEnv(t *testing.T) {
 		}
 	})
 
+	t.Run("tells the hooks which memory dir and channel the turn is on", func(t *testing.T) {
+		env := buildEnv(Options{MemoryDir: "/data/theo/memory"}, "email")
+		envMap := make(map[string]string)
+		for _, kv := range env {
+			key, val, _ := strings.Cut(kv, "=")
+			envMap[key] = val
+		}
+		if envMap[memorylayout.EnvMemoryDir] != "/data/theo/memory" {
+			t.Errorf("memory dir not passed to hooks, got %q", envMap[memorylayout.EnvMemoryDir])
+		}
+		if envMap[memorylayout.EnvChannel] != "email" {
+			t.Errorf("channel not passed to hooks, got %q", envMap[memorylayout.EnvChannel])
+		}
+	})
+
 	t.Run("omits NODE_OPTIONS when env var absent", func(t *testing.T) {
-		env := buildEnv(Options{})
+		env := buildEnv(Options{}, "")
 		for _, kv := range env {
 			key, _, _ := strings.Cut(kv, "=")
 			if key == "NODE_OPTIONS" {
