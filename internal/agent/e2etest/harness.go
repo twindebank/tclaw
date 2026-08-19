@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -108,6 +109,9 @@ type Harness struct {
 	turnLog        []TurnRecord
 
 	cancelRunPtr *func()
+
+	// consumed counts messages the agent has taken off the fan-in channel.
+	consumed *atomic.Int64
 }
 
 // NewHarness creates a fully wired test harness.
@@ -140,22 +144,31 @@ func NewHarness(t *testing.T, cfg Config) *Harness {
 		channelNames = append(channelNames, cc.Name)
 	}
 
-	// Auto-shutdown: when all channels are closed and a Done fires with an
-	// empty queue, cancel the run context. The queue emptiness check prevents
-	// early shutdown when system Dones (queue-ack) fire before the real turn.
-	allClosed := func() bool {
+	// Auto-shutdown: when every channel is closed, the agent has consumed every
+	// injected message, and a Done fires with an empty queue, cancel the run
+	// context. The queue emptiness check prevents early shutdown when system
+	// Dones (queue-ack) fire before the real turn.
+	//
+	// Counting consumption matters as much as the queue check. A message that
+	// has left its channel but has not yet been read by the agent is in neither
+	// place, so both counters read "nothing to do" — and a turn finishing right
+	// then would tear the run down with that message still in flight.
+	consumed := &atomic.Int64{}
+	allConsumed := func() bool {
+		injected := 0
 		for _, tc := range channels {
-			if !tc.closed {
+			if !tc.Closed() {
 				return false
 			}
+			injected += tc.Injected()
 		}
-		return true
+		return consumed.Load() >= int64(injected)
 	}
 	var cancelRun func()
 	var q *queue.Queue // set below after q is created
 	for _, tc := range channels {
 		tc.onDone = func() {
-			if allClosed() && (q == nil || q.Len() == 0) {
+			if allConsumed() && (q == nil || q.Len() == 0) {
 				if cancelRun != nil {
 					cancelRun()
 				}
@@ -207,6 +220,7 @@ func NewHarness(t *testing.T, cfg Config) *Harness {
 		q:             q,
 		channelChange: channelChangeCh,
 		cancelRunPtr:  &cancelRun,
+		consumed:      consumed,
 	}
 
 	// Outbox setup.
@@ -291,8 +305,23 @@ func (h *Harness) Run(ctx context.Context) error {
 		h.ob.Start(context.Background())
 	}
 
+	// Count messages as the agent takes them, so auto-shutdown can tell an
+	// empty pipeline from one that simply has a message in transit.
 	msgs := channel.FanIn(runCtx, h.channelMap)
-	err := agent.RunWithMessages(runCtx, h.opts, msgs)
+	counted := make(chan channel.TaggedMessage)
+	go func() {
+		defer close(counted)
+		for m := range msgs {
+			select {
+			case counted <- m:
+				h.consumed.Add(1)
+			case <-runCtx.Done():
+				return
+			}
+		}
+	}()
+
+	err := agent.RunWithMessages(runCtx, h.opts, counted)
 
 	// Flush outbox so all pending deliveries complete.
 	if h.ob != nil {

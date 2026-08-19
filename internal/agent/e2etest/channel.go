@@ -35,10 +35,16 @@ type TestChannel struct {
 	info  channel.Info
 	split bool
 
-	in     chan string
+	in chan string
+
+	mu     sync.Mutex
 	closed bool
 
-	mu         sync.Mutex
+	// injected counts messages handed to Inject. The harness compares it
+	// against what the agent has consumed to know whether any are still
+	// in flight.
+	injected int
+
 	sends      []SendRecord
 	edits      []EditRecord
 	dones      int
@@ -77,6 +83,9 @@ func NewTestChannel(cfg ChannelConfig) *TestChannel {
 
 // Inject pushes a user message into the channel.
 func (c *TestChannel) Inject(text string) {
+	c.mu.Lock()
+	c.injected++
+	c.mu.Unlock()
 	c.in <- text
 }
 
@@ -84,10 +93,27 @@ func (c *TestChannel) Inject(text string) {
 // channel stays open until its context is cancelled — this avoids a race
 // where closing input cancels an in-flight turn.
 func (c *TestChannel) Close() {
-	if !c.closed {
-		c.closed = true
-		close(c.in)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return
 	}
+	c.closed = true
+	close(c.in)
+}
+
+// Closed reports whether Close has been called.
+func (c *TestChannel) Closed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.closed
+}
+
+// Injected returns how many messages have been handed to Inject.
+func (c *TestChannel) Injected() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.injected
 }
 
 // Sends returns a thread-safe copy of all Send records.
