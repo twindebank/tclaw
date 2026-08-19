@@ -272,7 +272,11 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			slog.Error("failed to list remote mcps for config", "err", listErr)
 			return nil
 		}
-		return remoteMCPConfigEntries(mcps, remoteMCPProxy, proxyToken)
+		// Only the global servers. A channel-scoped one belongs in that
+		// channel's own config file — putting it here attaches it to every
+		// channel, and each one costs a handshake (or a cold start) per turn.
+		global, _ := partitionRemoteMCPs(mcps)
+		return remoteMCPConfigEntries(global, remoteMCPProxy, proxyToken)
 	}
 
 	// configUpdater regenerates the MCP config file with current remote MCPs.
