@@ -93,6 +93,23 @@ Two invariants hold across all three: **the agent may name a secret but never re
 returns a value; consumers read server-side and proxies inject at the network boundary), and
 **agent-facing keys are validated against `^[a-z0-9_]+$`**, which cannot express a slash — so nothing
 the agent names can reach the `cred/` or `channel/` namespaces.
+- **Handing the user a document built from a secret** — `document_send_pdf` (`internal/tool/documenttools`)
+  renders a markdown file the agent wrote into a PDF and sends it to the channel. `${cred:<name>}`
+  placeholders are resolved **inside the tool**, the same server-side injection the git and remote-MCP
+  proxies do at the network boundary.
+
+  A placeholder only ever reads the store key `doc_<name>`. That namespace is the boundary, and it has to
+  be a namespace rather than a list of forbidden keys: plenty of credentials are written at runtime
+  without being declared anywhere, `telegram_client_session` — full Telegram account access — among them,
+  so any list built by enumeration is one runtime key away from being wrong. The rendered PDF is carried in memory to the
+  transport and never written to disk, because anywhere the agent could read it back would hand it the
+  value the placeholder exists to hide. `channel.FileSender` is an optional interface: Telegram implements
+  it with `sendDocument`, and a channel that cannot carry a file says so rather than failing silently.
+
+  Rendering is `internal/libraries/markdownpdf`, pure Go with no browser — the runtime image has neither
+  chromium nor python, and the VM's spare memory is measured in tens of megabytes. It uses the PDF core
+  fonts, so text is limited to Windows-1252; a character outside it fails the render and names itself,
+  rather than reaching the reader mangled.
 - NaCl secretbox encryption with per-user HKDF-derived keys. See `libraries/secret/`.
 - Boot secrets via `${boot:NAME}` (keychain → env var fallback, then scrubbed).
 - Runtime secrets via encrypted store (agent-collected OAuth tokens, API keys).

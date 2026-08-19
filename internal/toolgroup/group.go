@@ -44,7 +44,7 @@ func AllGroups() []GroupInfo {
 		{GroupCoreTools, "Bash shell, file operations (read/write/edit/glob/grep), web access (fetch/search), and model management. The foundation most channels need."},
 		{GroupAllBuiltins, "All built-in commands: stop, compact, login, auth, and new/reset (fresh session)."},
 		{GroupSafeBuiltins, "Safe built-in commands only: stop, compact, and new/reset (fresh session). No auth commands."},
-		{GroupChannelMessaging, "Send messages to other channels (channel_send), read conversation history (channel_transcript), check if channels are busy (channel_is_busy), and tear down the current channel (channel_done). Cannot create new channels."},
+		{GroupChannelMessaging, "Send messages to other channels (channel_send), read conversation history (channel_transcript), check if channels are busy (channel_is_busy), and tear down the current channel (channel_done). Cannot create new channels. Also renders a markdown file into a PDF and sends it to the chat, which can carry a doc_-prefixed secret the agent cannot read."},
 		{GroupChannelManagement, "Full channel lifecycle: create, delete, edit, list channels, plus everything in channel_messaging. Required for orchestrating ephemeral channels."},
 		{GroupScheduling, "Create, edit, delete, pause, and resume cron schedules."},
 		{GroupDevWorkflow, "Dev workflow: start/end/cancel dev sessions, view status and logs, deploy to production. For channels that do code work."},

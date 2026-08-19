@@ -155,6 +155,26 @@ type SendOpts struct {
 	Notify bool
 }
 
+// SendFileParams describes one file being delivered to a channel. The content
+// is carried in memory so a file built from secrets never lands on disk.
+type SendFileParams struct {
+	// Filename is what the recipient sees.
+	Filename string
+
+	Content []byte
+
+	// Caption accompanies the file, in the channel's markup.
+	Caption string
+
+	Opts SendOpts
+}
+
+// FileSender is implemented by transports that can carry a file to the user.
+// Transports with nowhere to put one do not implement it.
+type FileSender interface {
+	SendFile(ctx context.Context, p SendFileParams) (MessageID, error)
+}
+
 // Channel is the interface every transport must implement.
 type Channel interface {
 	// Info returns the channel's identity and transport type.

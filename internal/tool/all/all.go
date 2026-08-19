@@ -27,6 +27,7 @@ import (
 	"tclaw/internal/tool/channeltools"
 	"tclaw/internal/tool/credentialtools"
 	"tclaw/internal/tool/devtools"
+	"tclaw/internal/tool/documenttools"
 	garmintools "tclaw/internal/tool/garmintools"
 	"tclaw/internal/tool/google"
 	"tclaw/internal/tool/modeltools"
@@ -77,6 +78,10 @@ type Params struct {
 	// CrossChSend delivers text directly to a channel's transport for
 	// no_reply cross-channel sends, bypassing the inbound agent pipeline.
 	CrossChSend func(ctx context.Context, chID channel.ChannelID, text string, opts channel.SendOpts) (channel.MessageID, error)
+
+	// SendFile delivers a file to the channel the turn is running on. Nil where
+	// no channel can carry one.
+	SendFile func(ctx context.Context, p channel.SendFileParams) (channel.MessageID, error)
 
 	// Channel transcript deps.
 	SessionStore *channel.SessionStore
@@ -198,6 +203,12 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 
 		// Channel management — uses provisioners map populated after registration.
 		chPkg,
+
+		&documenttools.Package{
+			MemoryDir:   p.MemoryDir,
+			SecretStore: p.SecretStore,
+			SendFile:    p.SendFile,
+		},
 
 		// Credential providers (OAuth / API key).
 		&google.Package{NotificationManager: p.NotificationManager},
