@@ -29,7 +29,20 @@
 - `internal/config/` — YAML config loading + `config.Writer` for atomic mutations.
 - `internal/router/` — top-level orchestrator. Per-user lifecycle, channel building, MCP servers. Only stateful struct.
 - `internal/tool/` — MCP tool packages. Each is self-contained with `toolpkg.Package` interface.
+- `internal/hooks/` — Claude Code hooks, built as the separate `tclaw-hooks` binary. The only place a direct file write can be caught; an MCP tool never sees one.
+- `internal/memorylayout/` — the paths and env vars the agent loop and the hook binary must agree on.
 - Per-user isolation via `HOME` env var on claude subprocess — all CLI state scoped per user
+
+### Rulebooks and channel scoping
+Standing decisions live in `<user>/memory/rules/`, one file per area, shared by every channel. A
+channel's `memory/channels/<name>/CLAUDE.md` `@`-imports the ones it loads on every turn and lists the
+rest by name. Scoping decides what arrives without being asked for — every rulebook stays readable from
+every channel, and `rule_list` shows what exists.
+
+The agent cannot write a rulebook. `internal/hooks` (the `tclaw-hooks` binary, registered in each
+user's `settings.json` and baked into the image) refuses a direct write to that directory, and
+`rule_propose` asks the user, with the router writing the file on their reply — outside the sandbox.
+Editing a channel's own index needs no approval; it is ordinary memory work.
 
 ### Directory model
 1. **Agent memory** (`<user>/memory/`) — agent reads/writes freely, sandboxed via CWD + `--add-dir`

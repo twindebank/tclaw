@@ -99,6 +99,8 @@ func interceptPendingConfirmation(ctx context.Context, msg channel.TaggedMessage
 		return confirmChannelDone(ctx, ch, chName, rs, params)
 	case channel.PendingRepoGrant:
 		return confirmRepoGrant(ctx, msg.ChannelID, chName, pending, params)
+	case channel.PendingRuleWrite:
+		return confirmRuleWrite(ctx, msg.ChannelID, chName, pending, params)
 	default:
 		slog.Error("pending confirmation of unknown kind, ignoring",
 			"channel", chName, "kind", pending.Kind)

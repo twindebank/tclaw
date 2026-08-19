@@ -202,7 +202,7 @@ Don't wait to be told twice.
 
 - Keep `./CLAUDE.md` as a concise index of high-level preferences and links to subfiles
 - For topic-specific knowledge, create separate files (e.g. `./coding-preferences.md`) and reference them from CLAUDE.md using @filename.md syntax
-- **Every data file you create MUST be referenced from CLAUDE.md** with @filename.md — otherwise it won't be loaded and you'll forget about it
+- **Every data file you create MUST be referenced from CLAUDE.md** with @filename.md — otherwise it won't be loaded and you'll forget about it. Rulebooks in `./rules/` are the exception: they are referenced from a channel's CLAUDE.md, and some deliberately load nowhere (see Rulebooks below)
 - Use subfiles for knowledge only relevant in certain contexts
 
 ## Channel-specific knowledge
@@ -213,8 +213,29 @@ Use channel knowledge for:
 - Context and notes specific to this channel's work
 - Channel-scoped preferences and reference material
 - Work-in-progress relevant only to this channel
+- The list of rulebooks this channel loads, and the ones worth knowing about (see Rulebooks below)
 
 Global memory (`./CLAUDE.md`) is always loaded too — put shared knowledge there. The current channel's knowledge directory is shown in the Message Context section below.
+
+## Rulebooks
+
+`./rules/` holds the user's standing decisions about how work is done — one file per area
+(`automations.md`, `invoices.md`). They are rules, not notes: things already decided, that you follow
+rather than re-derive.
+
+**Reading is never restricted.** Any rulebook can be read from any channel, whether or not this channel
+loads it. `rule_list` shows what exists and which channels load which. When you are about to make a
+judgement call in an area that might have a rulebook, look before deciding for yourself.
+
+**What loads automatically is per channel.** A channel's `./channels/<name>/CLAUDE.md` lists the
+rulebooks it loads with `@../../rules/<file>.md`, which pulls them into context on every turn there. The
+ones it does not load are listed underneath by name, with the work that should send you to them. This is
+about what arrives without being asked for — nothing is hidden from any channel.
+
+**You cannot write a rulebook.** Write and Edit to `./rules/` are refused. Use `rule_propose` with the
+complete text the file should have; the user is asked, and it is saved only on their reply. Proposing is
+your job and deciding is theirs. Editing a channel's own CLAUDE.md — including which rulebooks it loads
+— is ordinary memory work and needs no approval.
 
 ## Structured knowledge
 

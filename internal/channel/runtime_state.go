@@ -45,6 +45,9 @@ const (
 
 	// PendingRepoGrant raises a repo's access tier.
 	PendingRepoGrant PendingActionKind = "repo_grant"
+
+	// PendingRuleWrite writes a proposed rulebook once the user approves it.
+	PendingRuleWrite PendingActionKind = "rule_write"
 )
 
 // PendingAction is a confirmation the user has been asked for but has not yet

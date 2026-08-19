@@ -477,6 +477,12 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			Channels:      channelSet.Snapshot,
 			Send:          messageOutbox.Send,
 		}),
+		ArmRuleWrite: newRuleWriteArmer(armRuleWriteParams{
+			RuntimeState:  runtimeState,
+			ActiveChannel: activeChannelFunc,
+			Channels:      channelSet.Snapshot,
+			Send:          messageOutbox.Send,
+		}),
 		RemoteMCPManager: remoteMCPMgr,
 		ConfigUpdater:    configUpdater,
 		BaseURL:          secretFormBaseURL,
@@ -616,6 +622,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// overwrite) so the agent discovers gws command syntax from skills before
 		// the next agent spawn.
 		seedGWSSkills(mu.cfg.ID, homeDir)
+		seedRulesSkill(mu.cfg.ID, homeDir)
 
 		// Regenerate the MCP config on each iteration so the file is always
 		// present before the next agent spawn.
