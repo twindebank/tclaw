@@ -2,9 +2,11 @@ package markdownpdf_test
 
 import (
 	"bytes"
+	"compress/zlib"
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -67,16 +69,17 @@ func TestParse(t *testing.T) {
 
 		require.Len(t, blocks, 1, "one table block")
 		require.Equal(t, markdownpdf.BlockTable, blocks[0].Kind)
-		require.Equal(t, []string{"Room", "How"}, blocks[0].Header)
-		require.Equal(t, [][]string{{"Lounge", "Motion"}}, blocks[0].Rows)
+		require.Equal(t, []string{"Room", "How"}, cellText(blocks[0].Header))
+		require.Equal(t, []string{"Lounge", "Motion"}, cellText(blocks[0].Rows[0]))
+		require.Len(t, blocks[0].Rows, 1, "one data row")
 	})
 
 	t.Run("a table without a separator row still parses", func(t *testing.T) {
 		blocks := markdownpdf.Parse("| Say | Effect |\n| turn TV on | telly |\n")
 
 		require.Len(t, blocks, 1, "one table block")
-		require.Equal(t, []string{"Say", "Effect"}, blocks[0].Header)
-		require.Equal(t, [][]string{{"turn TV on", "telly"}}, blocks[0].Rows)
+		require.Equal(t, []string{"Say", "Effect"}, cellText(blocks[0].Header))
+		require.Equal(t, []string{"turn TV on", "telly"}, cellText(blocks[0].Rows[0]))
 	})
 
 	t.Run("a warning sign makes a callout whichever way it is written", func(t *testing.T) {
@@ -194,24 +197,37 @@ func TestRender(t *testing.T) {
 		require.True(t, bytes.HasPrefix(out, []byte("%PDF-")), "output should be a PDF")
 	})
 
-	t.Run("a credential is substituted after parsing, so its punctuation is literal", func(t *testing.T) {
-		const value = "a*b*c`d`"
-
-		// substituted through a placeholder, the asterisks and backticks are text
-		viaPlaceholder, err := markdownpdf.Render(markdownpdf.RenderParams{
+	t.Run("a credential's punctuation stays literal in a paragraph", func(t *testing.T) {
+		out, err := markdownpdf.Render(markdownpdf.RenderParams{
 			Markdown:    "# WiFi\n\nPassword: ${cred:wifi}\n",
-			Credentials: map[string]string{"wifi": value},
+			Credentials: map[string]string{"wifi": "a*b*c"},
 		})
-		require.NoError(t, err)
 
-		// written into the markdown itself, the same characters are markup
-		asMarkup, err := markdownpdf.Render(markdownpdf.RenderParams{
-			Markdown: "# WiFi\n\nPassword: " + value + "\n",
+		require.NoError(t, err)
+		require.Contains(t, strings.Join(pdfText(t, out), "\n"), "a*b*c",
+			"the asterisks must reach the page, not be eaten as italic markers")
+	})
+
+	t.Run("a credential's punctuation stays literal in a table cell", func(t *testing.T) {
+		out, err := markdownpdf.Render(markdownpdf.RenderParams{
+			Markdown:    "| What | Value |\n| --- | --- |\n| WiFi | ${cred:wifi} |\n",
+			Credentials: map[string]string{"wifi": "a*b*c"},
 		})
-		require.NoError(t, err)
 
-		require.NotEqual(t, asMarkup, viaPlaceholder,
-			"a value substituted before parsing would render identically to the same characters written as markup")
+		require.NoError(t, err)
+		require.Contains(t, strings.Join(pdfText(t, out), "\n"), "a*b*c",
+			"a credentials table is the natural layout, so a cell must not re-parse the value")
+	})
+
+	t.Run("a credential containing a pipe does not split a table cell", func(t *testing.T) {
+		out, err := markdownpdf.Render(markdownpdf.RenderParams{
+			Markdown:    "| What | Value |\n| --- | --- |\n| WiFi | ${cred:wifi} |\n",
+			Credentials: map[string]string{"wifi": "a|b"},
+		})
+
+		require.NoError(t, err)
+		require.Contains(t, strings.Join(pdfText(t, out), "\n"), "a|b",
+			"a pipe in a value must not become a column break")
 	})
 
 	t.Run("names the key, never the characters, when a credential cannot be rendered", func(t *testing.T) {
@@ -279,12 +295,49 @@ func TestRender(t *testing.T) {
 
 // --- helpers ---
 
+// cellText flattens a parsed table row back to plain strings for assertions.
+func cellText(cells []([]markdownpdf.Run)) []string {
+	out := make([]string, len(cells))
+	for i, cell := range cells {
+		out[i] = runText(cell)
+	}
+	return out
+}
+
 func runText(runs []markdownpdf.Run) string {
 	var joined string
 	for _, run := range runs {
 		joined += run.Text
 	}
 	return joined
+}
+
+// pdfText inflates the PDF's content streams and returns the text it shows,
+// one entry per drawn run. Raw PDF bytes are not comparable: fpdf emits font
+// objects in map order and stamps timestamps, so two identical renders differ.
+func pdfText(t *testing.T, pdf []byte) []string {
+	t.Helper()
+	var shown []string
+	for _, stream := range regexp.MustCompile(`(?s)stream\r?\n(.*?)endstream`).FindAllSubmatch(pdf, -1) {
+		reader, err := zlib.NewReader(bytes.NewReader(stream[1]))
+		if err != nil {
+			continue
+		}
+		body, err := io.ReadAll(reader)
+		require.NoError(t, reader.Close())
+		if err != nil {
+			continue
+		}
+		for _, run := range regexp.MustCompile(`\(((?:[^()\\]|\\.)*)\)\s*Tj`).FindAllSubmatch(body, -1) {
+			text := string(run[1])
+			for _, pair := range [][2]string{{`\(`, "("}, {`\)`, ")"}, {`\\`, `\`}} {
+				text = strings.ReplaceAll(text, pair[0], pair[1])
+			}
+			shown = append(shown, text)
+		}
+	}
+	require.NotEmpty(t, shown, "no text found in the PDF")
+	return shown
 }
 
 func pageCount(t *testing.T, pdf []byte) int {

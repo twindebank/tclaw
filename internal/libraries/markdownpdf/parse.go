@@ -36,8 +36,8 @@ type Block struct {
 	Items []ListItem
 
 	// Header is the first row, whether or not a separator row followed it.
-	Header []string
-	Rows   [][]string
+	Header []([]Run)
+	Rows   [][]([]Run)
 
 	// Source is an image path, relative to the assets directory.
 	Source string
@@ -223,14 +223,16 @@ func parseTable(lines []string, start int) (Block, int) {
 	return table, i
 }
 
-func splitRow(raw string) []string {
+// splitRow parses each cell's inline marks now, so a value substituted into a
+// cell later cannot be re-parsed as markup.
+func splitRow(raw string) []([]Run) {
 	line := strings.TrimSpace(raw)
 	line = strings.TrimPrefix(line, "|")
 	line = strings.TrimSuffix(line, "|")
 	parts := strings.Split(line, "|")
-	cells := make([]string, len(parts))
+	cells := make([]([]Run), len(parts))
 	for i, p := range parts {
-		cells[i] = strings.TrimSpace(p)
+		cells[i] = parseInline(strings.TrimSpace(p))
 	}
 	return cells
 }
@@ -239,6 +241,25 @@ func parseList(lines []string, start int) (Block, int) {
 	list := Block{Kind: BlockList}
 	counters := map[int]int{}
 	i := start
+
+	// indent width is whatever this list uses, so two- and four-space nesting
+	// both come out one level deep
+	step := 0
+	for j := start; j < len(lines); j++ {
+		found := bulletPattern.FindStringSubmatch(lines[j])
+		if found == nil {
+			if strings.TrimSpace(lines[j]) == "" || startsBlock(lines[j]) {
+				break
+			}
+			continue
+		}
+		if width := len(found[1]); width > 0 && (step == 0 || width < step) {
+			step = width
+		}
+	}
+	if step == 0 {
+		step = 2
+	}
 
 	for i < len(lines) {
 		found := bulletPattern.FindStringSubmatch(lines[i])
@@ -255,7 +276,7 @@ func parseList(lines []string, start int) (Block, int) {
 			break
 		}
 
-		depth := len(found[1])/2 + 1
+		depth := len(found[1])/step + 1
 		ordered := !(found[2] == "-" || found[2] == "*")
 		if ordered {
 			counters[depth]++
