@@ -230,6 +230,38 @@ func TestRender(t *testing.T) {
 			"a pipe in a value must not become a column break")
 	})
 
+	t.Run("refuses a credential placed in a link target", func(t *testing.T) {
+		_, err := markdownpdf.Render(markdownpdf.RenderParams{
+			Markdown:    "Tap [here](https://example.com/?q=${cred:wifi}) to join.\n",
+			Credentials: map[string]string{"wifi": "correct-horse"},
+		})
+
+		require.Error(t, err, "a value in a URL would be sent to that host on one tap")
+		require.Equal(t,
+			"a credential cannot go in a link target (https://example.com/?q=${cred:wifi}) — put it in the text",
+			err.Error())
+	})
+
+	t.Run("a credential never reaches a link target even when one is nearby", func(t *testing.T) {
+		out, err := markdownpdf.Render(markdownpdf.RenderParams{
+			Markdown:    "Password: ${cred:wifi}. See [the site](https://example.com/).\n",
+			Credentials: map[string]string{"wifi": "correct-horse"},
+		})
+
+		require.NoError(t, err)
+		require.NotContains(t, string(out), "example.com/correct-horse", "no value in a URL")
+		require.Contains(t, strings.Join(pdfText(t, out), "\n"), "correct-horse", "but it is in the text")
+	})
+
+	t.Run("refuses a mistyped placeholder rather than printing it", func(t *testing.T) {
+		_, err := markdownpdf.Render(markdownpdf.RenderParams{Markdown: "Password: ${cred:WiFi}\n"})
+
+		require.Error(t, err, "a delivered document must never show a raw placeholder")
+		require.Equal(t,
+			"these placeholder keys are not valid (lower case, digits and underscores only): WiFi",
+			err.Error())
+	})
+
 	t.Run("names the key, never the characters, when a credential cannot be rendered", func(t *testing.T) {
 		_, err := markdownpdf.Render(markdownpdf.RenderParams{
 			Markdown:    "# WiFi\n\nPassword: ${cred:wifi}\n",
@@ -385,5 +417,25 @@ func TestRender_LongBlocks(t *testing.T) {
 
 		require.NoError(t, err)
 		require.LessOrEqual(t, pageCount(t, out), 12, "baseline for the two above")
+	})
+}
+
+func TestParse_LooseLists(t *testing.T) {
+	t.Run("blank lines between numbered items keep the numbering", func(t *testing.T) {
+		blocks := markdownpdf.Parse("1. first\n\n2. second\n\n3. third\n")
+
+		require.Len(t, blocks, 1, "one list, not three")
+		require.Len(t, blocks[0].Items, 3, "three items")
+		require.Equal(t, []int{1, 2, 3}, []int{
+			blocks[0].Items[0].Number, blocks[0].Items[1].Number, blocks[0].Items[2].Number,
+		}, "a blank line between items must not restart the count")
+	})
+
+	t.Run("a blank line before a different kind of list starts a new one", func(t *testing.T) {
+		blocks := markdownpdf.Parse("- a bullet\n\n1. a number\n")
+
+		require.Len(t, blocks, 2, "bullet list then numbered list")
+		require.False(t, blocks[0].Items[0].Ordered)
+		require.True(t, blocks[1].Items[0].Ordered)
 	})
 }

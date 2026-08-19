@@ -45,6 +45,10 @@ func Render(p RenderParams) ([]byte, error) {
 	if unsupported := unencodableRunes(blocks); len(unsupported) > 0 {
 		return nil, fmt.Errorf("cannot render these characters: %s", strings.Join(unsupported, ", "))
 	}
+	if bad := malformedCredentialKeys(p.Markdown); len(bad) > 0 {
+		return nil, fmt.Errorf("these placeholder keys are not valid (lower case, digits and underscores only): %s",
+			strings.Join(bad, ", "))
+	}
 
 	// substituted last so a value containing *, ` or | cannot restructure the
 	// document, and so a bad value names its key rather than its characters
@@ -61,6 +65,15 @@ func Render(p RenderParams) ([]byte, error) {
 func substituteCredentials(blocks []Block, credentials map[string]string) ([]Block, error) {
 	if len(credentials) == 0 {
 		return blocks, nil
+	}
+
+	for _, block := range blocks {
+		for _, run := range allRuns(block) {
+			// a value in a URL is sent to whoever owns that host on one tap
+			if credentialRef.MatchString(run.Link) {
+				return nil, fmt.Errorf("a credential cannot go in a link target (%s) — put it in the text", run.Link)
+			}
+		}
 	}
 
 	encoder := charmap.Windows1252.NewEncoder()
@@ -83,11 +96,15 @@ func substituteCredentials(blocks []Block, credentials map[string]string) ([]Blo
 		})
 	}
 
-	return mapBlockText(blocks, fill), nil
+	return mapProseText(blocks, fill), nil
 }
 
 // credentialRef matches a placeholder filled from RenderParams.Credentials.
 var credentialRef = regexp.MustCompile(`\$\{cred:([a-z0-9_]+)\}`)
+
+// anyCredentialRef matches a placeholder whatever its key, so a mistyped one is
+// an error rather than a literal ${cred:...} in the delivered document.
+var anyCredentialRef = regexp.MustCompile(`\$\{cred:([^}]*)\}`)
 
 // CredentialKeys returns the placeholder keys a document references, in the
 // order they first appear.
@@ -102,6 +119,21 @@ func CredentialKeys(markdown string) []string {
 		keys = append(keys, match[1])
 	}
 	return keys
+}
+
+// malformedCredentialKeys returns placeholder keys that would never resolve.
+func malformedCredentialKeys(markdown string) []string {
+	var bad []string
+	seen := map[string]bool{}
+	for _, match := range anyCredentialRef.FindAllStringSubmatch(markdown, -1) {
+		if credentialRef.MatchString(match[0]) || seen[match[1]] {
+			continue
+		}
+		seen[match[1]] = true
+		bad = append(bad, match[1])
+	}
+	sort.Strings(bad)
+	return bad
 }
 
 // mapProseText passes only the prose through transform, leaving code bodies and
@@ -158,6 +190,23 @@ func mapText(blocks []Block, transform func(string) string, includeVerbatim bool
 		}
 	}
 	return out
+}
+
+// allRuns returns every run a block carries, whichever field holds them.
+func allRuns(block Block) []Run {
+	runs := append([]Run(nil), block.Runs...)
+	for _, item := range block.Items {
+		runs = append(runs, item.Runs...)
+	}
+	for _, cell := range block.Header {
+		runs = append(runs, cell...)
+	}
+	for _, row := range block.Rows {
+		for _, cell := range row {
+			runs = append(runs, cell...)
+		}
+	}
+	return runs
 }
 
 // stripWarningSign removes the sign and its variation selector wherever they
