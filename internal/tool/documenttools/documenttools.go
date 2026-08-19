@@ -31,8 +31,11 @@ func (p *Package) Description() string {
 func (p *Package) Group() toolgroup.ToolGroup { return toolgroup.GroupChannelMessaging }
 
 func (p *Package) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
+	// channel_management is documented as a superset of channel_messaging, and
+	// groups are unioned from explicit lists rather than inherited
 	return map[toolgroup.ToolGroup][]claudecli.Tool{
-		p.Group(): {"mcp__tclaw__document_*"},
+		toolgroup.GroupChannelMessaging:  {"mcp__tclaw__document_*"},
+		toolgroup.GroupChannelManagement: {"mcp__tclaw__document_*"},
 	}
 }
 

@@ -175,6 +175,10 @@ func writeCallout(pdf *fpdf.Fpdf, block Block) {
 	for drawn := 0; drawn < len(lines); {
 		fit := linesThatFit(pdf, bodyLine, 2*padY)
 		if fit < 1 {
+			if pdf.Error() != nil {
+				// AddPage is a no-op once fpdf has failed, so this would spin
+				return
+			}
 			pdf.AddPage()
 			continue
 		}
@@ -358,6 +362,10 @@ func writeTableRow(pdf *fpdf.Fpdf, cells []([]Run), widths []float64, header boo
 	for drawn := 0; drawn < tallest; {
 		fit := linesThatFit(pdf, tableLine, 2.4)
 		if fit < 1 {
+			if pdf.Error() != nil {
+				// AddPage is a no-op once fpdf has failed, so this would spin
+				return
+			}
 			pdf.AddPage()
 			continue
 		}
@@ -459,6 +467,10 @@ func writeCode(pdf *fpdf.Fpdf, block Block) {
 		available := pageHeight - marginBottom - pdf.GetY() - 3
 		fit := int(available / tableLine)
 		if fit < 1 {
+			if pdf.Error() != nil {
+				// AddPage is a no-op once fpdf has failed, so this would spin
+				return
+			}
 			pdf.AddPage()
 			continue
 		}

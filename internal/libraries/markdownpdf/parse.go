@@ -264,9 +264,18 @@ func parseList(lines []string, start int) (Block, int) {
 	for i < len(lines) {
 		found := bulletPattern.FindStringSubmatch(lines[i])
 		if found == nil {
-			// a plain line directly under an item is its continuation, not a new block
 			text := strings.TrimSpace(lines[i])
-			if text != "" && !startsBlock(lines[i]) && len(list.Items) > 0 {
+			if text == "" {
+				// a loose list separates its items with blank lines, so a blank
+				// line followed by an item of the same kind stays one list
+				if next := i + 1; next < len(lines) && continuesList(list, lines[next]) {
+					i = next
+					continue
+				}
+				break
+			}
+			// a plain line directly under an item is its continuation, not a new block
+			if !startsBlock(lines[i]) && len(list.Items) > 0 {
 				last := &list.Items[len(list.Items)-1]
 				last.Runs = append(last.Runs, Run{Text: " "})
 				last.Runs = append(last.Runs, parseInline(text)...)
@@ -296,6 +305,17 @@ func parseList(lines []string, start int) (Block, int) {
 		i++
 	}
 	return list, i
+}
+
+// continuesList reports whether the line is another item of the same kind as
+// the list so far, so a blank line between them does not restart the numbering.
+func continuesList(list Block, line string) bool {
+	found := bulletPattern.FindStringSubmatch(line)
+	if found == nil || len(list.Items) == 0 {
+		return false
+	}
+	ordered := !(found[2] == "-" || found[2] == "*")
+	return ordered == list.Items[len(list.Items)-1].Ordered
 }
 
 var inlinePattern = regexp.MustCompile("`[^`]+`" +
