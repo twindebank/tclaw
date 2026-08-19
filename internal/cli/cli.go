@@ -23,6 +23,7 @@ Commands:
   install            Install tclaw and tclaw-chat to $GOPATH/bin
   tidy               Run go mod tidy across all modules
   oneshot            Send a single message and print the response
+  render-pdf         Turn a markdown file into a PDF
   config push        Push local config to remote Fly volume
   config pull        Pull remote config to local
   config diff        Show differences between local and remote config
@@ -52,6 +53,8 @@ func Run() {
 		runServe()
 	case "oneshot":
 		runOneshot()
+	case "render-pdf":
+		runRenderPDF()
 	case "chat":
 		runChat()
 	case "secret":

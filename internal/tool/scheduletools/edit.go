@@ -49,13 +49,13 @@ func scheduleEditDef() mcp.ToolDef {
 }
 
 type scheduleEditArgs struct {
-	ID          string  `json:"id"`
-	Prompt      string  `json:"prompt"`
-	CronExpr    string  `json:"cron_expr"`
-	ChannelName string  `json:"channel_name"`
+	ID          string `json:"id"`
+	Prompt      string `json:"prompt"`
+	CronExpr    string `json:"cron_expr"`
+	ChannelName string `json:"channel_name"`
 	// Timezone uses a pointer so we can distinguish "not provided" (nil) from "reset to
 	// system default" (pointer to empty string). Other string fields use empty-means-unchanged.
-	Timezone    *string `json:"timezone"`
+	Timezone *string `json:"timezone"`
 }
 
 func scheduleEditHandler(deps Deps) mcp.ToolHandler {
