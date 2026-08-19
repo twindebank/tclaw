@@ -40,7 +40,7 @@ Layer 11: Orchestration (router, main)
 
 ## Security Model
 
-Four boundaries protect user data and the host system:
+Five boundaries protect user data and the host system:
 
 ### 1. Subprocess Isolation
 - **Environment allowlist** — only safe env vars (PATH, TERM, LANG, etc.) reach the subprocess. Cloud credentials, SSH agents, GitHub tokens, and tclaw internals are excluded. See `agent/handle.go:allowedEnvPrefixes`.
@@ -50,11 +50,32 @@ Four boundaries protect user data and the host system:
 - Socket and stdio channels are blocked in non-local environments (no authentication).
 - Telegram restricts access via user-level `telegram.user_id` — messages from other users are dropped.
 
-### 3. MCP Tool Boundary
+### 3. Rulebook Boundary
+
+Standing decisions live in `<user>/memory/rules/`. The agent may read every one of them from every
+channel and may not write any of them.
+
+That split needs two enforcement points, because they catch different things. `rule_propose` is the
+route a change takes: it arms a `PendingAction`, the prompt goes straight to the chat, and the router
+writes the file on the user's reply — outside the sandbox, so the approved text is what lands. But an
+MCP tool cannot see the agent editing a file directly, so the `rules-gate` hook refuses any write to
+that directory from inside the sandbox. Tool-side alone would be bypassable with Write; hook-side alone
+would have no approved way through.
+
+The hooks are registered in each user's `settings.json`, which is **mounted read-only** in the sandbox —
+the same protection that stops a prompt injection installing its own `SessionStart` hook stops one
+turning these off. The registrations are rebuilt from `hooks.Manifest` on every boot, so a hook cannot
+be implemented and left unregistered. Commands carry the binary path in full: a hook runs under a shell
+that reads no profile, so a command relying on an environment variable runs nothing, on every tool call.
+
+Which rulebooks a channel loads is not a boundary — it is `@`-imports in that channel's own CLAUDE.md,
+which the agent maintains freely. Scoping decides what arrives in context, never what may be read.
+
+### 4. MCP Tool Boundary
 - Per-user MCP server on localhost with random bearer token.
 - 1 MiB request body limit, audit logging, permission-gated via `tool_groups`.
 
-### 4. Secret Boundary
+### 5. Secret Boundary
 
 Secrets fall into three categories, distinguished by who creates the key and whether config can
 name it:

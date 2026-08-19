@@ -18,6 +18,7 @@ import (
 
 	"tclaw/internal/channel"
 	"tclaw/internal/claudecli"
+	"tclaw/internal/memorylayout"
 )
 
 // ErrAuthRequired is returned by handle/streamResponse when the CLI reports
@@ -365,7 +366,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	}
 
 	args := buildArgs(opts, model, sessionID, systemPrompt, promptText, allowed, disallowed, mcpConfigPath)
-	env := buildEnv(opts)
+	env := buildEnv(opts, ch.Info().Name)
 
 	dir := opts.HomeDir
 	if opts.MemoryDir != "" {
@@ -499,7 +500,7 @@ var allowedEnvPrefixes = []string{
 // allowlist. Only vars matching allowedEnvPrefixes are inherited — everything
 // else (cloud credentials, SSH agents, GitHub tokens, tclaw internals) is
 // excluded by default. Overrides are always applied.
-func buildEnv(opts Options) []string {
+func buildEnv(opts Options, channelName string) []string {
 	overrides := make(map[string]string)
 	if opts.HomeDir != "" {
 		overrides["HOME"] = opts.HomeDir
@@ -514,6 +515,17 @@ func buildEnv(opts Options) []string {
 	// Disable Claude Code's auto-memory so the agent only writes to
 	// its own memory dir (CWD), not ~/.claude/projects/.../memory/.
 	overrides["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
+
+	// The hooks tclaw registers run inside the sandbox and need to know which
+	// memory directory and channel the turn belongs to. Set here rather than
+	// read from the parent environment so the agent cannot change what its own
+	// hooks see.
+	if opts.MemoryDir != "" {
+		overrides[memorylayout.EnvMemoryDir] = opts.MemoryDir
+	}
+	if channelName != "" {
+		overrides[memorylayout.EnvChannel] = channelName
+	}
 
 	// Enable CLAUDE.md loading from --add-dir directories so per-channel
 	// knowledge dirs have their CLAUDE.md auto-loaded into context.
