@@ -21,7 +21,7 @@ func TestMergeAgentInputs(t *testing.T) {
 
 		// No consumer reads out, so the merge goroutine pulls the message and
 		// blocks on delivery — the exact restart-boundary race.
-		_ = mergeAgentInputs(ctx, q, static, dynamic)
+		out := mergeAgentInputs(ctx, q, static, dynamic)
 
 		static <- channel.TaggedMessage{
 			ChannelID:  "ch1",
@@ -33,6 +33,14 @@ func TestMergeAgentInputs(t *testing.T) {
 
 		require.Eventually(t, func() bool { return q.Len() == 1 }, time.Second, 5*time.Millisecond,
 			"the undelivered schedule message must be requeued, not dropped")
+
+		// Drain until the merge goroutines have exited. Only start after the
+		// requeue is confirmed — draining earlier would deliver the message
+		// instead, which is the case this test is not about. Without the wait,
+		// the requeue's store write can still be running when t.TempDir()
+		// removes the directory under it.
+		for range out {
+		}
 	})
 
 	t.Run("delivers normally when a consumer is reading", func(t *testing.T) {
