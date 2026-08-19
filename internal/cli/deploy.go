@@ -181,21 +181,18 @@ func deployFlyConfig() {
 	fmt.Println("done: fly.toml config deployed")
 }
 
-// extractImage parses the image tag from `fly status` output.
-// The output contains a line like: "Image    = tclaw:deployment-01KN73ZWZPWBPJ00C7RWT03ZW4"
+// extractImage parses the image tag from `fly status` output. flyctl has
+// printed the field as both "Image = tclaw:tag" and a box-drawing table row
+// ("Image │ tclaw:tag"), so both separators are accepted.
 func extractImage(statusOutput string) string {
 	for _, line := range strings.Split(statusOutput, "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "Image") {
 			continue
 		}
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		full := strings.TrimSpace(parts[1])
+		full := strings.TrimSpace(strings.TrimLeft(strings.TrimPrefix(line, "Image"), "=│ \t"))
 		if idx := strings.Index(full, ":"); idx >= 0 {
-			return full[idx+1:]
+			return strings.TrimSpace(full[idx+1:])
 		}
 	}
 	return ""
