@@ -66,6 +66,60 @@ func TestBuildMCPConfigPaths_RoutesThroughProxy(t *testing.T) {
 	})
 }
 
+// TestBuildMCPConfigPaths_Scoping guards which servers reach which channel. A
+// channel-scoped server must not be attached to every channel — each one costs
+// a handshake, or a cold start, on every turn of every channel it reaches.
+func TestBuildMCPConfigPaths_Scoping(t *testing.T) {
+	t.Run("a channel gets the global servers plus its own, and no other channel's", func(t *testing.T) {
+		ctx := context.Background()
+		mgr := newTestRemoteMCPManager(t)
+
+		for _, params := range []remotemcpstore.AddRemoteMCPParams{
+			{Name: "shared", URL: "https://shared.example.com"},
+			{Name: "browser", URL: "https://browser.example.com", Channel: "admin"},
+			{Name: "house", URL: "https://house.example.com", Channel: "homeassistant"},
+		} {
+			_, err := mgr.AddRemoteMCP(ctx, params)
+			require.NoError(t, err)
+		}
+
+		proxy := startTestProxy(t, mgr)
+
+		adminID := channel.ChannelID("telegram:admin")
+		emailID := channel.ChannelID("telegram:email")
+		chMap := map[channel.ChannelID]channel.Channel{
+			adminID: &stubNamedChannel{id: adminID, name: "admin"},
+			emailID: &stubNamedChannel{id: emailID, name: "email"},
+		}
+
+		paths := buildMCPConfigPaths(ctx, chMap, mgr, proxy, proxy.Token(), t.TempDir(), "127.0.0.1:1", "local-token")
+
+		adminPath, ok := paths[adminID]
+		require.True(t, ok, "admin has a scoped server so it needs its own config")
+		admin := readMCPConfigFile(t, adminPath)
+		require.Contains(t, admin.MCPServers, "browser", "admin must keep the server scoped to it")
+		require.Contains(t, admin.MCPServers, "shared", "a scoped channel must still get the global servers")
+		require.NotContains(t, admin.MCPServers, "house", "another channel's server must not leak in")
+
+		require.NotContains(t, paths, emailID,
+			"a channel with no scoped servers needs no file — the default config carries the global ones")
+	})
+
+	t.Run("partitions global and channel-scoped servers", func(t *testing.T) {
+		global, scoped := partitionRemoteMCPs([]remotemcpstore.RemoteMCP{
+			{Name: "shared"},
+			{Name: "browser", Channel: "admin"},
+			{Name: "house", Channel: "homeassistant"},
+			{Name: "notes", Channel: "admin"},
+		})
+
+		require.Len(t, global, 1)
+		require.Equal(t, "shared", global[0].Name)
+		require.Equal(t, []string{"browser", "notes"}, remoteMCPNames(scoped["admin"]))
+		require.Equal(t, []string{"house"}, remoteMCPNames(scoped["homeassistant"]))
+	})
+}
+
 // --- helpers ---
 
 func startTestProxy(t *testing.T, mgr *remotemcpstore.Manager) *remotemcpproxy.Server {
