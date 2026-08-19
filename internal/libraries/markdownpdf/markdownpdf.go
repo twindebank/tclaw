@@ -96,7 +96,7 @@ func substituteCredentials(blocks []Block, credentials map[string]string) ([]Blo
 		})
 	}
 
-	return mapProseText(blocks, fill), nil
+	return mapReadableText(blocks, fill), nil
 }
 
 // credentialRef matches a placeholder filled from RenderParams.Credentials.
@@ -136,25 +136,37 @@ func malformedCredentialKeys(markdown string) []string {
 	return bad
 }
 
+// textFields says which kinds of text a mapping touches.
+type textFields struct {
+	Code  bool
+	Links bool
+}
+
 // mapProseText passes only the prose through transform, leaving code bodies and
 // link targets untouched.
 func mapProseText(blocks []Block, transform func(string) string) []Block {
-	return mapText(blocks, transform, false)
+	return mapText(blocks, transform, textFields{})
+}
+
+// mapReadableText passes the prose and code bodies through transform. A link
+// target is left alone, because a value in a URL leaves with one tap.
+func mapReadableText(blocks []Block, transform func(string) string) []Block {
+	return mapText(blocks, transform, textFields{Code: true})
 }
 
 // mapBlockText passes every piece of text through transform, code and link
 // targets included.
 func mapBlockText(blocks []Block, transform func(string) string) []Block {
-	return mapText(blocks, transform, true)
+	return mapText(blocks, transform, textFields{Code: true, Links: true})
 }
 
-func mapText(blocks []Block, transform func(string) string, includeVerbatim bool) []Block {
+func mapText(blocks []Block, transform func(string) string, fields textFields) []Block {
 	mapRuns := func(runs []Run) []Run {
 		out := make([]Run, len(runs))
 		for i, run := range runs {
 			out[i] = run
 			out[i].Text = transform(run.Text)
-			if includeVerbatim {
+			if fields.Links {
 				out[i].Link = transform(run.Link)
 			}
 		}
@@ -173,7 +185,7 @@ func mapText(blocks []Block, transform func(string) string, includeVerbatim bool
 		out[i] = block
 		out[i].Runs = mapRuns(block.Runs)
 		out[i].Alt = transform(block.Alt)
-		if includeVerbatim {
+		if fields.Code {
 			out[i].Text = transform(block.Text)
 		}
 		out[i].Header = mapCells(block.Header)
@@ -210,15 +222,17 @@ func allRuns(block Block) []Run {
 }
 
 // stripWarningSign removes the sign and its variation selector wherever they
-// appear, and tidies the space a leading one leaves behind.
+// appear, collapsing the gap left behind to a single space.
 func stripWarningSign(text string) string {
 	if !strings.Contains(text, warningSign) {
 		return text
 	}
 	stripped := strings.ReplaceAll(text, warningSign, "")
 	stripped = strings.ReplaceAll(stripped, variationSelector, "")
-	return strings.TrimSpace(stripped)
+	return doubleSpace.ReplaceAllString(stripped, " ")
 }
+
+var doubleSpace = regexp.MustCompile(`  +`)
 
 // unencodableRunes returns a sorted, human-readable description of every rune
 // the document uses that Windows-1252 has no code point for.

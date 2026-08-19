@@ -251,7 +251,6 @@ func writeTable(pdf *fpdf.Fpdf, block Block) {
 // column wants to be, but never below its longest single word, so a column
 // beside a very wide one does not get squeezed until its words break.
 func columnWidths(pdf *fpdf.Fpdf, block Block, columns int) []float64 {
-	pdf.SetFont("Helvetica", "B", tableSize)
 	natural := make([]float64, columns)
 	floor := make([]float64, columns)
 
@@ -260,14 +259,23 @@ func columnWidths(pdf *fpdf.Fpdf, block Block, columns int) []float64 {
 			if i >= columns {
 				continue
 			}
-			plain := runText(cell)
-			if w := pdf.GetStringWidth(plain) + tableCellPad; w > natural[i] {
-				natural[i] = w
-			}
-			for _, word := range strings.Fields(plain) {
-				if w := pdf.GetStringWidth(word) + tableCellPad; w > floor[i] {
-					floor[i] = w
+			// measured per run, because a code run is drawn in Courier and is
+			// far wider per character than the Helvetica around it
+			total, widestWord := 0.0, 0.0
+			for _, run := range cell {
+				applyRunFont(pdf, run, tableSize)
+				total += pdf.GetStringWidth(run.Text)
+				for _, word := range strings.Fields(run.Text) {
+					if w := pdf.GetStringWidth(word); w > widestWord {
+						widestWord = w
+					}
 				}
+			}
+			if total+tableCellPad > natural[i] {
+				natural[i] = total + tableCellPad
+			}
+			if widestWord+tableCellPad > floor[i] {
+				floor[i] = widestWord + tableCellPad
 			}
 		}
 	}

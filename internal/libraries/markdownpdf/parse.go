@@ -97,7 +97,7 @@ func Parse(markdown string) []Block {
 				i++
 			}
 			if i < len(lines) {
-				// a fence that never closes still yields its body rather than swallowing the rest
+				// step over the closing fence; an unclosed one just ends at EOF
 				i++
 			}
 			for len(body) > 0 && strings.TrimSpace(body[len(body)-1]) == "" {
@@ -140,7 +140,7 @@ func Parse(markdown string) []Block {
 			blocks = append(blocks, Block{
 				Kind:    BlockCallout,
 				Warning: warning,
-				Runs:    parseInline(stripWarningSign(text)),
+				Runs:    parseInline(strings.TrimSpace(stripWarningSign(text))),
 			})
 			continue
 		}
@@ -173,7 +173,7 @@ func Parse(markdown string) []Block {
 		text := strings.Join(para, " ")
 		if strings.HasPrefix(text, warningSign) {
 			// a callout written without the quote marker
-			blocks = append(blocks, Block{Kind: BlockCallout, Warning: true, Runs: parseInline(stripWarningSign(text))})
+			blocks = append(blocks, Block{Kind: BlockCallout, Warning: true, Runs: parseInline(strings.TrimSpace(stripWarningSign(text)))})
 			continue
 		}
 		blocks = append(blocks, Block{Kind: BlockParagraph, Runs: parseInline(text)})
@@ -248,7 +248,11 @@ func parseList(lines []string, start int) (Block, int) {
 	for j := start; j < len(lines); j++ {
 		found := bulletPattern.FindStringSubmatch(lines[j])
 		if found == nil {
-			if strings.TrimSpace(lines[j]) == "" || startsBlock(lines[j]) {
+			if strings.TrimSpace(lines[j]) == "" {
+				// a loose list keeps going past a blank line, so the scan does too
+				continue
+			}
+			if startsBlock(lines[j]) {
 				break
 			}
 			continue

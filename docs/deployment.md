@@ -238,7 +238,9 @@ full key. On a laptop the equivalent is a 1Password reference filled in by `op i
 The renderer (`internal/libraries/markdownpdf`) is pure Go and deliberately not a browser: the image has
 no chromium and no python, and the VM has little spare memory once the CLI's V8 heap is accounted for.
 `tclaw render-pdf` puts the same engine behind a CLI command, so a document rendered on a laptop and one
-rendered in production look identical.
+rendered in production lay out identically. The CLI cannot fill credentials — it has no access to the
+store — so it warns and prints any placeholder literally. A document carrying one has to go through the
+tool.
 
 Text is limited to what the PDF core fonts cover (Windows-1252). Ordinary punctuation is fine — em
 dashes, en dashes, degree signs, accented letters. Emoji are not, and a render fails naming the character
