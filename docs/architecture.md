@@ -126,3 +126,15 @@ the agent names can reach the `cred/` or `channel/` namespaces.
   matching `MCP_TIMEOUT`: the claude CLI drops an MCP server whose handshake times out, and it drops it
   for the whole turn with no error the agent can report — so a budget shorter than the upstream's cold
   start costs the agent that server's entire tool surface, silently.
+- **Third-party auth that needs a human in the loop** — an integration whose provider enforces MFA cannot
+  log in unattended, so the flow is split across two tools and the credential never lands on disk. The
+  `garmin` package is the worked example. Its client library takes a `TokenStore` interface, so tclaw
+  supplies one backed by the encrypted store instead of the library's file default, and the OAuth token
+  refreshes and rotates in place there.
+
+  The MFA half cannot be serialised: the challenge is a live cookie session plus the page it was issued
+  on, so login and completion must happen in the same process. That works only because the MCP server is
+  long-lived per user — `garmin_login` starts the login and keeps the pending challenge in memory,
+  `garmin_login_mfa` finishes it with a code the user supplies on a later turn. A restart in between
+  loses the challenge and the login starts again, which is the right failure: the alternative is
+  persisting a half-authenticated session.

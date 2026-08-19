@@ -213,6 +213,18 @@ tclaw config push          # Push local config to remote volume + sync secrets +
 tclaw config pull          # Pull agent changes back to local
 ```
 
+**Moving a tool package to a different group is a two-step deploy, and the order matters.** A package's
+group comes from the binary, and which groups a channel holds comes from the config, so the two have to
+cross over without leaving a gap. Push the config **first**, granting the new group while leaving the old
+one in place:
+
+- old binary + new config — the new group is unknown, resolves to no tools, and the old group still
+  grants them
+- new binary + new config — the tools come from the new group, which the channel now has
+
+Deploying first inverts that: the moment the new binary boots, the tools leave the old group and no
+channel has been granted the new one, so every affected channel loses them until the config lands.
+
 ## Fly Platform Config (fly.toml)
 
 `fly.toml` controls Fly platform settings: concurrency limits, health checks, VM size, environment variables. It's gitignored because it contains the app name.
