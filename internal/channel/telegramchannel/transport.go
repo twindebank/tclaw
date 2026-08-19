@@ -384,6 +384,10 @@ func (t *Telegram) Send(ctx context.Context, text string, opts channel.SendOpts)
 	return channel.MessageID(strconv.Itoa(msg.ID)), nil
 }
 
+// telegramCaptionLimit is what the Bot API accepts on a document, well below
+// the 4096 a plain message allows.
+const telegramCaptionLimit = 1024
+
 // SendFile uploads content as a Telegram document.
 func (t *Telegram) SendFile(ctx context.Context, p channel.SendFileParams) (channel.MessageID, error) {
 	t.mu.Lock()
@@ -411,6 +415,12 @@ func (t *Telegram) SendFile(ctx context.Context, p channel.SendFileParams) (chan
 	if !utf8.ValidString(caption) {
 		slog.Warn("telegram send file: stripping invalid UTF-8 bytes from caption", "channel", t.name)
 		caption = tgsdk.SanitizeUTF8(caption)
+	}
+	if runes := []rune(caption); len(runes) > telegramCaptionLimit {
+		// a caption over the limit is a 400 the HTML fallback does not match,
+		// and the document may have cost a credential to build
+		slog.Warn("telegram send file: truncating caption", "channel", t.name, "runes", len(runes))
+		caption = string(runes[:telegramCaptionLimit-1]) + "…"
 	}
 
 	document := func() models.InputFile {

@@ -7,6 +7,8 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -183,6 +185,15 @@ func TestRender(t *testing.T) {
 		require.True(t, bytes.HasPrefix(out, []byte("%PDF-")), "output should be a PDF")
 	})
 
+	t.Run("a warning sign renders wherever it is written", func(t *testing.T) {
+		out, err := markdownpdf.Render(markdownpdf.RenderParams{
+			Markdown: "# Cats\n\n- ⚠️ Take the keys every time\n\n| ⚠️ Watch | Why |\n| --- | --- |\n| the latch | it closes behind you |\n",
+		})
+
+		require.NoError(t, err, "a warning sign in a list item or table cell must not fail the render")
+		require.True(t, bytes.HasPrefix(out, []byte("%PDF-")), "output should be a PDF")
+	})
+
 	t.Run("a credential is substituted after parsing, so its punctuation is literal", func(t *testing.T) {
 		const value = "a*b*c`d`"
 
@@ -276,6 +287,11 @@ func runText(runs []markdownpdf.Run) string {
 	return joined
 }
 
+func pageCount(t *testing.T, pdf []byte) int {
+	t.Helper()
+	return len(regexp.MustCompile(`/Type\s*/Page[^s]`).FindAll(pdf, -1))
+}
+
 func writeTestPNG(t *testing.T, path string) {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, 40, 20))
@@ -288,4 +304,33 @@ func writeTestPNG(t *testing.T, path string) {
 	require.NoError(t, err)
 	require.NoError(t, png.Encode(file, img))
 	require.NoError(t, file.Close())
+}
+
+func TestRender_LongBlocks(t *testing.T) {
+	words := strings.TrimSpace(strings.Repeat("alpha beta gamma delta epsilon ", 600))
+
+	t.Run("a callout longer than a page does not emit a page per line", func(t *testing.T) {
+		out, err := markdownpdf.Render(markdownpdf.RenderParams{Markdown: "> " + words + "\n"})
+
+		require.NoError(t, err)
+		require.LessOrEqual(t, pageCount(t, out), 12,
+			"a long callout should flow across a few pages, not one per line")
+	})
+
+	t.Run("a table row longer than a page does not emit a page per line", func(t *testing.T) {
+		out, err := markdownpdf.Render(markdownpdf.RenderParams{
+			Markdown: "| A | B |\n| --- | --- |\n| short | " + words + " |\n",
+		})
+
+		require.NoError(t, err)
+		require.LessOrEqual(t, pageCount(t, out), 12,
+			"a long table row should flow across a few pages, not one per line")
+	})
+
+	t.Run("the same text as a paragraph sets the baseline", func(t *testing.T) {
+		out, err := markdownpdf.Render(markdownpdf.RenderParams{Markdown: words + "\n"})
+
+		require.NoError(t, err)
+		require.LessOrEqual(t, pageCount(t, out), 12, "baseline for the two above")
+	})
 }

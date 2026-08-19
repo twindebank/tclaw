@@ -16,10 +16,10 @@ type channelFileSenderParams struct {
 // to whichever channel the turn is running on.
 func newChannelFileSender(params channelFileSenderParams) func(context.Context, channel.SendFileParams) (channel.MessageID, error) {
 	return func(ctx context.Context, file channel.SendFileParams) (channel.MessageID, error) {
-		chName := ""
-		if params.ActiveChannel != nil {
-			chName = params.ActiveChannel()
+		if params.ActiveChannel == nil || params.Channels == nil {
+			return "", fmt.Errorf("channel lookup is not wired up, so nothing can be sent")
 		}
+		chName := params.ActiveChannel()
 		if chName == "" {
 			return "", fmt.Errorf("no active channel to send the file to")
 		}

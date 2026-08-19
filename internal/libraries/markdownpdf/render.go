@@ -129,6 +129,14 @@ func writeHeading(pdf *fpdf.Fpdf, block Block) {
 	}
 }
 
+// linesThatFit reports how many lines of the given height still fit below the
+// cursor, leaving room for a block's own padding.
+func linesThatFit(pdf *fpdf.Fpdf, lineHeight, padding float64) int {
+	_, pageHeight := pdf.GetPageSize()
+	available := pageHeight - marginBottom - pdf.GetY() - padding
+	return int(available / lineHeight)
+}
+
 // spaceForHeading pushes a heading to the next page rather than leaving it
 // stranded at the bottom with its section overleaf.
 func spaceForHeading(pdf *fpdf.Fpdf, needed float64) {
@@ -161,24 +169,32 @@ func writeCallout(pdf *fpdf.Fpdf, block Block) {
 	inner := contentWidth - 2*padX
 
 	lines := wrapRuns(pdf, block.Runs, inner, bodySize)
-	boxHeight := float64(len(lines))*bodyLine + 2*padY
 
-	_, pageHeight := pdf.GetPageSize()
-	if pdf.GetY()+boxHeight > pageHeight-marginBottom {
-		pdf.AddPage()
+	// drawn in page-sized chunks: drawing past the page break would make every
+	// line after it start its own page
+	for drawn := 0; drawn < len(lines); {
+		fit := linesThatFit(pdf, bodyLine, 2*padY)
+		if fit < 1 {
+			pdf.AddPage()
+			continue
+		}
+		if fit > len(lines)-drawn {
+			fit = len(lines) - drawn
+		}
+
+		boxHeight := float64(fit)*bodyLine + 2*padY
+		top := pdf.GetY()
+		setColour(pdf.SetFillColor, fill)
+		pdf.Rect(marginLeft, top, contentWidth, boxHeight, "F")
+		setColour(pdf.SetFillColor, edge)
+		pdf.Rect(marginLeft, top, 1.2, boxHeight, "F")
+
+		for i, line := range lines[drawn : drawn+fit] {
+			drawRunLine(pdf, line, marginLeft+padX, top+padY+float64(i)*bodyLine, bodyLine, bodySize)
+		}
+		pdf.SetY(top + boxHeight)
+		drawn += fit
 	}
-
-	top := pdf.GetY()
-	setColour(pdf.SetFillColor, fill)
-	pdf.Rect(marginLeft, top, contentWidth, boxHeight, "F")
-	setColour(pdf.SetFillColor, edge)
-	pdf.Rect(marginLeft, top, 1.2, boxHeight, "F")
-
-	for i, line := range lines {
-		drawRunLine(pdf, line, marginLeft+padX, top+padY+float64(i)*bodyLine, bodyLine, bodySize)
-	}
-
-	pdf.SetY(top + boxHeight)
 	pdf.Ln(3)
 }
 
@@ -216,8 +232,14 @@ func writeTable(pdf *fpdf.Fpdf, block Block) {
 	widths := columnWidths(pdf, block, columns)
 
 	writeTableRow(pdf, block.Header, widths, true)
+	page := pdf.PageNo()
 	for _, row := range block.Rows {
 		writeTableRow(pdf, row, widths, false)
+		if pdf.PageNo() != page {
+			// a table carried onto a new page repeats its header there
+			page = pdf.PageNo()
+			writeTableRow(pdf, block.Header, widths, true)
+		}
 	}
 	pdf.Ln(3)
 }
@@ -331,21 +353,36 @@ func writeTableRow(pdf *fpdf.Fpdf, cells []string, widths []float64, header bool
 	}
 	rowHeight += 2.4
 
-	_, pageHeight := pdf.GetPageSize()
-	if pdf.GetY()+rowHeight > pageHeight-marginBottom {
-		pdf.AddPage()
-	}
-
-	top := pdf.GetY()
-	x := marginLeft
-	for i := range widths {
-		for j, line := range wrapped[i] {
-			drawRunLine(pdf, line, x+0.5, top+1.2+float64(j)*tableLine, tableLine, tableSize)
+	// a row taller than the page is drawn in chunks, because drawing past the
+	// page break would make every line after it start its own page
+	tallest := 0
+	for i := range wrapped {
+		if len(wrapped[i]) > tallest {
+			tallest = len(wrapped[i])
 		}
-		x += widths[i]
 	}
+	for drawn := 0; drawn < tallest; {
+		fit := linesThatFit(pdf, tableLine, 2.4)
+		if fit < 1 {
+			pdf.AddPage()
+			continue
+		}
+		if fit > tallest-drawn {
+			fit = tallest - drawn
+		}
 
-	bottom := top + rowHeight
+		top := pdf.GetY()
+		x := marginLeft
+		for i := range widths {
+			for j := drawn; j < drawn+fit && j < len(wrapped[i]); j++ {
+				drawRunLine(pdf, wrapped[i][j], x+0.5, top+1.2+float64(j-drawn)*tableLine, tableLine, tableSize)
+			}
+			x += widths[i]
+		}
+		pdf.SetY(top + float64(fit)*tableLine + 2.4)
+		drawn += fit
+	}
+	bottom := pdf.GetY()
 	setColour(pdf.SetDrawColor, ruleColour)
 	pdf.SetLineWidth(0.2)
 	if header {
@@ -353,7 +390,6 @@ func writeTableRow(pdf *fpdf.Fpdf, cells []string, widths []float64, header bool
 		pdf.SetLineWidth(0.4)
 	}
 	pdf.Line(marginLeft, bottom, marginLeft+contentWidth, bottom)
-	pdf.SetY(bottom)
 }
 
 func writeImage(pdf *fpdf.Fpdf, block Block, assetsDir string) error {
@@ -479,20 +515,22 @@ func writeRuns(pdf *fpdf.Fpdf, runs []Run, lineHeight, size float64, bold bool) 
 // applyRunFont selects the face a run is drawn in and returns nothing, so
 // measuring and drawing can never disagree about the font.
 func applyRunFont(pdf *fpdf.Fpdf, run Run, baseSize float64) {
-	switch {
-	case run.Code:
-		pdf.SetFont("Courier", "", baseSize-0.5)
-	case run.Bold && run.Italic:
-		pdf.SetFont("Helvetica", "BI", baseSize)
-	case run.Bold:
-		pdf.SetFont("Helvetica", "B", baseSize)
-	case run.Italic:
-		pdf.SetFont("Helvetica", "I", baseSize)
-	case run.Link != "":
-		pdf.SetFont("Helvetica", "U", baseSize)
-	default:
-		pdf.SetFont("Helvetica", "", baseSize)
+	style := ""
+	if run.Bold {
+		style += "B"
 	}
+	if run.Italic {
+		style += "I"
+	}
+	if run.Link != "" {
+		style += "U"
+	}
+	if run.Code {
+		// Courier has no underline face, so a code link keeps only its weight
+		pdf.SetFont("Courier", strings.ReplaceAll(style, "U", ""), baseSize-0.5)
+		return
+	}
+	pdf.SetFont("Helvetica", style, baseSize)
 }
 
 // wrapRuns breaks runs into lines that fit width, measuring each word in the

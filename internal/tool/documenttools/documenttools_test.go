@@ -41,7 +41,7 @@ func TestDocumentSendPDF(t *testing.T) {
 
 	t.Run("fills a credential placeholder from the store", func(t *testing.T) {
 		h := setup(t)
-		h.Secrets.data["wifi_password"] = "correct-horse-battery"
+		h.Secrets.data["doc_wifi_password"] = "correct-horse-battery"
 		writeMarkdown(t, h.MemoryDir, "guide.md", "# WiFi\n\nPassword: ${cred:wifi_password}\n")
 
 		result := callTool(t, h.Handler, documenttools.ToolSendPDF, map[string]any{
@@ -76,37 +76,39 @@ func TestDocumentSendPDF(t *testing.T) {
 			"filename":      "guide.pdf",
 		})
 
-		require.Equal(t, "no value set for wifi_password — use secret_form_request to have the user fill it in", err.Error())
-	})
-
-	t.Run("refuses a key that belongs to tclaw itself", func(t *testing.T) {
-		h := setup(t)
-		h.Secrets.data["anthropic_api_key"] = "sk-should-never-be-readable"
-		writeMarkdown(t, h.MemoryDir, "guide.md", "Key: ${cred:anthropic_api_key}\n")
-
-		err := callToolExpectError(t, h.Handler, documenttools.ToolSendPDF, map[string]any{
-			"markdown_path": "guide.md",
-			"filename":      "guide.pdf",
-		})
-
 		require.Equal(t,
-			"anthropic_api_key belong to tclaw itself and can never be put in a document — only keys the user set can",
+			"no value set for doc_wifi_password — use secret_form_request with that exact key to have the user fill it in",
 			err.Error())
-		require.Empty(t, h.Sent.calls, "nothing is sent when a key is refused")
 	})
 
-	t.Run("refuses a key a tool package provisioned for itself", func(t *testing.T) {
-		h := setupWithSystemKeys(t, map[string]bool{"tfl_api_key": true})
-		h.Secrets.data["tfl_api_key"] = "not-the-users-to-share"
-		writeMarkdown(t, h.MemoryDir, "guide.md", "Key: ${cred:tfl_api_key}\n")
+	t.Run("a key outside the document namespace cannot reach a system secret", func(t *testing.T) {
+		h := setup(t)
+		// the value a prompt injection would be after, stored under its real key
+		h.Secrets.data["telegram_client_session"] = "full-account-access"
+		writeMarkdown(t, h.MemoryDir, "guide.md", "Session: ${cred:telegram_client_session}\n")
 
 		err := callToolExpectError(t, h.Handler, documenttools.ToolSendPDF, map[string]any{
 			"markdown_path": "guide.md",
 			"filename":      "guide.pdf",
 		})
 
-		require.Contains(t, err.Error(), "tfl_api_key belong to tclaw itself")
-		require.Empty(t, h.Sent.calls, "nothing is sent when a key is refused")
+		require.Contains(t, err.Error(), "doc_telegram_client_session",
+			"the placeholder only ever reaches the doc_ namespace")
+		require.Empty(t, h.Sent.calls, "nothing is sent when the key does not resolve")
+	})
+
+	t.Run("refuses a filename that could inject into the upload headers", func(t *testing.T) {
+		h := setup(t)
+		writeMarkdown(t, h.MemoryDir, "guide.md", "# Guide\n")
+
+		for _, name := range []string{"guide\r\ninjected.pdf", "../../etc/guide.pdf"} {
+			err := callToolExpectError(t, h.Handler, documenttools.ToolSendPDF, map[string]any{
+				"markdown_path": "guide.md",
+				"filename":      name,
+			})
+			require.Contains(t, err.Error(), "filename", "the error names the offending field")
+		}
+		require.Empty(t, h.Sent.calls, "nothing is sent for a bad filename")
 	})
 
 	t.Run("refuses a path outside the memory directory", func(t *testing.T) {
@@ -186,11 +188,6 @@ type harness struct {
 
 func setup(t *testing.T) harness {
 	t.Helper()
-	return setupWithSystemKeys(t, nil)
-}
-
-func setupWithSystemKeys(t *testing.T, systemKeys map[string]bool) harness {
-	t.Helper()
 	h := harness{
 		Handler:   mcp.NewHandler(),
 		Sent:      &fileSpy{},
@@ -201,7 +198,6 @@ func setupWithSystemKeys(t *testing.T, systemKeys map[string]bool) harness {
 		MemoryDir:   h.MemoryDir,
 		SecretStore: h.Secrets,
 		SendFile:    h.Sent.send,
-		SystemKeys:  systemKeys,
 	})
 	return h
 }
@@ -209,7 +205,7 @@ func setupWithSystemKeys(t *testing.T, systemKeys map[string]bool) harness {
 func documentBytesForSecret(t *testing.T, markdown, value string) []byte {
 	t.Helper()
 	h := setup(t)
-	h.Secrets.data["wifi_password"] = value
+	h.Secrets.data["doc_wifi_password"] = value
 	writeMarkdown(t, h.MemoryDir, "guide.md", markdown)
 
 	callTool(t, h.Handler, documenttools.ToolSendPDF, map[string]any{

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 
 	"tclaw/internal/channel"
 	"tclaw/internal/libraries/markdownpdf"
@@ -19,23 +20,15 @@ import (
 // ToolSendPDF renders a markdown file and delivers the PDF to the chat.
 const ToolSendPDF = "document_send_pdf"
 
-// authKeys are the credentials that keep tclaw itself running. They are not
-// declared by any tool package, so they have to be named here.
-var authKeys = map[string]bool{
-	"anthropic_api_key":  true,
-	"claude_setup_token": true,
-}
+// DocumentKeyPrefix namespaces the only secrets a document may carry. Nothing
+// tclaw provisions for itself is named this way.
+const DocumentKeyPrefix = "doc_"
 
 // Deps carries what the send-pdf handler needs from the router.
 type Deps struct {
 	MemoryDir   string
 	SecretStore secret.Store
 	SendFile    func(ctx context.Context, p channel.SendFileParams) (channel.MessageID, error)
-
-	// SystemKeys are store keys a document may never read: everything the
-	// packages provision for themselves, plus tclaw's own auth. A document
-	// carries a credential to a person, so only keys the user set are fair game.
-	SystemKeys map[string]bool
 }
 
 // SendPDFParams is the tool's argument shape.
@@ -103,6 +96,9 @@ func sendPDFHandler(deps Deps) mcp.ToolHandler {
 		if !strings.HasSuffix(p.Filename, ".pdf") {
 			return nil, fmt.Errorf("filename %q must end in .pdf", p.Filename)
 		}
+		if err := checkFilename(p.Filename); err != nil {
+			return nil, err
+		}
 
 		markdownPath, err := resolveInMemoryDir(deps.MemoryDir, p.MarkdownPath)
 		if err != nil {
@@ -168,6 +164,20 @@ func sendPDFHandler(deps Deps) mcp.ToolHandler {
 	}
 }
 
+// checkFilename rejects a name that would be more than a name. It reaches a
+// multipart Content-Disposition header, which does not escape newlines.
+func checkFilename(name string) error {
+	if strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("filename %q must be a plain name, with no path separators", name)
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("filename %q must not contain control characters", name)
+		}
+	}
+	return nil
+}
+
 // readCredentials resolves the keys a document references. The values are
 // handed to the renderer and never returned to the agent.
 func readCredentials(ctx context.Context, deps Deps, markdown string) (map[string]string, error) {
@@ -179,32 +189,24 @@ func readCredentials(ctx context.Context, deps Deps, markdown string) (map[strin
 		return nil, fmt.Errorf("document has credential placeholders but no secret store is configured")
 	}
 
-	var refused, missing []string
+	var missing []string
 	values := map[string]string{}
 	for _, key := range keys {
-		if deps.SystemKeys[key] || authKeys[key] {
-			refused = append(refused, key)
-			continue
-		}
-		value, err := deps.SecretStore.Get(ctx, key)
+		storeKey := DocumentKeyPrefix + key
+		value, err := deps.SecretStore.Get(ctx, storeKey)
 		if err != nil {
-			return nil, fmt.Errorf("read credential %q: %w", key, err)
+			return nil, fmt.Errorf("read credential %q: %w", storeKey, err)
 		}
 		if value == "" {
-			missing = append(missing, key)
+			missing = append(missing, storeKey)
 			continue
 		}
 		values[key] = value
 	}
 
-	if len(refused) > 0 {
-		sort.Strings(refused)
-		return nil, fmt.Errorf("%s belong to tclaw itself and can never be put in a document — only keys the user set can",
-			strings.Join(refused, ", "))
-	}
 	if len(missing) > 0 {
 		sort.Strings(missing)
-		return nil, fmt.Errorf("no value set for %s — use secret_form_request to have the user fill it in",
+		return nil, fmt.Errorf("no value set for %s — use secret_form_request with that exact key to have the user fill it in",
 			strings.Join(missing, ", "))
 	}
 	return values, nil

@@ -33,7 +33,9 @@ When a user sends an image, voice message, or audio file via Telegram, it appear
 
 `document_send_pdf` renders a markdown file from your memory directory into a PDF and sends it to the chat. Use it when the user wants something as a document rather than a message — a guide, a report, anything they will forward on.
 
-It is also the only way to hand over something containing a credential. Write `${cred:some_key}` in the markdown and the value is filled in as the PDF is built: it never reaches you, and it never lands on disk where a later turn could read it back. Never try to work around this by asking for the value.
+It is also the only way to hand over something containing a credential. Write `${cred:wifi_password}` in the markdown and the value is filled in as the PDF is built: it never reaches you, and it never lands on disk where a later turn could read it back. Never try to work around this by asking for the value.
+
+A placeholder resolves the secret store key `doc_wifi_password` — only `doc_`-prefixed keys can go in a document, so nothing tclaw uses for itself can be printed. Set one up with `secret_form_request` using the full `doc_` key.
 
 ## Channel management
 
