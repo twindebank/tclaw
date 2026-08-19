@@ -119,13 +119,14 @@ func buildChannelContext(ctx context.Context, connMgr *remotemcpstore.Manager, c
 		}
 	}
 
-	mcps, err := connMgr.ListRemoteMCPsByChannel(ctx, channelName)
+	all, err := connMgr.ListRemoteMCPs(ctx)
 	if err != nil {
 		slog.Error("failed to list remote mcps for channel context", "channel", channelName, "err", err)
 	} else {
-		for _, m := range mcps {
-			channelCtx.RemoteMCPNames = append(channelCtx.RemoteMCPNames, m.Name)
-		}
+		// Must match what this channel's MCP config carries, or the agent is
+		// handed a server whose tools it is then denied.
+		global, scoped := partitionRemoteMCPs(all)
+		channelCtx.RemoteMCPNames = append(remoteMCPNames(global), remoteMCPNames(scoped[channelName])...)
 	}
 
 	return channelCtx
@@ -133,6 +134,10 @@ func buildChannelContext(ctx context.Context, connMgr *remotemcpstore.Manager, c
 
 // buildMCPConfigPaths generates per-channel MCP config files for channels that
 // have channel-scoped remote MCPs. Returns a map of channel ID to config path.
+//
+// A channel's file carries the global servers plus its own; a channel with no
+// servers of its own gets no file and falls back to the default config, which
+// carries the global ones.
 func buildMCPConfigPaths(
 	ctx context.Context,
 	allChMap map[channel.ChannelID]channel.Channel,
@@ -145,27 +150,25 @@ func buildMCPConfigPaths(
 ) map[channel.ChannelID]string {
 	paths := make(map[channel.ChannelID]string)
 
+	all, err := connMgr.ListRemoteMCPs(ctx)
+	if err != nil {
+		slog.Error("failed to list remote mcps for channel configs", "err", err)
+		return paths
+	}
+
+	global, scoped := partitionRemoteMCPs(all)
+
 	for chID, ch := range allChMap {
 		name := ch.Info().Name
 
-		mcps, err := connMgr.ListRemoteMCPsByChannel(ctx, name)
-		if err != nil {
-			slog.Error("failed to list remote mcps for channel config", "channel", name, "err", err)
+		own := scoped[name]
+		if len(own) == 0 {
 			continue
 		}
 
-		// Only generate a per-channel config if there are channel-specific
-		// remote MCPs. If all remote MCPs are global, the default config works.
-		hasChannelScoped := false
-		for _, m := range mcps {
-			if m.Channel != "" {
-				hasChannelScoped = true
-				break
-			}
-		}
-		if !hasChannelScoped {
-			continue
-		}
+		mcps := make([]remotemcpstore.RemoteMCP, 0, len(global)+len(own))
+		mcps = append(mcps, global...)
+		mcps = append(mcps, own...)
 
 		entries := remoteMCPConfigEntries(mcps, proxy, proxyToken)
 
@@ -174,10 +177,34 @@ func buildMCPConfigPaths(
 			slog.Error("failed to generate channel mcp config", "channel", name, "err", err)
 			continue
 		}
+		slog.Info("channel mcp config generated", "channel", name, "servers", remoteMCPNames(mcps))
 		paths[chID] = path
 	}
 
 	return paths
+}
+
+// partitionRemoteMCPs splits remote MCPs into the global ones (no channel set)
+// and the channel-scoped ones, keyed by channel name.
+func partitionRemoteMCPs(all []remotemcpstore.RemoteMCP) (global []remotemcpstore.RemoteMCP, scoped map[string][]remotemcpstore.RemoteMCP) {
+	scoped = make(map[string][]remotemcpstore.RemoteMCP)
+	for _, m := range all {
+		if m.Channel == "" {
+			global = append(global, m)
+			continue
+		}
+		scoped[m.Channel] = append(scoped[m.Channel], m)
+	}
+	return global, scoped
+}
+
+// remoteMCPNames lists server names for logging which servers a channel resolved to.
+func remoteMCPNames(mcps []remotemcpstore.RemoteMCP) []string {
+	names := make([]string, 0, len(mcps))
+	for _, m := range mcps {
+		names = append(names, m.Name)
+	}
+	return names
 }
 
 // toolsToStrings converts a claudecli.Tool slice to strings.

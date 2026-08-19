@@ -210,20 +210,6 @@ func (m *Manager) AddRemoteMCP(ctx context.Context, p AddRemoteMCPParams) (*Remo
 	return &entry, nil
 }
 
-func (m *Manager) ListRemoteMCPsByChannel(ctx context.Context, channelName string) ([]RemoteMCP, error) {
-	mcps, err := m.ListRemoteMCPs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var result []RemoteMCP
-	for _, mcp := range mcps {
-		if mcp.Channel == channelName {
-			result = append(result, mcp)
-		}
-	}
-	return result, nil
-}
-
 // SetToolNames updates the stored tool-name list for an existing remote MCP.
 // Used by the OAuth and no-auth registration paths where tool discovery
 // happens after the entry has already been persisted.
