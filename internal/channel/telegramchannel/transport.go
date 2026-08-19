@@ -1,6 +1,7 @@
 package telegramchannel
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -378,6 +379,65 @@ func (t *Telegram) Send(ctx context.Context, text string, opts channel.SendOpts)
 	}
 	if err != nil {
 		return "", fmt.Errorf("telegram send: %w", err)
+	}
+
+	return channel.MessageID(strconv.Itoa(msg.ID)), nil
+}
+
+// SendFile uploads content as a Telegram document.
+func (t *Telegram) SendFile(ctx context.Context, p channel.SendFileParams) (channel.MessageID, error) {
+	t.mu.Lock()
+	chatID := t.currentChatID
+	b := t.bot
+	t.mu.Unlock()
+
+	if chatID == 0 {
+		return "", fmt.Errorf("telegram send file: no chat ID set — channel %q has not received an inbound message yet", t.name)
+	}
+	if len(p.Content) == 0 {
+		return "", fmt.Errorf("telegram send file: %q has no content", p.Filename)
+	}
+
+	if b == nil {
+		// no inbound message yet, so Messages() has not built the bot
+		var err error
+		b, err = bot.New(t.token)
+		if err != nil {
+			return "", fmt.Errorf("telegram send file (create bot): %w", err)
+		}
+	}
+
+	caption := p.Caption
+	if !utf8.ValidString(caption) {
+		slog.Warn("telegram send file: stripping invalid UTF-8 bytes from caption", "channel", t.name)
+		caption = tgsdk.SanitizeUTF8(caption)
+	}
+
+	document := func() models.InputFile {
+		return &models.InputFileUpload{Filename: p.Filename, Data: bytes.NewReader(p.Content)}
+	}
+
+	msg, err := b.SendDocument(ctx, &bot.SendDocumentParams{
+		ChatID:              chatID,
+		Document:            document(),
+		Caption:             tgsdk.SanitizeHTML(tgsdk.MarkdownToHTML(caption)),
+		ParseMode:           models.ParseModeHTML,
+		DisableNotification: !p.Opts.Notify,
+	})
+	if err != nil && isHTMLParseError(err) {
+		// the document matters more than its caption's formatting, and the
+		// caller may have spent a credential building it
+		slog.Warn("telegram send file: HTML parse error in caption, falling back to plain text",
+			"channel", t.name, "error", err)
+		msg, err = b.SendDocument(ctx, &bot.SendDocumentParams{
+			ChatID:              chatID,
+			Document:            document(),
+			Caption:             tgsdk.StripAllTags(caption),
+			DisableNotification: !p.Opts.Notify,
+		})
+	}
+	if err != nil {
+		return "", fmt.Errorf("telegram send file: %w", err)
 	}
 
 	return channel.MessageID(strconv.Itoa(msg.ID)), nil
