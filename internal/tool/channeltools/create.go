@@ -56,6 +56,10 @@ func channelCreateDef() mcp.ToolDef {
 					"type": "string",
 					"description": "Optional model to pin for this channel (e.g. 'claude-opus-4-8', 'claude-sonnet-4-6'). Omit to inherit the user-level model. Pick a capable model for complex/orchestration channels and a lighter one for high-volume monitoring."
 				},
+				"max_turns": {
+					"type": "integer",
+					"description": "Optional cap on agentic turns per message on this channel. Omit to inherit the user-level limit. Set it low (e.g. 10) for channels that should answer and stop, like email or notification triage, and high (e.g. 100) for dev channels doing long multi-step work. When the cap is hit the turn ends and the user is told to send another message to continue."
+				},
 				"type": {
 					"type": "string",
 					"enum": ["socket", "telegram"],
@@ -129,6 +133,7 @@ type channelCreateArgs struct {
 	Description               string         `json:"description"`
 	Purpose                   string         `json:"purpose"`
 	Model                     string         `json:"model"`
+	MaxTurns                  int            `json:"max_turns"`
 	Type                      string         `json:"type"`
 	Ephemeral                 bool           `json:"ephemeral"`
 	EphemeralIdleTimeoutHours int            `json:"ephemeral_idle_timeout_hours"`
@@ -161,6 +166,9 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 		}
 		if a.Model != "" && !claudecli.ValidModel(claudecli.Model(a.Model)) {
 			return nil, fmt.Errorf("unknown model %q (known: %v)", a.Model, claudecli.ValidModels())
+		}
+		if a.MaxTurns < 0 {
+			return nil, fmt.Errorf("max_turns must be zero (inherit the user-level limit) or positive, got %d", a.MaxTurns)
 		}
 
 		channelType := channel.ChannelType(a.Type)
@@ -291,6 +299,7 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			Description:          a.Description,
 			Purpose:              a.Purpose,
 			Model:                claudecli.Model(a.Model),
+			MaxTurns:             a.MaxTurns,
 			ToolGroups:           toolGroups,
 			AllowedTools:         a.AllowedTools,
 			DisallowedTools:      a.DisallowedTools,
@@ -318,6 +327,7 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 				Description:     ch.Description,
 				Purpose:         ch.Purpose,
 				Model:           string(ch.Model),
+				MaxTurns:        ch.MaxTurns,
 				DisallowedTools: ch.DisallowedTools,
 			},
 			Links:  ch.Links,

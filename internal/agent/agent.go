@@ -147,6 +147,11 @@ type Options struct {
 	// MaxTurns limits agentic turns per invocation. Defaults to defaultMaxTurns.
 	MaxTurns int
 
+	// ChannelMaxTurns maps channel IDs to a per-channel turn limit, applied
+	// before falling back to MaxTurns. Lets a monitoring channel stop short
+	// while a dev channel runs long.
+	ChannelMaxTurns map[channel.ChannelID]int
+
 	// Debug logs raw CLI event JSON for troubleshooting.
 	Debug bool
 
@@ -980,7 +985,12 @@ func (opts Options) done(ctx context.Context, chID channel.ChannelID) error {
 	return ch.Done(ctx)
 }
 
-func maxTurns(opts Options) int {
+// resolveMaxTurnsForChannel returns the turn limit for a turn on the given
+// channel. Precedence: per-channel limit → user-level limit → defaultMaxTurns.
+func resolveMaxTurnsForChannel(opts Options, channelID channel.ChannelID) int {
+	if limit := opts.ChannelMaxTurns[channelID]; limit > 0 {
+		return limit
+	}
 	if opts.MaxTurns > 0 {
 		return opts.MaxTurns
 	}
@@ -1086,42 +1096,56 @@ func resolveMCPConfigPath(opts Options, channelID channel.ChannelID) string {
 	return opts.MCPConfigPath
 }
 
-func buildArgs(opts Options, model claudecli.Model, sessionID string, systemPrompt string, prompt string, allowed []claudecli.Tool, disallowed []claudecli.Tool, mcpConfigPath string) []string {
+// buildArgsParams carries the per-turn values already resolved for this
+// channel, alongside the immutable Options.
+type buildArgsParams struct {
+	Options       Options
+	Model         claudecli.Model
+	MaxTurns      int
+	SessionID     string
+	SystemPrompt  string
+	Prompt        string
+	Allowed       []claudecli.Tool
+	Disallowed    []claudecli.Tool
+	MCPConfigPath string
+}
+
+func buildArgs(p buildArgsParams) []string {
 	args := []string{
 		"--output-format", "stream-json",
 		"--verbose",
 		"--print",
 	}
-	if sessionID != "" {
-		args = append(args, "--resume", sessionID)
+	if p.SessionID != "" {
+		args = append(args, "--resume", p.SessionID)
 	}
-	if systemPrompt != "" {
-		args = append(args, "--append-system-prompt", systemPrompt)
+	if p.SystemPrompt != "" {
+		args = append(args, "--append-system-prompt", p.SystemPrompt)
 	}
-	if opts.PermissionMode != "" {
-		args = append(args, "--permission-mode", string(opts.PermissionMode))
+	if p.Options.PermissionMode != "" {
+		args = append(args, "--permission-mode", string(p.Options.PermissionMode))
 	}
-	if model != "" {
-		args = append(args, "--model", string(model))
+	if p.Model != "" {
+		args = append(args, "--model", string(p.Model))
 	}
-	args = append(args, "--max-turns", fmt.Sprintf("%d", maxTurns(opts)))
-	for _, t := range allowed {
+	args = append(args, "--max-turns", fmt.Sprintf("%d", p.MaxTurns))
+	for _, t := range p.Allowed {
 		args = append(args, "--allowedTools", string(t))
 	}
-	for _, t := range disallowed {
+	for _, t := range p.Disallowed {
 		args = append(args, "--disallowedTools", string(t))
 	}
-	if mcpConfigPath != "" {
-		args = append(args, "--mcp-config", mcpConfigPath)
+	if p.MCPConfigPath != "" {
+		args = append(args, "--mcp-config", p.MCPConfigPath)
 	}
-	if opts.MemoryDir != "" {
-		args = append(args, "--add-dir", opts.MemoryDir)
+	if p.Options.MemoryDir != "" {
+		args = append(args, "--add-dir", p.Options.MemoryDir)
 	}
-	for _, d := range opts.AddDirs {
+	for _, d := range p.Options.AddDirs {
 		args = append(args, "--add-dir", d)
 	}
 	// "--" terminates flag parsing so prompts starting with "-" aren't
 	// mistaken for CLI options.
-	args = append(args, "--", prompt)
+	args = append(args, "--", p.Prompt)
 	return args
 }

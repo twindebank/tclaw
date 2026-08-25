@@ -365,7 +365,17 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		promptText = opts.ResumeNotice + promptText
 	}
 
-	args := buildArgs(opts, model, sessionID, systemPrompt, promptText, allowed, disallowed, mcpConfigPath)
+	args := buildArgs(buildArgsParams{
+		Options:       opts,
+		Model:         model,
+		MaxTurns:      resolveMaxTurnsForChannel(opts, msg.ChannelID),
+		SessionID:     sessionID,
+		SystemPrompt:  systemPrompt,
+		Prompt:        promptText,
+		Allowed:       allowed,
+		Disallowed:    disallowed,
+		MCPConfigPath: mcpConfigPath,
+	})
 	env := buildEnv(opts, ch.Info().Name)
 
 	dir := opts.HomeDir
@@ -818,10 +828,7 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			if summary := modelSummary(result.ModelUsage); summary != "" {
 				stats += " " + summary
 			}
-			maxTurns := opts.MaxTurns
-			if maxTurns == 0 {
-				maxTurns = defaultMaxTurns
-			}
+			maxTurns := resolveMaxTurnsForChannel(opts, channelID)
 			if result.NumTurns >= maxTurns {
 				stats += fmt.Sprintf("\n⚠️ Turn limit reached (%d/%d). Send another message to continue.", result.NumTurns, maxTurns)
 			}

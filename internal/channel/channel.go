@@ -71,6 +71,10 @@ type Info struct {
 	// (not claudecli.Model) to avoid a circular dependency.
 	Model string
 
+	// MaxTurns caps agentic turns per message on this channel. Zero means
+	// inherit the user-level limit.
+	MaxTurns int
+
 	// AllowedTools is the resolved set of tools this channel can use.
 	// Populated at creation time from tool_groups, role presets, or explicit lists.
 	// Uses []string (not []claudecli.Tool) to avoid circular dependency.
