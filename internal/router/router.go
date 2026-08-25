@@ -998,6 +998,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// Per-channel turn limits, keyed by channel ID (empty for channels that
 		// inherit the user-level limit).
 		channelMaxTurns := buildChannelMaxTurns(allChMap, registry)
+		channelOutputStyles := buildChannelOutputStyles(allChMap, registry)
 
 		// Generate per-channel MCP config files for channels with scoped remote MCPs.
 		mcpConfigPaths := buildMCPConfigPaths(dynamicCtx, allChMap, remoteMCPMgr, remoteMCPProxy, proxyToken, mcpConfigDir, mcpAddr, mcpToken)
@@ -1019,14 +1020,16 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				// per-channel models beneath it. See resolveModelForChannel.
 				return modeltools.LoadOverride(s)
 			},
-			ChannelModels:   channelModels,
-			MaxTurns:        mu.cfg.MaxTurns,
-			ChannelMaxTurns: channelMaxTurns,
-			Debug:           mu.cfg.Debug,
-			APIKey:          mu.cfg.APIKey,
-			HomeDir:         homeDir,
-			MemoryDir:       memoryDir,
-			AddDirs:         addDirs,
+			ChannelModels:       channelModels,
+			MaxTurns:            mu.cfg.MaxTurns,
+			ChannelMaxTurns:     channelMaxTurns,
+			OutputStyle:         mu.cfg.OutputStyle,
+			ChannelOutputStyles: channelOutputStyles,
+			Debug:               mu.cfg.Debug,
+			APIKey:              mu.cfg.APIKey,
+			HomeDir:             homeDir,
+			MemoryDir:           memoryDir,
+			AddDirs:             addDirs,
 			AddDirsFunc: func(chID channel.ChannelID) []string {
 				// Read from the dev store each turn so worktrees created
 				// mid-session (via dev_start) are immediately accessible.

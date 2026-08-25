@@ -211,6 +211,10 @@ type User struct {
 	MaxTurns       int                      `yaml:"max_turns"`
 	Debug          bool                     `yaml:"debug"`
 
+	// OutputStyle names a Claude Code output style to write every reply in, by
+	// the name: in its frontmatter. Empty leaves the CLI's default.
+	OutputStyle string `yaml:"output_style,omitempty"`
+
 	// MessageDebounce coalesces same-channel user messages that arrive within
 	// this rolling window into a single agent turn (e.g. a photo album delivered
 	// as separate messages). A duration string like "1s"; unset defaults to 1s,
@@ -473,6 +477,10 @@ type Channel struct {
 	// inherit the user-level max_turns. Lets a monitoring channel stop short
 	// while a dev channel runs long.
 	MaxTurns int `yaml:"max_turns,omitempty"`
+
+	// OutputStyle overrides the user-level output_style here. Empty inherits it;
+	// "none" turns it off for this channel, since empty cannot mean both.
+	OutputStyle string `yaml:"output_style,omitempty"`
 
 	// Telegram holds Telegram-specific channel config.
 	// Non-nil when Type is "telegram".
@@ -1081,6 +1089,7 @@ func (u *User) ToUserConfig() user.Config {
 		AllowedTools:    u.AllowedTools,
 		DisallowedTools: u.DisallowedTools,
 		MaxTurns:        u.MaxTurns,
+		OutputStyle:     u.OutputStyle,
 		Debug:           u.Debug,
 		SystemPrompt:    u.SystemPrompt,
 		TelegramUserID:  tgUserID,

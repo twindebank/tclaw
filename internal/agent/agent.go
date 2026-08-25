@@ -152,6 +152,14 @@ type Options struct {
 	// while a dev channel runs long.
 	ChannelMaxTurns map[channel.ChannelID]int
 
+	// OutputStyle names the Claude Code output style replies are written in.
+	// Empty leaves the CLI's default.
+	OutputStyle string
+
+	// ChannelOutputStyles overrides OutputStyle per channel. The value "none"
+	// turns the style off there, which empty cannot mean.
+	ChannelOutputStyles map[channel.ChannelID]string
+
 	// Debug logs raw CLI event JSON for troubleshooting.
 	Debug bool
 
@@ -987,6 +995,23 @@ func (opts Options) done(ctx context.Context, chID channel.ChannelID) error {
 
 // resolveMaxTurnsForChannel returns the turn limit for a turn on the given
 // channel. Precedence: per-channel limit → user-level limit → defaultMaxTurns.
+// resolveOutputStyleForChannel returns the output style for a turn on the given
+// channel, or "" to leave the CLI's default.
+func resolveOutputStyleForChannel(opts Options, channelID channel.ChannelID) string {
+	switch style := opts.ChannelOutputStyles[channelID]; {
+	case style == outputStyleOff:
+		// The channel opted out. Empty already means "inherit", so turning it
+		// off needs a word of its own.
+		return ""
+	case style != "":
+		return style
+	}
+	return opts.OutputStyle
+}
+
+// outputStyleOff is the per-channel value that turns the user-level style off.
+const outputStyleOff = "none"
+
 func resolveMaxTurnsForChannel(opts Options, channelID channel.ChannelID) int {
 	if limit := opts.ChannelMaxTurns[channelID]; limit > 0 {
 		return limit
@@ -1102,6 +1127,7 @@ type buildArgsParams struct {
 	Options       Options
 	Model         claudecli.Model
 	MaxTurns      int
+	OutputStyle   string
 	SessionID     string
 	SystemPrompt  string
 	Prompt        string
@@ -1129,6 +1155,12 @@ func buildArgs(p buildArgsParams) []string {
 		args = append(args, "--model", string(p.Model))
 	}
 	args = append(args, "--max-turns", fmt.Sprintf("%d", p.MaxTurns))
+	if p.OutputStyle != "" {
+		// Passed as JSON rather than written into settings.json, which is mounted
+		// read-only so a prompt injection cannot install its own hooks. --settings
+		// is additive, so the hook registrations there still apply.
+		args = append(args, "--settings", fmt.Sprintf(`{"outputStyle":%q}`, p.OutputStyle))
+	}
 	for _, t := range p.Allowed {
 		args = append(args, "--allowedTools", string(t))
 	}

@@ -369,6 +369,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		Options:       opts,
 		Model:         model,
 		MaxTurns:      resolveMaxTurnsForChannel(opts, msg.ChannelID),
+		OutputStyle:   resolveOutputStyleForChannel(opts, msg.ChannelID),
 		SessionID:     sessionID,
 		SystemPrompt:  systemPrompt,
 		Prompt:        promptText,
