@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"tclaw/internal/claudecli"
@@ -24,16 +25,28 @@ func formatBlock(block claudecli.ContentBlock) string {
 	return ""
 }
 
+// Icons that head a status line, so a skill invocation is distinguishable from an
+// ordinary tool call at a glance.
+const (
+	iconTool  = "🔧"
+	iconSkill = "🎓"
+)
+
 // formatToolUse renders a tool invocation with its arguments.
 // Prefixed with a newline so it doesn't run into preceding text.
 func formatToolUse(block claudecli.ContentBlock) string {
+	if claudecli.Tool(block.Name) == claudecli.ToolSkill {
+		return formatSkillUse(block)
+	}
+
 	if len(block.Input) == 0 || string(block.Input) == "{}" {
-		return fmt.Sprintf("\n🔧 %s\n", block.Name)
+		return fmt.Sprintf("\n%s %s\n", iconTool, block.Name)
 	}
 
 	var args map[string]json.RawMessage
 	if err := json.Unmarshal(block.Input, &args); err != nil {
-		return fmt.Sprintf("🔧 %s\n", block.Name)
+		slog.Warn("failed to parse tool input", "tool", block.Name, "err", err)
+		return fmt.Sprintf("\n%s %s\n", iconTool, block.Name)
 	}
 
 	var parts []string
@@ -46,14 +59,52 @@ func formatToolUse(block claudecli.ContentBlock) string {
 				s = unquoted
 			}
 		}
-		// Truncate long values.
-		if len(s) > 60 {
-			s = s[:57] + "..."
-		}
-		parts = append(parts, fmt.Sprintf("%s=%s", k, s))
+		parts = append(parts, fmt.Sprintf("%s=%s", k, truncateValue(s)))
 	}
 
-	return fmt.Sprintf("\n🔧 %s(%s)\n", block.Name, strings.Join(parts, ", "))
+	return fmt.Sprintf("\n%s %s(%s)\n", iconTool, block.Name, strings.Join(parts, ", "))
+}
+
+// formatSkillUse renders a skill invocation led by the skill's own name.
+// "Skill(skill=x)" buries the only part of the line worth reading.
+func formatSkillUse(block claudecli.ContentBlock) string {
+	// Falls back to the tool name when the skill's own name can't be read.
+	unnamed := fmt.Sprintf("\n%s %s\n", iconSkill, block.Name)
+
+	var skill struct {
+		Skill string `json:"skill"`
+		Args  string `json:"args"`
+	}
+	if err := json.Unmarshal(block.Input, &skill); err != nil {
+		slog.Warn("failed to parse skill tool input", "err", err)
+		return unnamed
+	}
+	if skill.Skill == "" {
+		slog.Warn("skill tool use carried no skill name")
+		return unnamed
+	}
+
+	if skill.Args == "" {
+		return fmt.Sprintf("\n%s %s\n", iconSkill, skill.Skill)
+	}
+	return fmt.Sprintf("\n%s %s (%s)\n", iconSkill, skill.Skill, truncateValue(skill.Args))
+}
+
+// truncateValue keeps an argument value within 60 bytes for a one-line status
+// message, cutting on a rune boundary so a multi-byte character can't be split.
+func truncateValue(s string) string {
+	const maxLen = 60
+	if len(s) <= maxLen {
+		return s
+	}
+	cut := 0
+	for i := range s {
+		if i > maxLen-3 {
+			break
+		}
+		cut = i
+	}
+	return s[:cut] + "..."
 }
 
 // formatToolResult renders execution stats from a tool result event.
