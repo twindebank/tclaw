@@ -92,18 +92,35 @@ func block(params blockParams) {
 	os.Exit(exitBlock)
 }
 
-// advise lets the call through and adds context the agent reads. Output is only
-// shown when it is valid JSON, so a marshal failure means saying nothing rather
-// than printing a stray line into the transcript.
-func advise(event HookEvent, context string) {
-	out, err := json.Marshal(map[string]any{
+// advice is what a hook hands back when it lets a call through.
+type advice struct {
+	Event HookEvent
+
+	// Context is guidance only the agent reads.
+	Context string
+
+	// Notice is one line the user sees in the chat, so a hook that acted is not
+	// invisible to them. The CLI carries it as "<Event>:<Tool> says: <notice>".
+	Notice string
+}
+
+// advise lets the call through and hands back the advice. Output is only shown
+// when it is valid JSON, so a marshal failure means saying nothing rather than
+// printing a stray line into the transcript.
+func advise(a advice) {
+	body := map[string]any{
 		"hookSpecificOutput": map[string]string{
-			"hookEventName":     string(event),
-			"additionalContext": context,
+			"hookEventName":     string(a.Event),
+			"additionalContext": a.Context,
 		},
-	})
+	}
+	if a.Notice != "" {
+		// An empty one would still be a key the CLI has to decide to ignore.
+		body["systemMessage"] = a.Notice
+	}
+	out, err := json.Marshal(body)
 	if err != nil {
-		slog.Error("failed to encode hook advice", "event", event, "err", err)
+		slog.Error("failed to encode hook advice", "event", a.Event, "err", err)
 		pass()
 	}
 	fmt.Println(string(out))

@@ -30,6 +30,11 @@ type SystemEventSubtype string
 
 const (
 	SystemSubtypeInit SystemEventSubtype = "init"
+
+	// SystemSubtypeInformational carries a notice for the user, and is how a
+	// hook's systemMessage reaches the stream. A hook that runs on a tool event
+	// emits no event of its own, so this is the only one it can send.
+	SystemSubtypeInformational SystemEventSubtype = "informational"
 )
 
 // Event is a single parsed line from the CLI's stream-json output.
@@ -42,6 +47,10 @@ type SystemEvent struct {
 	Type      EventType          `json:"type"`
 	Subtype   SystemEventSubtype `json:"subtype"`
 	SessionID string             `json:"session_id"`
+
+	// Content is the notice text on an informational event, already prefixed by
+	// the CLI with what produced it, e.g. "PostToolUse:Write says: ...".
+	Content string `json:"content,omitempty"`
 }
 
 // AssistantEvent is the complete assistant message returned by --print mode.

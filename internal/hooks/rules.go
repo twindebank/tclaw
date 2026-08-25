@@ -64,12 +64,16 @@ func rulesIndex() {
 	if channelName == "" {
 		channelName = "this channel"
 	}
-	advise(eventPostToolUse, fmt.Sprintf(
-		"No channel mentions %s, so no channel loads it and nobody will come across it. "+
-			"Add it to %s: `@../../%s/%s` under the loaded list if it applies to most work there, "+
-			"or a line under the available list with the work that should send you to it.",
-		name, filepath.Join(memorylayout.ChannelsDirName, channelName, "CLAUDE.md"),
-		memorylayout.RulesDirName, name))
+	advise(advice{
+		Event: eventPostToolUse,
+		Context: fmt.Sprintf(
+			"No channel mentions %s, so no channel loads it and nobody will come across it. "+
+				"Add it to %s: `@../../%s/%s` under the loaded list if it applies to most work there, "+
+				"or a line under the available list with the work that should send you to it.",
+			name, filepath.Join(memorylayout.ChannelsDirName, channelName, "CLAUDE.md"),
+			memorylayout.RulesDirName, name),
+		Notice: fmt.Sprintf("rules-index: no channel mentions %s, so nothing loads it", name),
+	})
 }
 
 // referencedByAnyChannel reports whether any channel's CLAUDE.md names the

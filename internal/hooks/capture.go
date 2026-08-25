@@ -139,7 +139,7 @@ func lessonCapture() {
 	if len(notes) == 0 {
 		pass()
 	}
-	advise(eventUserPromptSubmit, strings.Join(notes, "\n\n"))
+	advise(advice{Event: eventUserPromptSubmit, Context: strings.Join(notes, "\n\n")})
 }
 
 // correctionTrigger returns the pattern that made a prompt read as pushback, or
