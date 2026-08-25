@@ -71,7 +71,7 @@ type SecretSpec struct {
 	// EnvVarPrefix is the env var prefix for seeding from Fly secrets.
 	// Combined with the user ID to form the full env var name:
 	//   EnvVarPrefix + "_" + UPPER(userID)
-	// Example: "TFL_API_KEY" -> "TFL_API_KEY_THEO"
+	// Example: "TFL_API_KEY" -> "TFL_API_KEY_ALICE"
 	EnvVarPrefix string
 
 	// Required indicates whether the package needs this secret to function.

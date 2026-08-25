@@ -14,7 +14,7 @@ import (
 // pre-provisioned secrets (e.g. Fly secrets) into the encrypted per-user store
 // at boot time.
 type SecretSeed struct {
-	// EnvVarName is the full environment variable name (e.g. "GITHUB_TOKEN_THEO").
+	// EnvVarName is the full environment variable name (e.g. "GITHUB_TOKEN_ALICE").
 	EnvVarName string
 
 	// StoreKey is the key in the secret store (e.g. "github_token").
@@ -43,7 +43,7 @@ func SeedSecrets(ctx context.Context, store secret.Store, seeds []SecretSeed) er
 // SecretSeedEnvVarName builds a per-user env var name from a prefix and user ID.
 // The user ID is uppercased with non-alphanumeric chars replaced by underscores.
 //
-//	SecretSeedEnvVarName("GITHUB_TOKEN", "alice") => "GITHUB_TOKEN_THEO"
+//	SecretSeedEnvVarName("GITHUB_TOKEN", "alice") => "GITHUB_TOKEN_ALICE"
 //	SecretSeedEnvVarName("TFL_API_KEY", "my-user") => "TFL_API_KEY_MY_USER"
 func SecretSeedEnvVarName(prefix string, userID string) string {
 	return prefix + "_" + sanitizeEnvSuffix(userID)

@@ -138,8 +138,14 @@ func skipIfNoClaude(t *testing.T) {
 // need to strip the prefix and decode.
 func getSetupToken(t *testing.T) string {
 	t.Helper()
+	// The keychain item is named after whichever user id this machine stored it
+	// under, so it comes from the environment rather than being written down here.
+	userID := os.Getenv("TCLAW_KEYCHAIN_USER")
+	if userID == "" {
+		return ""
+	}
 	out, err := exec.Command("security", "find-generic-password",
-		"-s", "tclaw/internal/alice", "-a", "claude_setup_token", "-w").Output()
+		"-s", "tclaw/internal/"+userID, "-a", "claude_setup_token", "-w").Output()
 	if err != nil {
 		return ""
 	}

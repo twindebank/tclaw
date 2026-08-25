@@ -67,7 +67,7 @@ type CredentialField struct {
 
 	// EnvVarPrefix is the env var prefix for seeding from Fly secrets.
 	// Combined with the user ID: EnvVarPrefix + "_" + UPPER(userID).
-	// Example: "TFL_API_KEY" -> "TFL_API_KEY_THEO".
+	// Example: "TFL_API_KEY" -> "TFL_API_KEY_ALICE".
 	EnvVarPrefix string
 }
 

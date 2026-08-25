@@ -49,18 +49,18 @@ func TestBuffer_UserIsolation(t *testing.T) {
 }
 
 func TestBuffer_UserIsolation_PrefixSafety(t *testing.T) {
-	// "the" should NOT match "alice"
+	// "ali" should NOT match "alice"
 	buf := New(100)
 	fmt.Fprintln(buf, `time=2024-01-01T00:00:00Z level=INFO msg="alice's log" user=alice`)
-	fmt.Fprintln(buf, `time=2024-01-01T00:00:01Z level=INFO msg="the's log" user=the`)
+	fmt.Fprintln(buf, `time=2024-01-01T00:00:01Z level=INFO msg="ali's log" user=ali`)
 
-	theoLines := buf.Query(QueryParams{UserID: "alice"})
-	require.Len(t, theoLines, 1)
-	require.Contains(t, theoLines[0], "alice's log")
+	aliceLines := buf.Query(QueryParams{UserID: "alice"})
+	require.Len(t, aliceLines, 1)
+	require.Contains(t, aliceLines[0], "alice's log")
 
-	theLines := buf.Query(QueryParams{UserID: "the"})
-	require.Len(t, theLines, 1)
-	require.Contains(t, theLines[0], "the's log")
+	aliLines := buf.Query(QueryParams{UserID: "ali"})
+	require.Len(t, aliLines, 1)
+	require.Contains(t, aliLines[0], "ali's log")
 }
 
 func TestBuffer_IncludeSystem(t *testing.T) {

@@ -111,7 +111,7 @@ func TestSeedSecrets(t *testing.T) {
 
 func TestSecretSeedEnvVarName(t *testing.T) {
 	t.Run("simple user ID", func(t *testing.T) {
-		require.Equal(t, "GITHUB_TOKEN_THEO", SecretSeedEnvVarName("GITHUB_TOKEN", "alice"))
+		require.Equal(t, "GITHUB_TOKEN_ALICE", SecretSeedEnvVarName("GITHUB_TOKEN", "alice"))
 	})
 
 	t.Run("user ID with hyphens", func(t *testing.T) {

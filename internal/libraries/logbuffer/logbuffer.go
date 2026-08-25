@@ -194,7 +194,7 @@ func extractTime(line string) (time.Time, bool) {
 
 // matchesUser checks for user=<id> in the slog text output. The value is
 // either unquoted (user=alice) or quoted (user="alice with spaces"). We match
-// exactly to prevent "the" matching "alice".
+// exactly to prevent "ali" matching "alice".
 func matchesUser(line, userID string) bool {
 	target := "user=" + userID
 	idx := strings.Index(line, target)
@@ -202,7 +202,7 @@ func matchesUser(line, userID string) bool {
 		return false
 	}
 	// Check that the match ends at a field boundary (space, end of line, or
-	// the next slog field). This prevents "user=the" matching "user=alice".
+	// the next slog field). This prevents "user=ali" matching "user=alice".
 	end := idx + len(target)
 	if end >= len(line) {
 		return true

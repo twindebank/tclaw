@@ -500,7 +500,7 @@ func findDuplicate(ctx context.Context, deps Deps, calendarID, title string, dat
 }
 
 // defaultCalendarTimeZone is used for timed events when no timezone is supplied.
-// Alice is based in London; travel/trip events should pass an explicit timezone.
+// A travel or trip event should pass an explicit timezone rather than rely on it.
 const defaultCalendarTimeZone = "Europe/London"
 
 // timingInput describes the requested date/time for an event before it's resolved

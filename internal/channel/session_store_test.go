@@ -242,7 +242,7 @@ func TestSessionStore(t *testing.T) {
 func TestSessionKey(t *testing.T) {
 	t.Run("replaces slashes", func(t *testing.T) {
 		got := channel.SessionKey("/tmp/tclaw/alice/admin.sock")
-		require.Equal(t, "_tmp_tclaw_theo_admin.sock", got)
+		require.Equal(t, "_tmp_tclaw_alice_admin.sock", got)
 	})
 
 	t.Run("simple name unchanged", func(t *testing.T) {
