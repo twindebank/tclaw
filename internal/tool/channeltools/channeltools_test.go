@@ -72,6 +72,8 @@ func TestChannelRead(t *testing.T) {
 			"type":                   "socket",
 			"initial_message":        "Hello",
 			"claude_session_timeout": "10m",
+			"model":                  "claude-opus-4-8",
+			"max_turns":              10,
 			"ephemeral":              true,
 		})
 
@@ -83,6 +85,8 @@ func TestChannelRead(t *testing.T) {
 		require.Equal(t, "socket", got["type"])
 		require.Equal(t, "Inbound email", got["description"])
 		require.Equal(t, "Triage incoming mail", got["purpose"])
+		require.Equal(t, "claude-opus-4-8", got["model"])
+		require.Equal(t, float64(10), got["max_turns"], "JSON numbers decode as float64")
 		require.Equal(t, "10m", got["claude_session_timeout"])
 		require.Equal(t, true, got["ephemeral"])
 		require.Equal(t, "Hello", got["initial_message"])
@@ -192,6 +196,33 @@ func TestChannelCreate(t *testing.T) {
 			"initial_message": "Hello",
 		})
 		require.Contains(t, err.Error(), "unknown model")
+	})
+
+	t.Run("max_turns is persisted to config", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name":            "phone",
+			"description":     "Mobile device",
+			"type":            "socket",
+			"max_turns":       100,
+			"initial_message": "Hello",
+		})
+
+		require.Equal(t, 100, readChannelMaxTurns(t, th, "phone"))
+	})
+
+	t.Run("rejects negative max_turns", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
+			"name":            "phone",
+			"description":     "Mobile device",
+			"type":            "socket",
+			"max_turns":       -1,
+			"initial_message": "Hello",
+		})
+		require.Contains(t, err.Error(), "max_turns must be zero")
 	})
 
 	t.Run("telegram provisions synchronously", func(t *testing.T) {
@@ -474,6 +505,43 @@ func TestChannelEdit(t *testing.T) {
 			"model": "claude-opus-9-9",
 		})
 		require.Contains(t, err.Error(), "unknown model")
+	})
+
+	t.Run("updates and clears max_turns", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "phone", "description": "Socket", "type": "socket",
+			"initial_message": "Hello",
+		})
+		reloadRegistry(t, th)
+
+		callTool(t, th.handler, "channel_edit", map[string]any{
+			"name":      "phone",
+			"max_turns": 100,
+		})
+		require.Equal(t, 100, readChannelMaxTurns(t, th, "phone"))
+
+		// Zero clears the override so the channel inherits again.
+		callTool(t, th.handler, "channel_edit", map[string]any{
+			"name":      "phone",
+			"max_turns": 0,
+		})
+		require.Equal(t, 0, readChannelMaxTurns(t, th, "phone"))
+	})
+
+	t.Run("rejects negative max_turns", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "phone", "description": "Socket", "type": "socket",
+			"initial_message": "Hello",
+		})
+		reloadRegistry(t, th)
+
+		err := callToolExpectError(t, th.handler, "channel_edit", map[string]any{
+			"name":      "phone",
+			"max_turns": -5,
+		})
+		require.Contains(t, err.Error(), "max_turns must be zero")
 	})
 
 	t.Run("edits hand-written channel", func(t *testing.T) {
@@ -1336,6 +1404,19 @@ func reloadRegistry(t *testing.T, th testHarness) {
 		})
 	}
 	th.registry.Reload(entries)
+}
+
+func readChannelMaxTurns(t *testing.T, th testHarness, name string) int {
+	t.Helper()
+	channels, err := th.configWriter.ReadChannels(testUserID)
+	require.NoError(t, err)
+	for _, ch := range channels {
+		if ch.Name == name {
+			return ch.MaxTurns
+		}
+	}
+	require.Failf(t, "channel not found", "no channel %q in config", name)
+	return 0
 }
 
 func readChannelModel(t *testing.T, th testHarness, name string) string {

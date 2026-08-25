@@ -124,6 +124,28 @@ func TestValidate_ChannelModel(t *testing.T) {
 	})
 }
 
+func TestValidate_ChannelMaxTurns(t *testing.T) {
+	t.Run("positive limit is accepted", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Channels[0].MaxTurns = 100
+		require.NoError(t, validate(cfg))
+	})
+
+	t.Run("zero is accepted (inherits user-level)", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Channels[0].MaxTurns = 0
+		require.NoError(t, validate(cfg))
+	})
+
+	t.Run("negative limit is rejected", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Channels[0].MaxTurns = -1
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "max_turns must be zero (inherit) or positive")
+	})
+}
+
 func TestValidate_MissingChannelType(t *testing.T) {
 	cfg := validConfig()
 	cfg.Users[0].Channels[0].Type = ""
