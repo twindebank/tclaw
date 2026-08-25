@@ -38,6 +38,10 @@ func channelEditDef() mcp.ToolDef {
 					"type": "string",
 					"description": "Model to pin for this channel (e.g. 'claude-opus-4-8', 'claude-sonnet-4-6'). Pass empty string to clear and inherit the user-level model."
 				},
+				"max_turns": {
+					"type": "integer",
+					"description": "Cap on agentic turns per message on this channel. Set it low (e.g. 10) for channels that should answer and stop, like email or notification triage, and high (e.g. 100) for dev channels doing long multi-step work. Pass 0 to clear and inherit the user-level limit."
+				},
 				"allowed_users": {
 					"type": "array",
 					"items": {"type": "string"},
@@ -94,6 +98,7 @@ type channelEditArgs struct {
 	Description          string          `json:"description"`
 	Purpose              *string         `json:"purpose"`
 	Model                *string         `json:"model"`
+	MaxTurns             *int            `json:"max_turns"`
 	AllowedUsers         *[]string       `json:"allowed_users"`
 	ToolGroups           []string        `json:"tool_groups"`
 	AllowedTools         []string        `json:"allowed_tools"`
@@ -111,7 +116,7 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 			return nil, fmt.Errorf("invalid arguments: %w", err)
 		}
 
-		hasChange := a.Description != "" || a.Purpose != nil || a.Model != nil || a.AllowedUsers != nil ||
+		hasChange := a.Description != "" || a.Purpose != nil || a.Model != nil || a.MaxTurns != nil || a.AllowedUsers != nil ||
 			a.ToolGroups != nil || a.AllowedTools != nil || a.DisallowedTools != nil ||
 			a.CreatableGroups != nil || a.Links != nil || a.Parent != nil ||
 			a.ClaudeSessionTimeout != nil
@@ -122,6 +127,10 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 		// Validate the model up front so we don't write a config that fails to reload.
 		if a.Model != nil && *a.Model != "" && !claudecli.ValidModel(claudecli.Model(*a.Model)) {
 			return nil, fmt.Errorf("unknown model %q (known: %v)", *a.Model, claudecli.ValidModels())
+		}
+
+		if a.MaxTurns != nil && *a.MaxTurns < 0 {
+			return nil, fmt.Errorf("max_turns must be zero (inherit the user-level limit) or positive, got %d", *a.MaxTurns)
 		}
 
 		// Validate the timeout up front so we don't write a config that fails to reload.
@@ -190,6 +199,9 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 			}
 			if a.Model != nil {
 				ch.Model = claudecli.Model(*a.Model)
+			}
+			if a.MaxTurns != nil {
+				ch.MaxTurns = *a.MaxTurns
 			}
 			if len(toolGroups) > 0 {
 				ch.ToolGroups = toolGroups

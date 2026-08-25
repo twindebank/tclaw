@@ -99,6 +99,24 @@ func buildChannelModels(
 	return models
 }
 
+// buildChannelMaxTurns maps each channel ID to its configured per-channel turn
+// limit. Channels without one are omitted so the agent falls back to the
+// user-level limit.
+func buildChannelMaxTurns(
+	allChMap map[channel.ChannelID]channel.Channel,
+	registry *channel.Registry,
+) map[channel.ChannelID]int {
+	limits := make(map[channel.ChannelID]int)
+	for chID, ch := range allChMap {
+		entry := registry.ByName(ch.Info().Name)
+		if entry == nil || entry.MaxTurns <= 0 {
+			continue
+		}
+		limits[chID] = entry.MaxTurns
+	}
+	return limits
+}
+
 // buildChannelContext constructs the ChannelContext for role resolution by
 // looking up which provider connections and remote MCPs are scoped to this
 // channel.

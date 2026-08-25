@@ -434,6 +434,11 @@ type Channel struct {
 	// own model (e.g. Opus for admin work, Sonnet for lightweight monitoring).
 	Model claudecli.Model `yaml:"model,omitempty"`
 
+	// MaxTurns caps agentic turns per message on this channel. Zero means
+	// inherit the user-level max_turns. Lets a monitoring channel stop short
+	// while a dev channel runs long.
+	MaxTurns int `yaml:"max_turns,omitempty"`
+
 	// Telegram holds Telegram-specific channel config.
 	// Non-nil when Type is "telegram".
 	Telegram *TelegramChannelConfig `yaml:"telegram,omitempty"`
@@ -695,6 +700,10 @@ func validate(cfg *Config) error {
 
 			if ch.Model != "" && !claudecli.ValidModel(ch.Model) {
 				return fmt.Errorf("user %q channel %q: unknown model %q (known: %v)", u.ID, ch.Name, ch.Model, claudecli.ValidModels())
+			}
+
+			if ch.MaxTurns < 0 {
+				return fmt.Errorf("user %q channel %q: max_turns must be zero (inherit) or positive, got %d", u.ID, ch.Name, ch.MaxTurns)
 			}
 
 			for k, t := range ch.AllowedTools {

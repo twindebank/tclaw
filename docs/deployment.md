@@ -175,6 +175,33 @@ the agent commits and pushes the vault every turn, so a read-only vault would si
 Guidance (vault conventions, git workflow) is seeded as a `knowledge` skill in the user's
 `home/.claude/skills/`; the agent loads it on demand, and tclaw auto-syncs after every turn.
 
+## Turn Limits
+
+`max_turns` caps how many agentic turns the claude CLI takes inside one message. When the cap is hit
+the turn ends and the chat gets `⚠️ Turn limit reached (N/N). Send another message to continue.`
+
+Set it per user, per channel, or both:
+
+```yaml
+users:
+  - id: alice
+    max_turns: 50            # applies to every channel that sets none of its own
+    channels:
+      - name: email
+        max_turns: 10        # answer and stop
+      - name: dev
+        max_turns: 150       # long multi-step work
+      - name: phone          # no max_turns — inherits the 50 above
+```
+
+The channel value wins where it is set. With neither set, the built-in default is 10
+(`defaultMaxTurns` in `internal/agent/agent.go`). Zero means inherit, so it cannot be used to stop a
+channel dead; a negative value is rejected at config load.
+
+The agent sets this itself when it stands up a channel: `channel_create` and `channel_edit` both take
+`max_turns`, and `channel_read` shows the current value. Passing `0` to `channel_edit` clears the
+channel's own limit and puts it back on the user-level one.
+
 ## Message Debounce
 
 A burst of user messages that lands close together — most visibly a photo album, which every

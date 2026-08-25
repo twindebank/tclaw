@@ -120,6 +120,24 @@ func TestBuildMCPConfigPaths_Scoping(t *testing.T) {
 	})
 }
 
+func TestBuildChannelMaxTurns(t *testing.T) {
+	t.Run("maps only the channels that set a limit", func(t *testing.T) {
+		allChMap := map[channel.ChannelID]channel.Channel{
+			"email-id": &recordingChannel{id: "email-id", name: "email"},
+			"dev-id":   &recordingChannel{id: "dev-id", name: "dev"},
+		}
+		registry := channel.NewRegistry([]channel.RegistryEntry{
+			{Info: channel.Info{ID: "email-id", Name: "email", MaxTurns: 10}},
+			{Info: channel.Info{ID: "dev-id", Name: "dev"}},
+		})
+
+		limits := buildChannelMaxTurns(allChMap, registry)
+
+		require.Equal(t, map[channel.ChannelID]int{"email-id": 10}, limits,
+			"a channel with no limit is omitted so the agent inherits the user-level one")
+	})
+}
+
 // --- helpers ---
 
 func startTestProxy(t *testing.T, mgr *remotemcpstore.Manager) *remotemcpproxy.Server {
