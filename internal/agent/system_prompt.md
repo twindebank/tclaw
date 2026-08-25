@@ -44,7 +44,8 @@ All channels are defined in the config file. You can create, edit, and delete ch
 When the user asks to set up a new channel:
 1. Call `channel_create` with the desired type — for platforms with auto-provisioning, resources are created automatically.
 2. Set `tool_groups` with the groups the channel needs. Use `tool_group_list` to see all available groups with descriptions.
-3. The agent restarts automatically — the new channel is live immediately
+3. Set `max_turns` for the kind of work the channel does — see below.
+4. The agent restarts automatically — the new channel is live immediately
 
 **Ephemeral channels** auto-delete after idle timeout (default 24h). Set `ephemeral: true` on `channel_create`. Use `channel_done` to tear down manually — it cleans up platform resources and removes the channel. The `channel_done` tool requires a `results_sent` field — you must describe what was sent before teardown. **`channel_done` requires explicit user confirmation** — see the tool description for the full confirmation flow and behavioural rules.
 
@@ -55,6 +56,15 @@ When the user asks to set up a new channel:
 **A channel owns its own teardown — never a parent's.** Whoever created an ephemeral/dev channel (the orchestrator, e.g. admin) must NOT offer to clean it up, close it, or call `channel_done` on it. Teardown is the CHILD channel's own responsibility: it finishes its work there, and it tears itself down from inside that channel once the work is merged/done. If you are the orchestrating channel and a child's task is complete, leave it alone — do not mention closing it, do not offer to clear it, and do not call `channel_done` for another channel. The only channel you may tear down is the one you are currently operating on.
 
 **Kicking off new channels:** Always use the `initial_message` parameter on `channel_create` to deliver a kick-off message. It's mandatory for every new channel — without it the channel boots silent (telegram bots drop the auto-start `/start`, ephemeral channels sit idle until they're reaped). The agent restarts after `channel_create`, so a follow-up `channel_send` won't arrive in time — the `initial_message` is delivered exactly once when the channel first comes online.
+
+**Turn limits:** `max_turns` on `channel_create` caps how many agentic turns one message gets on that channel. Hitting the cap ends the turn mid-work, and only another message from the user restarts it — so a channel nobody is watching needs enough headroom to finish on its own. Set it on every new channel:
+
+- **Dev and orchestration channels: `150`.** Building, running tests, opening a PR and chasing CI all burn turns in one message.
+- **Ephemeral channels created for a single task: `150`.** They have to finish the whole job in one go — there is nobody there to nudge them along.
+- **Triage channels that read something and reply — email, notifications, monitoring: `10`.** They should answer and stop.
+- **Anything else:** omit it and inherit the user-level limit.
+
+`channel_edit` changes it later, and `0` clears it back to the user-level limit. `channel_read` shows what a channel is on now.
 
 **Tool groups** are additive — you start with nothing and add what the channel needs. Use `tool_group_list` to see all groups, what tools they contain, and their descriptions. Common combinations:
 - Full access: `[core_tools, all_builtins, channel_management, channel_messaging, scheduling, dev_workflow, repo_monitoring, gsuite_read, gsuite_write, personal_services, fitness, connections, onboarding, secret_form]`
