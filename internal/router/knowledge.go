@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"tclaw/internal/agent"
+	"tclaw/internal/memorylayout"
 	"tclaw/internal/user"
 )
 
@@ -50,6 +51,38 @@ func seedKnowledgeSkill(userID user.ID, homeDir, knowledgeDir string) {
 	skillPath := filepath.Join(skillDir, "SKILL.md")
 	if err := os.WriteFile(skillPath, []byte(content), 0o600); err != nil {
 		slog.Error("failed to seed knowledge SKILL.md", "user", userID, "err", err)
+	}
+}
+
+// seedKnowledgeExtrasParams says which user is being seeded and which vault
+// directories install into their Claude config directory.
+type seedKnowledgeExtrasParams struct {
+	UserID       user.ID
+	HomeDir      string
+	KnowledgeDir string
+	ClaudeDirs   map[string]string
+}
+
+// seedKnowledgeExtras installs the skills, subagents and rule files the vault
+// carries, so a playbook written on a laptop is available here too.
+func seedKnowledgeExtras(params seedKnowledgeExtrasParams) {
+	// No new capability, despite copying out of a writable clone: the agent can
+	// already write these directories directly. What this adds is the vault as
+	// the place they are kept, so a change made anywhere reaches every machine.
+	for name, relative := range params.ClaudeDirs {
+		source := filepath.Join(params.KnowledgeDir, relative)
+		if _, err := os.Stat(source); err != nil {
+			// A vault that has not been cloned yet, or does not carry this
+			// directory. Neither is an error worth stopping a boot for.
+			slog.Debug("vault has no directory to install", "user", params.UserID, "name", name, "dir", source, "err", err)
+			continue
+		}
+		target := filepath.Join(params.HomeDir, memorylayout.ConfigDirName, name)
+		if err := copySkillTree(source, target); err != nil {
+			slog.Error("failed to install from vault", "user", params.UserID, "name", name, "dir", source, "err", err)
+			continue
+		}
+		slog.Debug("installed from vault", "user", params.UserID, "name", name, "dir", source)
 	}
 }
 

@@ -27,6 +27,20 @@ const (
 
 	// EnvChannel names the channel whose turn is running.
 	EnvChannel = "TCLAW_CHANNEL"
+
+	// EnvConfigDir is Claude Code's own config directory variable, set to the
+	// path the CLI already defaults to so hooks and skills name the same files.
+	EnvConfigDir = "CLAUDE_CONFIG_DIR"
+
+	// ConfigDirName is Claude Code's config directory inside a user's home.
+	ConfigDirName = ".claude"
+
+	// FeedbackDirName holds the retro queue, which is written during a turn and
+	// read much later by a session that did not see any of them happen.
+	FeedbackDirName = "feedback"
+
+	// InboxFileName is the queue itself, one JSON object per line.
+	InboxFileName = "inbox.jsonl"
 )
 
 // RulesDir is the rulebook pool inside a memory directory.
@@ -37,6 +51,21 @@ func RulesDir(memoryDir string) string {
 // ChannelDir is one channel's knowledge directory inside a memory directory.
 func ChannelDir(memoryDir, channelName string) string {
 	return filepath.Join(memoryDir, ChannelsDirName, channelName)
+}
+
+// ConfigDir is Claude Code's config directory inside a user's home.
+func ConfigDir(homeDir string) string {
+	return filepath.Join(homeDir, ConfigDirName)
+}
+
+// FeedbackDir holds the retro queue inside a config directory.
+func FeedbackDir(configDir string) string {
+	return filepath.Join(configDir, FeedbackDirName)
+}
+
+// InboxPath is the file captured corrections are appended to.
+func InboxPath(configDir string) string {
+	return filepath.Join(FeedbackDir(configDir), InboxFileName)
 }
 
 // InRules reports whether path is a file inside the rulebook pool. Both sides are

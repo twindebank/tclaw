@@ -99,4 +99,8 @@ type Knowledge struct {
 	// CommitName and CommitEmail are the git identity for agent commits.
 	CommitName  string
 	CommitEmail string
+
+	// ClaudeDirs installs directories the vault carries into the agent's Claude
+	// config directory, keyed by the name they take there.
+	ClaudeDirs map[string]string
 }

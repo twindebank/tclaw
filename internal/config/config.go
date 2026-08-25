@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -262,6 +263,10 @@ type KnowledgeConfig struct {
 	// Optional; a tclaw noreply identity is used when empty.
 	CommitName  string `yaml:"commit_name,omitempty"`
 	CommitEmail string `yaml:"commit_email,omitempty"`
+
+	// ClaudeDirs installs directories the vault carries into the agent's Claude
+	// config directory, keyed by the name they take there: {skills: path}.
+	ClaudeDirs map[string]string `yaml:"claude_dirs,omitempty"`
 }
 
 // normalize fills defaults. Mutates the receiver in place.
@@ -272,7 +277,27 @@ func (k *KnowledgeConfig) normalize() error {
 	if k.MountAt == "" {
 		k.MountAt = defaultKnowledgeMountAt
 	}
+	for name, dir := range k.ClaudeDirs {
+		// The source is joined onto the clone and the name onto the agent's own
+		// Claude directory, so either one climbing out would read or write files
+		// anywhere on the volume.
+		if !plainRelativePath(dir) {
+			return fmt.Errorf("claude_dirs %q: %q must be a plain path inside the vault", name, dir)
+		}
+		if name == "" || strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
+			return fmt.Errorf("claude_dirs %q must be a single directory name", name)
+		}
+	}
 	return nil
+}
+
+// plainRelativePath reports whether a path stays inside the directory it is
+// joined onto.
+func plainRelativePath(path string) bool {
+	if path == "" || filepath.IsAbs(path) || path != filepath.Clean(path) {
+		return false
+	}
+	return path != ".." && !strings.HasPrefix(path, ".."+string(filepath.Separator))
 }
 
 // defaultKnowledgeMountAt is where the vault lands under the user directory.
@@ -1011,6 +1036,7 @@ func (u *User) ToUserConfig() user.Config {
 			Repo:        u.Knowledge.Repo,
 			CommitName:  u.Knowledge.CommitName,
 			CommitEmail: u.Knowledge.CommitEmail,
+			ClaudeDirs:  u.Knowledge.ClaudeDirs,
 		}
 	}
 	var repos []user.Repo

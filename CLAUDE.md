@@ -30,7 +30,7 @@
 - `internal/config/` — YAML config loading + `config.Writer` for atomic mutations.
 - `internal/router/` — top-level orchestrator. Per-user lifecycle, channel building, MCP servers. Only stateful struct.
 - `internal/tool/` — MCP tool packages. Each is self-contained with `toolpkg.Package` interface.
-- `internal/hooks/` — Claude Code hooks, built as the separate `tclaw-hooks` binary. The only place a direct file write can be caught; an MCP tool never sees one.
+- `internal/hooks/` — Claude Code hooks, built as the separate `tclaw-hooks` binary. The only place a direct file write can be caught, and the only place the user's own words can be captured; an MCP tool never sees either.
 - `internal/memorylayout/` — the paths and env vars the agent loop and the hook binary must agree on.
 - Per-user isolation via `HOME` env var on claude subprocess — all CLI state scoped per user
 

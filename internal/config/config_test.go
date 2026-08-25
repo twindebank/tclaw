@@ -282,6 +282,50 @@ func TestValidate_Knowledge(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "repo is required")
 	})
+
+	t.Run("accepts vault directories to install into the Claude config dir", func(t *testing.T) {
+		cfg := withVault(repo.AccessFullWrite)
+		cfg.Users[0].Knowledge.ClaudeDirs = map[string]string{
+			"skills":        "vault-claude/skills",
+			"agents":        "vault-claude/agents",
+			"patterns":      "vault-claude/rules",
+			"output-styles": "vault-claude/output-styles",
+		}
+		require.NoError(t, validate(cfg))
+	})
+
+	t.Run("rejects a source path that climbs out of the vault", func(t *testing.T) {
+		// The source is joined onto the clone, so a path that escapes it would
+		// install files from anywhere on the volume.
+		escapes := map[string]string{
+			"a parent path":    "../../secrets",
+			"an absolute path": "/data/tclaw",
+			"an unclean path":  "vault-claude/../../etc",
+			"a trailing slash": "vault-claude/skills/",
+			"an empty path":    "",
+		}
+		for name, dir := range escapes {
+			t.Run(name, func(t *testing.T) {
+				cfg := withVault(repo.AccessFullWrite)
+				cfg.Users[0].Knowledge.ClaudeDirs = map[string]string{"skills": dir}
+				err := validate(cfg)
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "must be a plain path inside the vault")
+			})
+		}
+	})
+
+	t.Run("rejects a target name that is not a single directory", func(t *testing.T) {
+		// The name is joined onto the agent's own Claude directory, so anything
+		// with a separator in it would write outside that directory.
+		for _, name := range []string{"", "..", ".", "skills/nested", `skills\nested`} {
+			cfg := withVault(repo.AccessFullWrite)
+			cfg.Users[0].Knowledge.ClaudeDirs = map[string]string{name: "vault-claude/skills"}
+			err := validate(cfg)
+			require.Error(t, err, "name %q", name)
+			require.Contains(t, err.Error(), "must be a single directory name")
+		}
+	})
 }
 
 func TestValidate_CredentialSlots(t *testing.T) {

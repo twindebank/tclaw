@@ -168,12 +168,33 @@ knowledge:
   mount_at: knowledge              # dir under <user>/; keeps ../knowledge valid
   commit_name: My Name
   commit_email: me@users.noreply.github.com
+  claude_dirs:                     # optional; <name under home/.claude/>: <path in the vault>
+    skills: claude/skills
+    agents: claude/agents
 ```
 
 Validation rejects a `knowledge.repo` that names no declared repo, or one whose tier cannot push —
 the agent commits and pushes the vault every turn, so a read-only vault would silently fail to save.
 Guidance (vault conventions, git workflow) is seeded as a `knowledge` skill in the user's
 `home/.claude/skills/`; the agent loads it on demand, and tclaw auto-syncs after every turn.
+
+### Installing what the vault carries
+
+`claude_dirs` maps a directory in the agent's Claude config directory to the vault directory that
+fills it. On every boot the contents are copied across, so a skill, a subagent or a rule file written
+on a laptop is available here too, without a deploy. The CLI discovers `skills/` and `agents/` on its
+own; anything else is there for a skill to read by path.
+
+Both halves are checked at config load. The vault path must be a plain relative path — absolute, or
+climbing out with `..`, is rejected, because it is joined onto the clone and one that escaped would
+install files from anywhere on the volume. The name must be a single directory with no separator in
+it, because it is joined onto `home/.claude/`.
+
+They are copied **before** tclaw's own skills, so `knowledge`, `channel-rules` and `gws-tclaw` always
+win a name clash. The vault clone is writable by the agent, and a file it can write must not be able
+to replace the skill that explains tclaw's own machinery. Nothing else here is a new capability: the
+agent can already write those directories directly. What this adds is the vault as the place they are
+kept.
 
 ## Turn Limits
 
@@ -201,6 +222,34 @@ channel dead; a negative value is rejected at config load.
 The agent sets this itself when it stands up a channel: `channel_create` and `channel_edit` both take
 `max_turns`, and `channel_read` shows the current value. Passing `0` to `channel_edit` clears the
 channel's own limit and puts it back on the user-level one.
+
+## The Retro Queue
+
+Corrections are captured as they happen and judged much later, by a session that did not make the
+mistake. The `lesson-capture` hook runs on every message you send, matches it against a set of
+pushback patterns, and appends the matching ones verbatim to
+`home/.claude/feedback/inbox.jsonl`. A hook that refuses a tool call files its refusal there too —
+being stopped is evidence a rule did not hold on its own.
+
+Nothing is judged in the moment. A model grading its own work in the same conversation agrees with
+itself, so the queue is read later, and the only thing the hook puts into the agent's context is what
+the `!log` marker means.
+
+- **`!log` anywhere in a message files it** whether or not it reads like a correction, and means: do
+  not action or debate this now. A message that only writes *about* the marker, quoted in backticks
+  or a fenced block, is not filed.
+- **A prompt over 2000 characters is a paste**, not something typed at you, and is skipped.
+- **A task brief carrying a ground rule is not a correction.** "Add a retry, and don't touch the
+  tests" is work being assigned; "don't use a mock there" on its own is an objection.
+- **Once three rows are waiting**, the hook tells the agent so, and says so again each time the queue
+  grows by another three. The count is in the message, so a repeat reads as a repeat.
+
+`CLAUDE_CONFIG_DIR` is set on the agent subprocess to the directory the CLI already uses. Hooks run
+under a shell that reads no profile, so left unset a skill's `$CLAUDE_CONFIG_DIR/feedback` path
+resolves to the filesystem root, which the sandbox refuses.
+
+Draining the queue is a skill, not a tclaw feature: put one in the vault and name its directory in
+`knowledge.claude_dirs`.
 
 ## Message Debounce
 

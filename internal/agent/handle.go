@@ -514,6 +514,12 @@ func buildEnv(opts Options, channelName string) []string {
 	overrides := make(map[string]string)
 	if opts.HomeDir != "" {
 		overrides["HOME"] = opts.HomeDir
+
+		// The same directory the CLI would pick on its own, said out loud so a
+		// hook and a skill name the same files. Hooks run under a shell that
+		// reads no profile, so an unset variable makes a skill's paths resolve
+		// to the filesystem root, which the sandbox then refuses.
+		overrides[memorylayout.EnvConfigDir] = memorylayout.ConfigDir(opts.HomeDir)
 	}
 	if opts.APIKey != "" {
 		overrides["ANTHROPIC_API_KEY"] = opts.APIKey

@@ -8,12 +8,21 @@ import (
 // BinaryName is the hook binary as installed in the image.
 const BinaryName = "tclaw-hooks"
 
+// HookEvent is one of Claude Code's hook events.
+type HookEvent string
+
+const (
+	eventPreToolUse       HookEvent = "PreToolUse"
+	eventPostToolUse      HookEvent = "PostToolUse"
+	eventUserPromptSubmit HookEvent = "UserPromptSubmit"
+)
+
 // HookSpec is one registration. Matchers name the tools the hook needs to see:
 // a hook checks the target itself, so a wide matcher only costs a process start,
 // but every tool call pays that.
 type HookSpec struct {
 	Name    string
-	Event   string
+	Event   HookEvent
 	Matcher string
 }
 
@@ -24,8 +33,10 @@ const writeTools = "Write|Edit|MultiEdit|NotebookEdit"
 // built from it, so a hook cannot be implemented and left unregistered, or
 // registered under an event it never sees.
 var Manifest = []HookSpec{
-	{"rules-gate", "PreToolUse", writeTools},
-	{"rules-index", "PostToolUse", writeTools},
+	{"rules-gate", eventPreToolUse, writeTools},
+	{"rules-index", eventPostToolUse, writeTools},
+	// No matcher: a prompt is not a tool call, so this one sees every turn.
+	{"lesson-capture", eventUserPromptSubmit, ""},
 }
 
 // SettingsBlock builds the "hooks" value for a user's settings.json, pointing
@@ -44,7 +55,7 @@ func SettingsBlock(binary string) (json.RawMessage, error) {
 		Matcher string    `json:"matcher,omitempty"`
 		Hooks   []command `json:"hooks"`
 	}
-	events := map[string][]group{}
+	events := map[HookEvent][]group{}
 	for _, hook := range Manifest {
 		events[hook.Event] = append(events[hook.Event], group{
 			Matcher: hook.Matcher,
