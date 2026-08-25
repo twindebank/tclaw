@@ -645,7 +645,8 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				slog.Warn("failed to parse system event", "err", err)
 				continue
 			}
-			if sys.Subtype == claudecli.SystemSubtypeInit {
+			switch sys.Subtype {
+			case claudecli.SystemSubtypeInit:
 				initDelay := time.Since(cliStarted)
 				slog.Info("cli init received", "channel", channelID, "init_delay_ms", initDelay.Milliseconds())
 				if sys.SessionID != "" {
@@ -654,6 +655,24 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				if err := tw.write(phaseStatus, "✅ Session ready, generating response...\n"); err != nil {
 					return "", err
 				}
+			case claudecli.SystemSubtypeInformational:
+				if sys.Level == claudecli.NoticeLevelInfo {
+					// This subtype is the CLI's general banner channel, not the
+					// hooks' own, and it keeps this level to transcript mode.
+					slog.Debug("skipping transcript-only notice", "level", sys.Level)
+					continue
+				}
+				notice := formatNotice(sys.Content)
+				if notice == "" {
+					// Writing it would cost a message edit and show nothing.
+					slog.Debug("notice had nothing to show", "level", sys.Level)
+					continue
+				}
+				if err := tw.write(phaseStatus, notice); err != nil {
+					return "", err
+				}
+			default:
+				slog.Debug("unhandled system event subtype", "subtype", sys.Subtype)
 			}
 
 		case claudecli.EventContentBlockStart:

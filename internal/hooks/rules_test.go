@@ -86,8 +86,24 @@ func TestRulesIndex(t *testing.T) {
 		})
 
 		require.Equal(t, 0, code)
-		require.Contains(t, out, "invoices.md")
-		require.Contains(t, out, filepath.Join("channels", "admin", "CLAUDE.md"))
+
+		var advice struct {
+			SystemMessage      string `json:"systemMessage"`
+			HookSpecificOutput struct {
+				HookEventName     string `json:"hookEventName"`
+				AdditionalContext string `json:"additionalContext"`
+			} `json:"hookSpecificOutput"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(out), &advice), "output: %s", out)
+
+		require.Equal(t, "PostToolUse", advice.HookSpecificOutput.HookEventName)
+		require.Contains(t, advice.HookSpecificOutput.AdditionalContext, "invoices.md")
+		require.Contains(t, advice.HookSpecificOutput.AdditionalContext,
+			filepath.Join("channels", "admin", "CLAUDE.md"))
+
+		// The notice is what reaches the chat, so the user sees the hook acted.
+		require.Contains(t, advice.SystemMessage, "rules-index")
+		require.Contains(t, advice.SystemMessage, "invoices.md")
 	})
 
 	t.Run("says nothing when a channel already mentions it", func(t *testing.T) {

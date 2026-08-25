@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"tclaw/internal/claudecli"
+	"tclaw/internal/hooks"
 )
 
 func formatBlock(block claudecli.ContentBlock) string {
@@ -25,12 +26,49 @@ func formatBlock(block claudecli.ContentBlock) string {
 	return ""
 }
 
-// Icons that head a status line, so a skill invocation is distinguishable from an
-// ordinary tool call at a glance.
 const (
-	iconTool  = "🔧"
-	iconSkill = "🎓"
+	iconTool   = "🔧"
+	iconSkill  = "🎓"
+	iconHook   = "🪝"
+	iconNotice = "ℹ️"
 )
+
+// noticeSpeaker separates what produced a notice from the notice itself, as in
+// "PostToolUse:Write says: <notice>". The CLI repeats it on every line.
+const noticeSpeaker = " says: "
+
+// formatNotice renders a notice the CLI streamed for the user, which is how a
+// hook that ran without refusing anything gets to say so. Empty when the notice
+// carries nothing to show.
+func formatNotice(content string) string {
+	var lines []string
+	for _, line := range strings.Split(content, "\n") {
+		if line = strings.TrimSpace(stripSpeaker(line)); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+
+	shown := truncate(lines[0], quoteMaxLen)
+	if len(lines) > 1 {
+		// This channel also carries the CLI's own banners, which run to dozens of
+		// lines. They are dropped rather than filling the chat, but not silently.
+		shown += fmt.Sprintf(" (+%d more)", len(lines)-1)
+	}
+	return fmt.Sprintf("\n%s %s\n", iconNotice, shown)
+}
+
+// stripSpeaker drops the CLI's lead-in naming what produced a notice. What it
+// names never contains a space, so a notice that says "says:" itself survives.
+func stripSpeaker(line string) string {
+	speaker, said, found := strings.Cut(line, noticeSpeaker)
+	if !found || strings.ContainsAny(speaker, " \t") {
+		return line
+	}
+	return said
+}
 
 // formatToolUse renders a tool invocation with its arguments.
 // Prefixed with a newline so it doesn't run into preceding text.
@@ -90,10 +128,27 @@ func formatSkillUse(block claudecli.ContentBlock) string {
 	return fmt.Sprintf("\n%s %s (%s)\n", iconSkill, skill.Skill, truncateValue(skill.Args))
 }
 
-// truncateValue keeps an argument value within 60 bytes for a one-line status
-// message, cutting on a rune boundary so a multi-byte character can't be split.
+// Byte budgets for the two things a status line quotes: a tool argument, and a
+// line of text from a hook or from the CLI.
+const (
+	argMaxLen   = 60
+	quoteMaxLen = 120
+)
+
+// firstLine keeps a status line to one line of whatever it is quoting.
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return line
+}
+
+// truncateValue keeps an argument value within its budget for a one-line status message.
 func truncateValue(s string) string {
-	const maxLen = 60
+	return truncate(s, argMaxLen)
+}
+
+// truncate cuts s to maxLen bytes, on a rune boundary so a multi-byte character
+// can't be split.
+func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
@@ -117,6 +172,9 @@ func formatToolResult(raw json.RawMessage) string {
 	// Only attempt to extract meta from objects.
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || trimmed[0] != '{' {
+		if refusal := parseHookRefusal(raw); refusal != nil {
+			return formatHookRefusal(*refusal)
+		}
 		return fmt.Sprintf("  ↳ Done (%s)\n", formatBytes(len(raw)))
 	}
 
@@ -138,6 +196,90 @@ func formatToolResult(raw json.RawMessage) string {
 		return fmt.Sprintf("  ↳ Done (%s)\n", strings.Join(parts, " · "))
 	}
 	return "  ↳ Done\n"
+}
+
+// hookRefusal is a tool call a PreToolUse hook refused.
+type hookRefusal struct {
+	// Hook is the hook's own name, empty when the command that ran doesn't name one.
+	Hook string
+
+	Tool   string
+	Reason string
+}
+
+// A refused call comes back as "PreToolUse:<Tool> hook error: [<command>]: <stderr>",
+// sometimes behind an "Error: " lead-in. No system event carries a refusal.
+const (
+	hookErrorMarker  = " hook error: "
+	hookRefusalEvent = "PreToolUse:"
+
+	// hookNoStderr is what the CLI puts in place of the reason when the hook
+	// refused without writing one.
+	hookNoStderr = "No stderr output"
+)
+
+// parseHookRefusal reads the CLI's report of a refused tool call out of a string
+// tool result. Nil means the result is an ordinary one.
+func parseHookRefusal(raw json.RawMessage) *hookRefusal {
+	var result string
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil
+	}
+
+	refused, rest, found := strings.Cut(result, hookErrorMarker)
+	if !found {
+		return nil
+	}
+	// What comes before the marker ends "PreToolUse:<Tool>", with whatever the
+	// CLI prefixed ("Error: ") in front of it.
+	_, tool, found := strings.Cut(refused, hookRefusalEvent)
+	if !found || tool == "" {
+		return nil
+	}
+
+	// The command that refused is bracketed, and the reason is its stderr.
+	if !strings.HasPrefix(rest, "[") {
+		return nil
+	}
+	command, reason, found := strings.Cut(strings.TrimPrefix(rest, "["), "]: ")
+	if !found {
+		return nil
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == hookNoStderr {
+		// The hook refused and said nothing; passing that on says nothing either.
+		reason = ""
+	}
+
+	return &hookRefusal{Hook: tclawHookName(command), Tool: tool, Reason: reason}
+}
+
+// tclawHookName picks tclaw's own hook name out of the command the CLI reported.
+// Any other command belongs to somebody else's hook, whose text is not a name.
+func tclawHookName(command string) string {
+	if !strings.Contains(command, hooks.BinaryName) {
+		return ""
+	}
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[len(fields)-1]
+}
+
+// formatHookRefusal renders a refused tool call, so it reads as a refusal rather
+// than the "Done" every other tool result gets.
+func formatHookRefusal(refusal hookRefusal) string {
+	who := "a PreToolUse hook"
+	if refusal.Hook != "" {
+		who = refusal.Hook
+	}
+
+	reason := truncate(strings.TrimSpace(firstLine(refusal.Reason)), quoteMaxLen)
+	if reason == "" {
+		return fmt.Sprintf("  ↳ %s %s blocked %s\n", iconHook, who, refusal.Tool)
+	}
+	return fmt.Sprintf("  ↳ %s %s blocked %s: %s\n", iconHook, who, refusal.Tool, reason)
 }
 
 func formatBytes(n int) string {
