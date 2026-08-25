@@ -23,6 +23,7 @@ type Config struct {
 	AllowedTools    []claudecli.Tool
 	DisallowedTools []claudecli.Tool
 	MaxTurns        int
+	OutputStyle     string
 	Debug           bool
 
 	// MessageDebounce coalesces same-channel user messages that arrive within

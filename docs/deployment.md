@@ -215,6 +215,34 @@ to replace the skill that explains tclaw's own machinery. Nothing else here is a
 agent can already write those directories directly. What this adds is the vault as the place they are
 kept.
 
+## Output Style
+
+`output_style` names a Claude Code output style to write every reply in, by the `name:` in that style's
+frontmatter. It sets the agent's voice, so it is worth getting right per channel:
+
+```yaml
+users:
+  - id: alice
+    output_style: "Plain Words"   # applies to every channel that sets none of its own
+    channels:
+      - name: email
+        output_style: "none"      # off here, whatever the user-level setting says
+      - name: dev                 # no output_style — inherits "Plain Words" above
+```
+
+The channel value wins where it is set. Empty means inherit, so `"none"` is what turns it off for one
+channel — empty cannot mean both. With neither set, the CLI's own default applies.
+
+**The style file has to be installed first.** Put it in the vault and name its directory in
+`knowledge.claude_dirs` as `output-styles`; the CLI reads them from `home/.claude/output-styles/`. A
+style named here but not installed leaves the CLI falling back to its default, silently.
+
+It is passed per turn as `--settings '{"outputStyle":"..."}'` rather than written into `settings.json`.
+That file is mounted read-only so a prompt injection cannot install its own hooks, and it is rebuilt
+from `hooks.Manifest` on every boot — a style written there would be a second writer of one file. The
+flag is additive, so the hook registrations in `settings.json` still apply (verified: a `PreToolUse`
+guard still refused a write with the flag passed).
+
 ## Turn Limits
 
 `max_turns` caps how many agentic turns the claude CLI takes inside one message. When the cap is hit

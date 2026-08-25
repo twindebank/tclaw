@@ -75,6 +75,10 @@ type Info struct {
 	// inherit the user-level limit.
 	MaxTurns int
 
+	// OutputStyle overrides the user-level output style here. Empty inherits it;
+	// "none" turns it off for this channel.
+	OutputStyle string
+
 	// AllowedTools is the resolved set of tools this channel can use.
 	// Populated at creation time from tool_groups, role presets, or explicit lists.
 	// Uses []string (not []claudecli.Tool) to avoid circular dependency.

@@ -117,6 +117,23 @@ func buildChannelMaxTurns(
 	return limits
 }
 
+// buildChannelOutputStyles maps channel IDs to the output style set on each,
+// leaving out the ones that inherit the user-level style.
+func buildChannelOutputStyles(
+	allChMap map[channel.ChannelID]channel.Channel,
+	registry *channel.Registry,
+) map[channel.ChannelID]string {
+	styles := make(map[channel.ChannelID]string)
+	for chID, ch := range allChMap {
+		entry := registry.ByName(ch.Info().Name)
+		if entry == nil || entry.OutputStyle == "" {
+			continue
+		}
+		styles[chID] = entry.OutputStyle
+	}
+	return styles
+}
+
 // buildChannelContext constructs the ChannelContext for role resolution by
 // looking up which provider connections and remote MCPs are scoped to this
 // channel.
