@@ -300,7 +300,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	}
 	slog.Info("mcp config ready", "user", mu.cfg.ID, "addr", mcpAddr, "config", mcpConfigPath, "remotes", len(remotes))
 
-	// Read per-user setup token from Fly secret (e.g. CLAUDE_SETUP_TOKEN_THEO).
+	// Read per-user setup token from Fly secret (e.g. CLAUDE_SETUP_TOKEN_ALICE).
 	// Passed to the agent as opts.SetupToken, which buildEnv() maps to
 	// CLAUDE_CODE_OAUTH_TOKEN for the claude subprocess.
 	setupTokenEnvVar := agent.SetupTokenEnvVarName(string(mu.cfg.ID))
@@ -624,6 +624,17 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// reset that cleared home/.claude/ is repaired before the next agent spawn.
 		if mu.cfg.Knowledge != nil {
 			seedKnowledgeSkill(mu.cfg.ID, homeDir, dirs.Knowledge)
+
+			// Before tclaw's own skills below, so those always win a name clash.
+			// These come out of a clone the agent can write, and a vault file must
+			// not be able to replace the skill that explains tclaw's own machinery.
+			seedKnowledgeExtras(seedKnowledgeExtrasParams{
+				UserID:       mu.cfg.ID,
+				HomeDir:      homeDir,
+				KnowledgeDir: dirs.Knowledge,
+				ClaudeDirs:   mu.cfg.Knowledge.ClaudeDirs,
+				ClaudeLinks:  mu.cfg.Knowledge.ClaudeLinks,
+			})
 		}
 
 		// Re-seed the Google Workspace CLI skills each iteration (idempotent

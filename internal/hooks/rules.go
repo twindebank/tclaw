@@ -27,13 +27,17 @@ func rulesGate() {
 	if !memorylayout.InRules(memoryDir, target) {
 		pass()
 	}
-	block(fmt.Sprintf(`Refused: %s is a rulebook, and rulebooks are the user's standing decisions.
+	block(blockParams{
+		Guard:     "rules-gate",
+		SessionID: p.SessionID,
+		Reason: fmt.Sprintf(`Refused: %s is a rulebook, and rulebooks are the user's standing decisions.
 
 Proposing a change is your job and deciding is theirs. Use `+"`rule_propose`"+` with the full text you
 want the file to have — it asks in this channel and writes the file only after the user replies "yes".
 
 Reading is not restricted: you can read any rulebook in %s at any time, including ones this channel
-does not load automatically.`, filepath.Base(target), memorylayout.RulesDir(memoryDir)))
+does not load automatically.`, filepath.Base(target), memorylayout.RulesDir(memoryDir)),
+	})
 }
 
 // rulesIndex notices a rulebook no channel mentions. A rulebook nothing points at
@@ -60,7 +64,7 @@ func rulesIndex() {
 	if channelName == "" {
 		channelName = "this channel"
 	}
-	advise("PostToolUse", fmt.Sprintf(
+	advise(eventPostToolUse, fmt.Sprintf(
 		"No channel mentions %s, so no channel loads it and nobody will come across it. "+
 			"Add it to %s: `@../../%s/%s` under the loaded list if it applies to most work there, "+
 			"or a line under the available list with the work that should send you to it.",

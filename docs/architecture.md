@@ -71,6 +71,11 @@ that reads no profile, so a command relying on an environment variable runs noth
 Which rulebooks a channel loads is not a boundary — it is `@`-imports in that channel's own CLAUDE.md,
 which the agent maintains freely. Scoping decides what arrives in context, never what may be read.
 
+A refusal also files a row in the retro queue, from inside `block()` rather than at each call site, so
+a guard cannot be written that stops something without leaving the evidence a later retro reads. The
+same queue is where `lesson-capture` puts the user's own pushback — see the retro section in
+`docs/deployment.md` for what it captures and what it deliberately ignores.
+
 ### 4. MCP Tool Boundary
 - Per-user MCP server on localhost with random bearer token.
 - 1 MiB request body limit, audit logging, permission-gated via `tool_groups`.

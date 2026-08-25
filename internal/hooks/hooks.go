@@ -23,6 +23,12 @@ const exitBlock = 2
 type payload struct {
 	ToolName  string    `json:"tool_name"`
 	ToolInput toolInput `json:"tool_input"`
+
+	// Prompt is what the user just sent, on UserPromptSubmit only.
+	Prompt string `json:"prompt"`
+
+	// SessionID ties a queued row back to the turn it came from.
+	SessionID string `json:"session_id"`
 }
 
 type toolInput struct {
@@ -50,6 +56,8 @@ func Run(args []string) {
 		rulesGate()
 	case "rules-index":
 		rulesIndex()
+	case "lesson-capture":
+		lessonCapture()
 	default:
 		slog.Warn("unknown hook, passing", "hook", args[1])
 		pass()
@@ -62,19 +70,35 @@ func pass() {
 	os.Exit(0)
 }
 
+// blockParams is what a refusal needs: the reason shown to the agent, and enough
+// to file the row a later retro reads.
+type blockParams struct {
+	Guard     string
+	SessionID string
+	Reason    string
+}
+
 // block refuses the tool call and hands the agent the reason.
-func block(reason string) {
-	fmt.Fprintln(os.Stderr, reason)
+func block(params blockParams) {
+	// Filed from here rather than at each call site: being stopped is the
+	// evidence a retro reads, so no guard may leave it out.
+	queueFeedback(feedbackEntry{
+		SessionID: params.SessionID,
+		Kind:      KindGuardBlock,
+		Trigger:   params.Guard,
+		Detail:    params.Reason,
+	})
+	fmt.Fprintln(os.Stderr, params.Reason)
 	os.Exit(exitBlock)
 }
 
-// advise lets the call through and adds context the agent reads. PostToolUse
-// output is only shown when it is valid JSON, so a marshal failure means saying
-// nothing rather than printing a stray line into the transcript.
-func advise(event, context string) {
+// advise lets the call through and adds context the agent reads. Output is only
+// shown when it is valid JSON, so a marshal failure means saying nothing rather
+// than printing a stray line into the transcript.
+func advise(event HookEvent, context string) {
 	out, err := json.Marshal(map[string]any{
 		"hookSpecificOutput": map[string]string{
-			"hookEventName":     event,
+			"hookEventName":     string(event),
 			"additionalContext": context,
 		},
 	})

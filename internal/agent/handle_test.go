@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -334,6 +335,17 @@ func TestBuildEnv(t *testing.T) {
 				t.Errorf("dangerous env var %q leaked to subprocess", k)
 			}
 		}
+	})
+
+	t.Run("names the config directory so hooks and skills agree on it", func(t *testing.T) {
+		// Hooks run under a shell that reads no profile. Left unset, a skill's
+		// "$CLAUDE_CONFIG_DIR/feedback" resolves to the filesystem root, which
+		// the sandbox then refuses.
+		home := t.TempDir()
+
+		env := buildEnv(Options{HomeDir: home}, "admin")
+
+		require.Contains(t, env, memorylayout.EnvConfigDir+"="+filepath.Join(home, ".claude"))
 	})
 
 	t.Run("allows expected vars", func(t *testing.T) {
