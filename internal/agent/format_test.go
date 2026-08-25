@@ -73,6 +73,53 @@ func TestFormatToolUse(t *testing.T) {
 	})
 }
 
+func TestFormatToolResult(t *testing.T) {
+	t.Run("a refusal names tclaw's own hook and the tool it stopped", func(t *testing.T) {
+		// The text is a real refusal captured from the CLI, path and all.
+		got := formatToolResult(toolResult(t,
+			`Error: PreToolUse:Write hook error: ["/usr/local/bin/tclaw-hooks" rules-gate]: `+
+				"Refused: git.md is a rulebook, and rulebooks are the user's standing decisions."+
+				"\n\nUse `rule_propose` with the full text you want the file to have.\n"))
+
+		require.Equal(t,
+			"  ↳ 🪝 rules-gate blocked Write: Refused: git.md is a rulebook, and rulebooks are the user's standing decisions.\n",
+			got)
+	})
+
+	t.Run("a hook that isn't tclaw's is reported without a name", func(t *testing.T) {
+		got := formatToolResult(toolResult(t,
+			"Error: PreToolUse:Bash hook error: [echo nope >&2; exit 2]: nope\n"))
+
+		require.Equal(t, "  ↳ 🪝 a PreToolUse hook blocked Bash: nope\n", got)
+	})
+
+	t.Run("a long reason is cut to fit one status line", func(t *testing.T) {
+		got := formatToolResult(toolResult(t,
+			"Error: PreToolUse:Edit hook error: [hook]: "+strings.Repeat("0123456789", 20)))
+
+		want := "  ↳ 🪝 a PreToolUse hook blocked Edit: " + strings.Repeat("0123456789", 11) + "0123456...\n"
+		require.Equal(t, want, got, "an over-long reason should be cut and marked")
+	})
+
+	t.Run("a refusal with no reason still says what was blocked", func(t *testing.T) {
+		got := formatToolResult(toolResult(t, "Error: PreToolUse:Write hook error: [hook]: \n"))
+
+		require.Equal(t, "  ↳ 🪝 a PreToolUse hook blocked Write\n", got)
+	})
+
+	t.Run("an ordinary string result is unchanged", func(t *testing.T) {
+		got := formatToolResult(toolResult(t, "hello"))
+
+		require.Equal(t, "  ↳ Done (7 B)\n", got, "a plain result should still report its size")
+	})
+
+	t.Run("an object result still reports its stats", func(t *testing.T) {
+		got := formatToolResult(json.RawMessage(`{"durationSeconds":1.5}`))
+
+		require.Contains(t, got, "1.5s", "duration should survive")
+	})
+}
+
 func TestTruncateValue(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -111,4 +158,14 @@ func TestTruncateValue(t *testing.T) {
 			require.LessOrEqual(t, len(got), 60, "result must fit the 60-byte budget")
 		})
 	}
+}
+
+// --- helpers ---
+
+// toolResult encodes text the way the CLI carries a string tool result.
+func toolResult(t *testing.T, text string) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(text)
+	require.NoError(t, err)
+	return raw
 }
