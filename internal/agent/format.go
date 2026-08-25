@@ -26,8 +26,6 @@ func formatBlock(block claudecli.ContentBlock) string {
 	return ""
 }
 
-// Icons that head a status line, so a tool call, a skill, a hook and a notice
-// are told apart at a glance.
 const (
 	iconTool   = "🔧"
 	iconSkill  = "🎓"
@@ -36,20 +34,40 @@ const (
 )
 
 // noticeSpeaker separates what produced a notice from the notice itself, as in
-// "PostToolUse:Write says: <notice>".
+// "PostToolUse:Write says: <notice>". The CLI repeats it on every line.
 const noticeSpeaker = " says: "
 
 // formatNotice renders a notice the CLI streamed for the user, which is how a
-// hook that ran without refusing anything gets to say so.
+// hook that ran without refusing anything gets to say so. Empty when the notice
+// carries nothing to show.
 func formatNotice(content string) string {
-	// The CLI prefixes what produced the notice, which the notice itself says
-	// again in words the user has a chance of recognising.
-	if _, said, found := strings.Cut(content, noticeSpeaker); found {
-		content = said
+	var lines []string
+	for _, line := range strings.Split(content, "\n") {
+		if line = strings.TrimSpace(stripSpeaker(line)); line != "" {
+			lines = append(lines, line)
+		}
 	}
-	// One line, like every other status line: this channel also carries the CLI's
-	// own banners and slash-command output, which can run long.
-	return fmt.Sprintf("\n%s %s\n", iconNotice, truncate(strings.TrimSpace(firstLine(content)), quoteMaxLen))
+	if len(lines) == 0 {
+		return ""
+	}
+
+	shown := truncate(lines[0], quoteMaxLen)
+	if len(lines) > 1 {
+		// This channel also carries the CLI's own banners, which run to dozens of
+		// lines. They are dropped rather than filling the chat, but not silently.
+		shown += fmt.Sprintf(" (+%d more)", len(lines)-1)
+	}
+	return fmt.Sprintf("\n%s %s\n", iconNotice, shown)
+}
+
+// stripSpeaker drops the CLI's lead-in naming what produced a notice. What it
+// names never contains a space, so a notice that says "says:" itself survives.
+func stripSpeaker(line string) string {
+	speaker, said, found := strings.Cut(line, noticeSpeaker)
+	if !found || strings.ContainsAny(speaker, " \t") {
+		return line
+	}
+	return said
 }
 
 // formatToolUse renders a tool invocation with its arguments.
@@ -189,8 +207,8 @@ type hookRefusal struct {
 	Reason string
 }
 
-// A refused call comes back as "Error: PreToolUse:<Tool> hook error: [<command>]: <stderr>",
-// and only as that: no system event carries a refusal, and only PreToolUse can refuse.
+// A refused call comes back as "PreToolUse:<Tool> hook error: [<command>]: <stderr>",
+// sometimes behind an "Error: " lead-in. No system event carries a refusal.
 const (
 	hookErrorMarker  = " hook error: "
 	hookRefusalEvent = "PreToolUse:"

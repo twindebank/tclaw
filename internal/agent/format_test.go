@@ -141,6 +141,30 @@ func TestFormatNotice(t *testing.T) {
 
 		require.Equal(t, "\nℹ️ the CLI has something to say\n", got)
 	})
+
+	t.Run("a blank first line does not swallow the notice", func(t *testing.T) {
+		got := formatNotice("PostToolUse:Write says: \nPostToolUse:Write says: the real text")
+
+		require.Equal(t, "\nℹ️ the real text\n", got, "a blank lead line is not the notice")
+	})
+
+	t.Run("dropped lines are counted rather than dropped quietly", func(t *testing.T) {
+		got := formatNotice("Stop says: first\nStop says: second\nStop says: third")
+
+		require.Equal(t, "\nℹ️ first (+2 more)\n", got)
+	})
+
+	t.Run("a notice that says \"says:\" itself keeps its own words", func(t *testing.T) {
+		got := formatNotice("Stop says: the rule says: never delete a file")
+
+		require.Equal(t, "\nℹ️ the rule says: never delete a file\n", got,
+			"only the CLI's own single-word lead-in is stripped")
+	})
+
+	t.Run("a notice with nothing in it renders nothing", func(t *testing.T) {
+		require.Empty(t, formatNotice("Stop says: \n  \n"), "the caller skips on an empty result")
+		require.Empty(t, formatNotice(""))
+	})
 }
 
 func TestTruncateValue(t *testing.T) {
