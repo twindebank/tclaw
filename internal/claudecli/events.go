@@ -36,6 +36,18 @@ const (
 	SystemSubtypeInformational SystemEventSubtype = "informational"
 )
 
+// NoticeLevel is how prominently the CLI means an informational notice to be shown.
+type NoticeLevel string
+
+const (
+	// NoticeLevelInfo is transcript-only in the CLI's own UI, so it is not chat material.
+	NoticeLevelInfo NoticeLevel = "info"
+
+	NoticeLevelNotice     NoticeLevel = "notice"
+	NoticeLevelSuggestion NoticeLevel = "suggestion"
+	NoticeLevelWarning    NoticeLevel = "warning"
+)
+
 // Event is a single parsed line from the CLI's stream-json output.
 type Event struct {
 	Type EventType `json:"type"`
@@ -50,6 +62,8 @@ type SystemEvent struct {
 	// Content is the notice text on an informational event, already prefixed by
 	// the CLI with what produced it, e.g. "PostToolUse:Write says: ...".
 	Content string `json:"content,omitempty"`
+
+	Level NoticeLevel `json:"level,omitempty"`
 }
 
 // AssistantEvent is the complete assistant message returned by --print mode.

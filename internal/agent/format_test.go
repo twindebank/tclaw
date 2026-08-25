@@ -101,10 +101,18 @@ func TestFormatToolResult(t *testing.T) {
 		require.Equal(t, want, got, "an over-long reason should be cut and marked")
 	})
 
-	t.Run("a refusal with no reason still says what was blocked", func(t *testing.T) {
-		got := formatToolResult(toolResult(t, "Error: PreToolUse:Write hook error: [hook]: \n"))
+	t.Run("a hook that refused without saying why is reported without a reason", func(t *testing.T) {
+		// The CLI writes this in place of the reason when the hook printed nothing.
+		got := formatToolResult(toolResult(t,
+			"Error: PreToolUse:Write hook error: [/opt/gate]: No stderr output"))
 
 		require.Equal(t, "  ↳ 🪝 a PreToolUse hook blocked Write\n", got)
+	})
+
+	t.Run("a result that names no tool is left alone", func(t *testing.T) {
+		got := formatToolResult(toolResult(t, "Error: Stop hook error: [/opt/gate]: nope"))
+
+		require.Equal(t, "  ↳ Done (43 B)\n", got, "only a PreToolUse refusal is a blocked tool call")
 	})
 
 	t.Run("an ordinary string result is unchanged", func(t *testing.T) {
@@ -116,20 +124,22 @@ func TestFormatToolResult(t *testing.T) {
 	t.Run("an object result still reports its stats", func(t *testing.T) {
 		got := formatToolResult(json.RawMessage(`{"durationSeconds":1.5}`))
 
-		require.Contains(t, got, "1.5s", "duration should survive")
+		require.Equal(t, "  ↳ Done (1.5s · 23 B)\n", got)
 	})
 }
 
 func TestFormatNotice(t *testing.T) {
 	t.Run("a hook's notice is shown as its own status line", func(t *testing.T) {
-		got := formatNotice("PostToolUse:Write says: 🪝 rules-index: no channel mentions invoices.md")
+		got := formatNotice("PostToolUse:Write says: rules-index: no channel mentions invoices.md")
 
-		require.Equal(t,
-			"\nℹ️ PostToolUse:Write says: 🪝 rules-index: no channel mentions invoices.md\n", got)
+		require.Equal(t, "\nℹ️ rules-index: no channel mentions invoices.md\n", got,
+			"the CLI's own prefix is noise the notice already replaces")
 	})
 
-	t.Run("an empty notice renders nothing", func(t *testing.T) {
-		require.Empty(t, formatNotice("  \n"), "a blank notice should not take a line in the chat")
+	t.Run("a notice that names no speaker is shown as it stands", func(t *testing.T) {
+		got := formatNotice("the CLI has something to say")
+
+		require.Equal(t, "\nℹ️ the CLI has something to say\n", got)
 	})
 }
 

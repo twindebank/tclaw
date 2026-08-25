@@ -656,11 +656,15 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 					return "", err
 				}
 			case claudecli.SystemSubtypeInformational:
-				// An empty notice would still cost a message edit on the channel.
-				if notice := formatNotice(sys.Content); notice != "" {
-					if err := tw.write(phaseStatus, notice); err != nil {
-						return "", err
-					}
+				if sys.Level == claudecli.NoticeLevelInfo || strings.TrimSpace(sys.Content) == "" {
+					// This subtype is the CLI's general banner channel, not the
+					// hooks' own: info is transcript-only even in the CLI's UI,
+					// and an empty notice costs a message edit to show nothing.
+					slog.Debug("skipping informational event", "level", sys.Level)
+					continue
+				}
+				if err := tw.write(phaseStatus, formatNotice(sys.Content)); err != nil {
+					return "", err
 				}
 			default:
 				slog.Debug("unhandled system event subtype", "subtype", sys.Subtype)

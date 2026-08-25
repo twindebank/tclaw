@@ -26,8 +26,8 @@ func formatBlock(block claudecli.ContentBlock) string {
 	return ""
 }
 
-// Icons that head a status line, so a skill invocation is distinguishable from an
-// ordinary tool call at a glance.
+// Icons that head a status line, so a tool call, a skill, a hook and a notice
+// are told apart at a glance.
 const (
 	iconTool   = "🔧"
 	iconSkill  = "🎓"
@@ -35,14 +35,21 @@ const (
 	iconNotice = "ℹ️"
 )
 
+// noticeSpeaker separates what produced a notice from the notice itself, as in
+// "PostToolUse:Write says: <notice>".
+const noticeSpeaker = " says: "
+
 // formatNotice renders a notice the CLI streamed for the user, which is how a
 // hook that ran without refusing anything gets to say so.
 func formatNotice(content string) string {
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return ""
+	// The CLI prefixes what produced the notice, which the notice itself says
+	// again in words the user has a chance of recognising.
+	if _, said, found := strings.Cut(content, noticeSpeaker); found {
+		content = said
 	}
-	return fmt.Sprintf("\n%s %s\n", iconNotice, content)
+	// One line, like every other status line: this channel also carries the CLI's
+	// own banners and slash-command output, which can run long.
+	return fmt.Sprintf("\n%s %s\n", iconNotice, truncate(strings.TrimSpace(firstLine(content)), quoteMaxLen))
 }
 
 // formatToolUse renders a tool invocation with its arguments.
@@ -103,9 +110,22 @@ func formatSkillUse(block claudecli.ContentBlock) string {
 	return fmt.Sprintf("\n%s %s (%s)\n", iconSkill, skill.Skill, truncateValue(skill.Args))
 }
 
-// truncateValue keeps an argument value within 60 bytes for a one-line status message.
+// Byte budgets for the two things a status line quotes: a tool argument, and a
+// line of text from a hook or from the CLI.
+const (
+	argMaxLen   = 60
+	quoteMaxLen = 120
+)
+
+// firstLine keeps a status line to one line of whatever it is quoting.
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return line
+}
+
+// truncateValue keeps an argument value within its budget for a one-line status message.
 func truncateValue(s string) string {
-	return truncate(s, 60)
+	return truncate(s, argMaxLen)
 }
 
 // truncate cuts s to maxLen bytes, on a rune boundary so a multi-byte character
@@ -169,8 +189,16 @@ type hookRefusal struct {
 	Reason string
 }
 
-// hookErrorMarker is how the CLI reports a PreToolUse hook that exited non-zero.
-const hookErrorMarker = " hook error: "
+// A refused call comes back as "Error: PreToolUse:<Tool> hook error: [<command>]: <stderr>",
+// and only as that: no system event carries a refusal, and only PreToolUse can refuse.
+const (
+	hookErrorMarker  = " hook error: "
+	hookRefusalEvent = "PreToolUse:"
+
+	// hookNoStderr is what the CLI puts in place of the reason when the hook
+	// refused without writing one.
+	hookNoStderr = "No stderr output"
+)
 
 // parseHookRefusal reads the CLI's report of a refused tool call out of a string
 // tool result. Nil means the result is an ordinary one.
@@ -180,17 +208,16 @@ func parseHookRefusal(raw json.RawMessage) *hookRefusal {
 		return nil
 	}
 
-	event, rest, found := strings.Cut(result, hookErrorMarker)
+	refused, rest, found := strings.Cut(result, hookErrorMarker)
 	if !found {
 		return nil
 	}
-	// The part before the marker ends "PreToolUse:<Tool>", with whatever the CLI
-	// prefixed ("Error: ") in front of it.
-	colon := strings.LastIndex(event, ":")
-	if colon < 0 {
+	// What comes before the marker ends "PreToolUse:<Tool>", with whatever the
+	// CLI prefixed ("Error: ") in front of it.
+	_, tool, found := strings.Cut(refused, hookRefusalEvent)
+	if !found || tool == "" {
 		return nil
 	}
-	tool := event[colon+1:]
 
 	// The command that refused is bracketed, and the reason is its stderr.
 	if !strings.HasPrefix(rest, "[") {
@@ -199,6 +226,11 @@ func parseHookRefusal(raw json.RawMessage) *hookRefusal {
 	command, reason, found := strings.Cut(strings.TrimPrefix(rest, "["), "]: ")
 	if !found {
 		return nil
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == hookNoStderr {
+		// The hook refused and said nothing; passing that on says nothing either.
+		reason = ""
 	}
 
 	return &hookRefusal{Hook: tclawHookName(command), Tool: tool, Reason: reason}
@@ -225,16 +257,11 @@ func formatHookRefusal(refusal hookRefusal) string {
 		who = refusal.Hook
 	}
 
-	reason := truncate(strings.TrimSpace(firstLine(refusal.Reason)), 120)
+	reason := truncate(strings.TrimSpace(firstLine(refusal.Reason)), quoteMaxLen)
 	if reason == "" {
 		return fmt.Sprintf("  ↳ %s %s blocked %s\n", iconHook, who, refusal.Tool)
 	}
 	return fmt.Sprintf("  ↳ %s %s blocked %s: %s\n", iconHook, who, refusal.Tool, reason)
-}
-
-func firstLine(s string) string {
-	line, _, _ := strings.Cut(s, "\n")
-	return line
 }
 
 func formatBytes(n int) string {
