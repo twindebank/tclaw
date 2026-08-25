@@ -272,8 +272,9 @@ Draining the queue is a skill, not a tclaw feature: put one in the vault and nam
 is what `claude_links` is for — link the registry it edits so a rule written here is pushed rather
 than lost at the next boot.
 
-The queue is per machine. A retro run here judges what was said here; one run on a laptop judges that
-laptop's. Nothing merges them.
+The queue is per machine, deliberately. A correction about how a Telegram turn went is not a correction
+about writing code on a laptop, and judging them together would produce rules that fit neither. A retro
+judges the environment it runs in.
 
 ## Message Debounce
 

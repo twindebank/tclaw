@@ -42,14 +42,21 @@ var complaintPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)^(no|nope|nah)[,. !]`),
 	regexp.MustCompile(`(?i)you (missed|forgot|broke|ignored)`),
 	regexp.MustCompile(`(?i)not what i (asked|wanted|said)`),
+	// Work nobody requested. A correction of scope reads nothing like one of
+	// quality, so the patterns above all miss it.
+	regexp.MustCompile(`(?i)\b(?:i )?(?:never|did ?n'?t) (?:ask|want|say|said)`),
+	regexp.MustCompile(`(?i)nobody asked|who asked (?:you|for)`),
 }
 
 // Constraints and ordinary work verbs, which a brief carries in passing. These
 // are gated by the brief filter; the same words with nothing around them are an
 // objection.
 var constraintPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)do not |don'?t (do|add|use|write|make|put|create|say|forget)`),
+	regexp.MustCompile(`(?i)do not |don'?t (do|add|use|write|make|put|create|say|forget|stop)`),
 	regexp.MustCompile(`(?i)revert|undo that`),
+	// Stopping before the work is done. A brief can carry "don't stop until it
+	// is green", so this stays gated rather than sitting with the complaints.
+	regexp.MustCompile(`(?i)(?:have ?n'?t|did ?n'?t|before you) finish`),
 }
 
 // Prompts the harness writes on the user's behalf. These are not the user's
