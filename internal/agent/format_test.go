@@ -120,6 +120,19 @@ func TestFormatToolResult(t *testing.T) {
 	})
 }
 
+func TestFormatNotice(t *testing.T) {
+	t.Run("a hook's notice is shown as its own status line", func(t *testing.T) {
+		got := formatNotice("PostToolUse:Write says: 🪝 rules-index: no channel mentions invoices.md")
+
+		require.Equal(t,
+			"\nℹ️ PostToolUse:Write says: 🪝 rules-index: no channel mentions invoices.md\n", got)
+	})
+
+	t.Run("an empty notice renders nothing", func(t *testing.T) {
+		require.Empty(t, formatNotice("  \n"), "a blank notice should not take a line in the chat")
+	})
+}
+
 func TestTruncateValue(t *testing.T) {
 	tests := []struct {
 		name     string

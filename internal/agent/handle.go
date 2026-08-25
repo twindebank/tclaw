@@ -645,7 +645,8 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				slog.Warn("failed to parse system event", "err", err)
 				continue
 			}
-			if sys.Subtype == claudecli.SystemSubtypeInit {
+			switch sys.Subtype {
+			case claudecli.SystemSubtypeInit:
 				initDelay := time.Since(cliStarted)
 				slog.Info("cli init received", "channel", channelID, "init_delay_ms", initDelay.Milliseconds())
 				if sys.SessionID != "" {
@@ -654,6 +655,15 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				if err := tw.write(phaseStatus, "✅ Session ready, generating response...\n"); err != nil {
 					return "", err
 				}
+			case claudecli.SystemSubtypeInformational:
+				// An empty notice would still cost a message edit on the channel.
+				if notice := formatNotice(sys.Content); notice != "" {
+					if err := tw.write(phaseStatus, notice); err != nil {
+						return "", err
+					}
+				}
+			default:
+				slog.Debug("unhandled system event subtype", "subtype", sys.Subtype)
 			}
 
 		case claudecli.EventContentBlockStart:

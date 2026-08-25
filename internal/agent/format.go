@@ -29,10 +29,21 @@ func formatBlock(block claudecli.ContentBlock) string {
 // Icons that head a status line, so a skill invocation is distinguishable from an
 // ordinary tool call at a glance.
 const (
-	iconTool  = "🔧"
-	iconSkill = "🎓"
-	iconHook  = "🪝"
+	iconTool   = "🔧"
+	iconSkill  = "🎓"
+	iconHook   = "🪝"
+	iconNotice = "ℹ️"
 )
+
+// formatNotice renders a notice the CLI streamed for the user, which is how a
+// hook that ran without refusing anything gets to say so.
+func formatNotice(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+	return fmt.Sprintf("\n%s %s\n", iconNotice, content)
+}
 
 // formatToolUse renders a tool invocation with its arguments.
 // Prefixed with a newline so it doesn't run into preceding text.
@@ -159,8 +170,6 @@ type hookRefusal struct {
 }
 
 // hookErrorMarker is how the CLI reports a PreToolUse hook that exited non-zero.
-// The refusal reaches the stream only as this tool result — a hook that runs on a
-// tool event emits no event of its own.
 const hookErrorMarker = " hook error: "
 
 // parseHookRefusal reads the CLI's report of a refused tool call out of a string

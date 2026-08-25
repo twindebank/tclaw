@@ -32,8 +32,7 @@ const (
 	SystemSubtypeInit SystemEventSubtype = "init"
 
 	// SystemSubtypeInformational carries a notice for the user, and is how a
-	// hook's systemMessage reaches the stream. A hook that runs on a tool event
-	// emits no event of its own, so this is the only one it can send.
+	// hook's systemMessage reaches the stream.
 	SystemSubtypeInformational SystemEventSubtype = "informational"
 )
 

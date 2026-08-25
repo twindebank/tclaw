@@ -62,9 +62,12 @@ MCP tool cannot see the agent editing a file directly, so the `rules-gate` hook 
 that directory from inside the sandbox. Tool-side alone would be bypassable with Write; hook-side alone
 would have no approved way through.
 
-A refusal is visible in the chat, not only to the agent. The CLI emits no event when a tool-event hook
-runs, so the only trace is the tool result it hands back; `internal/agent/format.go` reads that and
-renders `🪝 rules-gate blocked Write: <reason>` instead of the `↳ Done` every other result gets.
+Both hooks are visible in the chat, not only to the agent, and they get there by different routes
+because the CLI streams no event of its own when a hook runs on a tool event. A refusal comes back as
+the tool result, which `internal/agent/format.go` renders as `🪝 rules-gate blocked Write: <reason>`
+instead of the `↳ Done` every other result gets. A hook that lets the call through says its piece in a
+`systemMessage`, which the CLI does stream as an `informational` notice; `rules-index` uses it to say a
+rulebook nothing loads has just been written, while the longer guidance still goes to the agent alone.
 
 The hooks are registered in each user's `settings.json`, which is **mounted read-only** in the sandbox —
 the same protection that stops a prompt injection installing its own `SessionStart` hook stops one
