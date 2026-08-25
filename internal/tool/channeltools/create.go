@@ -58,7 +58,7 @@ func channelCreateDef() mcp.ToolDef {
 				},
 				"max_turns": {
 					"type": "integer",
-					"description": "Optional cap on agentic turns per message on this channel. Omit to inherit the user-level limit. Set it low (e.g. 10) for channels that should answer and stop, like email or notification triage, and high (e.g. 100) for dev channels doing long multi-step work. When the cap is hit the turn ends and the user is told to send another message to continue."
+					"description": "Cap on agentic turns per message on this channel. Use 150 for dev, orchestration and single-task ephemeral channels, which must finish long multi-step work in one message with nobody there to nudge them along. Use 10 for triage channels that read something and reply, like email or notifications. Omit to inherit the user-level limit. When the cap is hit the turn ends mid-work and only another user message restarts it."
 				},
 				"type": {
 					"type": "string",

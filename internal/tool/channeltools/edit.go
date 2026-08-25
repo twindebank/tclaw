@@ -40,7 +40,7 @@ func channelEditDef() mcp.ToolDef {
 				},
 				"max_turns": {
 					"type": "integer",
-					"description": "Cap on agentic turns per message on this channel. Set it low (e.g. 10) for channels that should answer and stop, like email or notification triage, and high (e.g. 100) for dev channels doing long multi-step work. Pass 0 to clear and inherit the user-level limit."
+					"description": "Cap on agentic turns per message on this channel. Use 150 for dev, orchestration and single-task ephemeral channels doing long multi-step work, and 10 for triage channels that read something and reply, like email or notifications. Pass 0 to clear and inherit the user-level limit."
 				},
 				"allowed_users": {
 					"type": "array",
