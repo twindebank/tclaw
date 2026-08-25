@@ -315,6 +315,25 @@ func TestValidate_Knowledge(t *testing.T) {
 		}
 	})
 
+	t.Run("checks linked directories the same way as copied ones", func(t *testing.T) {
+		cfg := withVault(repo.AccessFullWrite)
+		cfg.Users[0].Knowledge.ClaudeLinks = map[string]string{"patterns": "../../secrets"}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "claude_links")
+		require.Contains(t, err.Error(), "must be a plain path inside the vault")
+	})
+
+	t.Run("rejects a directory that is both copied and linked", func(t *testing.T) {
+		// Whichever ran last would win, so the config has to say which it means.
+		cfg := withVault(repo.AccessFullWrite)
+		cfg.Users[0].Knowledge.ClaudeDirs = map[string]string{"patterns": "vault-claude/rules"}
+		cfg.Users[0].Knowledge.ClaudeLinks = map[string]string{"patterns": "vault-claude/rules"}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "cannot be both copied and linked")
+	})
+
 	t.Run("rejects a target name that is not a single directory", func(t *testing.T) {
 		// The name is joined onto the agent's own Claude directory, so anything
 		// with a separator in it would write outside that directory.

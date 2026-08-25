@@ -633,6 +633,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				HomeDir:      homeDir,
 				KnowledgeDir: dirs.Knowledge,
 				ClaudeDirs:   mu.cfg.Knowledge.ClaudeDirs,
+				ClaudeLinks:  mu.cfg.Knowledge.ClaudeLinks,
 			})
 		}
 

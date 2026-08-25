@@ -63,6 +63,55 @@ func TestSeedKnowledgeExtras(t *testing.T) {
 		require.True(t, os.IsNotExist(err), "nothing to copy should leave nothing behind")
 	})
 
+	t.Run("links a directory so an edit reaches the vault", func(t *testing.T) {
+		homeDir, knowledgeDir := t.TempDir(), t.TempDir()
+		writeSeedFile(t, filepath.Join(knowledgeDir, "vault-claude", "rules", "general.md"), "# rules")
+
+		seedKnowledgeExtras(seedKnowledgeExtrasParams{
+			UserID:       "testuser",
+			HomeDir:      homeDir,
+			KnowledgeDir: knowledgeDir,
+			ClaudeLinks:  map[string]string{"patterns": "vault-claude/rules"},
+		})
+
+		// A copy would read the same and be thrown away at the next boot, so what
+		// matters is that a write through the link lands in the clone.
+		linked := filepath.Join(homeDir, ".claude", "patterns", "general.md")
+		require.Equal(t, "# rules", readSeedFile(t, linked))
+		require.NoError(t, os.WriteFile(linked, []byte("# edited"), 0o600))
+		require.Equal(t, "# edited", readSeedFile(t, filepath.Join(knowledgeDir, "vault-claude", "rules", "general.md")))
+	})
+
+	t.Run("follows a vault directory that moved", func(t *testing.T) {
+		homeDir, knowledgeDir := t.TempDir(), t.TempDir()
+		writeSeedFile(t, filepath.Join(knowledgeDir, "old", "general.md"), "# old")
+		writeSeedFile(t, filepath.Join(knowledgeDir, "new", "general.md"), "# new")
+		params := seedKnowledgeExtrasParams{
+			UserID: "testuser", HomeDir: homeDir, KnowledgeDir: knowledgeDir,
+			ClaudeLinks: map[string]string{"patterns": "old"},
+		}
+		seedKnowledgeExtras(params)
+
+		params.ClaudeLinks = map[string]string{"patterns": "new"}
+		seedKnowledgeExtras(params)
+
+		require.Equal(t, "# new", readSeedFile(t, filepath.Join(homeDir, ".claude", "patterns", "general.md")))
+	})
+
+	t.Run("leaves a real directory alone rather than replacing it", func(t *testing.T) {
+		homeDir, knowledgeDir := t.TempDir(), t.TempDir()
+		writeSeedFile(t, filepath.Join(knowledgeDir, "rules", "general.md"), "# vault")
+		// Something else put files here, so they are not this function's to delete.
+		writeSeedFile(t, filepath.Join(homeDir, ".claude", "patterns", "local.md"), "# local")
+
+		seedKnowledgeExtras(seedKnowledgeExtrasParams{
+			UserID: "testuser", HomeDir: homeDir, KnowledgeDir: knowledgeDir,
+			ClaudeLinks: map[string]string{"patterns": "rules"},
+		})
+
+		require.Equal(t, "# local", readSeedFile(t, filepath.Join(homeDir, ".claude", "patterns", "local.md")))
+	})
+
 	t.Run("does nothing when the config names no directories", func(t *testing.T) {
 		homeDir, knowledgeDir := t.TempDir(), t.TempDir()
 		writeSeedFile(t, filepath.Join(knowledgeDir, "vault-claude", "skills", "note-taking", "SKILL.md"), "# a skill")

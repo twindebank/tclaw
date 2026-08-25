@@ -264,9 +264,13 @@ type KnowledgeConfig struct {
 	CommitName  string `yaml:"commit_name,omitempty"`
 	CommitEmail string `yaml:"commit_email,omitempty"`
 
-	// ClaudeDirs installs directories the vault carries into the agent's Claude
+	// ClaudeDirs copies directories the vault carries into the agent's Claude
 	// config directory, keyed by the name they take there: {skills: path}.
 	ClaudeDirs map[string]string `yaml:"claude_dirs,omitempty"`
+
+	// ClaudeLinks is ClaudeDirs by symlink, for a directory the agent edits and
+	// whose edits must reach the vault rather than being lost at the next boot.
+	ClaudeLinks map[string]string `yaml:"claude_links,omitempty"`
 }
 
 // normalize fills defaults. Mutates the receiver in place.
@@ -277,15 +281,21 @@ func (k *KnowledgeConfig) normalize() error {
 	if k.MountAt == "" {
 		k.MountAt = defaultKnowledgeMountAt
 	}
-	for name, dir := range k.ClaudeDirs {
-		// The source is joined onto the clone and the name onto the agent's own
-		// Claude directory, so either one climbing out would read or write files
-		// anywhere on the volume.
-		if !plainRelativePath(dir) {
-			return fmt.Errorf("claude_dirs %q: %q must be a plain path inside the vault", name, dir)
-		}
-		if name == "" || strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
-			return fmt.Errorf("claude_dirs %q must be a single directory name", name)
+	installs := map[string]map[string]string{"claude_dirs": k.ClaudeDirs, "claude_links": k.ClaudeLinks}
+	for field, dirs := range installs {
+		for name, dir := range dirs {
+			// The source is joined onto the clone and the name onto the agent's
+			// own Claude directory, so either one climbing out would read or
+			// write files anywhere on the volume.
+			if !plainRelativePath(dir) {
+				return fmt.Errorf("%s %q: %q must be a plain path inside the vault", field, name, dir)
+			}
+			if name == "" || strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
+				return fmt.Errorf("%s %q must be a single directory name", field, name)
+			}
+			if field == "claude_links" && k.ClaudeDirs[name] != "" {
+				return fmt.Errorf("claude_links %q is also in claude_dirs — one directory cannot be both copied and linked", name)
+			}
 		}
 	}
 	return nil
@@ -1037,6 +1047,7 @@ func (u *User) ToUserConfig() user.Config {
 			CommitName:  u.Knowledge.CommitName,
 			CommitEmail: u.Knowledge.CommitEmail,
 			ClaudeDirs:  u.Knowledge.ClaudeDirs,
+			ClaudeLinks: u.Knowledge.ClaudeLinks,
 		}
 	}
 	var repos []user.Repo

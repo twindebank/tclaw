@@ -100,7 +100,10 @@ type Knowledge struct {
 	CommitName  string
 	CommitEmail string
 
-	// ClaudeDirs installs directories the vault carries into the agent's Claude
+	// ClaudeDirs copies directories the vault carries into the agent's Claude
 	// config directory, keyed by the name they take there.
 	ClaudeDirs map[string]string
+
+	// ClaudeLinks is ClaudeDirs by symlink, for directories the agent edits.
+	ClaudeLinks map[string]string
 }
