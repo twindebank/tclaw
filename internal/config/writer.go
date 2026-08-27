@@ -85,15 +85,45 @@ func (w *Writer) RemoveChannel(userID user.ID, name string) error {
 	defer w.mu.Unlock()
 
 	return w.mutate(func(channels *yaml.Node) error {
+		removed := false
 		for i, node := range channels.Content {
-			nodeName := nodeScalarValue(node, "name")
-			if nodeName != name {
+			if nodeScalarValue(node, "name") == name {
+				channels.Content = append(channels.Content[:i], channels.Content[i+1:]...)
+				removed = true
+				break
+			}
+		}
+		if !removed {
+			return fmt.Errorf("channel %q not found", name)
+		}
+
+		// Strip any link pointing at the removed channel. A dangling link target
+		// fails config validation, which bricks every future reload and strands
+		// the router on its stale boot config — so a delete must never leave one.
+		for i, node := range channels.Content {
+			var ch Channel
+			if err := node.Decode(&ch); err != nil {
+				return fmt.Errorf("decode channel %q: %w", nodeScalarValue(node, "name"), err)
+			}
+			kept := ch.Links[:0]
+			for _, link := range ch.Links {
+				if link.Target != name {
+					kept = append(kept, link)
+				}
+			}
+			if len(kept) == len(ch.Links) {
+				// No link referenced the removed channel — leave this node
+				// untouched so its original formatting is preserved.
 				continue
 			}
-			channels.Content = append(channels.Content[:i], channels.Content[i+1:]...)
-			return nil
+			ch.Links = kept
+			replacement, err := marshalChannelToNode(ch)
+			if err != nil {
+				return fmt.Errorf("marshal channel %q after unlink: %w", ch.Name, err)
+			}
+			channels.Content[i] = replacement
 		}
-		return fmt.Errorf("channel %q not found", name)
+		return nil
 	}, userID)
 }
 

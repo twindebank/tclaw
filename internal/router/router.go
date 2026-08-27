@@ -677,10 +677,14 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		}
 
 		// Reconcile: provision channels that need it, identify needs_setup channels.
+		// When the reload failed the channel set is stale (it still holds channels
+		// the user has since deleted), so withhold provisioning — otherwise every
+		// iteration tries to re-mint bots for removed channels and hammers BotFather.
 		reconciled, reconcileErr := reconciler.Reconcile(dynamicCtx, reconciler.ReconcileParams{
-			Channels:     currentChannels,
-			RuntimeState: runtimeState,
-			Provisioners: provisioners,
+			Channels:      currentChannels,
+			RuntimeState:  runtimeState,
+			Provisioners:  provisioners,
+			SkipProvision: reloadErr != nil,
 		})
 		if reconcileErr != nil {
 			slog.Error("channel reconciliation failed", "user", mu.cfg.ID, "err", reconcileErr)
