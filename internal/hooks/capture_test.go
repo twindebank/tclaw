@@ -111,6 +111,20 @@ func TestLessonCapture(t *testing.T) {
 		require.Equal(t, "no, that's wrong, you keep doing this", rows[0].Detail)
 	})
 
+	t.Run("strips the stopped-by-the-user notice glued to ordinary content", func(t *testing.T) {
+		h := setup(t)
+		preamble := "[SYSTEM: The previous task on this channel was stopped by the user. Do NOT continue, " +
+			"summarize, or reference it. Focus only on the new message below.] "
+
+		code, _ := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+			"prompt":     preamble + "what's the weather like tomorrow?",
+			"session_id": "sess-8f21c4",
+		})
+
+		require.Equal(t, 0, code)
+		require.Empty(t, readInbox(t, h.ConfigDir), "ordinary content after the notice is not a correction")
+	})
+
 	t.Run("files anything marked !log and says what the marker means", func(t *testing.T) {
 		h := setup(t)
 

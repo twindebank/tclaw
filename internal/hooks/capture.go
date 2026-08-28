@@ -69,18 +69,13 @@ var injectedPromptPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)^<task-notification>`),
 }
 
-// Harness-injected preambles that arrive glued to the front of genuine user
-// content, unlike injectedPromptPatterns above which only ever matches a
-// prompt that is nothing but injected text. Stripping is the safer default
-// for any preamble the harness could plausibly prepend to real content: a
-// whole-prompt reject only ever catches the case with nothing glued after it,
-// and silently swallows a real correction that happens to open with the same
-// wording. The post-restart notice is the case that forced this; the
-// interrupted-mid-turn notice hasn't been seen with content glued after it
-// yet, but there is no reason to assume it never will be.
+// Every ResumeNotice/prepended-notice text the agent package glues to the
+// front of a real prompt (see agent.go and router.go), stripped rather than
+// rejected so a real correction after one is still captured on its own text.
 var injectedPreamblePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?is)^\[SYSTEM: Session resumed after restart\..*?\]\s*`),
 	regexp.MustCompile(`(?is)^\[SYSTEM: You were interrupted mid-turn by a restart\..*?\]\s*`),
+	regexp.MustCompile(`(?is)^\[SYSTEM: The previous task on this channel was stopped by the user\..*?\]\s*`),
 }
 
 // stripInjectedPreamble removes one recognized harness-injected preamble from
