@@ -66,6 +66,33 @@ var injectedPromptPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)^[<\[(]?system.?reminder`),
 	regexp.MustCompile(`(?i)^this session is being continued from a previous`),
 	regexp.MustCompile(`(?i)^caveat: the messages below were generated`),
+	regexp.MustCompile(`(?i)^<task-notification>`),
+}
+
+// Harness-injected preambles that arrive glued to the front of genuine user
+// content, unlike injectedPromptPatterns above which only ever matches a
+// prompt that is nothing but injected text. Stripping is the safer default
+// for any preamble the harness could plausibly prepend to real content: a
+// whole-prompt reject only ever catches the case with nothing glued after it,
+// and silently swallows a real correction that happens to open with the same
+// wording. The post-restart notice is the case that forced this; the
+// interrupted-mid-turn notice hasn't been seen with content glued after it
+// yet, but there is no reason to assume it never will be.
+var injectedPreamblePatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?is)^\[SYSTEM: Session resumed after restart\..*?\]\s*`),
+	regexp.MustCompile(`(?is)^\[SYSTEM: You were interrupted mid-turn by a restart\..*?\]\s*`),
+}
+
+// stripInjectedPreamble removes one recognized harness-injected preamble from
+// the front of prompt, if present, so every check that follows sees only what
+// the user actually wrote.
+func stripInjectedPreamble(prompt string) string {
+	for _, pattern := range injectedPreamblePatterns {
+		if loc := pattern.FindStringIndex(prompt); loc != nil && loc[0] == 0 {
+			return prompt[loc[1]:]
+		}
+	}
+	return prompt
 }
 
 // Openers that assign work. A brief starts by saying what to do.
@@ -104,7 +131,7 @@ var (
 // puts into the model's context is what the marker means; judging stays out.
 func lessonCapture() {
 	p := readPayload()
-	prompt := p.Prompt
+	prompt := stripInjectedPreamble(p.Prompt)
 	if prompt == "" || injectedPrompt(prompt) {
 		pass()
 	}

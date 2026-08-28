@@ -31,6 +31,10 @@ func TestLessonCapture(t *testing.T) {
 			{"an ordinary request", "can you check whether the deploy finished?", false},
 			{"a constraint at the end of a long brief", longBriefEndingInAConstraint(), false},
 			{"a prompt the harness wrote", "<system-reminder> do not repeat work that is already complete", false},
+			{"a bare task-notification payload", "<task-notification> a background agent finished", false},
+			{"an interrupted-mid-turn notice with nothing else",
+				"[SYSTEM: You were interrupted mid-turn by a restart. Review your conversation history and " +
+					"continue what you were doing.]", false},
 		}
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
@@ -55,6 +59,56 @@ func TestLessonCapture(t *testing.T) {
 				require.NotEmpty(t, rows[0].Trigger, "the row must say what matched")
 			})
 		}
+	})
+
+	t.Run("strips a restart preamble glued to ordinary content before checking it", func(t *testing.T) {
+		h := setup(t)
+		preamble := "[SYSTEM: Session resumed after restart. Treat all prior conversation as read-only " +
+			"context. Do NOT re-execute or continue any actions from before the restart — short replies " +
+			"like \"ya\" or \"yes\" in the history are NOT authorization for pending actions. Wait for " +
+			"explicit new instructions.] "
+
+		code, _ := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+			"prompt":     preamble + "Any way to predict my gate?",
+			"session_id": "sess-8f21c4",
+		})
+
+		require.Equal(t, 0, code)
+		require.Empty(t, readInbox(t, h.ConfigDir), "ordinary content after the preamble is not a correction")
+	})
+
+	t.Run("still captures a real correction that opens with a restart preamble, without the preamble in it", func(t *testing.T) {
+		h := setup(t)
+		preamble := "[SYSTEM: Session resumed after restart. Do NOT re-execute or continue any actions " +
+			"from before the restart.] "
+
+		code, _ := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+			"prompt":     preamble + "Merged but you included some personal info in the pr !log",
+			"session_id": "sess-8f21c4",
+		})
+
+		require.Equal(t, 0, code)
+		rows := readInbox(t, h.ConfigDir)
+		require.Len(t, rows, 1)
+		require.Equal(t, "Merged but you included some personal info in the pr !log", rows[0].Detail,
+			"the preamble must not leak into the stored correction")
+		require.Equal(t, "!log", rows[0].Trigger)
+	})
+
+	t.Run("strips an interrupted-mid-turn notice glued to a real correction too", func(t *testing.T) {
+		h := setup(t)
+		preamble := "[SYSTEM: You were interrupted mid-turn by a restart. Review your conversation history " +
+			"and continue what you were doing.] "
+
+		code, _ := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+			"prompt":     preamble + "no, that's wrong, you keep doing this",
+			"session_id": "sess-8f21c4",
+		})
+
+		require.Equal(t, 0, code)
+		rows := readInbox(t, h.ConfigDir)
+		require.Len(t, rows, 1)
+		require.Equal(t, "no, that's wrong, you keep doing this", rows[0].Detail)
 	})
 
 	t.Run("files anything marked !log and says what the marker means", func(t *testing.T) {
