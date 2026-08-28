@@ -43,6 +43,13 @@ type ReconcileParams struct {
 	Channels     []config.Channel
 	RuntimeState *channel.RuntimeStateStore
 	Provisioners channel.ProvisionerLookup
+
+	// SkipProvision withholds all platform-resource creation for this pass.
+	// The router sets it when the config failed to reload, so an unverified or
+	// stale desired state can never mint bots for channels the user has already
+	// removed. Channels that already have their resources still reconcile to
+	// ready via IsReady; only new provisioning is withheld.
+	SkipProvision bool
 }
 
 // Reconcile compares desired state (config channels) against actual state
@@ -82,6 +89,21 @@ func Reconcile(ctx context.Context, params ReconcileParams) ([]ReconciledChannel
 
 		if !provisioner.CanAutoProvision() {
 			slog.Info("channel needs manual setup",
+				"channel", ch.Name, "type", ch.Type)
+			results = append(results, ReconciledChannel{
+				Config:       ch,
+				RuntimeState: rs,
+				Status:       ChannelNeedsSetup,
+			})
+			continue
+		}
+
+		if params.SkipProvision {
+			// The config did not reload cleanly, so this channel set is not a
+			// verified desired state. Creating a bot here is how a removed
+			// channel gets resurrected and BotFather gets hammered — wait
+			// instead. Already-provisioned channels passed IsReady above.
+			slog.Warn("skipping auto-provision; config did not reload cleanly",
 				"channel", ch.Name, "type", ch.Type)
 			results = append(results, ReconciledChannel{
 				Config:       ch,
