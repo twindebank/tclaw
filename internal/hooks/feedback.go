@@ -116,16 +116,25 @@ func flatten(s string) string {
 	return strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(s)
 }
 
-// queuedCorrections counts the rows a retro would act on.
+// queuedCorrections counts the rows a retro would act on: the live inbox, plus
+// anything stranded in processing.jsonl by a retro that snapshotted the inbox
+// and then never archived it. Without the second file, that snapshot moving
+// the rows out of inbox.jsonl reads as the queue draining rather than as a
+// retro still owing an answer, and the nudge goes quiet on rows nobody judged.
 func queuedCorrections(configDir string) int {
-	inbox := memorylayout.InboxPath(configDir)
-	raw, err := os.ReadFile(inbox)
+	return countCorrections(memorylayout.InboxPath(configDir)) +
+		countCorrections(memorylayout.ProcessingPath(configDir))
+}
+
+// countCorrections counts actionable rows in one queue file.
+func countCorrections(path string) int {
+	raw, err := os.ReadFile(path)
 	switch {
 	case os.IsNotExist(err):
 		// Nothing captured yet, which is a count of zero rather than a problem.
 		return 0
 	case err != nil:
-		slog.Error("failed to read feedback queue", "path", inbox, "err", err)
+		slog.Error("failed to read feedback queue", "path", path, "err", err)
 		return 0
 	}
 	n := 0
@@ -156,11 +165,21 @@ const nudgeMarkerName = ".retro-nudged-at"
 // it is too small or has not grown enough since the last mention.
 func retroNudge(configDir string) string {
 	waiting := queuedCorrections(configDir)
-	if waiting < retroThreshold {
-		return ""
-	}
 	marker := filepath.Join(memorylayout.FeedbackDir(configDir), nudgeMarkerName)
-	if waiting < lastNudgedAt(marker)+retroNudgeStep {
+	last := lastNudgedAt(marker)
+	if waiting < last {
+		// The queue only shrinks when a retro has judged and archived it. Reset
+		// the baseline to zero — and persist that immediately — rather than
+		// waiting for growth to be measured against it: a fresh batch that
+		// happens to regrow to exactly the old high-water mark would otherwise
+		// look like it never grew at all, and the nudge would stay silent on
+		// rows nobody has judged.
+		last = 0
+		if err := os.WriteFile(marker, []byte(strconv.Itoa(last)), 0o600); err != nil {
+			slog.Warn("failed to record retro queue drain", "path", marker, "err", err)
+		}
+	}
+	if waiting < retroThreshold || waiting < last+retroNudgeStep {
 		return ""
 	}
 	if err := os.WriteFile(marker, []byte(strconv.Itoa(waiting)), 0o600); err != nil {
@@ -170,7 +189,7 @@ func retroNudge(configDir string) string {
 	}
 	return fmt.Sprintf("📝 %d corrections are waiting in the retro queue (%s). "+
 		"When there is a good moment, use your retro skill to turn them into rules or fixes — "+
-		"it should judge them in a fresh session rather than this one.", waiting, memorylayout.InboxPath(configDir))
+		"it should judge them in a fresh session rather than this one.", waiting, memorylayout.FeedbackDir(configDir))
 }
 
 // lastNudgedAt reads the queue size the nudge last spoke at. Anything unreadable

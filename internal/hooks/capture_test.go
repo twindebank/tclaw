@@ -221,6 +221,58 @@ func TestLessonCapture(t *testing.T) {
 			"a repeat must say how far the queue has grown")
 	})
 
+	t.Run("counts rows a retro snapshotted into processing.jsonl but never archived", func(t *testing.T) {
+		h := setup(t)
+
+		// A retro that dies between its snapshot step and its archive step
+		// leaves rows here instead of in the inbox. They are still unjudged
+		// and must still count toward the queue.
+		require.NoError(t, os.MkdirAll(filepath.Dir(memorylayout.ProcessingPath(h.ConfigDir)), 0o700))
+		require.NoError(t, os.WriteFile(memorylayout.ProcessingPath(h.ConfigDir), []byte(
+			`{"timestamp":"2026-08-28T07:00:00Z","kind":"user_correction","detail":"stranded one"}`+"\n"+
+				`{"timestamp":"2026-08-28T07:01:00Z","kind":"user_correction","detail":"stranded two"}`+"\n",
+		), 0o600))
+
+		_, out := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+			"prompt":     "no, that's wrong once more",
+			"session_id": "sess-8f21c4",
+		})
+		require.Contains(t, out, "3 corrections are waiting in the retro queue",
+			"the 2 stranded processing.jsonl rows plus this new inbox row")
+	})
+
+	t.Run("nudges again once fresh rows clear the threshold, even after a retro drained a much bigger queue", func(t *testing.T) {
+		h := setup(t)
+
+		for i := range 3 {
+			_, out := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+				"prompt":     fmt.Sprintf("no, that's wrong (%d)", i),
+				"session_id": "sess-8f21c4",
+			})
+			if i == 2 {
+				require.Contains(t, out, "3 corrections are waiting in the retro queue")
+			}
+		}
+
+		// A retro judges everything and archives it — both queue files go
+		// back to empty, exactly as tw-retro's Step 5 leaves them.
+		require.NoError(t, os.Remove(memorylayout.InboxPath(h.ConfigDir)))
+
+		for i := range 2 {
+			_, out := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+				"prompt":     fmt.Sprintf("no, that's wrong again (%d)", i),
+				"session_id": "sess-8f21c4",
+			})
+			require.NotContains(t, out, "waiting in the retro queue")
+		}
+		_, out := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+			"prompt":     "no, that's wrong a third time",
+			"session_id": "sess-8f21c4",
+		})
+		require.Contains(t, out, "3 corrections are waiting in the retro queue",
+			"a fresh batch must clear the threshold again, not the old high-water mark of 3")
+	})
+
 	t.Run("passes when it cannot tell where the config dir is", func(t *testing.T) {
 		h := setup(t)
 

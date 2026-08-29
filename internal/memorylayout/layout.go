@@ -41,6 +41,12 @@ const (
 
 	// InboxFileName is the queue itself, one JSON object per line.
 	InboxFileName = "inbox.jsonl"
+
+	// ProcessingFileName is where a retro moves the inbox before judging it, so
+	// new rows can keep arriving without mixing into the snapshot being judged.
+	// A retro interrupted between that move and archiving leaves rows stranded
+	// here rather than lost.
+	ProcessingFileName = "processing.jsonl"
 )
 
 // RulesDir is the rulebook pool inside a memory directory.
@@ -66,6 +72,13 @@ func FeedbackDir(configDir string) string {
 // InboxPath is the file captured corrections are appended to.
 func InboxPath(configDir string) string {
 	return filepath.Join(FeedbackDir(configDir), InboxFileName)
+}
+
+// ProcessingPath is the snapshot a retro judges from. It only holds rows
+// between a retro's snapshot step and its archive step, but a session that
+// dies in between leaves it populated indefinitely.
+func ProcessingPath(configDir string) string {
+	return filepath.Join(FeedbackDir(configDir), ProcessingFileName)
 }
 
 // InRules reports whether path is a file inside the rulebook pool. Both sides are
