@@ -66,6 +66,28 @@ var injectedPromptPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)^[<\[(]?system.?reminder`),
 	regexp.MustCompile(`(?i)^this session is being continued from a previous`),
 	regexp.MustCompile(`(?i)^caveat: the messages below were generated`),
+	regexp.MustCompile(`(?i)^<task-notification>`),
+}
+
+// Every ResumeNotice/prepended-notice text the agent package glues to the
+// front of a real prompt (see agent.go and router.go), stripped rather than
+// rejected so a real correction after one is still captured on its own text.
+var injectedPreamblePatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?is)^\[SYSTEM: Session resumed after restart\..*?\]\s*`),
+	regexp.MustCompile(`(?is)^\[SYSTEM: You were interrupted mid-turn by a restart\..*?\]\s*`),
+	regexp.MustCompile(`(?is)^\[SYSTEM: The previous task on this channel was stopped by the user\..*?\]\s*`),
+}
+
+// stripInjectedPreamble removes one recognized harness-injected preamble from
+// the front of prompt, if present, so every check that follows sees only what
+// the user actually wrote.
+func stripInjectedPreamble(prompt string) string {
+	for _, pattern := range injectedPreamblePatterns {
+		if loc := pattern.FindStringIndex(prompt); loc != nil && loc[0] == 0 {
+			return prompt[loc[1]:]
+		}
+	}
+	return prompt
 }
 
 // Openers that assign work. A brief starts by saying what to do.
@@ -104,7 +126,7 @@ var (
 // puts into the model's context is what the marker means; judging stays out.
 func lessonCapture() {
 	p := readPayload()
-	prompt := p.Prompt
+	prompt := stripInjectedPreamble(p.Prompt)
 	if prompt == "" || injectedPrompt(prompt) {
 		pass()
 	}
