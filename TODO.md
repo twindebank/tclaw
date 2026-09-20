@@ -70,6 +70,10 @@
 
 ## Connectivity
 - [x] Remote MCP support — add/remove/list remote MCP servers with OAuth discovery (RFC 7591)
+- [ ] Drop the single-channel remote MCP shim — once the build carrying `MigrateChannelScope` has booted in production, no stored registration carries a `channel` key. Delete `storedRemoteMCP`, `namesSingleChannel`, `resolve` and `MigrateChannelScope` from `remotemcpstore`, and the call in `router.waitAndStart`. Ships one deploy after the change that added `MigrateChannelScope`, not with it.
+- [ ] Prune a deleted channel from remote MCP registrations — `channel_delete` leaves the name behind, so a registration can name a channel that no longer exists. `remote_mcp_update` accepts a stale name so it can be dropped, but nothing removes it automatically.
+- [ ] Remote MCP tools in one-shot runs — `tclaw oneshot` builds the tool registry without a remote MCP manager or a channel list, so the `remote_mcp_*` tools are skipped there while every other package is registered. Wire both in, or decide one-shot does not need them.
+- [ ] Remove a runtime secret — `credential_clear` only covers declared credential slots, so a stray key (a token collected for a registration that was then replaced) can only be deleted by hand on the volume.
 - [x] OAuth connections — provider-based OAuth flow via callback server, credential encryption, per-user isolation
 - [x] Google Workspace — Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks via `gws` binary
 

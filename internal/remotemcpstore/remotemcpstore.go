@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"sync"
 	"time"
 
 	"tclaw/internal/libraries/secret"
@@ -22,8 +24,12 @@ const (
 type RemoteMCP struct {
 	Name      string    `json:"name"`
 	URL       string    `json:"url"`
-	Channel   string    `json:"channel"`
 	CreatedAt time.Time `json:"created_at"`
+
+	// Channels restricts which channels this server's tools reach. Every listed
+	// channel carries it in its own MCP config file and its own tool allowlist.
+	// Empty reaches every channel: no tool creates that, and boot reports it.
+	Channels []string `json:"channels,omitempty"`
 
 	// URLSensitive is true if the URL was registered via url_secret_key and
 	// should be treated as a credential (not echoed to the agent in tool
@@ -122,6 +128,10 @@ func (a RemoteMCPAuth) TokenExpired() bool {
 type Manager struct {
 	store   store.Store
 	secrets secret.Store
+
+	// mu serialises the read-modify-write cycles. Every registration lives in
+	// one stored list, so two concurrent edits would otherwise lose one of them.
+	mu sync.Mutex
 }
 
 // NewManager creates a remote MCP manager backed by the given stores.
@@ -130,22 +140,15 @@ func NewManager(s store.Store, sec secret.Store) *Manager {
 }
 
 func (m *Manager) ListRemoteMCPs(ctx context.Context) ([]RemoteMCP, error) {
-	data, err := m.store.Get(ctx, remoteMCPsStoreKey)
-	if err != nil {
-		return nil, fmt.Errorf("read remote mcps: %w", err)
-	}
-	if len(data) == 0 {
-		return nil, nil
-	}
-	var mcps []RemoteMCP
-	if err := json.Unmarshal(data, &mcps); err != nil {
-		return nil, fmt.Errorf("parse remote mcps: %w", err)
-	}
-	return mcps, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.load(ctx)
 }
 
 func (m *Manager) GetRemoteMCP(ctx context.Context, name string) (*RemoteMCP, error) {
-	mcps, err := m.ListRemoteMCPs(ctx)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	mcps, err := m.load(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -157,11 +160,93 @@ func (m *Manager) GetRemoteMCP(ctx context.Context, name string) (*RemoteMCP, er
 	return nil, nil
 }
 
+// storedRemoteMCP is the on-disk shape. It carries the `channel` key written
+// before a registration could name more than one channel.
+type storedRemoteMCP struct {
+	RemoteMCP
+	LegacyChannel string `json:"channel,omitempty"`
+}
+
+// namesSingleChannel reports whether this entry still carries the pre-list key.
+func (s storedRemoteMCP) namesSingleChannel() bool {
+	return s.LegacyChannel != "" && len(s.Channels) == 0
+}
+
+// resolve returns the registration in the current shape.
+func (s storedRemoteMCP) resolve() RemoteMCP {
+	if s.namesSingleChannel() {
+		// TODO: drop this once no entry under the remote_mcps store key carries
+		// a `channel` field. MigrateChannelScope rewrites them.
+		s.Channels = []string{s.LegacyChannel}
+	}
+	return s.RemoteMCP
+}
+
+// MigrateChannelScope rewrites any registration that still names a single
+// channel, so the stored file converges on the list shape.
+func (m *Manager) MigrateChannelScope(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	stored, err := m.loadStored(ctx)
+	if err != nil {
+		return err
+	}
+	mcps := make([]RemoteMCP, 0, len(stored))
+	migrated := 0
+	for _, s := range stored {
+		if s.namesSingleChannel() {
+			migrated++
+		}
+		mcps = append(mcps, s.resolve())
+	}
+	if migrated == 0 {
+		return nil
+	}
+	slog.Info("rewriting remote mcp channel scope as a list", "migrated", migrated, "registrations", len(mcps))
+	return m.save(ctx, mcps)
+}
+
+// loadStored reads the registrations in their on-disk shape. Callers must hold mu.
+func (m *Manager) loadStored(ctx context.Context) ([]storedRemoteMCP, error) {
+	data, err := m.store.Get(ctx, remoteMCPsStoreKey)
+	if err != nil {
+		return nil, fmt.Errorf("read remote mcps: %w", err)
+	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var stored []storedRemoteMCP
+	if err := json.Unmarshal(data, &stored); err != nil {
+		return nil, fmt.Errorf("parse remote mcps: %w", err)
+	}
+	return stored, nil
+}
+
+// load reads the stored registrations in the current shape. Callers must hold mu.
+func (m *Manager) load(ctx context.Context) ([]RemoteMCP, error) {
+	stored, err := m.loadStored(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(stored) == 0 {
+		return nil, nil
+	}
+	mcps := make([]RemoteMCP, 0, len(stored))
+	for _, s := range stored {
+		mcps = append(mcps, s.resolve())
+	}
+	return mcps, nil
+}
+
 // AddRemoteMCPParams configures a new remote MCP registration.
 type AddRemoteMCPParams struct {
-	Name    string
-	URL     string
-	Channel string
+	Name string
+	URL  string
+
+	// Channels restricts which channels the server's tools reach. See
+	// RemoteMCP.Channels. Empty means every channel.
+	Channels []string
 
 	// URLSensitive marks the URL as a credential so tool responses and list
 	// output show only scheme+host, not the full path. Set when the URL was
@@ -184,7 +269,9 @@ type AddRemoteMCPParams struct {
 }
 
 func (m *Manager) AddRemoteMCP(ctx context.Context, p AddRemoteMCPParams) (*RemoteMCP, error) {
-	mcps, err := m.ListRemoteMCPs(ctx)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	mcps, err := m.load(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +283,7 @@ func (m *Manager) AddRemoteMCP(ctx context.Context, p AddRemoteMCPParams) (*Remo
 	entry := RemoteMCP{
 		Name:         p.Name,
 		URL:          p.URL,
-		Channel:      p.Channel,
+		Channels:     p.Channels,
 		CreatedAt:    time.Now(),
 		URLSensitive: p.URLSensitive,
 		ToolNames:    p.ToolNames,
@@ -204,7 +291,7 @@ func (m *Manager) AddRemoteMCP(ctx context.Context, p AddRemoteMCPParams) (*Remo
 		Instructions: p.Instructions,
 	}
 	mcps = append(mcps, entry)
-	if err := m.saveRemoteMCPs(ctx, mcps); err != nil {
+	if err := m.save(ctx, mcps); err != nil {
 		return nil, err
 	}
 	return &entry, nil
@@ -214,22 +301,7 @@ func (m *Manager) AddRemoteMCP(ctx context.Context, p AddRemoteMCPParams) (*Remo
 // Used by the OAuth and no-auth registration paths where tool discovery
 // happens after the entry has already been persisted.
 func (m *Manager) SetToolNames(ctx context.Context, name string, toolNames []string) error {
-	mcps, err := m.ListRemoteMCPs(ctx)
-	if err != nil {
-		return err
-	}
-	found := false
-	for i := range mcps {
-		if mcps[i].Name == name {
-			mcps[i].ToolNames = toolNames
-			found = true
-			break
-		}
-	}
-	if !found {
-		return fmt.Errorf("remote mcp %q not found", name)
-	}
-	return m.saveRemoteMCPs(ctx, mcps)
+	return m.update(ctx, name, func(mcp *RemoteMCP) { mcp.ToolNames = toolNames })
 }
 
 // SetInstructions updates the stored server instructions for an existing remote
@@ -237,26 +309,36 @@ func (m *Manager) SetToolNames(ctx context.Context, name string, toolNames []str
 // handshake runs after the entry has already been persisted. An empty string is
 // a valid value — it clears any prior instructions when the server exposes none.
 func (m *Manager) SetInstructions(ctx context.Context, name string, instructions string) error {
-	mcps, err := m.ListRemoteMCPs(ctx)
+	return m.update(ctx, name, func(mcp *RemoteMCP) { mcp.Instructions = instructions })
+}
+
+// SetChannels replaces the set of channels an existing remote MCP's tools reach.
+// An empty list means every channel.
+func (m *Manager) SetChannels(ctx context.Context, name string, channels []string) error {
+	return m.update(ctx, name, func(mcp *RemoteMCP) { mcp.Channels = channels })
+}
+
+// update applies fn to the named registration and saves the list.
+func (m *Manager) update(ctx context.Context, name string, fn func(*RemoteMCP)) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	mcps, err := m.load(ctx)
 	if err != nil {
 		return err
 	}
-	found := false
 	for i := range mcps {
 		if mcps[i].Name == name {
-			mcps[i].Instructions = instructions
-			found = true
-			break
+			fn(&mcps[i])
+			return m.save(ctx, mcps)
 		}
 	}
-	if !found {
-		return fmt.Errorf("remote mcp %q not found", name)
-	}
-	return m.saveRemoteMCPs(ctx, mcps)
+	return fmt.Errorf("remote mcp %q not found", name)
 }
 
 func (m *Manager) RemoveRemoteMCP(ctx context.Context, name string) error {
-	mcps, err := m.ListRemoteMCPs(ctx)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	mcps, err := m.load(ctx)
 	if err != nil {
 		return err
 	}
@@ -275,7 +357,7 @@ func (m *Manager) RemoveRemoteMCP(ctx context.Context, name string) error {
 	if err := m.secrets.Delete(ctx, remoteMCPAuthKey(name)); err != nil {
 		return fmt.Errorf("delete remote mcp auth: %w", err)
 	}
-	if err := m.saveRemoteMCPs(ctx, remaining); err != nil {
+	if err := m.save(ctx, remaining); err != nil {
 		return err
 	}
 	return nil
@@ -307,7 +389,8 @@ func (m *Manager) SetRemoteMCPAuth(ctx context.Context, name string, auth *Remot
 	return nil
 }
 
-func (m *Manager) saveRemoteMCPs(ctx context.Context, mcps []RemoteMCP) error {
+// save writes the registrations in the current shape. Callers must hold mu.
+func (m *Manager) save(ctx context.Context, mcps []RemoteMCP) error {
 	data, err := json.Marshal(mcps)
 	if err != nil {
 		return fmt.Errorf("marshal remote mcps: %w", err)

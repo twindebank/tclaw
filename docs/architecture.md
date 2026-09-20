@@ -157,6 +157,23 @@ the agent names can reach the `cred/` or `channel/` namespaces.
   refused) so an autostop upstream that resets the connection while it cold-starts from sleep is waited
   out rather than surfaced to the agent as an immediate 502. Registration (`discovery`) shares the same
   retry, so adding a sleeping server doesn't fail on the request that wakes it.
+- **Remote MCP channel scoping** — a registration names the channels its tools reach, and one
+  registration serves all of them: each named channel gets the server in its own `--mcp-config` file and
+  its own tool allowlist. A server named by no channel reaches every channel, which is why
+  `remote_mcp_update` refuses an empty list rather than treating it as "take it off this channel". No
+  tool can produce that state, so boot warns about any registration in it — it was hand-written or lost
+  its scope, and it holds the widest reach there is.
+
+  Deleting a channel does not prune the registrations that name it, so `remote_mcp_update` accepts a
+  name the registration already carries even when no channel has it, and says in its reply that the name
+  reaches nothing. Without that, a deleted channel would leave a name behind that failed every later
+  edit of that server, the edit that would have removed it included. A name the registration does not
+  already carry must be a channel that exists.
+
+  Scoping is one list rather than one channel per registration because the credentials are deliberately
+  unreadable. The agent can name a stored credential but never read one, so a second registration of the
+  same server cannot copy the first one's headers, secret keys or TLS pin — it has to collect them
+  again, and every later rotation has to find both copies. One registration keeps one set.
 - **Remote MCP OAuth quirks** — the discovery chain follows RFC 8414 literally, including inserting
   `/.well-known/oauth-authorization-server` **between host and path** for an issuer that has one
   (`https://www.strava.com/mcp-issuer`); appending to the origin instead 404s and breaks discovery

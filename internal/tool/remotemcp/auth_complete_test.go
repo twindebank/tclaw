@@ -95,7 +95,7 @@ func TestRemoteMCPAuthComplete(t *testing.T) {
 		server := manualAuthServer(t, manualAuthServerOpts{toolNames: []string{"x"}})
 		h, mgr := setupManualAuth(t, server)
 		_, err := mgr.AddRemoteMCP(context.Background(), remotemcpstore.AddRemoteMCPParams{
-			Name: "strava", URL: server.URL + "/mcp", Channel: "running",
+			Name: "strava", URL: server.URL + "/mcp", Channels: []string{"running"},
 		})
 		require.NoError(t, err)
 		require.NoError(t, mgr.SetRemoteMCPAuth(context.Background(), "strava",
@@ -206,7 +206,7 @@ func seedPending(t *testing.T, mgr *remotemcpstore.Manager, server *httptest.Ser
 	t.Helper()
 	ctx := context.Background()
 	_, err := mgr.AddRemoteMCP(ctx, remotemcpstore.AddRemoteMCPParams{
-		Name: "strava", URL: server.URL + "/mcp", Channel: "running",
+		Name: "strava", URL: server.URL + "/mcp", Channels: []string{"running"},
 	})
 	require.NoError(t, err)
 	require.NoError(t, mgr.SetRemoteMCPAuth(ctx, "strava", &remotemcpstore.RemoteMCPAuth{

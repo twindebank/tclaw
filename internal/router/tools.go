@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"tclaw/internal/agent"
@@ -220,17 +221,38 @@ func buildMCPConfigPaths(
 }
 
 // partitionRemoteMCPs splits remote MCPs into the global ones (no channel set)
-// and the channel-scoped ones, keyed by channel name.
+// and the channel-scoped ones, keyed by channel name. A server naming several
+// channels appears under each of them.
 func partitionRemoteMCPs(all []remotemcpstore.RemoteMCP) (global []remotemcpstore.RemoteMCP, scoped map[string][]remotemcpstore.RemoteMCP) {
 	scoped = make(map[string][]remotemcpstore.RemoteMCP)
 	for _, m := range all {
-		if m.Channel == "" {
+		if len(m.Channels) == 0 {
 			global = append(global, m)
 			continue
 		}
-		scoped[m.Channel] = append(scoped[m.Channel], m)
+		for _, name := range m.Channels {
+			scoped[name] = append(scoped[name], m)
+		}
 	}
 	return global, scoped
+}
+
+// warnUnscopedRemoteMCPs reports any registration that names no channel, which
+// reaches every channel and which no tool can create.
+func warnUnscopedRemoteMCPs(ctx context.Context, connMgr *remotemcpstore.Manager, userID user.ID) error {
+	all, err := connMgr.ListRemoteMCPs(ctx)
+	if err != nil {
+		return fmt.Errorf("list remote mcps to check their scope: %w", err)
+	}
+	for _, m := range all {
+		if len(m.Channels) == 0 {
+			// Written by hand, or it lost its scope. Either way it holds the
+			// widest reach there is.
+			slog.Warn("remote mcp names no channel, so its tools reach all of them",
+				"user", userID, "name", m.Name)
+		}
+	}
+	return nil
 }
 
 // remoteMCPNames lists server names for logging which servers a channel resolved to.

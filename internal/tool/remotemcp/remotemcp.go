@@ -25,6 +25,11 @@ type Deps struct {
 	// regenerate the MCP config file. The next Claude turn picks up the change.
 	ConfigUpdater func(ctx context.Context) error
 
+	// ChannelNames lists the channels that exist. A server scoped to a name that
+	// matches no channel reaches nothing, and on an update it would silently
+	// leave the channel that had it, so the tools refuse an unknown name.
+	ChannelNames func() []string
+
 	// OnChannelChange is fired after a successful add or remove so the
 	// router restarts the running agent. Without a restart the Claude CLI
 	// keeps its original tool allowlist and the new tools stay invisible
@@ -42,7 +47,7 @@ type Deps struct {
 // ToolNames returns all tool name constants in this package.
 func ToolNames() []string {
 	return []string{
-		ToolRemoteMCPList, ToolRemoteMCPAdd, ToolRemoteMCPRemove,
+		ToolRemoteMCPList, ToolRemoteMCPAdd, ToolRemoteMCPUpdate, ToolRemoteMCPRemove,
 		ToolRemoteMCPAuthWait, ToolRemoteMCPAuthComplete,
 	}
 }
@@ -51,6 +56,7 @@ func ToolNames() []string {
 func RegisterTools(h *mcp.Handler, deps Deps) {
 	h.Register(remoteMCPListDef(), remoteMCPListHandler(deps))
 	h.Register(remoteMCPAddDef(), remoteMCPAddHandler(deps))
+	h.Register(remoteMCPUpdateDef(), remoteMCPUpdateHandler(deps))
 	h.Register(remoteMCPRemoveDef(), remoteMCPRemoveHandler(deps))
 }
 

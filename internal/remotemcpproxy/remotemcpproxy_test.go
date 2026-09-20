@@ -318,7 +318,7 @@ func register(t *testing.T, mgr *remotemcpstore.Manager, name, url string, auth 
 	_, err := mgr.AddRemoteMCP(context.Background(), remotemcpstore.AddRemoteMCPParams{
 		Name:      name,
 		URL:       url,
-		Channel:   "desktop",
+		Channels:  []string{"desktop"},
 		ToolNames: []string{"probe"},
 	})
 	require.NoError(t, err)
@@ -437,7 +437,7 @@ func registerPinned(t *testing.T, mgr *remotemcpstore.Manager, name, url, pin st
 	_, err := mgr.AddRemoteMCP(context.Background(), remotemcpstore.AddRemoteMCPParams{
 		Name:         name,
 		URL:          url,
-		Channel:      "desktop",
+		Channels:     []string{"desktop"},
 		ToolNames:    []string{"probe"},
 		TLSPinSHA256: pin,
 	})
