@@ -133,6 +133,10 @@ var toolDefs = []mcp.ToolDef{
 					"type": "string",
 					"description": "Bot username to configure."
 				},
+				"name": {
+					"type": "string",
+					"description": "Bot display name — the title shown in the chat list. Max 64 characters. This is the only way to rename a channel's bot after creation."
+				},
 				"description": {
 					"type": "string",
 					"description": "Bot description (shown on the bot's profile)."

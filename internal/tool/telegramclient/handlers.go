@@ -427,6 +427,7 @@ func configureBotHandler(s *handlerState) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 		var a struct {
 			Username    string `json:"username"`
+			Name        string `json:"name"`
 			Description string `json:"description"`
 			About       string `json:"about"`
 			Privacy     *bool  `json:"privacy"`
@@ -437,6 +438,9 @@ func configureBotHandler(s *handlerState) mcp.ToolHandler {
 		}
 		if a.Username == "" {
 			return nil, fmt.Errorf("username is required")
+		}
+		if runes := len([]rune(a.Name)); runes > tgsdk.MaxBotDisplayNameLength {
+			return nil, fmt.Errorf("name too long: %d runes, max %d (BotFather display name limit)", runes, tgsdk.MaxBotDisplayNameLength)
 		}
 
 		if err := ensureConnected(ctx, s); err != nil {
@@ -449,6 +453,7 @@ func configureBotHandler(s *handlerState) mcp.ToolHandler {
 		bf := tgsdk.NewBotFather(s.client)
 		if err := bf.ConfigureBot(ctx, tgsdk.ConfigureBotParams{
 			Username:    a.Username,
+			Name:        a.Name,
 			Description: a.Description,
 			About:       a.About,
 			Privacy:     a.Privacy,
