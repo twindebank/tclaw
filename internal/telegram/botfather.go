@@ -201,6 +201,34 @@ func (bf *BotFather) ConfigureBot(ctx context.Context, params ConfigureBotParams
 	return nil
 }
 
+// ListBots returns the usernames (without the @) of every bot the account owns,
+// by asking BotFather for /mybots and reading the bot list off the inline
+// keyboard it replies with.
+func (bf *BotFather) ListBots(ctx context.Context) ([]string, error) {
+	if err := bf.resolvePeer(ctx); err != nil {
+		return nil, err
+	}
+
+	if err := bf.sendMessage(ctx, "/mybots"); err != nil {
+		return nil, fmt.Errorf("send /mybots: %w", err)
+	}
+
+	// BotFather replies "Choose a bot from the list below:" with one inline
+	// button per bot, each labelled with the bot's @username.
+	msg, err := bf.waitForMessageMatching(ctx, "choose")
+	if err != nil {
+		return nil, fmt.Errorf("waiting for bot list: %w", err)
+	}
+
+	usernames := parseBotUsernames(msg)
+	if len(usernames) == 0 {
+		// Either the account has no bots or the reply wasn't the expected
+		// keyboard — surface it rather than returning a silent empty list.
+		return nil, fmt.Errorf("no bot usernames found in BotFather's /mybots reply")
+	}
+	return usernames, nil
+}
+
 // StartBot sends /start to a bot as the authenticated user via MTProto.
 func (bf *BotFather) StartBot(ctx context.Context, botUsername string) error {
 	resolved, err := bf.client.API().ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{
@@ -401,10 +429,23 @@ func (bf *BotFather) sendMessage(ctx context.Context, text string) error {
 	return err
 }
 
-// waitForResponse polls BotFather's chat for a new response with a message ID
-// strictly greater than lastSeenMsgID. This prevents picking up stale messages
-// or responses from concurrent BotFather conversations.
+// waitForResponse polls for the next matching BotFather message and returns its
+// text. See waitForMessageMatching for the matching rules.
 func (bf *BotFather) waitForResponse(ctx context.Context, substring string) (string, error) {
+	msg, err := bf.waitForMessageMatching(ctx, substring)
+	if err != nil {
+		return "", err
+	}
+	return msg.Message, nil
+}
+
+// waitForMessageMatching polls BotFather's chat for a new message with an ID
+// strictly greater than lastSeenMsgID whose text contains substring (case-
+// insensitive; an empty substring matches the next message). It returns the
+// full message so callers can also read structured fields such as the inline
+// keyboard. Polling by ID prevents picking up stale messages or responses from
+// concurrent BotFather conversations.
+func (bf *BotFather) waitForMessageMatching(ctx context.Context, substring string) (*tg.Message, error) {
 	deadline := time.Now().Add(stepTimeout)
 	substring = strings.ToLower(substring)
 
@@ -416,7 +457,7 @@ func (bf *BotFather) waitForResponse(ctx context.Context, substring string) (str
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return nil, ctx.Err()
 		default:
 		}
 
@@ -425,7 +466,7 @@ func (bf *BotFather) waitForResponse(ctx context.Context, substring string) (str
 			Limit: 5,
 		})
 		if err != nil {
-			return "", fmt.Errorf("get BotFather history: %w", err)
+			return nil, fmt.Errorf("get BotFather history: %w", err)
 		}
 
 		var messages []tg.MessageClass
@@ -461,12 +502,12 @@ func (bf *BotFather) waitForResponse(ctx context.Context, substring string) (str
 			// silently wait until stepTimeout before surfacing the error.
 			if substring != "" && !strings.Contains(strings.ToLower(text), substring) && containsError(text) {
 				slog.Error("botfather: received error response", "msg_id", msg.ID, "text", truncate(text, 120))
-				return "", fmt.Errorf("BotFather error: %s", text)
+				return nil, fmt.Errorf("BotFather error: %s", text)
 			}
 
 			if substring == "" || strings.Contains(strings.ToLower(text), substring) {
 				slog.Info("botfather: got response", "msg_id", msg.ID, "text_prefix", truncate(text, 80))
-				return text, nil
+				return msg, nil
 			}
 			slog.Debug("botfather: skipping message (no substring match)", "msg_id", msg.ID, "text_prefix", truncate(text, 80), "want", substring)
 		}
@@ -475,7 +516,7 @@ func (bf *BotFather) waitForResponse(ctx context.Context, substring string) (str
 	}
 
 	slog.Error("botfather: timeout waiting for response", "substring", substring, "last_seen_id", bf.lastSeenMsgID)
-	return "", fmt.Errorf("timeout waiting for BotFather response (expected %q)", substring)
+	return nil, fmt.Errorf("timeout waiting for BotFather response (expected %q)", substring)
 }
 
 // latestMessageID returns the ID of the most recent message in the BotFather
@@ -568,4 +609,43 @@ func containsError(text string) bool {
 		strings.Contains(lower, "invalid") ||
 		strings.Contains(lower, "can't") ||
 		strings.Contains(lower, "too many")
+}
+
+// parseBotUsernames pulls bot usernames (without the leading @) out of the
+// inline keyboard on BotFather's /mybots reply, where each button is labelled
+// with a bot's @username. Non-bot control buttons and duplicates are skipped.
+func parseBotUsernames(msg *tg.Message) []string {
+	markup, ok := msg.ReplyMarkup.(*tg.ReplyInlineMarkup)
+	if !ok {
+		return nil
+	}
+
+	var usernames []string
+	seen := make(map[string]bool)
+	for _, row := range markup.Rows {
+		for _, button := range row.Buttons {
+			name := strings.TrimPrefix(strings.TrimSpace(buttonText(button)), "@")
+			// BotFather labels each bot button with its @username, which always
+			// ends in "bot"; anything else is a control button, so skip it.
+			if !strings.HasSuffix(strings.ToLower(name), "bot") || seen[name] {
+				continue
+			}
+			seen[name] = true
+			usernames = append(usernames, name)
+		}
+	}
+	return usernames
+}
+
+// buttonText returns the label of an inline keyboard button, or "" for a button
+// type that carries no text.
+func buttonText(button tg.KeyboardButtonClass) string {
+	switch b := button.(type) {
+	case *tg.KeyboardButtonCallback:
+		return b.Text
+	case *tg.KeyboardButton:
+		return b.Text
+	default:
+		return ""
+	}
 }

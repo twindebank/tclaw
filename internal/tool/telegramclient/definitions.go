@@ -14,6 +14,7 @@ const (
 	ToolStatus       = "telegram_client_status"
 	ToolConfigureBot = "telegram_client_configure_bot"
 	ToolDeleteBot    = "telegram_client_delete_bot"
+	ToolListBots     = "telegram_client_list_bots"
 	ToolCreateGroup  = "telegram_client_create_group"
 	ToolListChats    = "telegram_client_list_chats"
 	ToolGetHistory   = "telegram_client_get_history"
@@ -24,7 +25,7 @@ const (
 func ToolNames() []string {
 	return []string{
 		ToolSetup, ToolAuth, ToolVerify, Tool2FA, ToolStatus,
-		ToolConfigureBot, ToolDeleteBot, ToolCreateGroup, ToolListChats, ToolGetHistory, ToolSearch,
+		ToolConfigureBot, ToolDeleteBot, ToolListBots, ToolCreateGroup, ToolListChats, ToolGetHistory, ToolSearch,
 	}
 }
 
@@ -175,6 +176,14 @@ var toolDefs = []mcp.ToolDef{
 			},
 			"required": ["username"]
 		}`),
+	},
+	{
+		Name: ToolListBots,
+		Description: "List every Telegram bot the account owns, via BotFather /mybots. Returns each " +
+			"bot's username (without the @). Use it to find a bot's username — e.g. to rename it with " +
+			"telegram_client_configure_bot or remove it with telegram_client_delete_bot — and to spot " +
+			"orphaned bots from deleted channels holding slots against the 20-bot-per-account limit. Takes no arguments.",
+		InputSchema: json.RawMessage(`{"type": "object", "properties": {}}`),
 	},
 	{
 		Name:        ToolCreateGroup,

@@ -54,6 +54,8 @@ func makeHandler(name string, state *handlerState) mcp.ToolHandler {
 		return createBotHandler(state)
 	case ToolDeleteBot:
 		return deleteBotHandler(state)
+	case ToolListBots:
+		return listBotsHandler(state)
 	case ToolConfigureBot:
 		return configureBotHandler(state)
 	case ToolCreateGroup:
@@ -419,6 +421,28 @@ func deleteBotHandler(s *handlerState) mcp.ToolHandler {
 		return json.Marshal(map[string]string{
 			"status":  "deleted",
 			"message": fmt.Sprintf("Bot @%s has been permanently deleted.", a.Username),
+		})
+	}
+}
+
+func listBotsHandler(s *handlerState) mcp.ToolHandler {
+	return func(ctx context.Context, _ json.RawMessage) (json.RawMessage, error) {
+		if err := ensureConnected(ctx, s); err != nil {
+			return nil, err
+		}
+
+		s.botFatherMu.Lock()
+		defer s.botFatherMu.Unlock()
+
+		bf := tgsdk.NewBotFather(s.client)
+		usernames, err := bf.ListBots(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list bots: %w", err)
+		}
+
+		return json.Marshal(map[string]any{
+			"count":     len(usernames),
+			"usernames": usernames,
 		})
 	}
 }

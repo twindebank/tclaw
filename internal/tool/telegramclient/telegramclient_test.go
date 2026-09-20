@@ -275,6 +275,7 @@ func TestAllToolsRegistered(t *testing.T) {
 		"telegram_client_status",
 		"telegram_client_configure_bot",
 		"telegram_client_delete_bot",
+		"telegram_client_list_bots",
 		"telegram_client_create_group",
 		"telegram_client_list_chats",
 		"telegram_client_get_history",
