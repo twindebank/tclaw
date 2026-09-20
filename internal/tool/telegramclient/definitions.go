@@ -13,6 +13,7 @@ const (
 	Tool2FA          = "telegram_client_2fa"
 	ToolStatus       = "telegram_client_status"
 	ToolConfigureBot = "telegram_client_configure_bot"
+	ToolDeleteBot    = "telegram_client_delete_bot"
 	ToolCreateGroup  = "telegram_client_create_group"
 	ToolListChats    = "telegram_client_list_chats"
 	ToolGetHistory   = "telegram_client_get_history"
@@ -23,7 +24,7 @@ const (
 func ToolNames() []string {
 	return []string{
 		ToolSetup, ToolAuth, ToolVerify, Tool2FA, ToolStatus,
-		ToolConfigureBot, ToolCreateGroup, ToolListChats, ToolGetHistory, ToolSearch,
+		ToolConfigureBot, ToolDeleteBot, ToolCreateGroup, ToolListChats, ToolGetHistory, ToolSearch,
 	}
 }
 
@@ -152,6 +153,24 @@ var toolDefs = []mcp.ToolDef{
 				"join_groups": {
 					"type": "boolean",
 					"description": "Whether the bot can be added to groups by other users."
+				}
+			},
+			"required": ["username"]
+		}`),
+	},
+	{
+		Name: ToolDeleteBot,
+		Description: "Permanently delete a Telegram bot via BotFather. IRREVERSIBLE — the bot, its " +
+			"token and its @username are gone for good. Use it to reap orphaned bots left behind by " +
+			"deleted channels, which otherwise hold slots against Telegram's hard limit of 20 bots per " +
+			"account. Do NOT delete a bot that still backs a live channel — use channel_delete for that, " +
+			"which tears the bot down as part of removing the channel.",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"username": {
+					"type": "string",
+					"description": "The bot's username to delete, without the @ (e.g. tclaw_ab12cd34_bot)."
 				}
 			},
 			"required": ["username"]

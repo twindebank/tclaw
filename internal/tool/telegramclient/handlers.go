@@ -52,7 +52,7 @@ func makeHandler(name string, state *handlerState) mcp.ToolHandler {
 		return statusHandler(state)
 	case "telegram_client_create_bot":
 		return createBotHandler(state)
-	case "telegram_client_delete_bot":
+	case ToolDeleteBot:
 		return deleteBotHandler(state)
 	case ToolConfigureBot:
 		return configureBotHandler(state)

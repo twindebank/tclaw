@@ -184,6 +184,17 @@ func TestConfigureBot(t *testing.T) {
 	})
 }
 
+func TestDeleteBot(t *testing.T) {
+	t.Run("rejects empty username", func(t *testing.T) {
+		h, _ := setup(t)
+
+		err := callToolExpectError(t, h, "telegram_client_delete_bot", map[string]any{
+			"username": "",
+		})
+		require.Contains(t, err.Error(), "username")
+	})
+}
+
 func TestCreateGroup(t *testing.T) {
 	t.Run("rejects empty title", func(t *testing.T) {
 		h, _ := setup(t)
@@ -263,6 +274,7 @@ func TestAllToolsRegistered(t *testing.T) {
 		"telegram_client_2fa",
 		"telegram_client_status",
 		"telegram_client_configure_bot",
+		"telegram_client_delete_bot",
 		"telegram_client_create_group",
 		"telegram_client_list_chats",
 		"telegram_client_get_history",
