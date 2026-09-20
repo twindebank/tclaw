@@ -3,6 +3,7 @@ package telegramclient_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -170,6 +171,16 @@ func TestConfigureBot(t *testing.T) {
 			"username": "",
 		})
 		require.Contains(t, err.Error(), "username")
+	})
+
+	t.Run("rejects a display name over the BotFather limit", func(t *testing.T) {
+		h, _ := setup(t)
+
+		err := callToolExpectError(t, h, "telegram_client_configure_bot", map[string]any{
+			"username": "somebot",
+			"name":     strings.Repeat("a", 65),
+		})
+		require.Contains(t, err.Error(), "too long")
 	})
 }
 

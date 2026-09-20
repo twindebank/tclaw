@@ -60,6 +60,7 @@ type CreateBotResult struct {
 // ConfigureBotParams controls which BotFather settings to update.
 type ConfigureBotParams struct {
 	Username    string
+	Name        string
 	Description string
 	About       string
 	Privacy     *bool
@@ -159,6 +160,18 @@ func (bf *BotFather) DeleteBot(ctx context.Context, username string) error {
 func (bf *BotFather) ConfigureBot(ctx context.Context, params ConfigureBotParams) error {
 	if err := bf.resolvePeer(ctx); err != nil {
 		return err
+	}
+
+	if params.Name != "" {
+		// /setname changes the bot's display name — the title shown in the chat
+		// list. BotFather sets it once at creation and only /setname changes it
+		// afterwards, so this is the only way to rename an existing channel's bot.
+		if runes := len([]rune(params.Name)); runes > MaxBotDisplayNameLength {
+			return fmt.Errorf("name too long: %d runes, max %d (BotFather display name limit)", runes, MaxBotDisplayNameLength)
+		}
+		if err := bf.runBotFatherCommand(ctx, "/setname", params.Username, params.Name); err != nil {
+			return fmt.Errorf("set name: %w", err)
+		}
 	}
 
 	if params.Description != "" {
@@ -495,15 +508,16 @@ func (bf *BotFather) latestMessageID(ctx context.Context) int {
 // --- helpers ---
 
 const (
-	// maxBotDisplayNameLength is BotFather's hard limit on bot display name length in runes.
-	maxBotDisplayNameLength = 64
+	// MaxBotDisplayNameLength is BotFather's hard limit on bot display name length in runes.
+	// Exported so callers (e.g. the configure_bot tool) can validate a new name before invoking BotFather.
+	MaxBotDisplayNameLength = 64
 
 	// botDisplayNamePrefix is prepended to the purpose to form the display name.
 	// Rune length: t,c,l,a,w,space,·,space = 8.
 	botDisplayNamePrefix = "tclaw · "
 
 	// MaxBotPurposeRunes is the maximum rune length allowed for the purpose string.
-	// = maxBotDisplayNameLength (64) - len([]rune(botDisplayNamePrefix)) (8).
+	// = MaxBotDisplayNameLength (64) - len([]rune(botDisplayNamePrefix)) (8).
 	// Exported so callers can validate before invoking BotFather.
 	MaxBotPurposeRunes = 56
 )
