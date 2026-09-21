@@ -26,7 +26,12 @@ const (
 type Model string
 
 const (
-	// Claude 4.8 family (latest)
+	// Claude 5 family (latest)
+	ModelOpus5   Model = "claude-opus-5"
+	ModelSonnet5 Model = "claude-sonnet-5"
+	ModelFable51 Model = "claude-fable-5-1"
+
+	// Claude 4.8 family
 	ModelOpus48 Model = "claude-opus-4-8"
 
 	// Claude 4.6 family
@@ -68,6 +73,9 @@ func (m Model) ShortName() string {
 
 // modelShortNames maps model identifiers to short display names.
 var modelShortNames = map[Model]string{
+	ModelOpus5:      "opus-5",
+	ModelSonnet5:    "sonnet-5",
+	ModelFable51:    "fable-5.1",
 	ModelOpus48:     "opus-4.8",
 	ModelOpus46:     "opus-4.6",
 	ModelSonnet46:   "sonnet-4.6",
@@ -147,6 +155,7 @@ func (t Tool) Scoped(pattern string) Tool {
 
 // validModels is the set of known model identifiers.
 var validModels = map[Model]bool{
+	ModelOpus5: true, ModelSonnet5: true, ModelFable51: true,
 	ModelOpus48: true,
 	ModelOpus46: true, ModelSonnet46: true,
 	ModelHaiku45: true,
