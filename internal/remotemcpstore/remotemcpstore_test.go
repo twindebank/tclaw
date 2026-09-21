@@ -267,7 +267,65 @@ func TestManager_SetChannels(t *testing.T) {
 	})
 }
 
+func TestManager_RemoveChannelFromAll(t *testing.T) {
+	t.Run("takes the channel off the registrations that name it", func(t *testing.T) {
+		mgr := newManager(t)
+		ctx := context.Background()
+		addForPrune(t, mgr, "a", "desktop", "shopping")
+		addForPrune(t, mgr, "b", "shopping")
+		addForPrune(t, mgr, "c", "desktop", "email")
+
+		result, err := mgr.RemoveChannelFromAll(ctx, "desktop")
+		require.NoError(t, err)
+		require.Equal(t, []string{"a", "c"}, result.Pruned)
+		require.Empty(t, result.LeftAlone)
+
+		a, err := mgr.GetRemoteMCP(ctx, "a")
+		require.NoError(t, err)
+		require.Equal(t, []string{"shopping"}, a.Channels)
+
+		b, err := mgr.GetRemoteMCP(ctx, "b")
+		require.NoError(t, err)
+		require.Equal(t, []string{"shopping"}, b.Channels, "a registration that never named it is untouched")
+	})
+
+	t.Run("leaves a registration scoped only to that channel alone", func(t *testing.T) {
+		mgr := newManager(t)
+		ctx := context.Background()
+		addForPrune(t, mgr, "only", "desktop")
+
+		result, err := mgr.RemoveChannelFromAll(ctx, "desktop")
+		require.NoError(t, err)
+		require.Equal(t, []string{"only"}, result.LeftAlone)
+		require.Empty(t, result.Pruned)
+
+		entry, err := mgr.GetRemoteMCP(ctx, "only")
+		require.NoError(t, err)
+		require.Equal(t, []string{"desktop"}, entry.Channels,
+			"emptying the list would make the server reach every channel, which is a widening")
+	})
+
+	t.Run("reports nothing when no registration names the channel", func(t *testing.T) {
+		mgr := newManager(t)
+		addForPrune(t, mgr, "a", "shopping")
+
+		result, err := mgr.RemoveChannelFromAll(context.Background(), "desktop")
+		require.NoError(t, err)
+		require.Empty(t, result.Pruned)
+		require.Empty(t, result.LeftAlone)
+	})
+
+}
+
 // --- helpers ---
+
+func addForPrune(t *testing.T, mgr *remotemcpstore.Manager, name string, channels ...string) {
+	t.Helper()
+	_, err := mgr.AddRemoteMCP(context.Background(), remotemcpstore.AddRemoteMCPParams{
+		Name: name, URL: "https://" + name + ".example.com/mcp", Channels: channels,
+	})
+	require.NoError(t, err)
+}
 
 func newManager(t *testing.T) *remotemcpstore.Manager {
 	t.Helper()

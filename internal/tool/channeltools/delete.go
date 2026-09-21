@@ -7,10 +7,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"tclaw/internal/channel"
 	"tclaw/internal/dev"
 	"tclaw/internal/mcp"
+	"tclaw/internal/remotemcpstore"
 )
 
 const ToolChannelDelete = "channel_delete"
@@ -100,6 +102,18 @@ func channelDeleteHandler(deps Deps) mcp.ToolHandler {
 		// shouldn't block the tool call.
 		devSessionsRemoved := cleanupDevSessionsForChannel(ctx, deps.DevStore, a.Name)
 
+		// Take the channel off the remote MCP servers scoped to it, so no
+		// registration is left naming a channel that no longer exists.
+		var prune remotemcpstore.PruneChannelResult
+		var pruneErr error
+		if deps.RemoteMCPs != nil {
+			prune, pruneErr = deps.RemoteMCPs.RemoveChannelFromAll(ctx, a.Name)
+			if pruneErr != nil {
+				slog.Error("channel_delete: failed to unscope remote mcps from channel",
+					"channel", a.Name, "err", pruneErr)
+			}
+		}
+
 		if deps.OnChannelChange != nil {
 			deps.OnChannelChange()
 		}
@@ -109,11 +123,53 @@ func channelDeleteHandler(deps Deps) mcp.ToolHandler {
 			message = fmt.Sprintf("Channel %q deleted (%d dev session(s) also cleaned up). The agent will restart automatically.",
 				a.Name, devSessionsRemoved)
 		}
-		return json.Marshal(map[string]any{
+		result := map[string]any{
 			"name":                 a.Name,
 			"message":              message,
 			"dev_sessions_removed": devSessionsRemoved,
-		})
+		}
+		remoteMCPCleanupResult(message, prune, pruneErr).mergeInto(result)
+		return json.Marshal(result)
+	}
+}
+
+// remoteMCPCleanupReport is what a teardown should tell the agent about the
+// remote MCP servers that were scoped to the channel.
+type remoteMCPCleanupReport struct {
+	// Message is the caller's message with anything worth saying appended.
+	Message string
+
+	// Fields are the response keys to merge in. Empty when there is nothing to
+	// report.
+	Fields map[string]any
+}
+
+// remoteMCPCleanupResult describes what the cleanup did, so a teardown is never
+// reported as clean when it was not.
+func remoteMCPCleanupResult(message string, prune remotemcpstore.PruneChannelResult, pruneErr error) remoteMCPCleanupReport {
+	report := remoteMCPCleanupReport{Message: message, Fields: map[string]any{}}
+	if len(prune.Pruned) > 0 {
+		report.Fields["remote_mcps_updated"] = prune.Pruned
+	}
+	if len(prune.LeftAlone) > 0 {
+		report.Fields["remote_mcps_still_naming_deleted_channel"] = prune.LeftAlone
+		report.Message = fmt.Sprintf("%s These remote MCP servers were scoped only to it and still name it: %s. "+
+			"Give each one a channel with remote_mcp_update, or remove it with remote_mcp_remove.",
+			report.Message, strings.Join(prune.LeftAlone, ", "))
+	}
+	if pruneErr != nil {
+		report.Fields["remote_mcp_cleanup_error"] = pruneErr.Error()
+		report.Message = fmt.Sprintf("%s The remote MCP servers scoped to it could NOT be updated, so some may still "+
+			"name it. Check with remote_mcp_list. (%s)", report.Message, pruneErr)
+	}
+	return report
+}
+
+// mergeInto copies the report onto a tool response.
+func (r remoteMCPCleanupReport) mergeInto(result map[string]any) {
+	result["message"] = r.Message
+	for key, value := range r.Fields {
+		result[key] = value
 	}
 }
 

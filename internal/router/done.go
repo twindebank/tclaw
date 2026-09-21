@@ -11,6 +11,7 @@ import (
 	"tclaw/internal/channel"
 	"tclaw/internal/config"
 	"tclaw/internal/libraries/secret"
+	"tclaw/internal/remotemcpstore"
 	"tclaw/internal/repo"
 	"tclaw/internal/user"
 )
@@ -26,6 +27,7 @@ type confirmParams struct {
 	SecretStore  secret.Store
 	Provisioners channel.ProvisionerLookup
 	RepoStore    *repo.Store
+	RemoteMCPs   *remotemcpstore.Manager
 	Notify       func(ctx context.Context, chID channel.ChannelID, text string)
 
 	OnChannelChange func()
@@ -187,6 +189,12 @@ func confirmChannelDone(
 		if removeErr := os.RemoveAll(knowledgeDir); removeErr != nil {
 			slog.Warn("channel_done: failed to clean up channel knowledge dir",
 				"channel", chName, "dir", knowledgeDir, "err", removeErr)
+		}
+	}
+	if params.RemoteMCPs != nil {
+		if _, pruneErr := params.RemoteMCPs.RemoveChannelFromAll(ctx, chName); pruneErr != nil {
+			slog.Error("channel_done: failed to unscope remote mcps",
+				"channel", chName, "err", pruneErr)
 		}
 	}
 

@@ -222,9 +222,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// the stored file is left unconverted.
 		slog.Error("failed to rewrite remote mcp channel scope", "user", mu.cfg.ID, "err", err)
 	}
-	if err := warnUnscopedRemoteMCPs(ctx, remoteMCPMgr, mu.cfg.ID); err != nil {
-		slog.Error("failed to check remote mcp scope", "user", mu.cfg.ID, "err", err)
-	}
 	credMgr := credential.NewManager(s, secretStore)
 	mcpHandler := mcp.NewHandler()
 
@@ -320,6 +317,15 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 	runtimeState := stores.RuntimeState
 	configWriter := config.NewWriter(r.configPath, r.env)
+	flaggedMCPs, err := checkRemoteMCPScope(ctx, remoteMCPMgr, configWriter, mu.cfg.ID)
+	if err != nil {
+		slog.Error("failed to check remote mcp scope", "user", mu.cfg.ID, "err", err)
+	}
+	if len(flaggedMCPs) > 0 {
+		// One line at ERROR so it is visible above the per-registration
+		// warnings, which is what a person acting on this would look for.
+		slog.Error("remote mcps need their channels repointed", "user", mu.cfg.ID, "names", flaggedMCPs)
+	}
 
 	// channelChangeCh signals the main loop to restart the agent when
 	// a channel is created, edited, or deleted via MCP tools.
@@ -569,7 +575,19 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Ephemeral channel cleanup goroutine. Runs at user lifetime and
 	// periodically tears down ephemeral channels that have been idle past
 	// their timeout. Reads channel config each tick via the config writer.
-	go cleanupEphemeralChannels(ctx, mu.cfg.ID, configWriter, runtimeState, activityTracker, secretStore, provisioners, onChannelChange, messageQueue, channelSet.Snapshot, devStore)
+	go cleanupEphemeralChannels(ctx, cleanupParams{
+		UserID:          mu.cfg.ID,
+		ConfigWriter:    configWriter,
+		RuntimeState:    runtimeState,
+		Tracker:         activityTracker,
+		SecretStore:     secretStore,
+		Provisioners:    provisioners,
+		OnChannelChange: onChannelChange,
+		MessageQueue:    messageQueue,
+		ChannelsFunc:    channelSet.Snapshot,
+		DevStore:        devStore,
+		RemoteMCPs:      remoteMCPMgr,
+	})
 
 	// Repo lifecycle: expire access grants, drop unused clones, refresh mirrors
 	// on their fetch interval. Runs at user lifetime so a grant lapses whether
@@ -973,6 +991,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 						SecretStore:     secretStore,
 						Provisioners:    provisioners,
 						RepoStore:       repoStore,
+						RemoteMCPs:      remoteMCPMgr,
 						Notify:          notifyChannel,
 						OnChannelChange: onChannelChange,
 						MemoryDir:       memoryDir,

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -316,6 +317,63 @@ func (m *Manager) SetInstructions(ctx context.Context, name string, instructions
 // An empty list means every channel.
 func (m *Manager) SetChannels(ctx context.Context, name string, channels []string) error {
 	return m.update(ctx, name, func(mcp *RemoteMCP) { mcp.Channels = channels })
+}
+
+// PruneChannelResult is what removing a channel from every registration did.
+type PruneChannelResult struct {
+	// Pruned names the registrations the channel was taken off.
+	Pruned []string
+
+	// LeftAlone names the registrations where it was the only channel. Removing
+	// it would leave an empty list, which reaches every channel.
+	LeftAlone []string
+}
+
+// RemoveChannelFromAll takes a channel off every registration that names it,
+// leaving alone any registration it is the only channel of.
+func (m *Manager) RemoveChannelFromAll(ctx context.Context, channelName string) (PruneChannelResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var result PruneChannelResult
+	mcps, err := m.load(ctx)
+	if err != nil {
+		return PruneChannelResult{}, err
+	}
+
+	changed := false
+	for i := range mcps {
+		remaining := slices.DeleteFunc(slices.Clone(mcps[i].Channels), func(name string) bool {
+			return name == channelName
+		})
+		if len(remaining) == len(mcps[i].Channels) {
+			continue
+		}
+		if len(remaining) == 0 {
+			// An empty list reaches every channel, so this would widen the
+			// server rather than tidy it.
+			result.LeftAlone = append(result.LeftAlone, mcps[i].Name)
+			continue
+		}
+		mcps[i].Channels = remaining
+		result.Pruned = append(result.Pruned, mcps[i].Name)
+		changed = true
+	}
+	for _, name := range result.LeftAlone {
+		slog.Warn("remote mcp was scoped only to a deleted channel and still names it",
+			"channel", channelName, "remote_mcp", name)
+	}
+	if !changed {
+		return result, nil
+	}
+	if err := m.save(ctx, mcps); err != nil {
+		return PruneChannelResult{}, err
+	}
+	for _, name := range result.Pruned {
+		slog.Info("remote mcp no longer scoped to deleted channel",
+			"channel", channelName, "remote_mcp", name)
+	}
+	return result, nil
 }
 
 // update applies fn to the named registration and saves the list.

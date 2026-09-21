@@ -15,6 +15,7 @@ import (
 	"tclaw/internal/dev"
 	"tclaw/internal/libraries/store"
 	"tclaw/internal/queue"
+	"tclaw/internal/remotemcpstore"
 )
 
 func TestCleanupOnce(t *testing.T) {
@@ -29,9 +30,7 @@ func TestCleanupOnce(t *testing.T) {
 		_, known := h.tracker.IsBusy("new-ephemeral")
 		require.False(t, known)
 
-		cleanupOnce(context.Background(), testUserID, h.configWriter, h.runtimeState,
-			h.tracker, h.secretStore, h.provisioners, h.onChannelChange,
-			h.lastLoggedError, h.messageQueue, h.channelsFunc, h.devStore)
+		cleanupOnce(context.Background(), h.params(), h.lastLoggedError)
 
 		channels, err := h.configWriter.ReadChannels(testUserID)
 		require.NoError(t, err)
@@ -61,9 +60,7 @@ func TestCleanupOnce(t *testing.T) {
 			context.Background(), h.runtimeState, []string{"restarted-ephemeral"},
 		)
 
-		cleanupOnce(context.Background(), testUserID, h.configWriter, h.runtimeState,
-			h.tracker, h.secretStore, h.provisioners, h.onChannelChange,
-			h.lastLoggedError, h.messageQueue, h.channelsFunc, h.devStore)
+		cleanupOnce(context.Background(), h.params(), h.lastLoggedError)
 
 		channels, err := h.configWriter.ReadChannels(testUserID)
 		require.NoError(t, err)
@@ -82,9 +79,7 @@ func TestCleanupOnce(t *testing.T) {
 		h.tracker.MessageReceived("busy-ephemeral")
 		h.tracker.TurnStarted("busy-ephemeral")
 
-		cleanupOnce(context.Background(), testUserID, h.configWriter, h.runtimeState,
-			h.tracker, h.secretStore, h.provisioners, h.onChannelChange,
-			h.lastLoggedError, h.messageQueue, h.channelsFunc, h.devStore)
+		cleanupOnce(context.Background(), h.params(), h.lastLoggedError)
 
 		channels, err := h.configWriter.ReadChannels(testUserID)
 		require.NoError(t, err)
@@ -107,9 +102,7 @@ func TestCleanupOnce(t *testing.T) {
 		// Backdate so the 1ms timeout is expired.
 		h.tracker.ForceLastMessageAt("idle-ephemeral", time.Now().Add(-time.Second))
 
-		cleanupOnce(context.Background(), testUserID, h.configWriter, h.runtimeState,
-			h.tracker, h.secretStore, h.provisioners, h.onChannelChange,
-			h.lastLoggedError, h.messageQueue, h.channelsFunc, h.devStore)
+		cleanupOnce(context.Background(), h.params(), h.lastLoggedError)
 
 		channels, err := h.configWriter.ReadChannels(testUserID)
 		require.NoError(t, err)
@@ -142,14 +135,38 @@ func TestCleanupOnce(t *testing.T) {
 			return nil
 		}
 
-		cleanupOnce(context.Background(), testUserID, h.configWriter, h.runtimeState,
-			h.tracker, h.secretStore, h.provisioners, h.onChannelChange,
-			h.lastLoggedError, h.messageQueue, h.channelsFunc, h.devStore)
+		cleanupOnce(context.Background(), h.params(), h.lastLoggedError)
 
 		require.True(t, prov.teardownCalled, "platform teardown should be called")
 		channels, err := h.configWriter.ReadChannels(testUserID)
 		require.NoError(t, err)
 		require.Empty(t, channels)
+	})
+
+	t.Run("takes the reaped channel off the remote MCP servers scoped to it", func(t *testing.T) {
+		h := setupEphemeralTest(t, config.Channel{
+			Name:                 "scratch",
+			Type:                 channel.TypeSocket,
+			Ephemeral:            true,
+			EphemeralIdleTimeout: "1ms",
+		})
+		ctx := context.Background()
+
+		_, err := h.remoteMCPs.AddRemoteMCP(ctx, remotemcpstore.AddRemoteMCPParams{
+			Name: "browser", URL: "https://browser.example.com/mcp",
+			Channels: []string{"scratch", "assistant"},
+		})
+		require.NoError(t, err)
+
+		h.tracker.MessageReceived("scratch")
+		h.tracker.ForceLastMessageAt("scratch", time.Now().Add(-time.Second))
+
+		cleanupOnce(ctx, h.params(), h.lastLoggedError)
+
+		entry, err := h.remoteMCPs.GetRemoteMCP(ctx, "browser")
+		require.NoError(t, err)
+		require.Equal(t, []string{"assistant"}, entry.Channels,
+			"an ephemeral name can be reused, so a registration still naming it would attach to whatever is created next")
 	})
 
 	t.Run("cleans up associated dev sessions and leaves others alone", func(t *testing.T) {
@@ -200,9 +217,7 @@ func TestCleanupOnce(t *testing.T) {
 		h.tracker.MessageReceived("dev-scratch")
 		h.tracker.ForceLastMessageAt("dev-scratch", time.Now().Add(-time.Second))
 
-		cleanupOnce(ctx, testUserID, h.configWriter, h.runtimeState,
-			h.tracker, h.secretStore, h.provisioners, h.onChannelChange,
-			h.lastLoggedError, h.messageQueue, h.channelsFunc, h.devStore)
+		cleanupOnce(ctx, h.params(), h.lastLoggedError)
 
 		// Channel torn down.
 		channels, err := h.configWriter.ReadChannels(testUserID)
@@ -236,9 +251,7 @@ func TestCleanupOnce(t *testing.T) {
 		h.tracker.MessageReceived("permanent")
 		h.tracker.ForceLastMessageAt("permanent", time.Now().Add(-48*time.Hour))
 
-		cleanupOnce(context.Background(), testUserID, h.configWriter, h.runtimeState,
-			h.tracker, h.secretStore, h.provisioners, h.onChannelChange,
-			h.lastLoggedError, h.messageQueue, h.channelsFunc, h.devStore)
+		cleanupOnce(context.Background(), h.params(), h.lastLoggedError)
 
 		channels, err := h.configWriter.ReadChannels(testUserID)
 		require.NoError(t, err)
@@ -260,6 +273,7 @@ type ephemeralTestHarness struct {
 	messageQueue    *queue.Queue
 	channelsFunc    func() map[channel.ChannelID]channel.Channel
 	devStore        *dev.Store
+	remoteMCPs      *remotemcpstore.Manager
 }
 
 func setupEphemeralTest(t *testing.T, ch config.Channel) *ephemeralTestHarness {
@@ -298,9 +312,28 @@ func setupEphemeralTest(t *testing.T, ch config.Channel) *ephemeralTestHarness {
 		messageQueue:    q,
 		channelsFunc:    func() map[channel.ChannelID]channel.Channel { return nil },
 		devStore:        dev.NewStore(s),
+		remoteMCPs:      remotemcpstore.NewManager(s, ss),
 	}
 	h.onChannelChange = func() { h.changeCalled = true }
 	return h
+}
+
+// params builds the reaper's arguments from the harness, reading the fields
+// fresh so a test can swap one (the tracker, the provisioners) before calling.
+func (h *ephemeralTestHarness) params() cleanupParams {
+	return cleanupParams{
+		UserID:          testUserID,
+		ConfigWriter:    h.configWriter,
+		RuntimeState:    h.runtimeState,
+		Tracker:         h.tracker,
+		SecretStore:     h.secretStore,
+		Provisioners:    h.provisioners,
+		OnChannelChange: h.onChannelChange,
+		MessageQueue:    h.messageQueue,
+		ChannelsFunc:    h.channelsFunc,
+		DevStore:        h.devStore,
+		RemoteMCPs:      h.remoteMCPs,
+	}
 }
 
 type mockEphemeralProvisioner struct {

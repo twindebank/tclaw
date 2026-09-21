@@ -11,6 +11,7 @@ import (
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/mcp"
 	"tclaw/internal/reconciler"
+	"tclaw/internal/remotemcpstore"
 	"tclaw/internal/tool/toolpkg"
 	"tclaw/internal/toolgroup"
 	"tclaw/internal/user"
@@ -40,6 +41,10 @@ type Package struct {
 	SessionStore *channel.SessionStore
 	HomeDir      string
 	MemoryDir    string
+
+	// RemoteMCPs holds the registrations to unscope when a channel is torn
+	// down. Nil skips that cleanup.
+	RemoteMCPs *remotemcpstore.Manager
 
 	// TelegramHistory reads Telegram message history for a channel. Nil if
 	// the Telegram Client API is not available.
@@ -113,6 +118,7 @@ func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationCont
 		SecretStore:  p.SecretStore,
 		ConfigPath:   p.ConfigPath,
 		MemoryDir:    p.MemoryDir,
+		RemoteMCPs:   p.RemoteMCPs,
 		ReconcileParams: reconciler.ReconcileParams{
 			Channels:     nil, // Populated from config at runtime.
 			RuntimeState: p.RuntimeState,

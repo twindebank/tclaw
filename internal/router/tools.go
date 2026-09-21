@@ -237,22 +237,46 @@ func partitionRemoteMCPs(all []remotemcpstore.RemoteMCP) (global []remotemcpstor
 	return global, scoped
 }
 
-// warnUnscopedRemoteMCPs reports any registration that names no channel, which
-// reaches every channel and which no tool can create.
-func warnUnscopedRemoteMCPs(ctx context.Context, connMgr *remotemcpstore.Manager, userID user.ID) error {
+// checkRemoteMCPScope warns about every registration whose channels do not hold
+// up, and returns their names: it names no channel, or one that does not exist.
+func checkRemoteMCPScope(ctx context.Context, connMgr *remotemcpstore.Manager, configWriter *config.Writer, userID user.ID) ([]string, error) {
 	all, err := connMgr.ListRemoteMCPs(ctx)
 	if err != nil {
-		return fmt.Errorf("list remote mcps to check their scope: %w", err)
+		return nil, fmt.Errorf("list remote mcps to check their scope: %w", err)
 	}
+	channels, err := configWriter.ReadChannels(userID)
+	if err != nil {
+		return nil, fmt.Errorf("read channels to check remote mcp scope: %w", err)
+	}
+	exists := make(map[string]bool, len(channels))
+	for _, ch := range channels {
+		exists[ch.Name] = true
+	}
+
+	var flagged []string
 	for _, m := range all {
 		if len(m.Channels) == 0 {
 			// Written by hand, or it lost its scope. Either way it holds the
 			// widest reach there is.
 			slog.Warn("remote mcp names no channel, so its tools reach all of them",
 				"user", userID, "name", m.Name)
+			flagged = append(flagged, m.Name)
+			continue
+		}
+		for _, name := range m.Channels {
+			if !exists[name] {
+				// Teardown prunes these, but a wholesale config rewrite does
+				// not, so a name can outlive its channel and silently attach to
+				// the next one created under it.
+				slog.Warn("remote mcp names a channel that does not exist",
+					"user", userID, "name", m.Name, "channel", name)
+				// Once per registration, however many of its names are gone.
+				flagged = append(flagged, m.Name)
+				break
+			}
 		}
 	}
-	return nil
+	return flagged, nil
 }
 
 // remoteMCPNames lists server names for logging which servers a channel resolved to.

@@ -164,11 +164,17 @@ the agent names can reach the `cred/` or `channel/` namespaces.
   tool can produce that state, so boot warns about any registration in it — it was hand-written or lost
   its scope, and it holds the widest reach there is.
 
-  Deleting a channel does not prune the registrations that name it, so `remote_mcp_update` accepts a
-  name the registration already carries even when no channel has it, and says in its reply that the name
-  reaches nothing. Without that, a deleted channel would leave a name behind that failed every later
-  edit of that server, the edit that would have removed it included. A name the registration does not
-  already carry must be a channel that exists.
+  Every path that *tears a channel down* — `channel_delete`, `channel_done`, the confirmed teardown and
+  the ephemeral reaper — takes it off every registration scoped to it, except where it was the
+  only one: emptying that list would widen the server to every channel, so it keeps the dead name and
+  `channel_delete` reports it for a person to point somewhere or remove. `remote_mcp_update` therefore
+  accepts a name the registration already carries even when no channel has it, and says in its reply that
+  the name reaches nothing — otherwise that server could never be edited again, the edit that would have
+  removed the name included. A name the registration does not already carry must be a channel that exists.
+
+  A wholesale `config_set` rewrite can drop a channel without going through any of those paths, so boot
+  also warns about a registration naming a channel that does not exist. That check is the backstop for
+  every writer, present and future, rather than a promise that each one prunes.
 
   Scoping is one list rather than one channel per registration because the credentials are deliberately
   unreadable. The agent can name a stored credential but never read one, so a second registration of the

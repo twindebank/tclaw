@@ -183,6 +183,7 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 		SessionStore:    p.SessionStore,
 		HomeDir:         p.HomeDir,
 		MemoryDir:       p.MemoryDir,
+		RemoteMCPs:      p.RemoteMCPManager,
 		// Lazy — tgClientPkg.state is nil until Register() runs, so we
 		// call ChannelHistoryFunc() at invocation time, not construction time.
 		TelegramHistory: func(ctx context.Context, channelName string, limit int) (json.RawMessage, error) {

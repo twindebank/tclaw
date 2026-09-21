@@ -10,6 +10,7 @@ import (
 
 	"tclaw/internal/channel"
 	"tclaw/internal/mcp"
+	"tclaw/internal/remotemcpstore"
 )
 
 const ToolChannelDone = "channel_done"
@@ -170,16 +171,26 @@ func channelDoneHandler(deps Deps) mcp.ToolHandler {
 				slog.Warn("failed to clean up channel knowledge dir", "channel", a.ChannelName, "err", err)
 			}
 		}
+		var prune remotemcpstore.PruneChannelResult
+		var pruneErr error
+		if deps.RemoteMCPs != nil {
+			prune, pruneErr = deps.RemoteMCPs.RemoveChannelFromAll(ctx, a.ChannelName)
+			if pruneErr != nil {
+				slog.Error("failed to unscope remote mcps during teardown", "channel", a.ChannelName, "err", pruneErr)
+			}
+		}
 
 		if deps.OnChannelChange != nil {
 			deps.OnChannelChange()
 		}
 
-		return json.Marshal(map[string]string{
+		message := fmt.Sprintf("Channel %q has been torn down.", a.ChannelName)
+		result := map[string]any{
 			"status":       "deleted",
 			"channel":      a.ChannelName,
 			"results_sent": a.ResultsSent,
-			"message":      fmt.Sprintf("Channel %q has been torn down.", a.ChannelName),
-		})
+		}
+		remoteMCPCleanupResult(message, prune, pruneErr).mergeInto(result)
+		return json.Marshal(result)
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"tclaw/internal/config"
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/libraries/store"
+	"tclaw/internal/remotemcpstore"
 	"tclaw/internal/repo"
 	"tclaw/internal/user"
 )
@@ -499,6 +500,45 @@ func interceptDone(
 		Provisioners:    provisioners,
 		OnChannelChange: onChannelChange,
 		MemoryDir:       memoryDir,
+	})
+}
+
+func TestConfirmChannelDone(t *testing.T) {
+	t.Run("takes the torn-down channel off the remote MCP servers scoped to it", func(t *testing.T) {
+		rs, ss, cw := setupDoneTest(t)
+		ctx := context.Background()
+
+		s, err := store.NewFS(t.TempDir())
+		require.NoError(t, err)
+		mcpMgr := remotemcpstore.NewManager(s, ss)
+		_, err = mcpMgr.AddRemoteMCP(ctx, remotemcpstore.AddRemoteMCPParams{
+			Name: "browser", URL: "https://browser.example.com/mcp",
+			Channels: []string{"ephemeral", "assistant"},
+		})
+		require.NoError(t, err)
+
+		require.NoError(t, rs.Update(ctx, "ephemeral", func(state *channel.RuntimeState) {
+			state.PendingAction = channel.NewPendingAction(channel.PendingChannelDone, nil)
+		}))
+		require.NoError(t, cw.AddChannel(testUserID, config.Channel{
+			Type: channel.TypeSocket, Name: "ephemeral", Description: "test",
+		}))
+
+		consumed := interceptPendingConfirmation(ctx, doneTaggedMsg("ephemeral-id", "yes"), confirmParams{
+			ChannelsFunc: doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeSocket),
+			RuntimeState: rs,
+			ConfigWriter: cw,
+			UserID:       testUserID,
+			SecretStore:  ss,
+			Provisioners: provLookup(channel.TypeSocket, &mockDoneProvisioner{}),
+			RemoteMCPs:   mcpMgr,
+		})
+		require.True(t, consumed)
+
+		entry, err := mcpMgr.GetRemoteMCP(ctx, "browser")
+		require.NoError(t, err)
+		require.Equal(t, []string{"assistant"}, entry.Channels,
+			"a confirmed teardown must not leave the channel name behind")
 	})
 }
 
