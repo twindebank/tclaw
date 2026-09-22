@@ -2,6 +2,7 @@ package remotemcp
 
 import (
 	"context"
+	"log/slog"
 
 	"tclaw/internal/claudecli"
 	"tclaw/internal/libraries/secret"
@@ -17,6 +18,10 @@ type Package struct {
 	Manager       *remotemcpstore.Manager
 	Callback      *oauth.CallbackServer
 	ConfigUpdater func(context.Context) error
+
+	// ChannelNames lists the channels that exist, so the tools can refuse to
+	// scope a server to a name that matches none of them.
+	ChannelNames func() []string
 
 	// OnChannelChange is invoked after a remote MCP is added or removed so
 	// the router can restart the running agent — the Claude CLI reads the
@@ -51,12 +56,21 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 }
 
 func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationContext) error {
+	if p.Manager == nil {
+		// Every tool here reads the manager, so registering them without one
+		// would panic on the first call. The one-shot CLI builds the registry
+		// without it.
+		slog.Warn("remote mcp tools not registered: no manager configured")
+		return nil
+	}
+
 	deps := Deps{
 		Manager:         p.Manager,
 		Callback:        p.Callback,
 		SecretStore:     regCtx.SecretStore,
 		ConfigUpdater:   p.ConfigUpdater,
 		OnChannelChange: p.OnChannelChange,
+		ChannelNames:    p.ChannelNames,
 	}
 
 	RegisterTools(handler, deps)

@@ -14,8 +14,10 @@ const ToolRemoteMCPList = "remote_mcp_list"
 func remoteMCPListDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name: ToolRemoteMCPList,
-		Description: "List all connected remote MCP servers, showing their name, URL, auth status, and any " +
-			"usage instructions the server published (how to use it, session lifecycle, tool conventions).",
+		Description: "List all connected remote MCP servers, showing their name, URL, auth status, the channels " +
+			"each one's tools reach, and any usage instructions the server published (how to use it, session " +
+			"lifecycle, tool conventions). Read this before remote_mcp_update: it replaces the channel list, so " +
+			"it needs the current one.",
 		InputSchema: json.RawMessage(`{"type": "object", "properties": {}}`),
 	}
 }
@@ -38,8 +40,8 @@ func remoteMCPListHandler(deps Deps) mcp.ToolHandler {
 			}
 			info := urlResponseFields(m.URL, m.URLSensitive)
 			info["name"] = m.Name
-			if m.Channel != "" {
-				info["channel"] = m.Channel
+			if len(m.Channels) > 0 {
+				info["channels"] = m.Channels
 			}
 			info["has_auth"] = auth != nil
 			info["has_token"] = auth != nil && auth.AccessToken != ""

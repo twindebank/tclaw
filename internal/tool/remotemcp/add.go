@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	"tclaw/internal/libraries/secret"
@@ -76,9 +77,11 @@ func remoteMCPAddDef() mcp.ToolDef {
 					"type": "string",
 					"description": "A short label for this server (e.g. 'linear', 'notion'). Used as the MCP server name in tool prefixes."
 				},
-				"channel": {
-					"type": "string",
-					"description": "Channel name to scope this remote MCP to. Its tools will only be available on this channel."
+				"channels": {
+					"type": "array",
+					"items": {"type": "string"},
+					"description": "Channel names this server's tools are available on. One registration serves every channel listed, so a server two channels both need is added once, not twice. Change the list later with remote_mcp_update.",
+					"minItems": 1
 				},
 				"skip_auth_discovery": {
 					"type": "boolean",
@@ -103,7 +106,7 @@ func remoteMCPAddDef() mcp.ToolDef {
 					"description": "Pin the server's TLS certificate by its SHA-256 fingerprint (hex, e.g. from 'openssl x509 -fingerprint -sha256'). Use for a self-signed https server on a Fly private host (*.flycast/*.internal) where no public CA applies — it authenticates the server by exact cert, not the system trust store. Non-secret. Requires an https URL."
 				}
 			},
-			"required": ["name", "channel"]
+			"required": ["name", "channels"]
 		}`),
 	}
 }
@@ -112,7 +115,7 @@ type remoteMCPAddArgs struct {
 	URL               string            `json:"url,omitempty"`
 	URLSecretKey      string            `json:"url_secret_key,omitempty"`
 	Name              string            `json:"name"`
-	Channel           string            `json:"channel"`
+	Channels          []string          `json:"channels"`
 	SkipAuthDiscovery bool              `json:"skip_auth_discovery,omitempty"`
 	Headers           map[string]string `json:"headers,omitempty"`
 	HeaderSecretKeys  map[string]string `json:"header_secret_keys,omitempty"`
@@ -130,9 +133,11 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 		if a.Name == "" || len(a.Name) > maxMCPNameLength || !mcpNamePattern.MatchString(a.Name) {
 			return nil, fmt.Errorf("name must be 1-%d characters, alphanumeric with hyphens/underscores", maxMCPNameLength)
 		}
-		if a.Channel == "" {
-			return nil, fmt.Errorf("channel is required — specify which channel this remote MCP's tools should be available on")
+		scope, err := cleanChannels(cleanChannelsParams{ChannelNames: deps.ChannelNames, Names: a.Channels})
+		if err != nil {
+			return nil, err
 		}
+		channels := scope.Channels
 
 		// Resolve the URL — exactly one of url or url_secret_key must be provided.
 		// url_secret_key keeps the URL out of chat history when it contains a
@@ -212,7 +217,7 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 			entry, err := deps.Manager.AddRemoteMCP(ctx, remotemcpstore.AddRemoteMCPParams{
 				Name:         a.Name,
 				URL:          resolvedURL,
-				Channel:      a.Channel,
+				Channels:     channels,
 				URLSensitive: a.URLSecretKey != "",
 				ToolNames:    discovered.ToolNames,
 				TLSPinSHA256: a.TLSPinSHA256,
@@ -270,7 +275,7 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 			entry, err := deps.Manager.AddRemoteMCP(ctx, remotemcpstore.AddRemoteMCPParams{
 				Name:         a.Name,
 				URL:          resolvedURL,
-				Channel:      a.Channel,
+				Channels:     channels,
 				URLSensitive: a.URLSecretKey != "",
 				ToolNames:    discovered.ToolNames,
 				TLSPinSHA256: a.TLSPinSHA256,
@@ -339,7 +344,7 @@ func remoteMCPAddHandler(deps Deps) mcp.ToolHandler {
 		entry, err := deps.Manager.AddRemoteMCP(ctx, remotemcpstore.AddRemoteMCPParams{
 			Name:         a.Name,
 			URL:          resolvedURL,
-			Channel:      a.Channel,
+			Channels:     channels,
 			URLSensitive: a.URLSecretKey != "",
 			TLSPinSHA256: a.TLSPinSHA256,
 		})
@@ -518,6 +523,110 @@ func buildAddResponse(entry *remotemcpstore.RemoteMCP, status, message string) m
 		result["instructions"] = entry.Instructions
 	}
 	return result
+}
+
+// cleanChannelsParams is the channel list from a tool call and what to judge it against.
+type cleanChannelsParams struct {
+	// ChannelNames lists the channels that exist.
+	ChannelNames func() []string
+
+	// AlreadyScoped are the names the registration carries now. They pass even
+	// if no channel matches, so a name left behind by a deleted channel can be
+	// re-sent or dropped instead of blocking every later edit.
+	AlreadyScoped []string
+
+	// Names is what the tool call asked for.
+	Names []string
+}
+
+// cleanedChannels is a validated channel list and what was odd about it.
+type cleanedChannels struct {
+	// Channels is the list to store.
+	Channels []string
+
+	// Unmatched are names kept only because the registration already carried
+	// them. No channel has these, so they reach nothing.
+	Unmatched []string
+}
+
+// cleanChannels validates a channel list, rejecting blanks, duplicates and
+// names that match neither an existing channel nor the current scope.
+func cleanChannels(p cleanChannelsParams) (cleanedChannels, error) {
+	if p.ChannelNames == nil {
+		return cleanedChannels{}, fmt.Errorf("channel lookup is not configured, so a channel name cannot be checked")
+	}
+	// Taken once: a second call could see a different set and report channels
+	// that were not the ones validated against.
+	live := p.ChannelNames()
+	isLive := make(map[string]bool, len(live))
+	for _, name := range live {
+		isLive[name] = true
+	}
+	scoped := make(map[string]bool, len(p.AlreadyScoped))
+	for _, name := range p.AlreadyScoped {
+		scoped[name] = true
+	}
+
+	var result cleanedChannels
+	seen := make(map[string]bool, len(p.Names))
+	var blank bool
+	var duplicates, unknown []string
+	for _, name := range p.Names {
+		trimmed := strings.TrimSpace(name)
+		switch {
+		case trimmed == "":
+			blank = true
+		case seen[trimmed]:
+			duplicates = append(duplicates, trimmed)
+		case isLive[trimmed]:
+			seen[trimmed] = true
+			result.Channels = append(result.Channels, trimmed)
+		case scoped[trimmed]:
+			// The channel is gone but the registration still names it. Kept so it
+			// can be dropped; it reaches nothing meanwhile.
+			seen[trimmed] = true
+			result.Channels = append(result.Channels, trimmed)
+			result.Unmatched = append(result.Unmatched, trimmed)
+		default:
+			// A name matching no channel would scope the server to nothing, and
+			// on an update it would drop the channel that had it.
+			seen[trimmed] = true
+			unknown = append(unknown, trimmed)
+		}
+	}
+
+	// Every bad name at once, so a list with several typos takes one correction
+	// rather than one round trip each.
+	var problems []string
+	if blank {
+		problems = append(problems, "channels must not contain an empty name")
+	}
+	if len(duplicates) > 0 {
+		problems = append(problems, fmt.Sprintf("listed twice: %s", strings.Join(quoteAll(duplicates), ", ")))
+	}
+	if len(unknown) > 0 {
+		problems = append(problems, fmt.Sprintf("no channel named %s — the channels that exist are %s",
+			strings.Join(quoteAll(unknown), ", "), strings.Join(live, ", ")))
+	}
+	if len(problems) > 0 {
+		return cleanedChannels{}, fmt.Errorf("%s", strings.Join(problems, "; "))
+	}
+	if len(result.Channels) == 0 {
+		// An empty list means every channel, so accepting one here would widen a
+		// server's reach on what reads like a narrowing edit.
+		return cleanedChannels{}, fmt.Errorf("channels is required — name at least one channel this server's tools should reach. " +
+			"To take the server away from every channel, remove it with " + ToolRemoteMCPRemove)
+	}
+	return result, nil
+}
+
+// quoteAll quotes each name so a list of them reads unambiguously in an error.
+func quoteAll(names []string) []string {
+	quoted := make([]string, len(names))
+	for i, name := range names {
+		quoted[i] = fmt.Sprintf("%q", name)
+	}
+	return quoted
 }
 
 // resolveURL returns the MCP URL, accepting either an inline value or a

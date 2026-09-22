@@ -27,7 +27,7 @@ func TestAddToConfigFile(t *testing.T) {
 		_ = callTool(t, h, "remote_mcp_add", map[string]any{
 			"name":                "home-assistant",
 			"url":                 server.URL + "/secret_path_abc",
-			"channel":             "desktop",
+			"channels":            []string{"desktop"},
 			"skip_auth_discovery": true,
 			"headers": map[string]string{
 				"CF-Access-Client-Id":     "client-id.access",
@@ -54,7 +54,7 @@ func TestAddToConfigFile(t *testing.T) {
 		_ = callTool(t, h, "remote_mcp_add", map[string]any{
 			"name":                "home-assistant",
 			"url":                 server.URL + "/secret",
-			"channel":             "desktop",
+			"channels":            []string{"desktop"},
 			"skip_auth_discovery": true,
 			"headers":             map[string]string{"CF-Access-Client-Id": "id"},
 		})
@@ -83,7 +83,7 @@ func TestHeadersOnWire(t *testing.T) {
 		_ = callTool(t, h, "remote_mcp_add", map[string]any{
 			"name":                "ha-wire",
 			"url":                 server.URL + "/mcp_secret_path",
-			"channel":             "desktop",
+			"channels":            []string{"desktop"},
 			"skip_auth_discovery": true,
 			"headers": map[string]string{
 				"CF-Access-Client-Id":     "client-id.access",
@@ -145,7 +145,7 @@ func TestSecretRegistration_NoLeaksE2E(t *testing.T) {
 	addResult := callTool(t, th.handler, "remote_mcp_add", map[string]any{
 		"name":                "home-assistant",
 		"url_secret_key":      urlSecretKey,
-		"channel":             "desktop",
+		"channels":            []string{"desktop"},
 		"skip_auth_discovery": true,
 		"header_secret_keys": map[string]string{
 			"CF-Access-Client-Id":     idSecretKey,
@@ -218,7 +218,7 @@ func TestSecretRegistration_NoLeaksE2E(t *testing.T) {
 		err := callToolExpectError(t, th2.handler, "remote_mcp_add", map[string]any{
 			"name":                "x",
 			"url":                 "https://example.com/mcp",
-			"channel":             "desktop",
+			"channels":            []string{"desktop"},
 			"skip_auth_discovery": true,
 			"header_secret_keys": map[string]string{
 				"X-Auth": secretSecretKey,
@@ -268,7 +268,7 @@ func TestRemoteMCP_LifecycleE2E(t *testing.T) {
 		addResp := callTool(t, th.handler, "remote_mcp_add", map[string]any{
 			"name":                "home-assistant",
 			"url":                 server.URL + "/mcp",
-			"channel":             "desktop",
+			"channels":            []string{"desktop"},
 			"skip_auth_discovery": true,
 			"headers":             map[string]string{"CF-Access-Client-Id": "id"},
 		})
@@ -337,7 +337,7 @@ func TestRemoteMCP_LifecycleE2E(t *testing.T) {
 		err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
 			"name":                "dead-server",
 			"url":                 server.URL + "/mcp",
-			"channel":             "desktop",
+			"channels":            []string{"desktop"},
 			"skip_auth_discovery": true,
 			"headers":             map[string]string{"X-Auth": "anything"},
 		})
@@ -361,7 +361,7 @@ func TestRemoteMCP_LifecycleE2E(t *testing.T) {
 		err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
 			"name":                "empty",
 			"url":                 server.URL + "/mcp",
-			"channel":             "desktop",
+			"channels":            []string{"desktop"},
 			"skip_auth_discovery": true,
 			"headers":             map[string]string{"X-Auth": "anything"},
 		})

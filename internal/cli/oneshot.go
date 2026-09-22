@@ -88,7 +88,9 @@ func runOneshot() {
 		os.Exit(1)
 	}
 
-	// Set up MCP server with tool registry so oneshot has the same tools as serve.
+	// Set up MCP server with tool registry so oneshot has nearly the same tools
+	// as serve. The remote MCP tools are absent: they need a manager and a live
+	// channel list, neither of which exists in a one-shot run.
 	stateDir := filepath.Join(userDir, "state")
 	stateStore, err := store.NewFS(stateDir)
 	if err != nil {

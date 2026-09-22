@@ -12,6 +12,7 @@ import (
 	"tclaw/internal/dev"
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/queue"
+	"tclaw/internal/remotemcpstore"
 	"tclaw/internal/user"
 )
 
@@ -20,25 +21,30 @@ const (
 	defaultEphemeralIdleTimeout = 24 * time.Hour
 )
 
+// cleanupParams is what the ephemeral reaper needs to tear an idle channel down.
+type cleanupParams struct {
+	UserID          user.ID
+	ConfigWriter    *config.Writer
+	RuntimeState    *channel.RuntimeStateStore
+	Tracker         *channel.ActivityTracker
+	SecretStore     secret.Store
+	Provisioners    channel.ProvisionerLookup
+	OnChannelChange func()
+	MessageQueue    *queue.Queue
+	ChannelsFunc    func() map[channel.ChannelID]channel.Channel
+	DevStore        *dev.Store
+	RemoteMCPs      *remotemcpstore.Manager
+}
+
 // cleanupEphemeralChannels runs at user lifetime and periodically checks
 // for ephemeral channels that have been idle past their timeout. When found,
 // it tears down platform resources and deletes the channel from config.
-func cleanupEphemeralChannels(
-	ctx context.Context,
-	userID user.ID,
-	configWriter *config.Writer,
-	runtimeState *channel.RuntimeStateStore,
-	tracker *channel.ActivityTracker,
-	secretStore secret.Store,
-	provisioners channel.ProvisionerLookup,
-	onChannelChange func(),
-	messageQueue *queue.Queue,
-	channelsFunc func() map[channel.ChannelID]channel.Channel,
-	devStore *dev.Store,
-) {
+func cleanupEphemeralChannels(ctx context.Context, p cleanupParams) {
 	ticker := time.NewTicker(ephemeralCheckInterval)
 	defer ticker.Stop()
 
+	// Owned by this loop: it stops a teardown that keeps failing from writing
+	// the same line on every tick.
 	lastLoggedError := make(map[string]string)
 
 	for {
@@ -46,25 +52,23 @@ func cleanupEphemeralChannels(
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			cleanupOnce(ctx, userID, configWriter, runtimeState, tracker, secretStore, provisioners, onChannelChange, lastLoggedError, messageQueue, channelsFunc, devStore)
+			cleanupOnce(ctx, p, lastLoggedError)
 		}
 	}
 }
 
-func cleanupOnce(
-	ctx context.Context,
-	userID user.ID,
-	configWriter *config.Writer,
-	runtimeState *channel.RuntimeStateStore,
-	tracker *channel.ActivityTracker,
-	secretStore secret.Store,
-	provisioners channel.ProvisionerLookup,
-	onChannelChange func(),
-	lastLoggedError map[string]string,
-	messageQueue *queue.Queue,
-	channelsFunc func() map[channel.ChannelID]channel.Channel,
-	devStore *dev.Store,
-) {
+func cleanupOnce(ctx context.Context, p cleanupParams, lastLoggedError map[string]string) {
+	userID := p.UserID
+	configWriter := p.ConfigWriter
+	runtimeState := p.RuntimeState
+	tracker := p.Tracker
+	secretStore := p.SecretStore
+	provisioners := p.Provisioners
+	onChannelChange := p.OnChannelChange
+	messageQueue := p.MessageQueue
+	channelsFunc := p.ChannelsFunc
+	devStore := p.DevStore
+
 	channels, err := configWriter.ReadChannels(userID)
 	if err != nil {
 		slog.Error("ephemeral cleanup: failed to read channels", "err", err)
@@ -148,6 +152,13 @@ func cleanupOnce(
 		// Tear down any dev sessions bound to this channel. Best-effort —
 		// failure here shouldn't prevent the channel from being removed.
 		cleanupDevSessionsForChannel(ctx, devStore, ch.Name)
+
+		if _, pruneErr := p.RemoteMCPs.RemoveChannelFromAll(ctx, ch.Name); pruneErr != nil {
+			// An ephemeral name can be reused, so a registration left naming
+			// this channel would attach to whatever is created next.
+			slog.Error("ephemeral cleanup: failed to unscope remote mcps",
+				"channel", ch.Name, "err", pruneErr)
+		}
 
 		delete(lastLoggedError, ch.Name)
 		cleaned = true

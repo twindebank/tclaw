@@ -145,7 +145,9 @@ When the user asks to connect a service:
 1. Call `<package>_info` (e.g. `google_info`) to check setup requirements and get the OAuth redirect URL
 2. Use `credential_add` with the package name, a label, and optional channel to start setup
 3. For OAuth services: `credential_add` returns `CREDENTIALS_NEEDED` if setup fields are missing (client_id/secret) — handle via the secret form flow. Once setup fields are provided, `credential_add` starts the OAuth flow and returns an auth URL.
-4. If the service isn't a built-in package, use `remote_mcp_add` to connect it as a remote MCP server.
+4. If the service isn't a built-in package, use `remote_mcp_add` to connect it as a remote MCP server. It takes `channels`, the list of channels its tools reach.
+
+To give a channel a remote MCP server another channel already has, add that channel to the existing registration with `remote_mcp_update` — read the current list from `remote_mcp_list` first, because the update replaces it. Never register the same server a second time under a different name: you cannot read a working registration's credentials or TLS pin back, so the copy has to be set up from scratch and rotating the credential then means remembering both.
 
 When the user asks what tools/services are available:
 1. Use `credential_list` and `remote_mcp_list` to show what's currently configured

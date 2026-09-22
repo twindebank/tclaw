@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"tclaw/internal/channel"
 	"tclaw/internal/config"
@@ -182,6 +183,7 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 		SessionStore:    p.SessionStore,
 		HomeDir:         p.HomeDir,
 		MemoryDir:       p.MemoryDir,
+		RemoteMCPs:      p.RemoteMCPManager,
 		// Lazy — tgClientPkg.state is nil until Register() runs, so we
 		// call ChannelHistoryFunc() at invocation time, not construction time.
 		TelegramHistory: func(ctx context.Context, channelName string, limit int) (json.RawMessage, error) {
@@ -264,6 +266,7 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 			Callback:        p.Callback,
 			ConfigUpdater:   p.ConfigUpdater,
 			OnChannelChange: p.OnChannelChange,
+			ChannelNames:    channelNames(p.ChannelsFunc),
 		},
 		&secretform.Package{
 			SecretStore:     p.SecretStore,
@@ -293,6 +296,26 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 	credPkg.Registry = reg
 
 	return reg, provisioners
+}
+
+// channelNames adapts the live channel map into the name list a tool package
+// needs to check a channel name against.
+func channelNames(channelsFunc func() map[channel.ChannelID]channel.Channel) func() []string {
+	if channelsFunc == nil {
+		// A registry built without channels must fail at the tool rather than
+		// report that no channel exists.
+		return nil
+	}
+	return func() []string {
+		channels := channelsFunc()
+		names := make([]string, 0, len(channels))
+		for _, ch := range channels {
+			names = append(names, ch.Info().Name)
+		}
+		// Sorted so an error listing them reads the same way every time.
+		slices.Sort(names)
+		return names
+	}
 }
 
 // CredentialSlotTypes returns every valid credential slot type: one per

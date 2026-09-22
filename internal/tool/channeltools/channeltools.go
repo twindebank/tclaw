@@ -7,6 +7,7 @@ import (
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/mcp"
 	"tclaw/internal/reconciler"
+	"tclaw/internal/remotemcpstore"
 	"tclaw/internal/user"
 )
 
@@ -27,6 +28,10 @@ type Deps struct {
 	// MemoryDir is the user's memory directory root. Used to clean up
 	// per-channel knowledge dirs on channel deletion.
 	MemoryDir string
+
+	// RemoteMCPs holds the registrations to unscope when a channel is torn
+	// down. Nil skips that cleanup.
+	RemoteMCPs *remotemcpstore.Manager
 
 	// OnChannelAdded is called after a new channel is created with the channel's
 	// name. Unlike OnChannelChange (which triggers a full restart), this signals

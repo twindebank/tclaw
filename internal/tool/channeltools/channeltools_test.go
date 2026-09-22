@@ -810,6 +810,52 @@ func TestChannelDelete(t *testing.T) {
 		err := callToolExpectError(t, th.handler, "channel_delete", map[string]any{"name": "nonexistent"})
 		require.Contains(t, err.Error(), "not found")
 	})
+
+	t.Run("takes the channel off the remote MCP servers scoped to it", func(t *testing.T) {
+		h, mcpMgr := setupChannelDeleteWithRemoteMCPs(t)
+		ctx := context.Background()
+		addRemoteMCPForDeleteTest(t, mcpMgr, "browser", "scratch", "assistant")
+		addRemoteMCPForDeleteTest(t, mcpMgr, "house", "assistant")
+
+		resp := deleteSeededChannel(t, h, "scratch")
+		require.Equal(t, []any{"browser"}, resp["remote_mcps_updated"])
+
+		browser, err := mcpMgr.GetRemoteMCP(ctx, "browser")
+		require.NoError(t, err)
+		require.Equal(t, []string{"assistant"}, browser.Channels,
+			"the deleted channel must not be left on a registration")
+
+		house, err := mcpMgr.GetRemoteMCP(ctx, "house")
+		require.NoError(t, err)
+		require.Equal(t, []string{"assistant"}, house.Channels,
+			"a server that never named the channel is untouched")
+	})
+
+	t.Run("keeps a server whose only channel this was, and says so", func(t *testing.T) {
+		h, mcpMgr := setupChannelDeleteWithRemoteMCPs(t)
+		addRemoteMCPForDeleteTest(t, mcpMgr, "browser", "scratch")
+
+		resp := deleteSeededChannel(t, h, "scratch")
+
+		entry, err := mcpMgr.GetRemoteMCP(context.Background(), "browser")
+		require.NoError(t, err)
+		require.Equal(t, []string{"scratch"}, entry.Channels,
+			"emptying the list would make the server reach every channel, which is a widening")
+
+		require.Equal(t, []any{"browser"}, resp["remote_mcps_still_naming_deleted_channel"])
+		require.Contains(t, resp["message"], "remote_mcp_update",
+			"the agent must be told how to give it a channel")
+	})
+
+	t.Run("deletes the channel when no remote MCP manager is wired in", func(t *testing.T) {
+		h := setupChannelDeleteWithoutRemoteMCPs(t)
+
+		resp := deleteSeededChannel(t, h, "scratch")
+
+		require.NotContains(t, resp, "remote_mcps_updated", "nothing to report with no manager")
+		require.NotContains(t, resp, "remote_mcp_cleanup_error")
+		require.Contains(t, resp["message"], "deleted")
+	})
 }
 
 func TestChannelDone(t *testing.T) {
@@ -1040,6 +1086,29 @@ func TestChannelDone(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, rs.PendingAction)
 		require.False(t, th.provisioner.teardownCalled)
+	})
+
+	t.Run("takes the channel off the remote MCP servers scoped to it", func(t *testing.T) {
+		h, mcpMgr := setupChannelDeleteWithRemoteMCPs(t)
+		addRemoteMCPForDeleteTest(t, mcpMgr, "browser", "scratch", "assistant")
+
+		resp := doneSeededChannel(t, h, "scratch")
+		require.Equal(t, []any{"browser"}, resp["remote_mcps_updated"])
+
+		entry, err := mcpMgr.GetRemoteMCP(context.Background(), "browser")
+		require.NoError(t, err)
+		require.Equal(t, []string{"assistant"}, entry.Channels,
+			"teardown must not leave the name behind either")
+	})
+
+	t.Run("reports a server whose only channel this was", func(t *testing.T) {
+		h, mcpMgr := setupChannelDeleteWithRemoteMCPs(t)
+		addRemoteMCPForDeleteTest(t, mcpMgr, "browser", "scratch")
+
+		resp := doneSeededChannel(t, h, "scratch")
+
+		require.Equal(t, []any{"browser"}, resp["remote_mcps_still_naming_deleted_channel"])
+		require.Contains(t, resp["message"], "remote_mcp_update")
 	})
 }
 

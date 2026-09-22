@@ -25,9 +25,9 @@ func TestBuildMCPConfigPaths_RoutesThroughProxy(t *testing.T) {
 		mgr := newTestRemoteMCPManager(t)
 
 		_, err := mgr.AddRemoteMCP(ctx, remotemcpstore.AddRemoteMCPParams{
-			Name:    "home-assistant",
-			URL:     "https://ha-mcp.example.com/private_path",
-			Channel: "homeassistant",
+			Name:     "home-assistant",
+			URL:      "https://ha-mcp.example.com/private_path",
+			Channels: []string{"homeassistant"},
 		})
 		require.NoError(t, err)
 		require.NoError(t, mgr.SetRemoteMCPAuth(ctx, "home-assistant", &remotemcpstore.RemoteMCPAuth{
@@ -76,8 +76,8 @@ func TestBuildMCPConfigPaths_Scoping(t *testing.T) {
 
 		for _, params := range []remotemcpstore.AddRemoteMCPParams{
 			{Name: "shared", URL: "https://shared.example.com"},
-			{Name: "browser", URL: "https://browser.example.com", Channel: "admin"},
-			{Name: "house", URL: "https://house.example.com", Channel: "homeassistant"},
+			{Name: "browser", URL: "https://browser.example.com", Channels: []string{"admin"}},
+			{Name: "house", URL: "https://house.example.com", Channels: []string{"homeassistant"}},
 		} {
 			_, err := mgr.AddRemoteMCP(ctx, params)
 			require.NoError(t, err)
@@ -105,17 +105,51 @@ func TestBuildMCPConfigPaths_Scoping(t *testing.T) {
 			"a channel with no scoped servers needs no file — the default config carries the global ones")
 	})
 
+	t.Run("one server named by two channels reaches both", func(t *testing.T) {
+		ctx := context.Background()
+		mgr := newTestRemoteMCPManager(t)
+
+		_, err := mgr.AddRemoteMCP(ctx, remotemcpstore.AddRemoteMCPParams{
+			Name:     "browser",
+			URL:      "https://browser.example.com",
+			Channels: []string{"admin", "shopping"},
+		})
+		require.NoError(t, err)
+
+		proxy := startTestProxy(t, mgr)
+
+		adminID := channel.ChannelID("telegram:admin")
+		shoppingID := channel.ChannelID("telegram:shopping")
+		emailID := channel.ChannelID("telegram:email")
+		chMap := map[channel.ChannelID]channel.Channel{
+			adminID:    &stubNamedChannel{id: adminID, name: "admin"},
+			shoppingID: &stubNamedChannel{id: shoppingID, name: "shopping"},
+			emailID:    &stubNamedChannel{id: emailID, name: "email"},
+		}
+
+		paths := buildMCPConfigPaths(ctx, chMap, mgr, proxy, proxy.Token(), t.TempDir(), "127.0.0.1:1", "local-token")
+
+		for _, chID := range []channel.ChannelID{adminID, shoppingID} {
+			path, ok := paths[chID]
+			require.True(t, ok, "both named channels need their own config: %s", chID)
+			require.Contains(t, readMCPConfigFile(t, path).MCPServers, "browser",
+				"one registration should serve every channel it names: %s", chID)
+		}
+		require.NotContains(t, paths, emailID, "a channel the server does not name gets nothing")
+	})
+
 	t.Run("partitions global and channel-scoped servers", func(t *testing.T) {
 		global, scoped := partitionRemoteMCPs([]remotemcpstore.RemoteMCP{
 			{Name: "shared"},
-			{Name: "browser", Channel: "admin"},
-			{Name: "house", Channel: "homeassistant"},
-			{Name: "notes", Channel: "admin"},
+			{Name: "browser", Channels: []string{"admin", "shopping"}},
+			{Name: "house", Channels: []string{"homeassistant"}},
+			{Name: "notes", Channels: []string{"admin"}},
 		})
 
 		require.Len(t, global, 1)
 		require.Equal(t, "shared", global[0].Name)
 		require.Equal(t, []string{"browser", "notes"}, remoteMCPNames(scoped["admin"]))
+		require.Equal(t, []string{"browser"}, remoteMCPNames(scoped["shopping"]))
 		require.Equal(t, []string{"house"}, remoteMCPNames(scoped["homeassistant"]))
 	})
 }
