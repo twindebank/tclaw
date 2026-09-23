@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gotd/td/telegram/auth"
 	"github.com/gotd/td/tg"
 
+	"tclaw/internal/channel"
+	"tclaw/internal/channel/telegramchannel"
 	"tclaw/internal/mcp"
 	tgsdk "tclaw/internal/telegram"
 )
@@ -432,19 +435,100 @@ func listBotsHandler(s *handlerState) mcp.ToolHandler {
 		}
 
 		s.botFatherMu.Lock()
-		defer s.botFatherMu.Unlock()
-
 		bf := tgsdk.NewBotFather(s.client)
 		usernames, err := bf.ListBots(ctx)
+		s.botFatherMu.Unlock()
 		if err != nil {
 			return nil, fmt.Errorf("list bots: %w", err)
 		}
 
+		// Map each bot back to the channel that owns it so leftover bots from
+		// deleted channels can be told apart from live ones.
+		channelByBot, err := s.channelBotUsernames(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("map bots to channels: %w", err)
+		}
+
+		bots := classifyBots(usernames, channelByBot)
+		orphanCount := 0
+		for _, b := range bots {
+			if b.Orphan {
+				orphanCount++
+			}
+		}
+
 		return json.Marshal(map[string]any{
-			"count":     len(usernames),
-			"usernames": usernames,
+			"count":        len(bots),
+			"orphan_count": orphanCount,
+			"bots":         bots,
 		})
 	}
+}
+
+// botInfo describes one BotFather-owned bot and whether tclaw can account for it.
+type botInfo struct {
+	Username string `json:"username"`
+
+	// BacksChannel names the channel this bot serves, or is empty when no
+	// channel claims it.
+	BacksChannel string `json:"backs_channel,omitempty"`
+
+	// Orphan is true when no channel claims the bot AND its username matches the
+	// convention tclaw uses for bots it auto-creates — i.e. it is a leftover from
+	// a deleted channel and safe to delete with telegram_client_delete_bot.
+	Orphan bool `json:"orphan"`
+}
+
+// classifyBots annotates each BotFather username with the channel that owns it
+// (from channelByBot, keyed by lowercased username) and whether it is a reapable
+// orphan. A bot no channel claims is flagged as an orphan only when its username
+// matches tclaw's auto-provision convention, so a custom or statically-configured
+// bot (e.g. the admin or assistant bot) is never mistaken for a leftover.
+func classifyBots(usernames []string, channelByBot map[string]string) []botInfo {
+	bots := make([]botInfo, 0, len(usernames))
+	for _, username := range usernames {
+		info := botInfo{Username: username}
+		if channelName, ok := channelByBot[strings.ToLower(username)]; ok {
+			info.BacksChannel = channelName
+		} else if tgsdk.IsAutoProvisionedBotUsername(username) {
+			info.Orphan = true
+		}
+		bots = append(bots, info)
+	}
+	return bots
+}
+
+// channelBotUsernames returns a map from lowercased bot username to the channel
+// that owns it, for every Telegram channel tclaw provisioned (which records its
+// bot username in teardown state). Statically-configured channels do not record
+// a username and so are absent — their custom-named bots are never mistaken for
+// orphans because they do not match the auto-provision naming convention.
+func (s *handlerState) channelBotUsernames(ctx context.Context) (map[string]string, error) {
+	result := make(map[string]string)
+	if s.deps.ChannelRegistry == nil || s.deps.RuntimeState == nil {
+		return result, nil
+	}
+
+	for _, entry := range s.deps.ChannelRegistry.All() {
+		if entry.Type != channel.TypeTelegram {
+			continue
+		}
+		state, err := s.deps.RuntimeState.Get(ctx, entry.Name)
+		if err != nil {
+			return nil, fmt.Errorf("read runtime state for %q: %w", entry.Name, err)
+		}
+		if !state.TeardownState.HasTeardownState() || state.TeardownState.Type != channel.PlatformTelegram {
+			continue
+		}
+		tgState, err := telegramchannel.ParseTeardownState(state.TeardownState)
+		if err != nil {
+			return nil, fmt.Errorf("parse teardown state for %q: %w", entry.Name, err)
+		}
+		if tgState.BotUsername != "" {
+			result[strings.ToLower(tgState.BotUsername)] = entry.Name
+		}
+	}
+	return result, nil
 }
 
 func configureBotHandler(s *handlerState) mcp.ToolHandler {

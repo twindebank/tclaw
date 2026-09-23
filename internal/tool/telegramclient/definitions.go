@@ -179,10 +179,15 @@ var toolDefs = []mcp.ToolDef{
 	},
 	{
 		Name: ToolListBots,
-		Description: "List every Telegram bot the account owns, via BotFather /mybots. Returns each " +
-			"bot's username (without the @). Use it to find a bot's username — e.g. to rename it with " +
-			"telegram_client_configure_bot or remove it with telegram_client_delete_bot — and to spot " +
-			"orphaned bots from deleted channels holding slots against the 20-bot-per-account limit. Takes no arguments.",
+		Description: "List every Telegram bot the account owns, via BotFather /mybots, paging through " +
+			"all pages so the list is complete even past the first keyboard. Returns \"count\", " +
+			"\"orphan_count\", and \"bots\": an array of {username (without @), backs_channel, orphan}. " +
+			"backs_channel names the channel a bot serves (empty if none claims it). orphan is true only " +
+			"when no channel claims the bot AND its username matches the tclaw_<hex>_bot convention tclaw " +
+			"uses for bots it auto-creates — those are leftovers from deleted channels and safe to reap " +
+			"with telegram_client_delete_bot to free slots against the 20-bot-per-account limit. A bot " +
+			"that is neither backing a channel nor an orphan is a custom/statically-configured bot (e.g. " +
+			"admin or assistant) — do NOT delete it. Takes no arguments.",
 		InputSchema: json.RawMessage(`{"type": "object", "properties": {}}`),
 	},
 	{
