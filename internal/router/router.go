@@ -217,11 +217,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 	// Set up remote MCP manager and credential manager.
 	remoteMCPMgr := remotemcpstore.NewManager(s, secretStore)
-	if err := remoteMCPMgr.MigrateChannelScope(ctx); err != nil {
-		// Reads resolve the old shape anyway, so scoping is still correct; only
-		// the stored file is left unconverted.
-		slog.Error("failed to rewrite remote mcp channel scope", "user", mu.cfg.ID, "err", err)
-	}
 	credMgr := credential.NewManager(s, secretStore)
 	mcpHandler := mcp.NewHandler()
 

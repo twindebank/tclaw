@@ -161,55 +161,8 @@ func (m *Manager) GetRemoteMCP(ctx context.Context, name string) (*RemoteMCP, er
 	return nil, nil
 }
 
-// storedRemoteMCP is the on-disk shape. It carries the `channel` key written
-// before a registration could name more than one channel.
-type storedRemoteMCP struct {
-	RemoteMCP
-	LegacyChannel string `json:"channel,omitempty"`
-}
-
-// namesSingleChannel reports whether this entry still carries the pre-list key.
-func (s storedRemoteMCP) namesSingleChannel() bool {
-	return s.LegacyChannel != "" && len(s.Channels) == 0
-}
-
-// resolve returns the registration in the current shape.
-func (s storedRemoteMCP) resolve() RemoteMCP {
-	if s.namesSingleChannel() {
-		// TODO: drop this once no entry under the remote_mcps store key carries
-		// a `channel` field. MigrateChannelScope rewrites them.
-		s.Channels = []string{s.LegacyChannel}
-	}
-	return s.RemoteMCP
-}
-
-// MigrateChannelScope rewrites any registration that still names a single
-// channel, so the stored file converges on the list shape.
-func (m *Manager) MigrateChannelScope(ctx context.Context) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	stored, err := m.loadStored(ctx)
-	if err != nil {
-		return err
-	}
-	mcps := make([]RemoteMCP, 0, len(stored))
-	migrated := 0
-	for _, s := range stored {
-		if s.namesSingleChannel() {
-			migrated++
-		}
-		mcps = append(mcps, s.resolve())
-	}
-	if migrated == 0 {
-		return nil
-	}
-	slog.Info("rewriting remote mcp channel scope as a list", "migrated", migrated, "registrations", len(mcps))
-	return m.save(ctx, mcps)
-}
-
-// loadStored reads the registrations in their on-disk shape. Callers must hold mu.
-func (m *Manager) loadStored(ctx context.Context) ([]storedRemoteMCP, error) {
+// load reads the stored registrations. Callers must hold mu.
+func (m *Manager) load(ctx context.Context) ([]RemoteMCP, error) {
 	data, err := m.store.Get(ctx, remoteMCPsStoreKey)
 	if err != nil {
 		return nil, fmt.Errorf("read remote mcps: %w", err)
@@ -217,25 +170,9 @@ func (m *Manager) loadStored(ctx context.Context) ([]storedRemoteMCP, error) {
 	if len(data) == 0 {
 		return nil, nil
 	}
-	var stored []storedRemoteMCP
-	if err := json.Unmarshal(data, &stored); err != nil {
+	var mcps []RemoteMCP
+	if err := json.Unmarshal(data, &mcps); err != nil {
 		return nil, fmt.Errorf("parse remote mcps: %w", err)
-	}
-	return stored, nil
-}
-
-// load reads the stored registrations in the current shape. Callers must hold mu.
-func (m *Manager) load(ctx context.Context) ([]RemoteMCP, error) {
-	stored, err := m.loadStored(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if len(stored) == 0 {
-		return nil, nil
-	}
-	mcps := make([]RemoteMCP, 0, len(stored))
-	for _, s := range stored {
-		mcps = append(mcps, s.resolve())
 	}
 	return mcps, nil
 }
