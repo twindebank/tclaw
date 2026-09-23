@@ -44,6 +44,7 @@ import (
 	"tclaw/internal/schedule"
 	"tclaw/internal/tool/all"
 	"tclaw/internal/tool/modeltools"
+	"tclaw/internal/tool/secretform"
 	"tclaw/internal/tool/toolpkg"
 	"tclaw/internal/toolgroup"
 	"tclaw/internal/user"
@@ -499,6 +500,13 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			ActiveChannel: activeChannelFunc,
 			Channels:      channelSet.Snapshot,
 			Send:          messageOutbox.Send,
+		}),
+		ArmSecretDelete: newSecretDeleteArmer(armSecretDeleteParams{
+			RuntimeState:  runtimeState,
+			ActiveChannel: activeChannelFunc,
+			Channels:      channelSet.Snapshot,
+			Send:          messageOutbox.Send,
+			SecretStore:   secretStore,
 		}),
 		RemoteMCPManager: remoteMCPMgr,
 		ConfigUpdater:    configUpdater,
@@ -990,6 +998,12 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 						Notify:          notifyChannel,
 						OnChannelChange: onChannelChange,
 						MemoryDir:       memoryDir,
+						CollectedSecretKeys: func(ctx context.Context) (map[string]bool, error) {
+							return secretform.CollectedKeys(ctx, s)
+						},
+						ForgetSecretKey: func(ctx context.Context, key string) error {
+							return secretform.ForgetCollectedKey(ctx, s, key)
+						},
 					}) {
 						continue
 					}

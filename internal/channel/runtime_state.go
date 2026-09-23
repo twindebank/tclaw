@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -48,6 +49,9 @@ const (
 
 	// PendingRuleWrite writes a proposed rulebook once the user approves it.
 	PendingRuleWrite PendingActionKind = "rule_write"
+
+	// PendingSecretDelete removes a stored secret once the user approves it.
+	PendingSecretDelete PendingActionKind = "secret_delete"
 )
 
 // PendingAction is a confirmation the user has been asked for but has not yet
@@ -133,6 +137,40 @@ func (r *RuntimeStateStore) Update(ctx context.Context, name string, fn func(*Ru
 	}
 
 	fn(state)
+
+	data, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal runtime state for %q: %w", name, err)
+	}
+	if err := r.store.Set(ctx, runtimeStateKeyPrefix+name, data); err != nil {
+		return fmt.Errorf("save runtime state for %q: %w", name, err)
+	}
+	return nil
+}
+
+// ErrConfirmationPending means a channel is already waiting on the user's answer
+// to a different confirmation.
+var ErrConfirmationPending = errors.New("a confirmation is already waiting")
+
+// ArmPendingAction sets a channel's pending confirmation, refusing while one
+// that has not expired is still waiting.
+func (r *RuntimeStateStore) ArmPendingAction(ctx context.Context, name string, action *PendingAction) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	state, err := r.get(ctx, name)
+	if err != nil {
+		return err
+	}
+	if state.PendingAction != nil && !state.PendingAction.Expired(time.Now()) {
+		// A "yes" the user is part-way through typing answers whichever action
+		// is armed, so replacing a live one turns their answer to one question
+		// into consent to another. Checked under the same lock as the write, so
+		// two prompts cannot race past each other.
+		return fmt.Errorf("%w on channel %q (%s) — ask again once it is answered",
+			ErrConfirmationPending, name, state.PendingAction.Kind)
+	}
+	state.PendingAction = action
 
 	data, err := json.Marshal(state)
 	if err != nil {

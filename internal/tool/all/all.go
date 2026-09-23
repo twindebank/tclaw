@@ -113,6 +113,9 @@ type Params struct {
 	// ArmRuleWrite asks the user to confirm a proposed rulebook change.
 	ArmRuleWrite func(ctx context.Context, params ruletools.RuleWriteRequest) error
 
+	// ArmSecretDelete asks the user to confirm removing a stored secret.
+	ArmSecretDelete func(ctx context.Context, request secretform.DeleteRequest) error
+
 	// Remote MCP tools.
 	RemoteMCPManager *remotemcpstore.Manager
 	ConfigUpdater    func(context.Context) error
@@ -290,6 +293,7 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 				}
 				return credential.FieldKey(id, target.Field), nil
 			},
+			ArmSecretDelete: p.ArmSecretDelete,
 		},
 	)
 

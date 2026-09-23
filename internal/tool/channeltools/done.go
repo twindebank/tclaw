@@ -110,9 +110,7 @@ func channelDoneHandler(deps Deps) mcp.ToolHandler {
 			// sent first, a fast "yes" (or a reply already queued) could arrive while
 			// nothing is armed, slip past the intercept, and reach the agent — which
 			// would then process and answer its own confirmation prompt.
-			if updateErr := deps.RuntimeState.Update(ctx, a.ChannelName, func(rs *channel.RuntimeState) {
-				rs.PendingAction = channel.NewPendingAction(channel.PendingChannelDone, nil)
-			}); updateErr != nil {
+			if updateErr := deps.RuntimeState.ArmPendingAction(ctx, a.ChannelName, channel.NewPendingAction(channel.PendingChannelDone, nil)); updateErr != nil {
 				return nil, fmt.Errorf("arm teardown confirmation for channel %q: %w", a.ChannelName, updateErr)
 			}
 

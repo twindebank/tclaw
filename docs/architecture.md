@@ -110,6 +110,26 @@ Two invariants hold across all three: **the agent may name a secret but never re
 returns a value; consumers read server-side and proxies inject at the network boundary), and
 **agent-facing keys are validated against `^[a-z0-9_]+$`**, which cannot express a slash — so nothing
 the agent names can reach the `cred/` or `channel/` namespaces.
+
+  **Deleting one needs the user, and only reaches what the user gave.** `secret_form_delete` arms a
+  `PendingAction` and sends the prompt straight to the chat; the router removes the secret on the reply,
+  outside the sandbox. Setting a value already puts the user in the loop, because it goes through a form
+  they fill — deletion would otherwise be the one irreversible thing the agent could do to a credential
+  on its own.
+
+  What is deletable is an **allowlist**, not a denylist. The flat namespace mixes values the user typed
+  into a form with keys tclaw's own packages write at runtime — an OAuth token a package refreshed, a
+  session it established, the Telegram session that is full account access. Those are not the agent's to
+  clear, and enumerating them means auditing every package and being wrong the first time one writes a
+  new key. So a form submission records the bare key it wrote, and only a recorded key can be deleted.
+  An allowlist that cannot be read allows nothing, at both the tool and the router's re-check on
+  approval. Credential slots stay with `credential_clear`.
+
+  Every confirmation is armed through `RuntimeStateStore.ArmPendingAction`, which refuses while another
+  one on the channel is still waiting. A "yes" answers whichever action is armed, so letting a second
+  prompt replace a live one would turn the user's answer to one question into consent to another — the
+  dangerous case being an access grant landing on top of a deletion prompt. The check and the write
+  share the store's lock, so two prompts cannot race past each other.
 - **Handing the user a document built from a secret** — `document_send_pdf` (`internal/tool/documenttools`)
   renders a markdown file the agent wrote into a PDF and sends it to the channel. `${cred:<name>}`
   placeholders are resolved **inside the tool**, the same server-side injection the git and remote-MCP

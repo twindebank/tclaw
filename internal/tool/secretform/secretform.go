@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"tclaw/internal/libraries/secret"
+	"tclaw/internal/libraries/store"
 	"tclaw/internal/mcp"
 )
 
@@ -42,7 +43,7 @@ var maxWaitPerCall = 45 * time.Second
 
 // ToolNames returns all tool name constants in this package.
 func ToolNames() []string {
-	return []string{ToolRequest, ToolWait}
+	return []string{ToolRequest, ToolWait, ToolDelete}
 }
 
 // keyPattern restricts secret store keys to safe characters: lowercase
@@ -157,6 +158,15 @@ type Deps struct {
 	// ResolveSlotField resolves credential targets. Nil when the credential
 	// system isn't wired.
 	ResolveSlotField ResolveSlotField
+
+	// ArmSecretDelete asks the user to confirm removing a stored secret. Nil
+	// when no channel can be asked, which makes the tool fail rather than
+	// silently skipping the confirmation.
+	ArmSecretDelete func(ctx context.Context, request DeleteRequest) error
+
+	// StateStore holds the record of which flat keys the user supplied through a
+	// form, which is the set secret_form_delete may touch.
+	StateStore store.Store
 }
 
 // RegisterTools adds the secret form tools to the MCP handler and registers
@@ -170,11 +180,12 @@ func RegisterTools(handler *mcp.Handler, deps Deps) {
 	pending := &sync.Map{}
 
 	if deps.RegisterHandler != nil {
-		deps.RegisterHandler("/secret-form/", newFormHTTPHandler(deps.SecretStore, pending))
+		deps.RegisterHandler("/secret-form/", newFormHTTPHandler(deps.SecretStore, deps.StateStore, pending))
 	}
 
 	handler.Register(secretFormRequestDef(), secretFormRequestHandler(deps, pending))
 	handler.Register(secretFormWaitDef(), secretFormWaitHandler(pending))
+	handler.Register(deleteDef(), deleteHandler(deps))
 }
 
 func generateRequestID() (string, error) {
@@ -195,19 +206,28 @@ func generateVerifyCode() (string, error) {
 	return fmt.Sprintf("%06d", n.Int64()), nil
 }
 
-// validateKey checks that a secret store key is safe and not reserved.
+// validateKeyShape checks what every agent-facing secret key must satisfy,
+// whatever is being done to it. Deleting one has extra rules of its own.
+func validateKeyShape(key string) error {
+	switch {
+	case key == "":
+		return fmt.Errorf("key is required")
+	case len(key) > maxKeyLen:
+		return fmt.Errorf("key exceeds %d characters", maxKeyLen)
+	case !keyPattern.MatchString(key):
+		// No slash can appear here, which is what keeps cred/, channel/ and
+		// remote_mcp/ out of reach.
+		return fmt.Errorf("key %q contains invalid characters (only lowercase alphanumeric and underscores allowed)", key)
+	case reservedKeys[key]:
+		return fmt.Errorf("key %q is reserved — it is managed by a dedicated auth flow, not by hand", key)
+	}
+	return nil
+}
+
+// validateKey checks that a form field's secret store key is safe and not reserved.
 func validateKey(key string, idx int) error {
-	if key == "" {
-		return fmt.Errorf("field %d: key is required", idx)
-	}
-	if len(key) > maxKeyLen {
-		return fmt.Errorf("field %d: key exceeds %d characters", idx, maxKeyLen)
-	}
-	if !keyPattern.MatchString(key) {
-		return fmt.Errorf("field %d: key %q contains invalid characters (only lowercase alphanumeric and underscores allowed)", idx, key)
-	}
-	if reservedKeys[key] {
-		return fmt.Errorf("field %d: key %q is reserved and cannot be set via form", idx, key)
+	if err := validateKeyShape(key); err != nil {
+		return fmt.Errorf("field %d: %w", idx, err)
 	}
 	return nil
 }

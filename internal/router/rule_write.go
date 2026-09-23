@@ -128,9 +128,7 @@ func newRuleWriteArmer(params armRuleWriteParams) func(context.Context, ruletool
 			return fmt.Errorf("encode rule change: %w", err)
 		}
 
-		if err := params.RuntimeState.Update(ctx, chName, func(rs *channel.RuntimeState) {
-			rs.PendingAction = channel.NewPendingAction(channel.PendingRuleWrite, payload)
-		}); err != nil {
+		if err := params.RuntimeState.ArmPendingAction(ctx, chName, channel.NewPendingAction(channel.PendingRuleWrite, payload)); err != nil {
 			return fmt.Errorf("arm rule confirmation: %w", err)
 		}
 

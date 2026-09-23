@@ -30,6 +30,14 @@ type confirmParams struct {
 	RemoteMCPs   *remotemcpstore.Manager
 	Notify       func(ctx context.Context, chID channel.ChannelID, text string)
 
+	// CollectedSecretKeys reports which flat keys the user supplied through a
+	// form. Re-read before an approved deletion runs, never trusted from the
+	// payload. Nil makes the deletion refuse.
+	CollectedSecretKeys func(ctx context.Context) (map[string]bool, error)
+
+	// ForgetSecretKey drops a deleted key from that record.
+	ForgetSecretKey func(ctx context.Context, key string) error
+
 	OnChannelChange func()
 	MemoryDir       string
 }
@@ -103,6 +111,8 @@ func interceptPendingConfirmation(ctx context.Context, msg channel.TaggedMessage
 		return confirmRepoGrant(ctx, msg.ChannelID, chName, pending, params)
 	case channel.PendingRuleWrite:
 		return confirmRuleWrite(ctx, msg.ChannelID, chName, pending, params)
+	case channel.PendingSecretDelete:
+		return confirmSecretDelete(ctx, msg.ChannelID, chName, pending, params)
 	default:
 		slog.Error("pending confirmation of unknown kind, ignoring",
 			"channel", chName, "kind", pending.Kind)
