@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -522,7 +523,13 @@ func (s *handlerState) channelBotUsernames(ctx context.Context) (map[string]stri
 		}
 		tgState, err := telegramchannel.ParseTeardownState(state.TeardownState)
 		if err != nil {
-			return nil, fmt.Errorf("parse teardown state for %q: %w", entry.Name, err)
+			// A channel with a malformed or empty telegram teardown state (e.g. a
+			// statically-configured channel that never recorded a bot username)
+			// simply contributes no mapping. Skip it rather than fail the whole
+			// listing, which would leave every bot unclassified.
+			slog.Warn("list bots: skipping channel with unparseable teardown state",
+				"channel", entry.Name, "err", err)
+			continue
 		}
 		if tgState.BotUsername != "" {
 			result[strings.ToLower(tgState.BotUsername)] = entry.Name
