@@ -1,6 +1,7 @@
 package telegramclient
 
 import (
+	"tclaw/internal/channel"
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/libraries/store"
 	"tclaw/internal/mcp"
@@ -35,6 +36,13 @@ const (
 type Deps struct {
 	SecretStore secret.Store
 	StateStore  store.Store
+
+	// ChannelRegistry and RuntimeState let telegram_client_list_bots map each
+	// BotFather-owned bot back to the channel that owns it, so leftover bots from
+	// deleted channels can be told apart from live ones. Both may be nil (e.g. in
+	// tests that don't exercise the mapping).
+	ChannelRegistry *channel.Registry
+	RuntimeState    *channel.RuntimeStateStore
 }
 
 // RegisterTools registers all Telegram Client API tools on the handler.

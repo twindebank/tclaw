@@ -149,10 +149,11 @@ func NewRegistry(p Params) (*toolpkg.Registry, channel.ProvisionerLookup) {
 	}
 
 	tgClientPkg := &telegramclient.Package{
-		SecretStore:    p.SecretStore,
-		StateStore:     p.StateStore,
-		RuntimeState:   p.RuntimeState,
-		TelegramUserID: p.TelegramUserID,
+		SecretStore:     p.SecretStore,
+		StateStore:      p.StateStore,
+		RuntimeState:    p.RuntimeState,
+		ChannelRegistry: p.ChannelRegistry,
+		TelegramUserID:  p.TelegramUserID,
 	}
 
 	// Lazy provisioner lookup — reads tgClientPkg.Provisioner at call time, so

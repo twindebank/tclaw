@@ -115,3 +115,113 @@ func TestParseBotUsernames(t *testing.T) {
 		require.Nil(t, parseBotUsernames(&tg.Message{Message: "Choose a bot from the list below:"}))
 	})
 }
+
+func TestIsAutoProvisionedBotUsername(t *testing.T) {
+	t.Run("matches the tclaw_<hex>_bot convention", func(t *testing.T) {
+		require.True(t, IsAutoProvisionedBotUsername("tclaw_ab12cd34_bot"))
+	})
+
+	t.Run("tolerates a leading @ and mixed case", func(t *testing.T) {
+		require.True(t, IsAutoProvisionedBotUsername("@TCLAW_AB12CD34_BOT"))
+	})
+
+	t.Run("rejects a custom username", func(t *testing.T) {
+		require.False(t, IsAutoProvisionedBotUsername("theo_assistant_bot"))
+	})
+
+	t.Run("rejects the wrong hex length", func(t *testing.T) {
+		require.False(t, IsAutoProvisionedBotUsername("tclaw_ab12cd_bot"))
+	})
+
+	t.Run("rejects a non-hex suffix", func(t *testing.T) {
+		require.False(t, IsAutoProvisionedBotUsername("tclaw_zzzzzzzz_bot"))
+	})
+}
+
+func TestFindNextPageButton(t *testing.T) {
+	t.Run("returns the callback data of the forward-navigation button", func(t *testing.T) {
+		msg := &tg.Message{
+			ReplyMarkup: &tg.ReplyInlineMarkup{
+				Rows: []tg.KeyboardButtonRow{
+					{Buttons: []tg.KeyboardButtonClass{
+						&tg.KeyboardButtonCallback{Text: "@tclaw_ab12cd34_bot"},
+					}},
+					{Buttons: []tg.KeyboardButtonClass{
+						&tg.KeyboardButtonCallback{Text: "«", Data: []byte("prev")},
+						&tg.KeyboardButtonCallback{Text: "»", Data: []byte("next-page")},
+					}},
+				},
+			},
+		}
+
+		data, ok := findNextPageButton(msg)
+		require.True(t, ok)
+		require.Equal(t, []byte("next-page"), data)
+	})
+
+	t.Run("returns false when there is no forward-navigation button", func(t *testing.T) {
+		msg := &tg.Message{
+			ReplyMarkup: &tg.ReplyInlineMarkup{
+				Rows: []tg.KeyboardButtonRow{
+					{Buttons: []tg.KeyboardButtonClass{
+						&tg.KeyboardButtonCallback{Text: "@tclaw_ab12cd34_bot"},
+						&tg.KeyboardButtonCallback{Text: "«", Data: []byte("prev")},
+					}},
+				},
+			},
+		}
+
+		_, ok := findNextPageButton(msg)
+		require.False(t, ok)
+	})
+
+	t.Run("returns false when the message has no inline keyboard", func(t *testing.T) {
+		_, ok := findNextPageButton(&tg.Message{Message: "Choose a bot from the list below:"})
+		require.False(t, ok)
+	})
+}
+
+func TestKeyboardSignature(t *testing.T) {
+	page1 := &tg.Message{
+		ReplyMarkup: &tg.ReplyInlineMarkup{
+			Rows: []tg.KeyboardButtonRow{
+				{Buttons: []tg.KeyboardButtonClass{
+					&tg.KeyboardButtonCallback{Text: "@tclaw_ab12cd34_bot"},
+				}},
+			},
+		},
+	}
+	page2 := &tg.Message{
+		ReplyMarkup: &tg.ReplyInlineMarkup{
+			Rows: []tg.KeyboardButtonRow{
+				{Buttons: []tg.KeyboardButtonClass{
+					&tg.KeyboardButtonCallback{Text: "@tclaw_ef56ab78_bot"},
+				}},
+			},
+		},
+	}
+
+	t.Run("differs between pages with different buttons", func(t *testing.T) {
+		require.NotEqual(t, keyboardSignature(page1), keyboardSignature(page2))
+	})
+
+	t.Run("is stable for the same keyboard", func(t *testing.T) {
+		require.Equal(t, keyboardSignature(page1), keyboardSignature(page1))
+	})
+
+	t.Run("is empty when the message has no inline keyboard", func(t *testing.T) {
+		require.Empty(t, keyboardSignature(&tg.Message{Message: "no keyboard"}))
+	})
+}
+
+func TestAppendNewUsernames(t *testing.T) {
+	t.Run("accumulates in order and skips duplicates across calls", func(t *testing.T) {
+		seen := make(map[string]bool)
+		var got []string
+
+		appendNewUsernames(&got, seen, []string{"tclaw_aaaaaaaa_bot", "tclaw_bbbbbbbb_bot"})
+		appendNewUsernames(&got, seen, []string{"tclaw_bbbbbbbb_bot", "tclaw_cccccccc_bot"})
+
+		require.Equal(t, []string{"tclaw_aaaaaaaa_bot", "tclaw_bbbbbbbb_bot", "tclaw_cccccccc_bot"}, got)
+	})
+}

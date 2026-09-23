@@ -14,9 +14,10 @@ import (
 
 // Package implements toolpkg.Package for Telegram Client API tools.
 type Package struct {
-	SecretStore  secret.Store
-	StateStore   store.Store
-	RuntimeState *channel.RuntimeStateStore
+	SecretStore     secret.Store
+	StateStore      store.Store
+	RuntimeState    *channel.RuntimeStateStore
+	ChannelRegistry *channel.Registry
 
 	// TelegramUserID is the user's Telegram user ID from config, passed
 	// through to the provisioner for auto-start and notification delivery.
@@ -74,8 +75,10 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 
 func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationContext) error {
 	provisioner := RegisterTools(handler, Deps{
-		SecretStore: p.SecretStore,
-		StateStore:  p.StateStore,
+		SecretStore:     p.SecretStore,
+		StateStore:      p.StateStore,
+		ChannelRegistry: p.ChannelRegistry,
+		RuntimeState:    p.RuntimeState,
 	})
 
 	provisioner.TelegramUserID = p.TelegramUserID
