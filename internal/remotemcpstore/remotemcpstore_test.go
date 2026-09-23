@@ -2,7 +2,6 @@ package remotemcpstore_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -135,28 +134,30 @@ func TestManager_Instructions(t *testing.T) {
 }
 
 func TestManager_ListRemoteMCPs(t *testing.T) {
-	t.Run("a registration naming a single channel reads as a one-element list", func(t *testing.T) {
+	t.Run("reads the channels a registration names", func(t *testing.T) {
 		mgr, s := newManagerWithStore(t)
 		ctx := context.Background()
-		writeStored(t, s, `[{"name":"browser-mcp","url":"https://browser-mcp.example.com/mcp","channel":"desktop"}]`)
+		writeStored(t, s, `[{"name":"browser-mcp","url":"https://browser-mcp.example.com/mcp","channels":["desktop","email"]}]`)
 
 		mcps, err := mgr.ListRemoteMCPs(ctx)
 		require.NoError(t, err)
 		require.Len(t, mcps, 1)
-		require.Equal(t, []string{"desktop"}, mcps[0].Channels, "the single channel should become the list")
+		require.Equal(t, []string{"desktop", "email"}, mcps[0].Channels)
 	})
 
-	t.Run("reading does not rewrite the store", func(t *testing.T) {
+	t.Run("reading does not write", func(t *testing.T) {
 		mgr, s := newManagerWithStore(t)
 		ctx := context.Background()
-		writeStored(t, s, `[{"name":"browser-mcp","url":"https://browser-mcp.example.com/mcp","channel":"desktop"}]`)
+		const raw = `[{"name":"browser-mcp","url":"https://browser-mcp.example.com/mcp","channels":["desktop"]}]`
+		writeStored(t, s, raw)
 
 		_, err := mgr.ListRemoteMCPs(ctx)
 		require.NoError(t, err)
 
-		stored := readStored(t, s)
-		require.Contains(t, stored[0], "channel",
-			"a read resolves the shape in memory; only MigrateChannelScope writes")
+		// This load runs on every proxy request, so it must never write.
+		got, err := s.Get(ctx, storeKey)
+		require.NoError(t, err)
+		require.JSONEq(t, raw, string(got))
 	})
 
 	t.Run("an empty list is left alone", func(t *testing.T) {
@@ -168,56 +169,6 @@ func TestManager_ListRemoteMCPs(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, mcps, 1)
 		require.Empty(t, mcps[0].Channels, "a server on every channel stays on every channel")
-	})
-}
-
-func TestManager_MigrateChannelScope(t *testing.T) {
-	t.Run("rewrites a single-channel registration keeping every other field", func(t *testing.T) {
-		mgr, s := newManagerWithStore(t)
-		writeStored(t, s, `[{
-			"name":"browser-mcp",
-			"url":"https://browser-mcp.example.com/mcp",
-			"channel":"desktop",
-			"created_at":"2026-01-02T03:04:05Z",
-			"url_sensitive":true,
-			"tool_names":["browser_navigate","browser_click"],
-			"tls_pin_sha256":"5675bf78",
-			"instructions":"One session at a time."
-		}]`)
-
-		require.NoError(t, mgr.MigrateChannelScope(context.Background()))
-
-		stored := readStored(t, s)
-		require.Len(t, stored, 1)
-		require.Equal(t, []any{"desktop"}, stored[0]["channels"])
-		require.NotContains(t, stored[0], "channel", "the single-channel key should be gone once rewritten")
-
-		// The rewrite overwrites the only copy of this data, so nothing may be
-		// dropped on the way through.
-		require.Equal(t, "browser-mcp", stored[0]["name"])
-		require.Equal(t, "https://browser-mcp.example.com/mcp", stored[0]["url"])
-		require.Equal(t, "2026-01-02T03:04:05Z", stored[0]["created_at"])
-		require.Equal(t, true, stored[0]["url_sensitive"])
-		require.Equal(t, []any{"browser_navigate", "browser_click"}, stored[0]["tool_names"])
-		require.Equal(t, "5675bf78", stored[0]["tls_pin_sha256"])
-		require.Equal(t, "One session at a time.", stored[0]["instructions"])
-	})
-
-	t.Run("leaves a store that is already a list untouched", func(t *testing.T) {
-		mgr, s := newManagerWithStore(t)
-		const raw = `[{"name":"browser-mcp","url":"https://browser-mcp.example.com/mcp","channels":["desktop"]}]`
-		writeStored(t, s, raw)
-
-		require.NoError(t, mgr.MigrateChannelScope(context.Background()))
-
-		got, err := s.Get(context.Background(), storeKey)
-		require.NoError(t, err)
-		require.JSONEq(t, raw, string(got), "nothing to migrate means nothing written")
-	})
-
-	t.Run("an empty store is not an error", func(t *testing.T) {
-		mgr, _ := newManagerWithStore(t)
-		require.NoError(t, mgr.MigrateChannelScope(context.Background()))
 	})
 }
 
@@ -348,15 +299,6 @@ const storeKey = "remote_mcps"
 func writeStored(t *testing.T, s store.Store, raw string) {
 	t.Helper()
 	require.NoError(t, s.Set(context.Background(), storeKey, []byte(raw)))
-}
-
-func readStored(t *testing.T, s store.Store) []map[string]any {
-	t.Helper()
-	raw, err := s.Get(context.Background(), storeKey)
-	require.NoError(t, err)
-	var stored []map[string]any
-	require.NoError(t, json.Unmarshal(raw, &stored))
-	return stored
 }
 
 type memorySecretStore struct {
