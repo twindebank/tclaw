@@ -30,6 +30,27 @@ func TestValidModel(t *testing.T) {
 	t.Run("fable 5.1 has a short name", func(t *testing.T) {
 		require.Equal(t, "fable-5.1", ModelFable51.ShortName())
 	})
+
+	t.Run("accepts opus 5.5", func(t *testing.T) {
+		require.True(t, ValidModel(ModelOpus55))
+		require.Equal(t, Model("claude-opus-5-5"), ModelOpus55)
+		require.Equal(t, "opus-5.5", ModelOpus55.ShortName())
+	})
+
+	t.Run("accepts fable 5 and opus 4.7", func(t *testing.T) {
+		require.True(t, ValidModel(ModelFable5))
+		require.Equal(t, Model("claude-fable-5"), ModelFable5)
+		require.Equal(t, "fable-5", ModelFable5.ShortName())
+
+		require.True(t, ValidModel(ModelOpus47))
+		require.Equal(t, Model("claude-opus-4-7"), ModelOpus47)
+		require.Equal(t, "opus-4.7", ModelOpus47.ShortName())
+	})
+
+	t.Run("resolves opus 5.5 short name and full id back to the model", func(t *testing.T) {
+		require.Equal(t, ModelOpus55, ShortNameToModel["opus-5.5"])
+		require.Equal(t, ModelOpus55, ShortNameToModel["claude-opus-5-5"])
+	})
 }
 
 func TestValidPermissionMode(t *testing.T) {
