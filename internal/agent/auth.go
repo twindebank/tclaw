@@ -59,7 +59,7 @@ func code(s string) string {
 	return "`" + s + "`"
 }
 
-// authPrompt builds the auth choice message for the given channel markup.
+// authPrompt builds the auth choice message.
 func authPrompt() string {
 	return "🔐 " + bold("Authentication required") + "\n\n" +
 		"Choose how to authenticate:\n" +
@@ -68,7 +68,7 @@ func authPrompt() string {
 		bold("3") + " — Cancel"
 }
 
-// apiKeyPrompt builds the API key entry prompt for the given channel markup.
+// apiKeyPrompt builds the API key entry prompt.
 func apiKeyPrompt() string {
 	return "🔑 Paste your Anthropic API key (starts with " + code("sk-ant-") + "):"
 }

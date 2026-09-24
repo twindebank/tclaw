@@ -49,7 +49,8 @@ func FormattingInstructions(m Markup) string {
 			"Keep messages concise.\n" +
 			"To give a date or time, write it as ![22:45 tomorrow](tg://time?unix=1647531900&format=wDT) with the real unix time: " +
 			"Telegram shows it in the reader's own timezone. The format letters are w (weekday), d or D (short or long date), " +
-			"t or T (short or long time), or r on its own (relative, e.g. \"in 2 hours\")."
+			"t or T (short or long time), or r on its own (relative, e.g. \"in 2 hours\").\n" +
+			"Write a literal dollar sign as \\$, so \"\\$5\" is a price rather than the start of a formula."
 	case MarkupMarkdown:
 		return ""
 	default:
@@ -169,6 +170,11 @@ type SendOpts struct {
 	// vibration, badge) for this message. Transports without a notion of
 	// notifications ignore it.
 	Notify bool
+
+	// Rich marks the agent's reply, written in the channel's markup, for a
+	// transport that renders it more fully than its other messages. Edits keep
+	// the form the message was sent in.
+	Rich bool
 }
 
 // SendFileParams describes one file being delivered to a channel. The content
@@ -183,6 +189,27 @@ type SendFileParams struct {
 	Caption string
 
 	Opts SendOpts
+}
+
+// RichReplier is implemented by transports that render a reply sent with SendOpts.Rich as one
+// long message, rather than at the length their other messages allow.
+type RichReplier interface {
+	// MaxRichReplyLen is the longest rich reply, in bytes, the transport sends as one message.
+	MaxRichReplyLen() int
+}
+
+// StreamDraftParams is one update to a reply still being written.
+type StreamDraftParams struct {
+	// DraftID identifies the reply; updates with the same one replace each other in place.
+	DraftID int64
+
+	Text string
+}
+
+// DraftStreamer is implemented by transports that can show a reply as a live preview while it is
+// written. A draft is temporary: the finished reply is still sent as a message.
+type DraftStreamer interface {
+	StreamDraft(ctx context.Context, p StreamDraftParams) error
 }
 
 // FileSender is implemented by transports that can carry a file to the user.

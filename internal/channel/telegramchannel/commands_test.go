@@ -1,8 +1,10 @@
 package telegramchannel
 
 import (
+	"context"
 	"testing"
 
+	"github.com/go-telegram/bot/models"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,4 +27,24 @@ func TestNormalizeCommand(t *testing.T) {
 			require.Equal(t, tt.expected, normalizeCommand(tt.text))
 		})
 	}
+}
+
+func TestTelegram_HandleGenerationStopped(t *testing.T) {
+	t.Run("the allowed user's stop becomes the stop keyword", func(t *testing.T) {
+		tg := NewTelegram("fake-token", "test", "desc", "", []int64{7}, TelegramOptions{})
+		out := make(chan string, 1)
+
+		tg.handleGenerationStopped(context.Background(), &models.MessageGenerationStopped{Chat: models.Chat{ID: 7}, DraftID: 3}, out)
+
+		require.Equal(t, "stop", <-out)
+	})
+
+	t.Run("anyone else's is dropped", func(t *testing.T) {
+		tg := NewTelegram("fake-token", "test", "desc", "", []int64{7}, TelegramOptions{})
+		out := make(chan string, 1)
+
+		tg.handleGenerationStopped(context.Background(), &models.MessageGenerationStopped{Chat: models.Chat{ID: 8}, DraftID: 3}, out)
+
+		require.Empty(t, out)
+	})
 }

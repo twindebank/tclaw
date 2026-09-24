@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -385,10 +386,10 @@ func (t *Telegram) Send(ctx context.Context, text string, opts channel.SendOpts)
 	// Status, thinking, and lifecycle chatter land silently.
 	silent := !opts.Notify
 
-	if opts.Notify {
+	if opts.Rich {
 		// A reply goes out as a rich message, which renders markdown natively:
 		// tables, headings, code blocks and maths.
-		return t.sendRich(ctx, b, chatID, text)
+		return t.sendRich(ctx, b, chatID, text, silent)
 	}
 
 	msg, err := b.SendMessage(ctx, &bot.SendMessageParams{
@@ -414,44 +415,91 @@ func (t *Telegram) Send(ctx context.Context, text string, opts channel.SendOpts)
 	return channel.MessageID(strconv.Itoa(msg.ID)), nil
 }
 
-// sendRich sends text as a rich markdown message, falling back to plain text when Telegram
-// rejects the markup, so the reply still arrives.
-func (t *Telegram) sendRich(ctx context.Context, b *bot.Bot, chatID int64, text string) (channel.MessageID, error) {
+// sendRich sends text as a rich markdown message. If Telegram refuses it for anything but a rate
+// limit, the reply goes out as plain text instead, so it still arrives.
+func (t *Telegram) sendRich(ctx context.Context, b *bot.Bot, chatID int64, text string, silent bool) (channel.MessageID, error) {
 	msg, err := b.SendRichMessage(ctx, &bot.SendRichMessageParams{
-		ChatID:      chatID,
-		RichMessage: models.InputRichMessage{Markdown: text},
+		ChatID:              chatID,
+		RichMessage:         models.InputRichMessage{Markdown: withoutButtons(text)},
+		DisableNotification: silent,
 	})
-	if err == nil {
-		t.rememberRich(msg.ID)
-		return channel.MessageID(strconv.Itoa(msg.ID)), nil
-	}
-	if !errors.Is(err, bot.ErrorBadRequest) {
+	if err != nil && !fallBackToPlain(ctx, err) {
 		return "", fmt.Errorf("telegram send rich message: %w", err)
 	}
-
-	slog.Warn("telegram send: rich message rejected, falling back to plain text", "channel", t.name, "error", err)
-	msg, err = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: text})
 	if err != nil {
-		return "", fmt.Errorf("telegram send plain fallback: %w", err)
+		slog.Warn("telegram send: rich message refused, falling back to plain text", "channel", t.name, "error", err)
+		msg, err = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: plainFallbackNotice + text, DisableNotification: silent})
+		if err != nil {
+			return "", fmt.Errorf("telegram send plain fallback: %w", err)
+		}
 	}
+	// A fallback is remembered too: a streamed reply often starts as markdown Telegram cannot
+	// parse yet, and the next edit should try the rich form again.
+	t.rememberRich(msg.ID)
 	return channel.MessageID(strconv.Itoa(msg.ID)), nil
 }
 
-// editRich replaces a rich message's content. When Telegram rejects the new markup, the message
-// is edited to plain text instead, which Telegram allows for a rich message.
+// editRich replaces a rich message's content, falling back to plain text as sendRich does.
 func (t *Telegram) editRich(ctx context.Context, b *bot.Bot, chatID int64, msgID int, text string) error {
 	_, err := b.EditMessageText(ctx, &bot.EditMessageTextParams{
 		ChatID:      chatID,
 		MessageID:   msgID,
-		RichMessage: &models.InputRichMessage{Markdown: text},
+		RichMessage: &models.InputRichMessage{Markdown: withoutButtons(text)},
 	})
-	if err == nil || !errors.Is(err, bot.ErrorBadRequest) || isNotModifiedError(err) {
+	if err == nil || isNotModifiedError(err) || !fallBackToPlain(ctx, err) {
 		return err
 	}
 
-	slog.Warn("telegram edit: rich message rejected, falling back to plain text", "channel", t.name, "error", err)
-	_, err = b.EditMessageText(ctx, &bot.EditMessageTextParams{ChatID: chatID, MessageID: msgID, Text: text})
+	slog.Warn("telegram edit: rich message refused, falling back to plain text", "channel", t.name, "error", err)
+	_, err = b.EditMessageText(ctx, &bot.EditMessageTextParams{ChatID: chatID, MessageID: msgID, Text: plainFallbackNotice + text})
 	return err
+}
+
+// maxRichReplyLen leaves room under Telegram's 32,768-character rich message limit, counted
+// here in bytes, which is never fewer than the characters.
+const maxRichReplyLen = 30000
+
+func (t *Telegram) MaxRichReplyLen() int {
+	return maxRichReplyLen
+}
+
+// StreamDraft shows text as a draft the user watches being written, with a Stop button that
+// arrives as the stop keyword. Telegram drops a draft 30 seconds after its last update.
+func (t *Telegram) StreamDraft(ctx context.Context, p channel.StreamDraftParams) error {
+	t.mu.Lock()
+	chatID := t.currentChatID
+	b := t.bot
+	t.mu.Unlock()
+	if chatID == 0 || b == nil {
+		return fmt.Errorf("telegram draft: channel %q has no chat to show it in yet", t.name)
+	}
+	if _, err := b.SendRichMessageDraft(ctx, &bot.SendRichMessageDraftParams{
+		ChatID:      chatID,
+		DraftID:     int(p.DraftID),
+		RichMessage: models.InputRichMessage{Markdown: withoutButtons(tgsdk.SanitizeUTF8(p.Text))},
+		CanStop:     true,
+	}); err != nil {
+		return fmt.Errorf("telegram draft: %w", err)
+	}
+	return nil
+}
+
+// plainFallbackNotice heads a reply that had to be sent without formatting.
+const plainFallbackNotice = "⚠️ [formatting error — sent as plain text]\n\n"
+
+// fallBackToPlain reports whether a refused rich message should be resent as plain text: any
+// failure except a rate limit, which plain text would hit as well, or a cancelled request.
+func fallBackToPlain(ctx context.Context, err error) bool {
+	return ctx.Err() == nil && !bot.IsTooManyRequestsError(err) && !errors.Is(err, bot.ErrorTooManyRequests)
+}
+
+// buttonTag matches the opening or closing of a rich message button or button row.
+var buttonTag = regexp.MustCompile(`(?i)<(/?)(tg-button)`)
+
+// withoutButtons escapes any button tag in text the agent wrote, so it shows as text. A button
+// the agent drew could carry any callback data and any label, so only tclaw's own prompts get buttons.
+func withoutButtons(text string) string {
+	return buttonTag.ReplaceAllString(text, "&lt;$1$2")
 }
 
 // richMessageMemory bounds how many sent rich messages the transport remembers. Only a reply

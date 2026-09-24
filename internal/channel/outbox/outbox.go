@@ -53,6 +53,9 @@ type Op struct {
 	// (silent) on ops persisted before this field existed.
 	Notify bool `json:"notify,omitempty"`
 
+	// Rich carries SendOpts.Rich through the queue, for the same reason.
+	Rich bool `json:"rich,omitempty"`
+
 	// Seq is a monotonic counter used for edit coalescing — when multiple
 	// Edits target the same message, only the highest-Seq one is delivered.
 	Seq uint64 `json:"seq"`
@@ -164,6 +167,7 @@ func (o *Outbox) Send(ctx context.Context, chID channel.ChannelID, text string, 
 		ProxyID:   proxyID,
 		Text:      text,
 		Notify:    opts.Notify,
+		Rich:      opts.Rich,
 	}
 
 	if err := o.enqueue(chID, op, true); err != nil {
@@ -398,7 +402,7 @@ func (o *Outbox) deliver(chID channel.ChannelID, cq *channelQueue, op Op) {
 		switch op.Kind {
 		case OpSend:
 			var realID channel.MessageID
-			realID, err = ch.Send(o.ctx, op.Text, channel.SendOpts{Notify: op.Notify})
+			realID, err = ch.Send(o.ctx, op.Text, channel.SendOpts{Notify: op.Notify, Rich: op.Rich})
 			if err == nil {
 				o.mu.Lock()
 				cq.proxyMap[op.ProxyID] = realID
