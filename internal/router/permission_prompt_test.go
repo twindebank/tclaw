@@ -37,7 +37,8 @@ func TestAskPermission(t *testing.T) {
 		p, ch := permissionSetup(t)
 
 		answerPrompt(t, p, ch, func(prompt channel.SendPromptParams) channel.TaggedMessage {
-			require.Equal(t, "🔐 Allow **Bash**?\n\n`{\"command\":\"ls\"}`", prompt.Text, "the whole input is shown")
+			require.Equal(t, "🔐 Allow **Bash**?", prompt.Text)
+			require.Equal(t, `{"command":"ls"}`, prompt.Detail, "the whole input, exactly")
 			return userPress(prompt.PromptID, channel.ReplyNo)
 		})
 	})
@@ -60,8 +61,7 @@ func TestAskPermission(t *testing.T) {
 
 		decision := askPermission(context.Background(), p, permissionRequest{ToolName: "Bash", Input: json.RawMessage(long)})
 
-		require.Equal(t, permissionDeny, decision.Behavior)
-		require.Contains(t, decision.Message, "too long to show the user in full")
+		require.Equal(t, permissionDecision{Behavior: permissionDeny, Message: tooLongMessage(len([]rune(long)))}, decision)
 		require.Empty(t, ch.prompts, "the user is never shown part of a call to approve")
 	})
 
@@ -73,9 +73,6 @@ func TestAskPermission(t *testing.T) {
 
 		require.Equal(t, permissionDeny, decision.Behavior)
 		require.Empty(t, ch.prompts)
-
-		p.Prompts.newTurn()
-		require.False(t, p.Prompts.alreadyUnanswered(), "the next turn asks again")
 	})
 
 	t.Run("refuses when the turn ends before an answer", func(t *testing.T) {
@@ -105,6 +102,15 @@ func TestPermissionPrompts_Resolve(t *testing.T) {
 
 		require.False(t, prompts.resolve(press))
 		require.Empty(t, reply)
+	})
+
+	t.Run("a new turn asks again after an unanswered one", func(t *testing.T) {
+		prompts := newPermissionPrompts()
+		prompts.markUnanswered()
+
+		prompts.newTurn()
+
+		require.False(t, prompts.alreadyUnanswered())
 	})
 
 	t.Run("a press after the wait gave up is not consumed", func(t *testing.T) {

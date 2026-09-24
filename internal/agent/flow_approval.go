@@ -85,6 +85,13 @@ func sendStaleButtonNotice(ctx context.Context, opts Options, chID channel.Chann
 	}
 }
 
+// answersOpenApproval reports whether press answers the tool approval open on chID, which is
+// read between turns, so a press for it that arrives mid-turn waits in the queue.
+func answersOpenApproval(fm *FlowManager, chID channel.ChannelID, press *channel.ButtonPress) bool {
+	f := fm.Active(chID)
+	return f != nil && f.Kind == FlowToolApproval && f.ToolApproval.promptID == press.PromptID
+}
+
 // wouldReplaceOpenPrompt reports whether a turn's outcome would open a prompt over one the user
 // is in the middle of answering, such as an OAuth login or a tool approval. Only a turn nobody
 // started is held back; the user's own turn replacing their own prompt is them moving on.

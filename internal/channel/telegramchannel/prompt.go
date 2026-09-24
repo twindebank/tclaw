@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -43,9 +44,14 @@ func (t *Telegram) SendPrompt(ctx context.Context, p channel.SendPromptParams) (
 	if err != nil {
 		return "", fmt.Errorf("telegram prompt: %w", err)
 	}
+	text := tgsdk.SanitizeHTML(tgsdk.MarkdownToHTML(p.Text))
+	if p.Detail != "" {
+		// Escaped rather than converted, so no markup in it can change what is shown.
+		text += "\n<pre>" + html.EscapeString(p.Detail) + "</pre>"
+	}
 	msg, err := b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:      chatID,
-		Text:        tgsdk.SanitizeHTML(tgsdk.MarkdownToHTML(p.Text)),
+		Text:        text,
 		ParseMode:   models.ParseModeHTML,
 		ReplyMarkup: keyboard,
 	})

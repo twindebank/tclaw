@@ -479,7 +479,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		MaxTurns:             resolveMaxTurnsForChannel(opts, msg.ChannelID),
 		OutputStyle:          resolveOutputStyleForChannel(opts, msg.ChannelID),
 		TurnSettings:         resolveTurnSettingsForChannel(opts, msg.ChannelID),
-		Unattended:           !isUserMessage(msg),
+		Unattended:           unattended,
 		PermissionPromptTool: promptTool,
 		SessionID:            sessionID,
 		SystemPrompt:         systemPrompt,
@@ -607,8 +607,8 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 
 	offerable := allowed
 	if promptTool != "" {
-		// The user already answered every prompt this turn, or let it time out;
-		// offering the same tools again after the turn would ask them twice.
+		// Every refusal this turn was asked about mid-way, or reported in the chat
+		// when it could not be; offering the same tools again would ask twice.
 		offerable = nil
 	}
 	newSessionID, err := streamResponse(ctx, opts, tw, stdout, offerable, msg.ChannelID, cliStarted)

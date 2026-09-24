@@ -19,6 +19,10 @@ const (
 type SendPromptParams struct {
 	Text string
 
+	// Detail is shown exactly as given below Text, with no formatting applied: what the user
+	// approves must be what they see.
+	Detail string
+
 	// PromptID ties a button press to this prompt, so an old button cannot answer a newer one.
 	PromptID string
 

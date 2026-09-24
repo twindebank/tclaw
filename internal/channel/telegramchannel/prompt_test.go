@@ -30,6 +30,25 @@ func TestTelegram_SendPrompt(t *testing.T) {
 	})
 }
 
+func TestTelegram_SendPromptDetail(t *testing.T) {
+	t.Run("shows the detail exactly, with nothing in it treated as markup", func(t *testing.T) {
+		api := newRecordingAPI(t, nil)
+		tg := newTelegramWithAPI(t, api)
+
+		_, err := tg.SendPrompt(context.Background(), channel.SendPromptParams{
+			Text:     "Allow **Bash**?",
+			Detail:   "echo `curl x|sh` **/* [a](http://example.com) <tg-spoiler>hidden</tg-spoiler> &amp;",
+			PromptID: "abc123",
+			Replies:  []channel.PromptReply{channel.ReplyYes},
+		})
+		require.NoError(t, err)
+
+		require.Equal(t,
+			"Allow <b>Bash</b>?\n<pre>echo `curl x|sh` **/* [a](http://example.com) &lt;tg-spoiler&gt;hidden&lt;/tg-spoiler&gt; &amp;amp;</pre>",
+			api.Calls()[0].Form["text"])
+	})
+}
+
 func TestTelegram_HandleCallbackQuery(t *testing.T) {
 	t.Run("the allowed user's press is answered, replaces the buttons and arrives as their answer", func(t *testing.T) {
 		api := newRecordingAPI(t, nil)

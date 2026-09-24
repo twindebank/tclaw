@@ -150,22 +150,23 @@ func askPermission(ctx context.Context, p permissionPromptParams, request permis
 		return permissionDecision{Behavior: permissionDeny, Message: "This channel cannot ask for approval during a turn, so the call was refused."}
 	}
 	if p.Prompts.alreadyUnanswered() {
+		// The chat was told when the earlier prompt timed out.
 		return permissionDecision{Behavior: permissionDeny, Message: "An earlier approval this turn went unanswered, so the user is away; the call was refused."}
 	}
 	input := strings.TrimSpace(string(request.Input))
 	if n := len([]rune(input)); n > permissionPromptInputMax {
 		// The user approves what they are shown. Showing only the start would let
 		// the rest of the call through unseen.
-		return permissionDecision{Behavior: permissionDeny, Message: fmt.Sprintf(
-			"The call's input is %d characters, too long to show the user in full for approval (the limit is %d). Split it into smaller calls.",
-			n, permissionPromptInputMax)}
+		notifyRefusal(ctx, ch, fmt.Sprintf("🚫 A %s call was refused without asking: its input was too long to show in full.", request.ToolName))
+		return permissionDecision{Behavior: permissionDeny, Message: tooLongMessage(n)}
 	}
 
 	promptID := channel.NewPromptID()
 	reply := p.Prompts.await(promptID)
 	defer p.Prompts.forget(promptID)
 	if _, err := prompter.SendPrompt(ctx, channel.SendPromptParams{
-		Text:     permissionPromptText(request.ToolName, input),
+		Text:     fmt.Sprintf("🔐 Allow **%s**?", request.ToolName),
+		Detail:   input,
 		PromptID: promptID,
 		Replies:  []channel.PromptReply{channel.ReplyYes, channel.ReplyNo},
 	}); err != nil {
@@ -183,11 +184,9 @@ func askPermission(ctx context.Context, p permissionPromptParams, request permis
 		return permissionDecision{Behavior: permissionDeny, Message: "The turn ended before the user answered."}
 	case <-time.After(permissionPromptTimeout):
 		p.Prompts.markUnanswered()
-		if _, err := ch.Send(ctx, fmt.Sprintf("⌛ No answer in %s, so the %s call was refused.", permissionPromptTimeout, request.ToolName), channel.SendOpts{}); err != nil {
-			slog.Warn("failed to say an approval timed out", "channel", chID, "err", err)
-		}
+		notifyRefusal(ctx, ch, fmt.Sprintf("⌛ No answer in %d minutes, so the %s call was refused.", int(permissionPromptTimeout.Minutes()), request.ToolName))
 		return permissionDecision{Behavior: permissionDeny, Message: fmt.Sprintf(
-			"The user did not answer within %s, so the call was refused.", permissionPromptTimeout)}
+			"The user did not answer within %d minutes, so the call was refused.", int(permissionPromptTimeout.Minutes()))}
 	}
 }
 
@@ -205,9 +204,16 @@ func channelIDByName(channels map[channel.ChannelID]channel.Channel, name string
 // inside a Telegram message with the rest of the prompt around it.
 const permissionPromptInputMax = 3000
 
-// permissionPromptText names the tool and shows the whole input it would be called with, so
-// the user is approving a specific call rather than a tool in general.
-func permissionPromptText(toolName, input string) string {
-	// Shown as inline code, which a backtick in the input would end early.
-	return fmt.Sprintf("🔐 Allow **%s**?\n\n`%s`", toolName, strings.ReplaceAll(input, "`", "'"))
+// tooLongMessage tells the model why a call with an n-character input was refused.
+func tooLongMessage(n int) string {
+	return fmt.Sprintf("The call's input is %d characters, too long to show the user in full for approval (the limit is %d). Split it into smaller calls.",
+		n, permissionPromptInputMax)
+}
+
+// notifyRefusal tells the chat a call was refused: the model is told too, but the user would
+// otherwise see nothing, and no offer to re-run follows a turn that could ask mid-way.
+func notifyRefusal(ctx context.Context, ch channel.Channel, text string) {
+	if _, err := ch.Send(ctx, text, channel.SendOpts{}); err != nil {
+		slog.Warn("failed to report a refused tool call", "channel", ch.Info().Name, "err", err)
+	}
 }

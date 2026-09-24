@@ -872,10 +872,10 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 						stopped = true
 						stoppedChannels[msg.ChannelID] = true
 					}
-				} else if channel.ParseButtonPress(newMsg.Text) != nil {
-					// A press that reached the agent mid-turn answers nothing: the
-					// router hands the presses that do count straight to what waits
-					// for them. Queuing it would read as if it will still take effect.
+				} else if press := channel.ParseButtonPress(newMsg.Text); press != nil && !answersOpenApproval(fm, newMsg.ChannelID, press) {
+					// A press for nothing still open. The router hands mid-turn
+					// approvals and confirmations their presses directly, and queuing
+					// it would read as if it will still take effect.
 					if _, err := opts.send(ctx, newMsg.ChannelID, staleButtonNotice); err != nil {
 						slog.Error("failed to send stale button notice", "err", err)
 					}

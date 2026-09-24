@@ -35,7 +35,7 @@ const (
 
 // formatSubagentText renders the first line of what a subagent said, as progress.
 func formatSubagentText(text string) string {
-	line := firstLine(strings.TrimSpace(text))
+	line := strings.TrimSpace(firstLine(strings.TrimSpace(text)))
 	if line == "" {
 		return ""
 	}

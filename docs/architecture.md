@@ -107,7 +107,8 @@ On a channel with buttons, a tool call that needs approval is also asked about *
 `--permission-prompt-tool` is `permission_prompt`, a tclaw MCP tool that is also in `--disallowedTools`:
 the CLI still calls it, the model cannot. It sends the prompt, and the router's message bridge, which
 keeps reading while a turn runs, hands the press straight to the waiting call. The prompt shows the
-call's whole input, and an input too long to show in full is refused rather than shown in part. No
+call's whole input exactly, escaped rather than formatted, and an input too long to show in full is
+refused rather than shown in part; a call refused without asking is reported in the chat. No
 answer in four minutes refuses the call, keeping inside the CLI's five-minute limit on a silent MCP
 call, and refuses the rest of that turn's prompts at once, so an absent user holds up their other
 channels for one wait rather than one per call. A turn nobody started

@@ -124,6 +124,23 @@ func TestHandleToolApprovalFlow(t *testing.T) {
 	})
 }
 
+func TestAnswersOpenApproval(t *testing.T) {
+	fm := NewFlowManager()
+	promptID := fm.StartToolApproval("ch1", channel.TaggedMessage{ChannelID: "ch1"}, []string{"Bash"}, "s1")
+
+	t.Run("a press for the open approval is kept for it", func(t *testing.T) {
+		require.True(t, answersOpenApproval(fm, "ch1", &channel.ButtonPress{PromptID: promptID, Reply: channel.ReplyYes}))
+	})
+
+	t.Run("an older prompt's press is not", func(t *testing.T) {
+		require.False(t, answersOpenApproval(fm, "ch1", &channel.ButtonPress{PromptID: channel.NewPromptID(), Reply: channel.ReplyYes}))
+	})
+
+	t.Run("nor is a press on a channel with nothing open", func(t *testing.T) {
+		require.False(t, answersOpenApproval(fm, "ch2", &channel.ButtonPress{PromptID: promptID, Reply: channel.ReplyYes}))
+	})
+}
+
 func TestWouldReplaceOpenPrompt(t *testing.T) {
 	scheduled := channel.TaggedMessage{ChannelID: "ch1", SourceInfo: &channel.MessageSourceInfo{Source: channel.SourceSchedule}}
 	typed := channel.TaggedMessage{ChannelID: "ch1", SourceInfo: &channel.MessageSourceInfo{Source: channel.SourceUser}}
