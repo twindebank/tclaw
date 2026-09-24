@@ -34,6 +34,13 @@ type RuntimeState struct {
 	// LastMessageSource is who sent the most recent message (e.g. "user", "schedule").
 	// Persisted alongside LastMessageAt for observability.
 	LastMessageSource MessageSource `json:"last_message_source,omitempty"`
+
+	// ContextTokens is the size of the channel's conversation after its last turn, which is
+	// what compacting would shrink. Zero until a turn has measured it.
+	ContextTokens int `json:"context_tokens,omitempty"`
+
+	// ContextMeasuredAt is when ContextTokens was taken.
+	ContextMeasuredAt time.Time `json:"context_measured_at,omitempty"`
 }
 
 // PendingActionKind identifies what a pending confirmation will do.

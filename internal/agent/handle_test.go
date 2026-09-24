@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -695,6 +696,39 @@ func TestStreamResponse(t *testing.T) {
 		require.ErrorAs(t, err, &denied)
 		require.Equal(t, []string{"Bash"}, denied.Tools, "Write is allowed, so a hook or the user refused it")
 		require.Contains(t, ch.sends[0], "🚫 Bash is not allowed here")
+	})
+
+	t.Run("reports the conversation's size from the last main-thread request", func(t *testing.T) {
+		ch := &mockChannel{info: channel.Info{Name: "dev"}}
+		tw := newTestTurnWriter(ch)
+		var reported []string
+		tw.opts.OnContextSize = func(name string, tokens int) { reported = append(reported, fmt.Sprintf("%s=%d", name, tokens)) }
+
+		runStream(t, tw,
+			streamLine(`{"type":"message_start","message":{"usage":{"input_tokens":5,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000}}}`),
+			streamLine(`{"type":"message_stop"}`),
+			// A subagent's request is not the channel's conversation.
+			`{"type":"stream_event","parent_tool_use_id":"toolu_01A","event":{"type":"message_start","message":{"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}}`,
+			streamLine(`{"type":"message_start","message":{"usage":{"input_tokens":7,"cache_creation_input_tokens":200,"cache_read_input_tokens":1100}}}`),
+			streamLine(`{"type":"message_stop"}`),
+			`{"type":"result","subtype":"success","session_id":"s1"}`,
+		)
+
+		require.Equal(t, []string{"dev=1307"}, reported)
+	})
+
+	t.Run("reports the size a compaction left", func(t *testing.T) {
+		ch := &mockChannel{info: channel.Info{Name: "dev"}}
+		tw := newTestTurnWriter(ch)
+		var reported []int
+		tw.opts.OnContextSize = func(_ string, tokens int) { reported = append(reported, tokens) }
+
+		runStream(t, tw,
+			`{"type":"system","subtype":"compact_boundary","compact_metadata":{"trigger":"manual","pre_tokens":28968,"post_tokens":2958}}`,
+			`{"type":"result","subtype":"success","session_id":"s1"}`,
+		)
+
+		require.Equal(t, []int{2958}, reported)
 	})
 
 	t.Run("writes no tool result line for a user event that is not a tool result", func(t *testing.T) {

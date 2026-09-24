@@ -13,9 +13,8 @@
 - [ ] Token exhausted state — when Claude API limit is hit, record reset time in channel state. Scheduled jobs should be deferred until reset time (not silently dropped). On reset, prompt user whether to run deferred schedules or skip them. Normal inbound messages should be queued and replayed (or flagged as unactioned) when the limit resets so nothing is silently lost.
 
 ## Token Optimisation
-- [ ] Auto-compact — track per-session context size (last turn's input tokens from ResultEvent), expose via `channel_read` tool, add `compact_channel` tool for programmatic compaction, set up 2am admin schedule to compact sessions above a threshold. Key design decision: use `LastTurnInputTokens` (the actual context window size on the most recent turn) as the compaction metric — not cumulative usage, which never resets and would re-trigger compaction every time.
-- [ ] `channel_read` tool — read a single channel's full config + session history (current + historical sessions with token stats and timestamps). Avoids forcing the agent to list all channels just to check one.
-- [ ] `compact_channel` tool — trigger compaction on any channel by injecting a "compact" message into the agent queue. Bypasses the link requirement of `channel_send` for admin use.
+- [x] Compaction — `compact` runs the CLI's real `/compact`, and the CLI compacts on its own when the context fills; both show a status line with the size before and after. `channel_read` shows each channel's `context_tokens` after its last turn, and `channel_send` with the word "compact" compacts another channel.
+- [ ] Scheduled compaction — an admin schedule that compacts channels whose `context_tokens` is over a threshold, using the two tools above.
 
 ## Memory & Context
 - [x] System and agent memories — system prompt (--append-system-prompt) for identity/rules, CLAUDE.md for persistent per-user memory, seeded on first startup

@@ -744,6 +744,8 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 	// an assistant event outside a streamed message, such as a command's reply, is
 	// the only copy of its content.
 	streamingMessage := false
+	// The size of the conversation as the last main-thread request carried it.
+	contextTokens := 0
 	// A streamed tool_use block and its input, gathered until the block stops.
 	var pendingToolUse claudecli.ContentBlock
 	var pendingToolInput strings.Builder
@@ -836,6 +838,9 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 					return "", err
 				}
 			case claudecli.SystemSubtypeCompactBoundary:
+				if sys.CompactMetadata != nil {
+					contextTokens = sys.CompactMetadata.PostTokens
+				}
 				if err := tw.write(phaseStatus, formatCompactBoundary(sys.CompactMetadata)); err != nil {
 					return "", err
 				}
@@ -844,6 +849,12 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			}
 
 		case claudecli.EventMessageStart:
+			var start claudecli.MessageStartEvent
+			if err := json.Unmarshal(line, &start); err != nil {
+				slog.Warn("failed to parse message_start", "err", err)
+			} else {
+				contextTokens = start.Message.Usage.ContextTokens()
+			}
 			if streamingMessage {
 				// The previous message's stream broke off before its stop.
 				slog.Warn("message_start arrived before the previous message stopped", "channel", channelID)
@@ -1036,6 +1047,9 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			}
 			if result.SessionID != "" && sessionID == "" {
 				sessionID = result.SessionID
+			}
+			if contextTokens > 0 && opts.OnContextSize != nil {
+				opts.OnContextSize(tw.ch.Info().Name, contextTokens)
 			}
 			// The CLI's own record of what it refused. It also holds refusals by a
 			// hook or by the user, which re-running with the tool allowed would not

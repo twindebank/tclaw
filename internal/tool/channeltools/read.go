@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"tclaw/internal/channel"
 	"tclaw/internal/claudecli"
@@ -19,7 +20,8 @@ func channelReadDef() mcp.ToolDef {
 		Name: ToolChannelRead,
 		Description: "Return the full config for a single channel — every field that's set in tclaw.yaml. " +
 			"Use this to see fields channel_list omits (model, max_turns, effort, max_budget_usd, fallback_model, claude_session_timeout, " +
-			"ephemeral settings, initial_message, tool groups, links, created_at).",
+			"ephemeral settings, initial_message, tool groups, links, created_at), and context_tokens: how large the " +
+			"channel's conversation was after its last turn. To shrink one, send the channel the word \"compact\" with channel_send.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -63,6 +65,10 @@ type channelReadEntry struct {
 	CreatedAt            string           `json:"created_at,omitempty"`
 	Envs                 []string         `json:"envs,omitempty"`
 	Telegram             *telegramSummary `json:"telegram,omitempty"`
+
+	// ContextTokens is the conversation's size after the channel's last turn; absent until one has run.
+	ContextTokens     int    `json:"context_tokens,omitempty"`
+	ContextMeasuredAt string `json:"context_measured_at,omitempty"`
 }
 
 // telegramSummary surfaces telegram metadata that doesn't leak the bot token —
@@ -114,6 +120,16 @@ func channelReadHandler(deps Deps) mcp.ToolHandler {
 			}
 			if ch.Telegram != nil {
 				entry.Telegram = &telegramSummary{HasToken: ch.Telegram.Token != ""}
+			}
+			if deps.RuntimeState != nil {
+				rs, err := deps.RuntimeState.Get(ctx, ch.Name)
+				if err != nil {
+					return nil, fmt.Errorf("read runtime state for %q: %w", ch.Name, err)
+				}
+				if rs.ContextTokens > 0 {
+					entry.ContextTokens = rs.ContextTokens
+					entry.ContextMeasuredAt = rs.ContextMeasuredAt.Format(time.RFC3339)
+				}
 			}
 			return json.Marshal(entry)
 		}

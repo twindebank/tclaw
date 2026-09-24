@@ -206,6 +206,27 @@ type ToolResultMeta struct {
 	Stderr string `json:"stderr,omitempty"`
 }
 
+// MessageStartEvent opens one API response in a stream. Its usage says how much context the
+// request carried, which is the size of the conversation at that point.
+type MessageStartEvent struct {
+	Type    EventType `json:"type"`
+	Message struct {
+		Usage MessageUsage `json:"usage"`
+	} `json:"message"`
+}
+
+// MessageUsage is the token accounting for one API request.
+type MessageUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+}
+
+// ContextTokens is everything the request sent the model: new input plus cached context.
+func (u MessageUsage) ContextTokens() int {
+	return u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+}
+
 // ContentBlockStartEvent marks the beginning of a new content block.
 type ContentBlockStartEvent struct {
 	Type         EventType    `json:"type"`

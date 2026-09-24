@@ -95,6 +95,25 @@ func TestChannelRead(t *testing.T) {
 		require.NotEmpty(t, got["created_at"], "channel_create stamps created_at")
 	})
 
+	t.Run("shows how large the conversation was after the last turn", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "email", "description": "Inbound email", "type": "socket", "initial_message": "Hello",
+		})
+		measured := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+		require.NoError(t, th.runtimeState.Update(context.Background(), "email", func(rs *channel.RuntimeState) {
+			rs.ContextTokens = 48000
+			rs.ContextMeasuredAt = measured
+		}))
+
+		result := callTool(t, th.handler, "channel_read", map[string]any{"name": "email"})
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(result, &got))
+		require.Equal(t, float64(48000), got["context_tokens"])
+		require.Equal(t, "2026-09-01T12:00:00Z", got["context_measured_at"])
+	})
+
 	t.Run("returns error for missing channel", func(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 

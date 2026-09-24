@@ -1128,6 +1128,14 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				activityTracker.MessageReceived(channelName)
 				activityTracker.TurnStarted(channelName)
 			},
+			OnContextSize: func(channelName string, tokens int) {
+				if err := runtimeState.Update(ctx, channelName, func(rs *channel.RuntimeState) {
+					rs.ContextTokens = tokens
+					rs.ContextMeasuredAt = time.Now()
+				}); err != nil {
+					slog.Error("failed to record channel context size", "channel", channelName, "err", err)
+				}
+			},
 			OnTurnEnd: func(channelName string) {
 				activityTracker.TurnEnded(channelName)
 

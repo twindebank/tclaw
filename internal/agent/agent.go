@@ -307,6 +307,9 @@ type Options struct {
 	// May be nil.
 	OnTurnStart func(channelName string)
 
+	// OnContextSize is called after a turn with the size of the channel's conversation.
+	OnContextSize func(channelName string, tokens int)
+
 	// OnTurnEnd is called after each message turn completes (whether
 	// successful, failed, or stopped), with the name of the channel.
 	// The router uses this to update channel activity state.
