@@ -471,6 +471,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		MaxTurns:      resolveMaxTurnsForChannel(opts, msg.ChannelID),
 		OutputStyle:   resolveOutputStyleForChannel(opts, msg.ChannelID),
 		TurnSettings:  resolveTurnSettingsForChannel(opts, msg.ChannelID),
+		Unattended:    !isUserMessage(msg),
 		SessionID:     sessionID,
 		SystemPrompt:  systemPrompt,
 		Prompt:        promptText,
@@ -807,7 +808,7 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				if sys.SessionID != "" {
 					sessionID = sys.SessionID
 				}
-				if err := tw.write(phaseStatus, "✅ Session ready, generating response...\n"); err != nil {
+				if err := tw.write(phaseStatus, "✅ Session ready, generating response...\n"+formatMCPProblems(sys)); err != nil {
 					return "", err
 				}
 			case claudecli.SystemSubtypeInformational:
@@ -824,6 +825,14 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 					continue
 				}
 				if err := tw.write(phaseStatus, notice); err != nil {
+					return "", err
+				}
+			case claudecli.SystemSubtypeAPIRetry:
+				if err := tw.write(phaseStatus, formatAPIRetry(sys)); err != nil {
+					return "", err
+				}
+			case claudecli.SystemSubtypePermissionDenied:
+				if err := tw.write(phaseStatus, fmt.Sprintf("\n🚫 %s is not allowed here\n", sys.ToolName)); err != nil {
 					return "", err
 				}
 			case claudecli.SystemSubtypeCompactBoundary:
@@ -868,14 +877,6 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				// fragments, so the line is written once the block stops.
 				pendingToolUse = start.ContentBlock
 				pendingToolInput.Reset()
-				// Track tools the model tried to use that aren't in the allowed list.
-				// Only applies when an allowlist is configured (non-empty).
-				if len(allowedSet) > 0 && start.ContentBlock.Name != "" {
-					toolName := claudecli.Tool(start.ContentBlock.Name)
-					if !allowedSet[toolName] {
-						deniedToolSet[start.ContentBlock.Name] = true
-					}
-				}
 			default:
 				slog.Debug("unhandled content block type", "type", currentBlockType)
 			}
@@ -932,13 +933,20 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			}
 
 			if msg.ParentToolUseID != nil {
-				// A subagent's message. Its tool calls show as progress; its
-				// text is not the reply.
+				// A subagent's message. Its tool calls and what it says show as
+				// progress; none of it is the reply.
 				for _, block := range msg.Message.Content {
-					if block.Type != claudecli.ContentToolUse {
+					var line string
+					switch block.Type {
+					case claudecli.ContentToolUse:
+						line = formatToolUse(block)
+					case claudecli.ContentText:
+						line = formatSubagentText(block.Text)
+					}
+					if line == "" {
 						continue
 					}
-					if err := tw.write(phaseStatus, formatToolUse(block)); err != nil {
+					if err := tw.write(phaseStatus, line); err != nil {
 						return "", err
 					}
 				}
@@ -1029,6 +1037,16 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			if result.SessionID != "" && sessionID == "" {
 				sessionID = result.SessionID
 			}
+			// The CLI's own record of what it refused. It also holds refusals by a
+			// hook or by the user, which re-running with the tool allowed would not
+			// change, so only tools missing from the channel's list are offered.
+			if len(allowedSet) > 0 {
+				for _, denial := range result.PermissionDenials {
+					if !allowedSet[claudecli.Tool(denial.ToolName)] {
+						deniedToolSet[denial.ToolName] = true
+					}
+				}
+			}
 			stats := fmt.Sprintf("\n📊 %d turns | %.1fs | $%.4f",
 				result.NumTurns,
 				result.DurationMs/1000,
@@ -1076,6 +1094,34 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 	}
 
 	return sessionID, nil
+}
+
+// formatMCPProblems names each of tclaw's MCP servers that did not connect and each
+// config entry the CLI skipped, or is empty when there are none. Without it a server
+// that failed is simply missing for the turn, with nothing saying so.
+func formatMCPProblems(sys claudecli.SystemEvent) string {
+	var b strings.Builder
+	for _, server := range sys.MCPServers {
+		if server.Source != claudecli.MCPServerSourceConfigFlag {
+			// Not one of tclaw's, e.g. a claude.ai connector.
+			continue
+		}
+		switch server.Status {
+		case claudecli.MCPServerConnected, claudecli.MCPServerPending:
+		default:
+			fmt.Fprintf(&b, "⚠️ MCP server %s is unavailable this turn (%s)\n", server.Name, server.Status)
+		}
+	}
+	for _, skipped := range sys.MCPServerErrors {
+		fmt.Fprintf(&b, "⚠️ MCP server %s was skipped: %s\n", skipped.Name, skipped.Message)
+	}
+	return b.String()
+}
+
+// formatAPIRetry says the CLI is retrying a failed request, so a slow turn is not a silent one.
+func formatAPIRetry(sys claudecli.SystemEvent) string {
+	return fmt.Sprintf("⏳ API error (%s) — retrying in %ds (attempt %d/%d)\n",
+		sys.RetryError, (sys.RetryDelayMs+999)/1000, sys.Attempt, sys.MaxRetries)
 }
 
 // modelSummary builds a parenthesized string of model short names from the

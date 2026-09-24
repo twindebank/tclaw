@@ -44,6 +44,12 @@ const (
 
 	// SystemSubtypeCompactBoundary marks a finished compaction, manual or automatic.
 	SystemSubtypeCompactBoundary SystemEventSubtype = "compact_boundary"
+
+	// SystemSubtypeAPIRetry is sent before the CLI retries a failed API request.
+	SystemSubtypeAPIRetry SystemEventSubtype = "api_retry"
+
+	// SystemSubtypePermissionDenied is sent when a tool call is refused.
+	SystemSubtypePermissionDenied SystemEventSubtype = "permission_denied"
 )
 
 // NoticeLevel is how prominently the CLI means an informational notice to be shown.
@@ -87,7 +93,54 @@ type SystemEvent struct {
 
 	// CompactMetadata is set on a compact_boundary event.
 	CompactMetadata *CompactMetadata `json:"compact_metadata,omitempty"`
+
+	// MCPServers and MCPServerErrors are set on init: every server in the session with
+	// its connection state, and the --mcp-config entries skipped as invalid.
+	MCPServers      []MCPServerState `json:"mcp_servers,omitempty"`
+	MCPServerErrors []MCPServerError `json:"mcp_server_errors,omitempty"`
+
+	// The api_retry fields.
+	Attempt      int           `json:"attempt,omitempty"`
+	MaxRetries   int           `json:"max_retries,omitempty"`
+	RetryDelayMs int           `json:"retry_delay_ms,omitempty"`
+	RetryError   APIErrorClass `json:"error,omitempty"`
+
+	// ToolName is the refused tool, on permission_denied.
+	ToolName string `json:"tool_name,omitempty"`
 }
+
+// MCPServerState is one MCP server's connection state at the start of a turn.
+type MCPServerState struct {
+	Name   string          `json:"name"`
+	Status MCPServerStatus `json:"status"`
+	Source MCPServerSource `json:"source"`
+}
+
+// MCPServerStatus is whether an MCP server connected.
+type MCPServerStatus string
+
+const (
+	MCPServerConnected MCPServerStatus = "connected"
+	MCPServerPending   MCPServerStatus = "pending"
+	MCPServerFailed    MCPServerStatus = "failed"
+	MCPServerNeedsAuth MCPServerStatus = "needs-auth"
+)
+
+// MCPServerSource is where an MCP server's configuration came from.
+type MCPServerSource string
+
+// MCPServerSourceConfigFlag is a server from --mcp-config, which is where tclaw's own come from.
+const MCPServerSourceConfigFlag MCPServerSource = "dynamic"
+
+// MCPServerError is an --mcp-config entry the CLI skipped as invalid.
+type MCPServerError struct {
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Message string `json:"message"`
+}
+
+// APIErrorClass is the kind of error an API request failed with, such as rate_limit or overloaded.
+type APIErrorClass string
 
 // CompactMetadata describes one compaction of a session's context.
 type CompactMetadata struct {
@@ -206,9 +259,18 @@ type ResultEvent struct {
 	SessionID  string  `json:"session_id"`
 	CostUSD    float64 `json:"total_cost_usd"`
 
+	// PermissionDenials lists every tool call refused during the turn.
+	PermissionDenials []PermissionDenial `json:"permission_denials,omitempty"`
+
 	// ModelUsage is a per-model breakdown of token usage and cost.
 	// Keys are model identifiers (may include context window suffix, e.g. "claude-opus-4-6[1m]").
 	ModelUsage map[string]ModelUsage `json:"modelUsage,omitempty"`
+}
+
+// PermissionDenial is one refused tool call.
+type PermissionDenial struct {
+	ToolName  string `json:"tool_name"`
+	ToolUseID string `json:"tool_use_id"`
 }
 
 // ResultSubtype says how a turn ended.

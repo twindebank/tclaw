@@ -61,3 +61,17 @@ func TestBuildArgs_OutputStyle(t *testing.T) {
 		require.Contains(t, args, `{"outputStyle":"Odd\" name"}`)
 	})
 }
+
+func TestBuildArgs_Unattended(t *testing.T) {
+	t.Run("an unattended turn refuses whatever would prompt", func(t *testing.T) {
+		args := buildArgs(buildArgsParams{MaxTurns: 10, Prompt: "hello", Unattended: true})
+
+		require.Equal(t, "none", flagValue(t, args, "--permission-prompts"))
+	})
+
+	t.Run("a turn the user started leaves prompting to the CLI", func(t *testing.T) {
+		args := buildArgs(buildArgsParams{MaxTurns: 10, Prompt: "hello"})
+
+		require.NotContains(t, args, "--permission-prompts")
+	})
+}

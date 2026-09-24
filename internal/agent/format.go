@@ -33,6 +33,15 @@ const (
 	iconNotice = "ℹ️"
 )
 
+// formatSubagentText renders the first line of what a subagent said, as progress.
+func formatSubagentText(text string) string {
+	line := strings.TrimSpace(firstLine(strings.TrimSpace(text)))
+	if line == "" {
+		return ""
+	}
+	return fmt.Sprintf("\n🤖 %s\n", truncate(line, quoteMaxLen))
+}
+
 // formatCompactBoundary renders a finished compaction, saying whether the CLI started it on its own.
 func formatCompactBoundary(meta *claudecli.CompactMetadata) string {
 	if meta == nil {

@@ -588,7 +588,7 @@ func TestStreamResponse(t *testing.T) {
 		require.Contains(t, ch.sends[0], "command=echo hi", "the tool line should carry the streamed input")
 	})
 
-	t.Run("keeps a subagent's text out of the reply when it arrives mid-block", func(t *testing.T) {
+	t.Run("shows a subagent's work as progress, never in the reply, when it arrives mid-block", func(t *testing.T) {
 		ch := &mockChannel{}
 		tw := newTestTurnWriter(ch)
 
@@ -605,10 +605,11 @@ func TestStreamResponse(t *testing.T) {
 			streamLine(`{"type":"message_stop"}`),
 		)
 
-		shown := strings.Join(finalTexts(ch), "\n")
-		require.NotContains(t, shown, "subagent notes", "a subagent's text is not the reply")
-		require.Contains(t, shown, "Read(file_path=notes.md)", "a subagent's tool call should show as progress")
-		require.Equal(t, 1, strings.Count(shown, "Main answer"), "the main answer should be written once")
+		messages := finalTexts(ch)
+		require.Len(t, messages, 2, "one status message, then the reply")
+		require.Contains(t, messages[0], "Read(file_path=notes.md)", "a subagent's tool call should show as progress")
+		require.Contains(t, messages[0], "🤖 subagent notes", "so should what it says")
+		require.Equal(t, "Main answer", messages[1], "only the main thread's text is the reply")
 	})
 
 	t.Run("shows an assistant message that was not streamed", func(t *testing.T) {
@@ -650,6 +651,50 @@ func TestStreamResponse(t *testing.T) {
 		)
 
 		require.Equal(t, []string{"API Error: overloaded"}, finalTexts(ch))
+	})
+
+	t.Run("names tclaw's MCP servers that did not connect, and config entries skipped", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := newTestTurnWriter(ch)
+
+		runStream(t, tw,
+			`{"type":"system","subtype":"init","session_id":"s1","mcp_servers":[`+
+				`{"name":"tclaw","status":"connected","source":"dynamic"},`+
+				`{"name":"strava","status":"failed","source":"dynamic"},`+
+				`{"name":"claude.ai Gmail","status":"needs-auth","source":"claudeai"}],`+
+				`"mcp_server_errors":[{"name":"broken","type":"url_missing_type","message":"has a url but no type"}]}`,
+		)
+
+		require.Contains(t, ch.sends[0], "⚠️ MCP server strava is unavailable this turn (failed)")
+		require.Contains(t, ch.sends[0], "⚠️ MCP server broken was skipped: has a url but no type")
+		require.NotContains(t, ch.sends[0], "Gmail", "a claude.ai connector is not tclaw's to report")
+	})
+
+	t.Run("says the CLI is retrying a failed request", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := newTestTurnWriter(ch)
+
+		runStream(t, tw,
+			`{"type":"system","subtype":"api_retry","attempt":2,"max_retries":10,"retry_delay_ms":4200,"error":"overloaded"}`,
+		)
+
+		require.Equal(t, []string{"⏳ API error (overloaded) — retrying in 5s (attempt 2/10)\n"}, ch.sends)
+	})
+
+	t.Run("offers approval only for refused tools the channel does not allow", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := newTestTurnWriter(ch)
+
+		_, err := streamResponse(context.Background(), tw.opts, tw, strings.NewReader(strings.Join([]string{
+			`{"type":"system","subtype":"permission_denied","tool_name":"Bash"}`,
+			`{"type":"result","subtype":"success","session_id":"s1","permission_denials":[` +
+				`{"tool_name":"Bash","tool_use_id":"toolu_01A"},{"tool_name":"Write","tool_use_id":"toolu_01B"}]}`,
+		}, "\n")), []claudecli.Tool{"Read", "Write"}, testChannelID, time.Now())
+
+		var denied *ToolsDeniedError
+		require.ErrorAs(t, err, &denied)
+		require.Equal(t, []string{"Bash"}, denied.Tools, "Write is allowed, so a hook or the user refused it")
+		require.Contains(t, ch.sends[0], "🚫 Bash is not allowed here")
 	})
 
 	t.Run("writes no tool result line for a user event that is not a tool result", func(t *testing.T) {

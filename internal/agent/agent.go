@@ -1173,12 +1173,16 @@ func resolveMCPConfigPath(opts Options, channelID channel.ChannelID) string {
 // buildArgsParams carries the per-turn values already resolved for this
 // channel, alongside the immutable Options.
 type buildArgsParams struct {
-	Options       Options
-	Model         claudecli.Model
-	MaxTurns      int
-	OutputStyle   string
-	TurnSettings  claudecli.TurnSettings
-	SessionID     string
+	Options      Options
+	Model        claudecli.Model
+	MaxTurns     int
+	OutputStyle  string
+	TurnSettings claudecli.TurnSettings
+	SessionID    string
+
+	// Unattended is a turn no person started, such as a schedule, so no one can
+	// answer a permission prompt.
+	Unattended    bool
 	SystemPrompt  string
 	Prompt        string
 	Allowed       []claudecli.Tool
@@ -1194,6 +1198,9 @@ func buildArgs(p buildArgsParams) []string {
 		// Without it the CLI sends each assistant message only once it is
 		// complete, so nothing reaches the chat until then.
 		"--include-partial-messages",
+		// A subagent's text, so the status message can show what it is doing
+		// rather than one long silent tool call.
+		"--forward-subagent-text",
 	}
 	if p.SessionID != "" {
 		args = append(args, "--resume", p.SessionID)
@@ -1208,6 +1215,11 @@ func buildArgs(p buildArgsParams) []string {
 		args = append(args, "--model", string(p.Model))
 	}
 	args = append(args, "--max-turns", fmt.Sprintf("%d", p.MaxTurns))
+	if p.Unattended {
+		// Refuse anything that would prompt, and tell the model nobody can approve
+		// it, rather than leave it retrying.
+		args = append(args, "--permission-prompts", "none")
+	}
 	if p.TurnSettings.Effort != "" {
 		args = append(args, "--effort", string(p.TurnSettings.Effort))
 	}
