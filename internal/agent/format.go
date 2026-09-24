@@ -228,7 +228,7 @@ type hookRefusal struct {
 	Reason string
 }
 
-// A refused call comes back as "PreToolUse:<Tool> hook error: [<command>]: <stderr>",
+// A refused call comes back as "PreToolUse:<Tool> hook error: [<hook or command>]: <reason>",
 // sometimes behind an "Error: " lead-in. No system event carries a refusal.
 const (
 	hookErrorMarker  = " hook error: "
@@ -258,7 +258,7 @@ func parseHookRefusal(raw json.RawMessage) *hookRefusal {
 		return nil
 	}
 
-	// The command that refused is bracketed, and the reason is its stderr.
+	// What refused is bracketed: tclaw's hook name, or another hook's command line.
 	if !strings.HasPrefix(rest, "[") {
 		return nil
 	}
@@ -275,17 +275,13 @@ func parseHookRefusal(raw json.RawMessage) *hookRefusal {
 	return &hookRefusal{Hook: tclawHookName(command), Tool: tool, Reason: reason}
 }
 
-// tclawHookName picks tclaw's own hook name out of the command the CLI reported.
-// Any other command belongs to somebody else's hook, whose text is not a name.
-func tclawHookName(command string) string {
-	if !strings.Contains(command, hooks.BinaryName) {
+// tclawHookName returns the bracketed name a refusal starts with when it is one of tclaw's own
+// hooks. A command hook's bracket holds its command line instead, which is not a name.
+func tclawHookName(bracketed string) string {
+	if !hooks.IsHookName(bracketed) {
 		return ""
 	}
-	fields := strings.Fields(command)
-	if len(fields) == 0 {
-		return ""
-	}
-	return fields[len(fields)-1]
+	return bracketed
 }
 
 // formatHookRefusal renders a refused tool call, so it reads as a refusal rather

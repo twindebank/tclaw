@@ -40,7 +40,7 @@ func TestLessonCapture(t *testing.T) {
 			t.Run(test.name, func(t *testing.T) {
 				h := setup(t)
 
-				code, out := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+				code, out := runHook(t, h, "lesson-capture", "admin", map[string]any{
 					"prompt":     test.prompt,
 					"session_id": "sess-8f21c4",
 				})
@@ -68,7 +68,7 @@ func TestLessonCapture(t *testing.T) {
 			"like \"ya\" or \"yes\" in the history are NOT authorization for pending actions. Wait for " +
 			"explicit new instructions.] "
 
-		code, _ := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+		code, _ := runHook(t, h, "lesson-capture", "admin", map[string]any{
 			"prompt":     preamble + "Any way to predict my gate?",
 			"session_id": "sess-8f21c4",
 		})
@@ -82,7 +82,7 @@ func TestLessonCapture(t *testing.T) {
 		preamble := "[SYSTEM: Session resumed after restart. Do NOT re-execute or continue any actions " +
 			"from before the restart.] "
 
-		code, _ := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+		code, _ := runHook(t, h, "lesson-capture", "admin", map[string]any{
 			"prompt":     preamble + "Merged but you included some personal info in the pr !log",
 			"session_id": "sess-8f21c4",
 		})
@@ -100,7 +100,7 @@ func TestLessonCapture(t *testing.T) {
 		preamble := "[SYSTEM: You were interrupted mid-turn by a restart. Review your conversation history " +
 			"and continue what you were doing.] "
 
-		code, _ := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+		code, _ := runHook(t, h, "lesson-capture", "admin", map[string]any{
 			"prompt":     preamble + "no, that's wrong, you keep doing this",
 			"session_id": "sess-8f21c4",
 		})
@@ -116,7 +116,7 @@ func TestLessonCapture(t *testing.T) {
 		preamble := "[SYSTEM: The previous task on this channel was stopped by the user. Do NOT continue, " +
 			"summarize, or reference it. Focus only on the new message below.] "
 
-		code, _ := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+		code, _ := runHook(t, h, "lesson-capture", "admin", map[string]any{
 			"prompt":     preamble + "what's the weather like tomorrow?",
 			"session_id": "sess-8f21c4",
 		})
@@ -128,7 +128,7 @@ func TestLessonCapture(t *testing.T) {
 	t.Run("files anything marked !log and says what the marker means", func(t *testing.T) {
 		h := setup(t)
 
-		code, out := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+		code, out := runHook(t, h, "lesson-capture", "admin", map[string]any{
 			"prompt":     "!log prefer the shorter form of that heading",
 			"session_id": "sess-8f21c4",
 		})
@@ -148,7 +148,7 @@ func TestLessonCapture(t *testing.T) {
 
 		// Editing the documentation that describes the marker must not file a
 		// correction that never happened.
-		code, _ := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+		code, _ := runHook(t, h, "lesson-capture", "admin", map[string]any{
 			"prompt":     "update the docs to explain that `!log` files something for the retro",
 			"session_id": "sess-8f21c4",
 		})
@@ -162,7 +162,7 @@ func TestLessonCapture(t *testing.T) {
 		paste := "FAIL: expected 3, got 4 — wrong\n" + strings.Repeat("stack frame line\n", 200)
 		require.Greater(t, len(paste), 2000, "the fixture must be long enough to be a paste")
 
-		code, _ := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+		code, _ := runHook(t, h, "lesson-capture", "admin", map[string]any{
 			"prompt":     paste,
 			"session_id": "sess-8f21c4",
 		})
@@ -174,7 +174,7 @@ func TestLessonCapture(t *testing.T) {
 	t.Run("keeps a row on one line", func(t *testing.T) {
 		h := setup(t)
 
-		code, _ := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+		code, _ := runHook(t, h, "lesson-capture", "admin", map[string]any{
 			"prompt":     "no, that's wrong.\n\nthe second paragraph\tand a tab",
 			"session_id": "sess-8f21c4",
 		})
@@ -190,14 +190,14 @@ func TestLessonCapture(t *testing.T) {
 
 		// Two corrections is under the threshold, so nothing is said yet.
 		for i := range 2 {
-			_, out := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+			_, out := runHook(t, h, "lesson-capture", "admin", map[string]any{
 				"prompt":     fmt.Sprintf("no, that's wrong (%d)", i),
 				"session_id": "sess-8f21c4",
 			})
 			require.NotContains(t, out, "waiting in the retro queue")
 		}
 
-		_, out := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+		_, out := runHook(t, h, "lesson-capture", "admin", map[string]any{
 			"prompt":     "no, that's wrong again",
 			"session_id": "sess-8f21c4",
 		})
@@ -206,14 +206,14 @@ func TestLessonCapture(t *testing.T) {
 
 		// The next two land under the step, so the nudge holds its tongue.
 		for i := range 2 {
-			_, out := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+			_, out := runHook(t, h, "lesson-capture", "admin", map[string]any{
 				"prompt":     fmt.Sprintf("no, that's still wrong (%d)", i),
 				"session_id": "sess-8f21c4",
 			})
 			require.NotContains(t, out, "waiting in the retro queue")
 		}
 
-		_, out = runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+		_, out = runHook(t, h, "lesson-capture", "admin", map[string]any{
 			"prompt":     "no, wrong once more",
 			"session_id": "sess-8f21c4",
 		})
@@ -233,7 +233,7 @@ func TestLessonCapture(t *testing.T) {
 				`{"timestamp":"2026-08-28T07:01:00Z","kind":"user_correction","detail":"stranded two"}`+"\n",
 		), 0o600))
 
-		_, out := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+		_, out := runHook(t, h, "lesson-capture", "admin", map[string]any{
 			"prompt":     "no, that's wrong once more",
 			"session_id": "sess-8f21c4",
 		})
@@ -245,7 +245,7 @@ func TestLessonCapture(t *testing.T) {
 		h := setup(t)
 
 		for i := range 3 {
-			_, out := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+			_, out := runHook(t, h, "lesson-capture", "admin", map[string]any{
 				"prompt":     fmt.Sprintf("no, that's wrong (%d)", i),
 				"session_id": "sess-8f21c4",
 			})
@@ -259,13 +259,13 @@ func TestLessonCapture(t *testing.T) {
 		require.NoError(t, os.Remove(memorylayout.InboxPath(h.ConfigDir)))
 
 		for i := range 2 {
-			_, out := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+			_, out := runHook(t, h, "lesson-capture", "admin", map[string]any{
 				"prompt":     fmt.Sprintf("no, that's wrong again (%d)", i),
 				"session_id": "sess-8f21c4",
 			})
 			require.NotContains(t, out, "waiting in the retro queue")
 		}
-		_, out := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+		_, out := runHook(t, h, "lesson-capture", "admin", map[string]any{
 			"prompt":     "no, that's wrong a third time",
 			"session_id": "sess-8f21c4",
 		})
@@ -276,7 +276,7 @@ func TestLessonCapture(t *testing.T) {
 	t.Run("passes when it cannot tell where the config dir is", func(t *testing.T) {
 		h := setup(t)
 
-		code, out := runHook(t, h.Bin, "lesson-capture", []string{}, map[string]any{
+		code, out := runHook(t, withoutDirs(h), "lesson-capture", "", map[string]any{
 			"prompt":     "no, that's wrong",
 			"session_id": "sess-8f21c4",
 		})
@@ -288,7 +288,7 @@ func TestLessonCapture(t *testing.T) {
 	t.Run("passes on an empty prompt", func(t *testing.T) {
 		h := setup(t)
 
-		code, out := runHook(t, h.Bin, "lesson-capture", hookEnv(h, "admin"), map[string]any{
+		code, out := runHook(t, h, "lesson-capture", "admin", map[string]any{
 			"session_id": "sess-8f21c4",
 		})
 
@@ -302,7 +302,7 @@ func TestBlockQueuesTheRefusal(t *testing.T) {
 	t.Run("a refused rulebook write reaches the retro queue", func(t *testing.T) {
 		h := setup(t)
 
-		code, _ := runHook(t, h.Bin, "rules-gate", hookEnv(h, "admin"), map[string]any{
+		code, _ := runHook(t, h, "rules-gate", "admin", map[string]any{
 			"tool_name":  "Write",
 			"tool_input": map[string]any{"file_path": filepath.Join(h.MemoryDir, "rules", "invoices.md")},
 			"session_id": "sess-8f21c4",

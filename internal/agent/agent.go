@@ -167,6 +167,9 @@ type Options struct {
 	// ChannelTurnSettings override TurnSettings per channel, field by field.
 	ChannelTurnSettings map[channel.ChannelID]claudecli.TurnSettings
 
+	// HookToken is the bearer token the CLI presents to the user's hook server.
+	HookToken string
+
 	// Debug logs raw CLI event JSON for troubleshooting.
 	Debug bool
 

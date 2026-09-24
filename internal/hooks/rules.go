@@ -17,18 +17,17 @@ import (
 //
 // Reading is untouched. Every rulebook stays readable from every channel; only
 // writing is gated.
-func rulesGate() {
-	memoryDir := os.Getenv(memorylayout.EnvMemoryDir)
-	if memoryDir == "" {
-		pass() // nothing to compare against → fail open
+func rulesGate(env Env, p payload) Outcome {
+	if env.MemoryDir == "" {
+		// Nothing to compare against. The server is always given one.
+		return Outcome{}
 	}
-	p := readPayload()
 	target := p.targetPath()
-	if !memorylayout.InRules(memoryDir, target) {
-		pass()
+	if !memorylayout.InRules(env.MemoryDir, target) {
+		return Outcome{}
 	}
-	block(blockParams{
-		Guard:     "rules-gate",
+	return refuse(env, blockParams{
+		Guard:     hookRulesGate,
 		SessionID: p.SessionID,
 		Reason: fmt.Sprintf(`Refused: %s is a rulebook, and rulebooks are the user's standing decisions.
 
@@ -36,36 +35,33 @@ Proposing a change is your job and deciding is theirs. Use `+"`rule_propose`"+` 
 want the file to have — it asks in this channel and writes the file only after the user replies "yes".
 
 Reading is not restricted: you can read any rulebook in %s at any time, including ones this channel
-does not load automatically.`, filepath.Base(target), memorylayout.RulesDir(memoryDir)),
+does not load automatically.`, filepath.Base(target), memorylayout.RulesDir(env.MemoryDir)),
 	})
 }
 
 // rulesIndex notices a rulebook no channel mentions. A rulebook nothing points at
 // is loaded by nobody and found by nobody, which reads exactly like having no
 // rule at all — the failure this whole layer exists to avoid.
-func rulesIndex() {
-	memoryDir := os.Getenv(memorylayout.EnvMemoryDir)
-	if memoryDir == "" {
-		pass()
+func rulesIndex(env Env, p payload) Outcome {
+	if env.MemoryDir == "" {
+		return Outcome{}
 	}
-	p := readPayload()
 	target := p.targetPath()
-	if !memorylayout.InRules(memoryDir, target) {
-		pass()
+	if !memorylayout.InRules(env.MemoryDir, target) {
+		return Outcome{}
 	}
 	name := filepath.Base(target)
 	if name == "README.md" {
-		pass() // the pool's own guide, not a rulebook
+		return Outcome{} // the pool's own guide, not a rulebook
 	}
-	if referencedByAnyChannel(memoryDir, name) {
-		pass()
+	if referencedByAnyChannel(env.MemoryDir, name) {
+		return Outcome{}
 	}
-	channelName := os.Getenv(memorylayout.EnvChannel)
+	channelName := env.Channel
 	if channelName == "" {
 		channelName = "this channel"
 	}
-	advise(advice{
-		Event: eventPostToolUse,
+	return Outcome{
 		Context: fmt.Sprintf(
 			"No channel mentions %s, so no channel loads it and nobody will come across it. "+
 				"Add it to %s: `@../../%s/%s` under the loaded list if it applies to most work there, "+
@@ -73,7 +69,7 @@ func rulesIndex() {
 			name, filepath.Join(memorylayout.ChannelsDirName, channelName, "CLAUDE.md"),
 			memorylayout.RulesDirName, name),
 		Notice: fmt.Sprintf("rules-index: no channel mentions %s, so nothing loads it", name),
-	})
+	}
 }
 
 // referencedByAnyChannel reports whether any channel's CLAUDE.md names the

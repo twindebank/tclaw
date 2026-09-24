@@ -144,13 +144,9 @@ text in the chat, and it is written on your "yes" — by tclaw, outside the sand
 rules directory are refused by the `rules-gate` hook, so there is no other route. Editing which
 rulebooks a channel loads is ordinary agent memory work and needs no approval.
 
-Hooks are registered in each user's `settings.json` at boot from `hooks.Manifest`, pointing at whatever
-`tclaw-hooks` resolves to on `PATH` — `/usr/local/bin/tclaw-hooks` in the image, which the Dockerfile
-fails the build without, because a registration pointing at nothing would fail on every tool call.
-
-**Running locally**, `tclaw build` puts it in `bin/` and `tclaw install` puts it on `PATH`. Until it is
-on `PATH`, boot logs a warning and the agent runs unenforced: it can write rulebooks directly, and
-nothing else looks different. The tools and the channel indexes work either way.
+Hooks are registered in each user's `settings.json` at boot from `hooks.Manifest`, as HTTP hooks
+pointing at a loopback listener tclaw starts for that user. Nothing needs installing, locally or in the
+image: the hooks are part of the tclaw process.
 
 ## Personal Knowledge Base
 

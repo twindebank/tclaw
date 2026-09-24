@@ -77,13 +77,21 @@ to its first line, and says how many lines it dropped.
 The hooks are registered in each user's `settings.json`, which is **mounted read-only** in the sandbox —
 the same protection that stops a prompt injection installing its own `SessionStart` hook stops one
 turning these off. The registrations are rebuilt from `hooks.Manifest` on every boot, so a hook cannot
-be implemented and left unregistered. Commands carry the binary path in full: a hook runs under a shell
-that reads no profile, so a command relying on an environment variable runs nothing, on every tool call.
+be implemented and left unregistered.
+
+They are `http` hooks, answered by tclaw itself outside the sandbox: each user gets a loopback listener
+of their own at boot, and the registrations point at it. The CLI sends each request with a per-user
+bearer token and the turn's channel name, both filled in from environment variables tclaw sets on the
+subprocess. The CLI lets a tool call through when a hook request fails, so the listener is deliberately
+not the MCP server: it has no rate limit and no request size cap a large or rapid write could trip, and
+`rules-gate` refuses a request it cannot read rather than guess at it. The agent can see the token in
+its environment and call the listener itself; that gets it nothing, since the gate only answers for the
+call in front of it and the retro queue it could write to is already in the agent's own home directory.
 
 Which rulebooks a channel loads is not a boundary — it is `@`-imports in that channel's own CLAUDE.md,
 which the agent maintains freely. Scoping decides what arrives in context, never what may be read.
 
-A refusal also files a row in the retro queue, from inside `block()` rather than at each call site, so
+A refusal also files a row in the retro queue, from inside `refuse()` rather than at each call site, so
 a guard cannot be written that stops something without leaving the evidence a later retro reads. The
 same queue is where `lesson-capture` puts the user's own pushback — see the retro section in
 `docs/deployment.md` for what it captures and what it deliberately ignores.

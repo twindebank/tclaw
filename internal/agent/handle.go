@@ -555,15 +555,17 @@ func buildEnv(opts Options, channelName string) []string {
 	// its own memory dir (CWD), not ~/.claude/projects/.../memory/.
 	overrides["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
 
-	// The hooks tclaw registers run inside the sandbox and need to know which
-	// memory directory and channel the turn belongs to. Set here rather than
-	// read from the parent environment so the agent cannot change what its own
-	// hooks see.
+	// The CLI tells tclaw's hooks which channel the turn belongs to, and proves the
+	// request is its own with the token. Set here rather than read from the parent
+	// environment so the agent cannot change what its own hooks see.
 	if opts.MemoryDir != "" {
 		overrides[memorylayout.EnvMemoryDir] = opts.MemoryDir
 	}
 	if channelName != "" {
 		overrides[memorylayout.EnvChannel] = channelName
+	}
+	if opts.HookToken != "" {
+		overrides[memorylayout.EnvHookToken] = opts.HookToken
 	}
 
 	// Enable CLAUDE.md loading from --add-dir directories so per-channel
