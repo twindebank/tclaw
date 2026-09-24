@@ -41,6 +41,17 @@ func (e *ToolsDeniedError) Error() string {
 	return fmt.Sprintf("tools denied: %s", strings.Join(e.Tools, ", "))
 }
 
+// TurnError is a turn the CLI ended with an error. SessionID is the session the turn ran in, so
+// the next message can carry on in it, even when this was the session's first turn.
+type TurnError struct {
+	Message   string
+	SessionID string
+}
+
+func (e *TurnError) Error() string {
+	return e.Message
+}
+
 // writePhase distinguishes status output (thinking, tools, stats) from
 // the actual response text so they can be rendered in separate messages.
 type writePhase int
@@ -896,7 +907,10 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 					// Return the session ID so retries can resume the same session.
 					return sessionID, ErrRateLimited
 				}
-				return "", fmt.Errorf("%s", friendlyErrorMessage(result.Result, result.Subtype))
+				if sessionID == "" {
+					sessionID = result.SessionID
+				}
+				return "", &TurnError{Message: friendlyErrorMessage(result.Result, result.Subtype), SessionID: sessionID}
 			}
 			if result.SessionID != "" && sessionID == "" {
 				sessionID = result.SessionID
@@ -981,7 +995,7 @@ func friendlyErrorMessage(raw string, subtype claudecli.ResultSubtype) string {
 	lower := strings.ToLower(raw)
 	switch {
 	case subtype == claudecli.ResultErrorMaxBudget:
-		return "spend cap reached — the channel's max_budget_usd stopped this turn. Send another message to carry on, or raise the cap"
+		return "spend cap reached — the max_budget_usd cap stopped this turn. Send another message to carry on, or raise the cap"
 	case strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit") || strings.Contains(lower, "429"):
 		return "rate limit reached — please wait a moment before sending another message"
 	case strings.Contains(lower, "usage") || strings.Contains(lower, "session limit"):

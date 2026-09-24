@@ -161,7 +161,7 @@ func TestValidate_TurnSettings(t *testing.T) {
 		cfg.Users[0].TurnSettings = claudecli.TurnSettings{Effort: "extreme"}
 		err := validate(cfg)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), `user "`+string(cfg.Users[0].ID)+`": unknown effort "extreme"`)
+		require.Equal(t, `user "`+string(cfg.Users[0].ID)+`": unknown effort "extreme" (known: [high low max medium ultracode xhigh])`, err.Error())
 	})
 
 	t.Run("a bad channel value names the channel", func(t *testing.T) {
@@ -169,7 +169,7 @@ func TestValidate_TurnSettings(t *testing.T) {
 		cfg.Users[0].Channels[0].TurnSettings = claudecli.TurnSettings{MaxBudgetUSD: -2}
 		err := validate(cfg)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), `channel "`+cfg.Users[0].Channels[0].Name+`": max_budget_usd must be zero`)
+		require.Equal(t, `user "`+string(cfg.Users[0].ID)+`" channel "`+cfg.Users[0].Channels[0].Name+`": max_budget_usd must be zero (inherit) or positive, got -2`, err.Error())
 	})
 
 	t.Run("the settings load from their yaml keys", func(t *testing.T) {

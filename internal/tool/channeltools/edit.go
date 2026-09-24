@@ -107,22 +107,22 @@ func channelEditDef() mcp.ToolDef {
 }
 
 type channelEditArgs struct {
-	Name                 string          `json:"name"`
-	Description          string          `json:"description"`
-	Purpose              *string         `json:"purpose"`
-	Model                *string         `json:"model"`
-	MaxTurns             *int            `json:"max_turns"`
-	Effort               *string         `json:"effort"`
-	MaxBudgetUSD         *float64        `json:"max_budget_usd"`
-	FallbackModel        *string         `json:"fallback_model"`
-	AllowedUsers         *[]string       `json:"allowed_users"`
-	ToolGroups           []string        `json:"tool_groups"`
-	AllowedTools         []string        `json:"allowed_tools"`
-	DisallowedTools      []string        `json:"disallowed_tools"`
-	CreatableGroups      *[]string       `json:"creatable_groups"`
-	Links                *[]channel.Link `json:"links"`
-	Parent               *string         `json:"parent"`
-	ClaudeSessionTimeout *string         `json:"claude_session_timeout"`
+	Name                 string            `json:"name"`
+	Description          string            `json:"description"`
+	Purpose              *string           `json:"purpose"`
+	Model                *string           `json:"model"`
+	MaxTurns             *int              `json:"max_turns"`
+	Effort               *claudecli.Effort `json:"effort"`
+	MaxBudgetUSD         *float64          `json:"max_budget_usd"`
+	FallbackModel        *claudecli.Model  `json:"fallback_model"`
+	AllowedUsers         *[]string         `json:"allowed_users"`
+	ToolGroups           []string          `json:"tool_groups"`
+	AllowedTools         []string          `json:"allowed_tools"`
+	DisallowedTools      []string          `json:"disallowed_tools"`
+	CreatableGroups      *[]string         `json:"creatable_groups"`
+	Links                *[]channel.Link   `json:"links"`
+	Parent               *string           `json:"parent"`
+	ClaudeSessionTimeout *string           `json:"claude_session_timeout"`
 }
 
 func channelEditHandler(deps Deps) mcp.ToolHandler {
@@ -153,13 +153,13 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 		// Only the fields being set are checked here; the stored ones already passed.
 		var requested claudecli.TurnSettings
 		if a.Effort != nil {
-			requested.Effort = claudecli.Effort(*a.Effort)
+			requested.Effort = *a.Effort
 		}
 		if a.MaxBudgetUSD != nil {
 			requested.MaxBudgetUSD = *a.MaxBudgetUSD
 		}
 		if a.FallbackModel != nil {
-			requested.FallbackModel = claudecli.Model(*a.FallbackModel)
+			requested.FallbackModel = *a.FallbackModel
 		}
 		if err := requested.Validate(); err != nil {
 			return nil, err

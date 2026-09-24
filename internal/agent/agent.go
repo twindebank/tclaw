@@ -770,6 +770,11 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 						slog.Error("failed to send error notification", "err", sendErr)
 					}
 				}
+				var turnErr *TurnError
+				if errors.As(result.err, &turnErr) && turnErr.SessionID != "" {
+					// Keep the session so the next message carries on in it.
+					result.sessionID = turnErr.SessionID
+				}
 				if result.sessionID != "" {
 					if result.sessionID != sessionID {
 						slog.Info("session started", "channel", msg.ChannelID, "session_id", result.sessionID)

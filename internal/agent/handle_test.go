@@ -63,7 +63,7 @@ func TestFriendlyErrorMessage(t *testing.T) {
 			name:    "spend cap says which setting stopped the turn",
 			raw:     "",
 			subtype: claudecli.ResultErrorMaxBudget,
-			want:    "spend cap reached — the channel's max_budget_usd stopped this turn. Send another message to carry on, or raise the cap",
+			want:    "spend cap reached — the max_budget_usd cap stopped this turn. Send another message to carry on, or raise the cap",
 		},
 		{
 			name:    "empty error falls back to subtype",

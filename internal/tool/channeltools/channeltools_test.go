@@ -242,7 +242,7 @@ func TestChannelCreate(t *testing.T) {
 			"effort":          "extreme",
 			"initial_message": "Hello",
 		})
-		require.Contains(t, err.Error(), `unknown effort "extreme"`)
+		require.Equal(t, `unknown effort "extreme" (known: [high low max medium ultracode xhigh])`, err.Error())
 	})
 
 	t.Run("rejects negative max_turns", func(t *testing.T) {
