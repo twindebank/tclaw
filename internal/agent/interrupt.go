@@ -2,7 +2,6 @@ package agent
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -11,88 +10,69 @@ import (
 	"time"
 )
 
-// interruptEscalateAfter is how long an interrupted CLI gets to end its turn before it is asked
-// to exit outright. The process is killed once exec's WaitDelay runs out after that.
-const interruptEscalateAfter = 4 * time.Second
+// cliWaitDelay is how long an interrupted CLI gets to end its turn and exit before it is killed.
+const cliWaitDelay = 5 * time.Second
 
-// cliWaitDelay bounds how long a cancelled CLI may take to exit before it is killed.
-const cliWaitDelay = 8 * time.Second
-
-// interruptCLIParams identifies the process tclaw started for a turn.
-type interruptCLIParams struct {
-	// PID is the process tclaw started: the CLI itself, or bwrap wrapping it.
-	PID int
-
-	Sandboxed bool
-
-	// ProcRoot is the proc filesystem to walk when sandboxed.
-	ProcRoot string
-}
-
-// interruptCLI sends the CLI SIGINT, which ends the turn cleanly, then SIGTERM if it has not
-// exited in time. Inside the sandbox the CLI is signalled directly, because bwrap does not
-// forward signals and dies on SIGINT, taking the CLI down with it mid-turn.
-func interruptCLI(p interruptCLIParams) error {
-	target := p.PID
-	if p.Sandboxed {
-		pid, err := sandboxedCommandPID(p.ProcRoot, p.PID)
+// interruptCLI sends the CLI SIGINT, which ends the turn cleanly. Inside the sandbox the CLI is
+// signalled directly, because bwrap does not forward signals and dies on SIGINT, killing the CLI.
+func interruptCLI(pid int, sandboxed bool) error {
+	target := pid
+	if sandboxed {
+		found, err := sandboxedCommandPID("/proc", pid)
 		if err != nil {
 			return fmt.Errorf("find the CLI inside the sandbox: %w", err)
 		}
-		target = pid
+		target = found
 	}
-
 	if err := syscall.Kill(target, syscall.SIGINT); err != nil {
 		return fmt.Errorf("interrupt pid %d: %w", target, err)
 	}
-	time.AfterFunc(interruptEscalateAfter, func() {
-		err := syscall.Kill(target, syscall.SIGTERM)
-		switch {
-		case err == syscall.ESRCH:
-			// Already exited, which is the usual case.
-		case err != nil:
-			slog.Warn("failed to send SIGTERM to interrupted CLI", "pid", target, "err", err)
-		default:
-			slog.Warn("CLI did not exit after SIGINT, sent SIGTERM", "pid", target)
-		}
-	})
 	return nil
 }
 
-// sandboxedCommandPID returns the first process below bwrapPID that is not bwrap itself. With a
-// private PID namespace, bwrap runs a second bwrap as the namespace's init, which starts the command.
+// sandboxedCommandPID returns the command bwrap is running. With a private PID namespace bwrap
+// runs a second bwrap as the namespace's init, which starts the command; anything the command
+// orphans is re-parented to that init too, so the command is its earliest-started child.
 func sandboxedCommandPID(procRoot string, bwrapPID int) (int, error) {
-	children, err := childrenByParent(procRoot)
+	procs, err := readProcs(procRoot)
 	if err != nil {
 		return 0, err
 	}
 
-	queue := []int{bwrapPID}
-	for len(queue) > 0 {
-		parent := queue[0]
-		queue = queue[1:]
-		for _, pid := range children[parent] {
-			comm, err := os.ReadFile(filepath.Join(procRoot, strconv.Itoa(pid), "comm"))
-			if err != nil {
-				// The process exited between listing and reading.
-				continue
+	for _, init := range procs {
+		if init.ParentPID != bwrapPID || init.Comm != "bwrap" {
+			continue
+		}
+		var command *procInfo
+		for i, p := range procs {
+			if p.ParentPID == init.PID && (command == nil || p.StartTime < command.StartTime) {
+				command = &procs[i]
 			}
-			if strings.TrimSpace(string(comm)) != "bwrap" {
-				return pid, nil
-			}
-			queue = append(queue, pid)
+		}
+		if command != nil {
+			return command.PID, nil
 		}
 	}
-	return 0, fmt.Errorf("no process found below bwrap pid %d", bwrapPID)
+	return 0, fmt.Errorf("no command found below bwrap pid %d", bwrapPID)
 }
 
-// childrenByParent maps each parent pid to its children, read from every /proc/<pid>/stat.
-func childrenByParent(procRoot string) (map[int][]int, error) {
+// procInfo is what sandboxedCommandPID needs to know about one process.
+type procInfo struct {
+	PID       int
+	ParentPID int
+	Comm      string
+
+	// StartTime is in clock ticks since boot, so only its order matters.
+	StartTime uint64
+}
+
+// readProcs reads every process's /proc/<pid>/stat. A process that exits while being read is skipped.
+func readProcs(procRoot string) ([]procInfo, error) {
 	entries, err := os.ReadDir(procRoot)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", procRoot, err)
 	}
-	children := make(map[int][]int)
+	var procs []procInfo
 	for _, entry := range entries {
 		pid, err := strconv.Atoi(entry.Name())
 		if err != nil {
@@ -104,29 +84,35 @@ func childrenByParent(procRoot string) (map[int][]int, error) {
 			// The process exited between listing and reading.
 			continue
 		}
-		ppid, err := parentPID(string(stat))
+		info, err := parseStat(pid, string(stat))
 		if err != nil {
-			return nil, fmt.Errorf("pid %d: %w", pid, err)
+			return nil, err
 		}
-		children[ppid] = append(children[ppid], pid)
+		procs = append(procs, info)
 	}
-	return children, nil
+	return procs, nil
 }
 
-// parentPID reads the ppid field from a /proc/<pid>/stat line. The command name before it is in
-// parentheses and may itself contain spaces or parentheses, so fields are counted from the last ")".
-func parentPID(stat string) (int, error) {
+// parseStat reads the command name, parent and start time from a /proc/<pid>/stat line. The name
+// is in parentheses and may itself hold spaces or parentheses, so fields count from the last ")".
+func parseStat(pid int, stat string) (procInfo, error) {
+	open := strings.Index(stat, "(")
 	end := strings.LastIndex(stat, ")")
-	if end < 0 {
-		return 0, fmt.Errorf("malformed stat %q", stat)
+	if open < 0 || end < open {
+		return procInfo{}, fmt.Errorf("pid %d: malformed stat %q", pid, stat)
 	}
+	// Fields after the name start at field 3 (state); ppid is field 4 and starttime field 22.
 	fields := strings.Fields(stat[end+1:])
-	if len(fields) < 2 {
-		return 0, fmt.Errorf("malformed stat %q", stat)
+	if len(fields) < 20 {
+		return procInfo{}, fmt.Errorf("pid %d: malformed stat %q", pid, stat)
 	}
 	ppid, err := strconv.Atoi(fields[1])
 	if err != nil {
-		return 0, fmt.Errorf("parse ppid in %q: %w", stat, err)
+		return procInfo{}, fmt.Errorf("pid %d: parse ppid: %w", pid, err)
 	}
-	return ppid, nil
+	start, err := strconv.ParseUint(fields[19], 10, 64)
+	if err != nil {
+		return procInfo{}, fmt.Errorf("pid %d: parse starttime: %w", pid, err)
+	}
+	return procInfo{PID: pid, ParentPID: ppid, Comm: stat[open+1 : end], StartTime: start}, nil
 }

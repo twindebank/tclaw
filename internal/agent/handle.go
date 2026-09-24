@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"tclaw/internal/channel"
@@ -432,7 +433,11 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		// actually runs, which the sandbox replaces.
 		sandboxed := sandboxEnabled()
 		cmd.Cancel = func() error {
-			return interruptCLI(interruptCLIParams{PID: cmd.Process.Pid, Sandboxed: sandboxed, ProcRoot: "/proc"})
+			if err := interruptCLI(cmd.Process.Pid, sandboxed); err != nil {
+				slog.Warn("could not interrupt the CLI, stopping it outright", "err", err)
+				return cmd.Process.Signal(syscall.SIGTERM)
+			}
+			return nil
 		}
 		cmd.WaitDelay = cliWaitDelay
 
@@ -478,8 +483,8 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	switch {
 	case waitErr == nil:
 	case ctx.Err() != nil:
-		// Context was cancelled (user typed "stop", idle timeout, deploy). The
-		// SIGTERM→SIGKILL cleanup chain is expected here, not a real failure.
+		// Context was cancelled (user typed "stop", idle timeout, deploy), so the
+		// CLI was interrupted or, failing that, killed. Not a real failure.
 		slog.Debug("claude exited after context cancel", "err", waitErr)
 	default:
 		slog.Warn("claude exited with error", "err", waitErr)
