@@ -50,8 +50,7 @@ const (
 	CmdNew = "new"
 )
 
-// compactPrompt is sent as the prompt when the compact command is used. The CLI runs it as a
-// command in print mode; asking the model in words to compact does not shrink anything.
+// compactPrompt is the CLI's own compact command, which print mode runs rather than sending to the model.
 const compactPrompt = "/compact"
 
 // IsControlCommand reports whether raw user text is a builtin command

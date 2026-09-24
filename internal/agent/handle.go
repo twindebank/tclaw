@@ -602,14 +602,11 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 
 	var sessionID string
 	var currentBlockType claudecli.ContentBlockType
-	// Track whether content was streamed for the current assistant
-	// message via content_block events. When true, the assistant event's
-	// thinking/text blocks are redundant and should be skipped.
-	gotStreamedBlocks := false
-	// Track whether tool_use blocks were seen in streaming events.
-	// The CLI may not stream tool_use (or may use a type we don't
-	// recognize), so we extract them from the assistant event if missing.
-	gotStreamedToolUse := false
+	// Set between a streamed message's start and stop. The CLI also sends each
+	// streamed block whole as an assistant event, which must not be written twice;
+	// an assistant event outside a streamed message, such as a command's reply, is
+	// the only copy of its content.
+	streamingMessage := false
 	// A streamed tool_use block and its input, gathered until the block stops.
 	var pendingToolUse claudecli.ContentBlock
 	var pendingToolInput strings.Builder
@@ -650,7 +647,7 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			}
 			if wrapped.ParentToolUseID != nil {
 				// A subagent's tokens would otherwise be written into the
-				// main reply.
+				// main reply; its tool calls arrive as whole assistant events.
 				continue
 			}
 			line = wrapped.Event
@@ -701,13 +698,18 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				slog.Debug("unhandled system event subtype", "subtype", sys.Subtype)
 			}
 
+		case claudecli.EventMessageStart:
+			streamingMessage = true
+
+		case claudecli.EventMessageStop:
+			streamingMessage = false
+
 		case claudecli.EventContentBlockStart:
 			var start claudecli.ContentBlockStartEvent
 			if err := json.Unmarshal(line, &start); err != nil {
 				slog.Warn("failed to parse content_block_start", "err", err)
 				continue
 			}
-			gotStreamedBlocks = true
 			currentBlockType = start.ContentBlock.Type
 			switch currentBlockType {
 			case claudecli.ContentText:
@@ -722,7 +724,6 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 					return "", err
 				}
 			case claudecli.ContentToolUse:
-				gotStreamedToolUse = true
 				// The input streams in afterwards as input_json_delta
 				// fragments, so the line is written once the block stops.
 				pendingToolUse = start.ContentBlock
@@ -778,9 +779,6 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			currentBlockType = ""
 
 		case claudecli.EventAssistant:
-			// The assistant event carries the complete message. When
-			// streaming worked (gotStreamedBlocks), all content was
-			// already sent via content_block events — skip re-emitting.
 			var msg claudecli.AssistantEvent
 			if err := json.Unmarshal(line, &msg); err != nil {
 				slog.Warn("failed to parse assistant event", "err", err)
@@ -793,55 +791,60 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				return sessionID, ErrAuthRequired
 			}
 
-			if !gotStreamedBlocks {
-				// Fallback: no streaming events received, extract
-				// content from the full assistant message.
-				fallbackHadText := false
+			if msg.ParentToolUseID != nil {
+				// A subagent's message. Its tool calls show as progress; its
+				// text is not the reply.
 				for _, block := range msg.Message.Content {
-					text := formatBlock(block)
-					if text != "" {
-						phase := phaseStatus
-						switch block.Type {
-						case claudecli.ContentText:
-							// Separate consecutive text blocks with a newline.
-							if fallbackHadText {
-								text = "\n\n" + text
-							}
-							fallbackHadText = true
-							phase = phaseResponse
-						case claudecli.ContentThinking:
-							phase = phaseThinking
-						}
-						if err := tw.write(phase, text); err != nil {
-							return "", err
-						}
+					if block.Type != claudecli.ContentToolUse {
+						continue
+					}
+					if err := tw.write(phaseStatus, formatToolUse(block)); err != nil {
+						return "", err
 					}
 				}
-			} else if !gotStreamedToolUse {
-				// Thinking/text were streamed but tool_use wasn't — extract
-				// tool_use from the assistant event as a safety net.
-				for _, block := range msg.Message.Content {
-					if block.Type == claudecli.ContentToolUse {
-						text := formatToolUse(block)
-						if text != "" {
-							if err := tw.write(phaseStatus, text); err != nil {
-								return "", err
-							}
-						}
+				continue
+			}
+
+			if streamingMessage {
+				// Already written from the stream.
+				continue
+			}
+
+			fallbackHadText := false
+			for _, block := range msg.Message.Content {
+				text := formatBlock(block)
+				if text == "" {
+					continue
+				}
+				phase := phaseStatus
+				switch block.Type {
+				case claudecli.ContentText:
+					// Separate consecutive text blocks with a newline.
+					if fallbackHadText || hadTextBlock {
+						text = "\n\n" + text
 					}
+					fallbackHadText = true
+					phase = phaseResponse
+				case claudecli.ContentThinking:
+					phase = phaseThinking
+				}
+				if err := tw.write(phase, text); err != nil {
+					return "", err
 				}
 			}
-			gotStreamedBlocks = false
-			gotStreamedToolUse = false
-			// hadTextBlock intentionally NOT reset — the response buffer
-			// accumulates across assistant events, so the separator logic
-			// must persist to insert \n\n between text blocks from
-			// different events.
+			if fallbackHadText {
+				hadTextBlock = true
+			}
 
 		case claudecli.EventUser:
 			var user claudecli.UserEvent
 			if err := json.Unmarshal(line, &user); err != nil {
 				slog.Warn("failed to parse user event", "err", err)
+				continue
+			}
+			if len(user.ToolUseResult) == 0 || string(user.ToolUseResult) == "null" {
+				// Not a tool result: a command's output or a compaction summary
+				// fed back to the model.
 				continue
 			}
 			if err := tw.write(phaseStatus, formatToolResult(user.ToolUseResult)); err != nil {

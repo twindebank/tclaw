@@ -460,50 +460,110 @@ func TestSandboxPaths(t *testing.T) {
 }
 
 func TestStreamResponse(t *testing.T) {
-	t.Run("streams wrapped text deltas into the response as they arrive", func(t *testing.T) {
+	t.Run("streams text into the response as it arrives and never writes it twice", func(t *testing.T) {
 		ch := &mockChannel{}
 		tw := newTestTurnWriter(ch)
 
-		_, err := streamResponse(context.Background(), tw.opts, tw, strings.NewReader(strings.Join([]string{
-			`{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_start","content_block":{"type":"text","text":""}}}`,
-			`{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hel"}}}`,
-			`{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"lo"}}}`,
-			`{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_stop"}}`,
-			`{"type":"assistant","message":{"content":[{"type":"text","text":"Hello"}]}}`,
-		}, "\n")), nil, testChannelID, time.Now())
-		require.NoError(t, err)
+		runStream(t, tw,
+			streamLine(`{"type":"message_start"}`),
+			streamLine(`{"type":"content_block_start","content_block":{"type":"text","text":""}}`),
+			streamLine(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hel"}}`),
+			streamLine(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"lo"}}`),
+			`{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"text","text":"Hello"}]}}`,
+			streamLine(`{"type":"content_block_stop"}`),
+			streamLine(`{"type":"message_stop"}`),
+		)
 
 		require.Equal(t, []string{"Hel"}, ch.sends, "the first delta should open the response message")
-		require.Equal(t, "Hello", ch.edits[len(ch.edits)-1].text, "later deltas should extend it, and the complete message must not be written again")
+		require.Equal(t, "Hello", ch.edits[len(ch.edits)-1].text, "the whole-block copy must not be appended again")
 	})
 
 	t.Run("shows a tool call with the input that streamed in after it started", func(t *testing.T) {
 		ch := &mockChannel{}
 		tw := newTestTurnWriter(ch)
 
-		_, err := streamResponse(context.Background(), tw.opts, tw, strings.NewReader(strings.Join([]string{
-			`{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_start","content_block":{"type":"tool_use","id":"t1","name":"Bash","input":{}}}}`,
-			`{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{\"command\":"}}}`,
-			`{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"\"echo hi\"}"}}}`,
-			`{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_stop"}}`,
-		}, "\n")), nil, testChannelID, time.Now())
-		require.NoError(t, err)
+		runStream(t, tw,
+			streamLine(`{"type":"message_start"}`),
+			streamLine(`{"type":"content_block_start","content_block":{"type":"tool_use","id":"toolu_01A","name":"Bash","input":{}}}`),
+			streamLine(`{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{\"command\":"}}`),
+			streamLine(`{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"\"echo hi\"}"}}`),
+			`{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","id":"toolu_01A","name":"Bash","input":{"command":"echo hi"}}]}}`,
+			streamLine(`{"type":"content_block_stop"}`),
+			streamLine(`{"type":"message_stop"}`),
+		)
 
 		require.Len(t, ch.sends, 1)
+		require.Equal(t, 1, strings.Count(ch.sends[0], "Bash"), "the tool line should be written once")
 		require.Contains(t, ch.sends[0], "command=echo hi", "the tool line should carry the streamed input")
 	})
 
-	t.Run("keeps a subagent's streamed text out of the reply", func(t *testing.T) {
+	t.Run("keeps a subagent's text out of the reply when it arrives mid-block", func(t *testing.T) {
 		ch := &mockChannel{}
 		tw := newTestTurnWriter(ch)
 
-		_, err := streamResponse(context.Background(), tw.opts, tw, strings.NewReader(strings.Join([]string{
-			`{"type":"stream_event","parent_tool_use_id":"t1","event":{"type":"content_block_start","content_block":{"type":"text","text":""}}}`,
-			`{"type":"stream_event","parent_tool_use_id":"t1","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"subagent notes"}}}`,
-			`{"type":"stream_event","parent_tool_use_id":"t1","event":{"type":"content_block_stop"}}`,
-		}, "\n")), nil, testChannelID, time.Now())
-		require.NoError(t, err)
+		// The interleaving a real Agent tool call produced: the subagent's whole
+		// messages arrive while the main thread's block is still streaming.
+		runStream(t, tw,
+			streamLine(`{"type":"message_start"}`),
+			streamLine(`{"type":"content_block_start","content_block":{"type":"text","text":""}}`),
+			`{"type":"assistant","parent_tool_use_id":"toolu_01B","message":{"content":[{"type":"tool_use","id":"toolu_01C","name":"Read","input":{"file_path":"notes.md"}}]}}`,
+			`{"type":"assistant","parent_tool_use_id":"toolu_01B","message":{"content":[{"type":"text","text":"subagent notes"}]}}`,
+			streamLine(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"Main answer"}}`),
+			`{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"text","text":"Main answer"}]}}`,
+			streamLine(`{"type":"content_block_stop"}`),
+			streamLine(`{"type":"message_stop"}`),
+		)
 
-		require.Empty(t, ch.sends, "nothing from a subagent belongs in the main reply")
+		shown := strings.Join(finalTexts(ch), "\n")
+		require.NotContains(t, shown, "subagent notes", "a subagent's text is not the reply")
+		require.Contains(t, shown, "Read(file_path=notes.md)", "a subagent's tool call should show as progress")
+		require.Equal(t, 1, strings.Count(shown, "Main answer"), "the main answer should be written once")
 	})
+
+	t.Run("shows an assistant message that was not streamed", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := newTestTurnWriter(ch)
+
+		// A command's reply, e.g. /compact on an empty session, comes only whole.
+		runStream(t, tw,
+			`{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"text","text":"Not enough messages to compact."}]}}`,
+		)
+
+		require.Equal(t, []string{"Not enough messages to compact."}, ch.sends)
+	})
+
+	t.Run("writes no tool result line for a user event that is not a tool result", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := newTestTurnWriter(ch)
+
+		// What /compact feeds back: the summary and the command's output.
+		runStream(t, tw,
+			`{"type":"user","message":{"role":"user","content":"This session is being continued from a previous conversation."}}`,
+			`{"type":"user","message":{"role":"user","content":"<local-command-stdout>Compacted </local-command-stdout>"}}`,
+		)
+
+		require.Empty(t, ch.sends)
+	})
+}
+
+// --- helpers ---
+
+// streamLine wraps a main-thread API event the way the CLI does.
+func streamLine(event string) string {
+	return `{"type":"stream_event","parent_tool_use_id":null,"event":` + event + `}`
+}
+
+// finalTexts returns what each message the channel was sent reads as after its last edit.
+func finalTexts(ch *mockChannel) []string {
+	texts := append([]string(nil), ch.sends...)
+	for _, e := range ch.edits {
+		texts[len(e.id)-1] = e.text
+	}
+	return texts
+}
+
+func runStream(t *testing.T, tw *turnWriter, lines ...string) {
+	t.Helper()
+	_, err := streamResponse(context.Background(), tw.opts, tw, strings.NewReader(strings.Join(lines, "\n")), nil, testChannelID, time.Now())
+	require.NoError(t, err)
 }

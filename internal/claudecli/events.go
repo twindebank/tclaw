@@ -16,8 +16,11 @@ const (
 	EventResult            EventType = "result"
 
 	// EventStreamEvent wraps one raw API streaming event, sent only with
-	// --include-partial-messages. The content_block_* types arrive inside it.
+	// --include-partial-messages. The message_* and content_block_* types arrive inside it.
 	EventStreamEvent EventType = "stream_event"
+
+	EventMessageStart EventType = "message_start"
+	EventMessageStop  EventType = "message_stop"
 )
 
 // ContentBlockType identifies the kind of content within a message.
@@ -108,6 +111,9 @@ type AssistantEvent struct {
 	Type    EventType        `json:"type"`
 	Message AssistantMessage `json:"message"`
 	Error   string           `json:"error,omitempty"`
+
+	// ParentToolUseID is set when a subagent wrote the message.
+	ParentToolUseID *string `json:"parent_tool_use_id"`
 }
 
 // AssistantErrorAuthFailed is the error string the CLI returns when not logged in.
