@@ -215,6 +215,9 @@ type User struct {
 	// the name: in its frontmatter. Empty leaves the CLI's default.
 	OutputStyle string `yaml:"output_style,omitempty"`
 
+	// TurnSettings apply to every channel that does not set its own.
+	TurnSettings claudecli.TurnSettings `yaml:",inline"`
+
 	// MessageDebounce coalesces same-channel user messages that arrive within
 	// this rolling window into a single agent turn (e.g. a photo album delivered
 	// as separate messages). A duration string like "1s"; unset defaults to 1s,
@@ -482,6 +485,9 @@ type Channel struct {
 	// "none" turns it off for this channel, since empty cannot mean both.
 	OutputStyle string `yaml:"output_style,omitempty"`
 
+	// TurnSettings override the user-level ones field by field; an unset field inherits.
+	TurnSettings claudecli.TurnSettings `yaml:",inline"`
+
 	// Telegram holds Telegram-specific channel config.
 	// Non-nil when Type is "telegram".
 	Telegram *TelegramChannelConfig `yaml:"telegram,omitempty"`
@@ -680,6 +686,10 @@ func validate(cfg *Config) error {
 			return fmt.Errorf("user %q: unknown permission_mode %q (known: %v)", u.ID, u.PermissionMode, claudecli.ValidPermissionModes())
 		}
 
+		if err := u.TurnSettings.Validate(); err != nil {
+			return fmt.Errorf("user %q: %w", u.ID, err)
+		}
+
 		for j, t := range u.AllowedTools {
 			if !claudecli.ValidTool(t) {
 				return fmt.Errorf("user %q allowed_tools[%d]: unknown tool %q", u.ID, j, t)
@@ -747,6 +757,10 @@ func validate(cfg *Config) error {
 
 			if ch.MaxTurns < 0 {
 				return fmt.Errorf("user %q channel %q: max_turns must be zero (inherit) or positive, got %d", u.ID, ch.Name, ch.MaxTurns)
+			}
+
+			if err := ch.TurnSettings.Validate(); err != nil {
+				return fmt.Errorf("user %q channel %q: %w", u.ID, ch.Name, err)
 			}
 
 			for k, t := range ch.AllowedTools {
@@ -1090,6 +1104,7 @@ func (u *User) ToUserConfig() user.Config {
 		DisallowedTools: u.DisallowedTools,
 		MaxTurns:        u.MaxTurns,
 		OutputStyle:     u.OutputStyle,
+		TurnSettings:    u.TurnSettings,
 		Debug:           u.Debug,
 		SystemPrompt:    u.SystemPrompt,
 		TelegramUserID:  tgUserID,

@@ -1025,6 +1025,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// inherit the user-level limit).
 		channelMaxTurns := buildChannelMaxTurns(allChMap, registry)
 		channelOutputStyles := buildChannelOutputStyles(allChMap, registry)
+		channelTurnSettings := buildChannelTurnSettings(allChMap, registry)
 
 		// Generate per-channel MCP config files for channels with scoped remote MCPs.
 		mcpConfigPaths := buildMCPConfigPaths(dynamicCtx, allChMap, remoteMCPMgr, remoteMCPProxy, proxyToken, mcpConfigDir, mcpAddr, mcpToken)
@@ -1051,6 +1052,8 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			ChannelMaxTurns:     channelMaxTurns,
 			OutputStyle:         mu.cfg.OutputStyle,
 			ChannelOutputStyles: channelOutputStyles,
+			TurnSettings:        mu.cfg.TurnSettings,
+			ChannelTurnSettings: channelTurnSettings,
 			Debug:               mu.cfg.Debug,
 			APIKey:              mu.cfg.APIKey,
 			HomeDir:             homeDir,

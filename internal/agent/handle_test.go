@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"tclaw/internal/channel"
+	"tclaw/internal/claudecli"
 	"tclaw/internal/memorylayout"
 )
 
@@ -55,13 +56,19 @@ func TestFriendlyErrorMessage(t *testing.T) {
 	tests := []struct {
 		name    string
 		raw     string
-		subtype string
+		subtype claudecli.ResultSubtype
 		want    string
 	}{
 		{
+			name:    "spend cap says which setting stopped the turn",
+			raw:     "",
+			subtype: claudecli.ResultErrorMaxBudget,
+			want:    "spend cap reached — the channel's max_budget_usd stopped this turn. Send another message to carry on, or raise the cap",
+		},
+		{
 			name:    "empty error falls back to subtype",
 			raw:     "",
-			subtype: "error_during_execution",
+			subtype: claudecli.ResultErrorDuringExecution,
 			want:    "claude ended the turn with an error (error_during_execution) but gave no details — check the logs",
 		},
 		{

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"tclaw/internal/channel"
+	"tclaw/internal/claudecli"
 	"tclaw/internal/config"
 	"tclaw/internal/mcp"
 	"tclaw/internal/toolgroup"
@@ -17,7 +18,7 @@ func channelReadDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name: ToolChannelRead,
 		Description: "Return the full config for a single channel — every field that's set in tclaw.yaml. " +
-			"Use this to see fields channel_list omits (model, max_turns, claude_session_timeout, " +
+			"Use this to see fields channel_list omits (model, max_turns, effort, max_budget_usd, fallback_model, claude_session_timeout, " +
 			"ephemeral settings, initial_message, tool groups, links, created_at).",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
@@ -41,12 +42,13 @@ type channelReadArgs struct {
 // config.Channel directly because its YAML tags would surface as snake_case
 // inconsistently across embedded types.
 type channelReadEntry struct {
-	Name                 string           `json:"name"`
-	Type                 string           `json:"type"`
-	Description          string           `json:"description"`
-	Purpose              string           `json:"purpose,omitempty"`
-	Model                string           `json:"model,omitempty"`
-	MaxTurns             int              `json:"max_turns,omitempty"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+	Purpose     string `json:"purpose,omitempty"`
+	Model       string `json:"model,omitempty"`
+	MaxTurns    int    `json:"max_turns,omitempty"`
+	claudecli.TurnSettings
 	Parent               string           `json:"parent,omitempty"`
 	ToolGroups           []string         `json:"tool_groups,omitempty"`
 	AllowedTools         []string         `json:"allowed_tools,omitempty"`
@@ -95,6 +97,7 @@ func channelReadHandler(deps Deps) mcp.ToolHandler {
 				Purpose:              ch.Purpose,
 				Model:                string(ch.Model),
 				MaxTurns:             ch.MaxTurns,
+				TurnSettings:         ch.TurnSettings,
 				Parent:               ch.Parent,
 				ToolGroups:           toolGroupNames(ch.ToolGroups),
 				AllowedTools:         ch.AllowedTools,

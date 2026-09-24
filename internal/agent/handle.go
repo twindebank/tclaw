@@ -369,6 +369,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		Model:         model,
 		MaxTurns:      resolveMaxTurnsForChannel(opts, msg.ChannelID),
 		OutputStyle:   resolveOutputStyleForChannel(opts, msg.ChannelID),
+		TurnSettings:  resolveTurnSettingsForChannel(opts, msg.ChannelID),
 		SessionID:     sessionID,
 		SystemPrompt:  systemPrompt,
 		Prompt:        promptText,
@@ -968,9 +969,11 @@ func isRateLimitError(raw string) bool {
 // and returns a more actionable message. When the CLI reports an error with no
 // message text (raw is empty — seen in production as a bare "claude error:"), it
 // falls back to the result subtype so the user always gets something diagnostic.
-func friendlyErrorMessage(raw, subtype string) string {
+func friendlyErrorMessage(raw string, subtype claudecli.ResultSubtype) string {
 	lower := strings.ToLower(raw)
 	switch {
+	case subtype == claudecli.ResultErrorMaxBudget:
+		return "spend cap reached — the channel's max_budget_usd stopped this turn. Send another message to carry on, or raise the cap"
 	case strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit") || strings.Contains(lower, "429"):
 		return "rate limit reached — please wait a moment before sending another message"
 	case strings.Contains(lower, "usage") || strings.Contains(lower, "session limit"):
@@ -985,7 +988,7 @@ func friendlyErrorMessage(raw, subtype string) string {
 	case strings.TrimSpace(raw) == "":
 		// The CLI signalled an error but gave no message. Report the subtype so
 		// the failure is never silent (e.g. "error_during_execution").
-		if s := strings.TrimSpace(subtype); s != "" {
+		if s := strings.TrimSpace(string(subtype)); s != "" {
 			return "claude ended the turn with an error (" + s + ") but gave no details — check the logs"
 		}
 		return "claude ended the turn with an error but gave no details — check the logs"

@@ -5,9 +5,11 @@ import (
 	"time"
 
 	"tclaw/internal/channel"
+	"tclaw/internal/claudecli"
 	"tclaw/internal/repo"
 
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // validConfig returns a minimal config that passes validation.
@@ -143,6 +145,37 @@ func TestValidate_ChannelMaxTurns(t *testing.T) {
 		err := validate(cfg)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "max_turns must be zero (inherit) or positive")
+	})
+}
+
+func TestValidate_TurnSettings(t *testing.T) {
+	t.Run("user and channel settings are accepted", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].TurnSettings = claudecli.TurnSettings{Effort: claudecli.EffortHigh, MaxBudgetUSD: 5}
+		cfg.Users[0].Channels[0].TurnSettings = claudecli.TurnSettings{Effort: claudecli.EffortLow}
+		require.NoError(t, validate(cfg))
+	})
+
+	t.Run("a bad user-level value names the user", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].TurnSettings = claudecli.TurnSettings{Effort: "extreme"}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), `user "`+string(cfg.Users[0].ID)+`": unknown effort "extreme"`)
+	})
+
+	t.Run("a bad channel value names the channel", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Users[0].Channels[0].TurnSettings = claudecli.TurnSettings{MaxBudgetUSD: -2}
+		err := validate(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), `channel "`+cfg.Users[0].Channels[0].Name+`": max_budget_usd must be zero`)
+	})
+
+	t.Run("the settings load from their yaml keys", func(t *testing.T) {
+		var ch Channel
+		require.NoError(t, yaml.Unmarshal([]byte("name: triage\neffort: low\nmax_budget_usd: 0.5\nfallback_model: claude-sonnet-5\n"), &ch))
+		require.Equal(t, claudecli.TurnSettings{Effort: claudecli.EffortLow, MaxBudgetUSD: 0.5, FallbackModel: claudecli.ModelSonnet5}, ch.TurnSettings)
 	})
 }
 

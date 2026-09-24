@@ -196,10 +196,9 @@ type ResultEvent struct {
 	Type    EventType `json:"type"`
 	IsError bool      `json:"is_error"`
 
-	// Subtype categorises the outcome, e.g. "success", "error_max_turns",
-	// "error_during_execution". On error results Result is sometimes empty, so
+	// Subtype categorises the outcome. On error results Result is sometimes empty, so
 	// Subtype is the only signal for what went wrong.
-	Subtype string `json:"subtype"`
+	Subtype ResultSubtype `json:"subtype"`
 
 	Result     string  `json:"result"`
 	DurationMs float64 `json:"duration_ms"`
@@ -211,6 +210,22 @@ type ResultEvent struct {
 	// Keys are model identifiers (may include context window suffix, e.g. "claude-opus-4-6[1m]").
 	ModelUsage map[string]ModelUsage `json:"modelUsage,omitempty"`
 }
+
+// ResultSubtype says how a turn ended.
+type ResultSubtype string
+
+const (
+	ResultSuccess ResultSubtype = "success"
+
+	// ResultErrorMaxTurns means the --max-turns cap stopped the turn.
+	ResultErrorMaxTurns ResultSubtype = "error_max_turns"
+
+	// ResultErrorMaxBudget means the --max-budget-usd cap stopped the turn.
+	ResultErrorMaxBudget ResultSubtype = "error_max_budget_usd"
+
+	// ResultErrorDuringExecution covers any other failure, including an interrupted turn.
+	ResultErrorDuringExecution ResultSubtype = "error_during_execution"
+)
 
 // ModelUsage holds token counts and cost for a single model within a turn.
 type ModelUsage struct {

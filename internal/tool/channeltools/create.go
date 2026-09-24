@@ -60,6 +60,19 @@ func channelCreateDef() mcp.ToolDef {
 					"type": "integer",
 					"description": "Cap on agentic turns per message on this channel. Use 150 for dev, orchestration and single-task ephemeral channels, which must finish long multi-step work in one message with nobody there to nudge them along. Use 10 for triage channels that read something and reply, like email or notifications. Omit to inherit the user-level limit. When the cap is hit the turn ends mid-work and only another user message restarts it."
 				},
+				"effort": {
+					"type": "string",
+					"enum": ["low", "medium", "high", "xhigh", "max", "ultracode"],
+					"description": "How hard the model works each turn. Lower is faster and cheaper; use low for quick-answer or triage channels, high or above for dev and research. ultracode also lets the model fan work out to many subagents, which is costly. Omit to inherit the user-level setting."
+				},
+				"max_budget_usd": {
+					"type": "number",
+					"description": "Stops a single message's turn once it has spent this many dollars, subagents included. Useful on scheduled or unattended channels. Omit to inherit the user-level cap."
+				},
+				"fallback_model": {
+					"type": "string",
+					"description": "Model to switch to when this channel's model is overloaded or unavailable (e.g. 'claude-sonnet-5'). Omit to inherit the user-level setting."
+				},
 				"type": {
 					"type": "string",
 					"enum": ["socket", "telegram"],
@@ -129,11 +142,12 @@ func channelCreateDef() mcp.ToolDef {
 }
 
 type channelCreateArgs struct {
-	Name                      string         `json:"name"`
-	Description               string         `json:"description"`
-	Purpose                   string         `json:"purpose"`
-	Model                     string         `json:"model"`
-	MaxTurns                  int            `json:"max_turns"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Purpose     string `json:"purpose"`
+	Model       string `json:"model"`
+	MaxTurns    int    `json:"max_turns"`
+	claudecli.TurnSettings
 	Type                      string         `json:"type"`
 	Ephemeral                 bool           `json:"ephemeral"`
 	EphemeralIdleTimeoutHours int            `json:"ephemeral_idle_timeout_hours"`
@@ -169,6 +183,9 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 		}
 		if a.MaxTurns < 0 {
 			return nil, fmt.Errorf("max_turns must be zero (inherit the user-level limit) or positive, got %d", a.MaxTurns)
+		}
+		if err := a.TurnSettings.Validate(); err != nil {
+			return nil, err
 		}
 
 		channelType := channel.ChannelType(a.Type)
@@ -300,6 +317,7 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 			Purpose:              a.Purpose,
 			Model:                claudecli.Model(a.Model),
 			MaxTurns:             a.MaxTurns,
+			TurnSettings:         a.TurnSettings,
 			ToolGroups:           toolGroups,
 			AllowedTools:         a.AllowedTools,
 			DisallowedTools:      a.DisallowedTools,
@@ -328,6 +346,7 @@ func channelCreateHandler(deps Deps) mcp.ToolHandler {
 				Purpose:         ch.Purpose,
 				Model:           string(ch.Model),
 				MaxTurns:        ch.MaxTurns,
+				TurnSettings:    ch.TurnSettings,
 				DisallowedTools: ch.DisallowedTools,
 			},
 			Links:  ch.Links,

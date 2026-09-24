@@ -270,6 +270,30 @@ The agent sets this itself when it stands up a channel: `channel_create` and `ch
 `max_turns`, and `channel_read` shows the current value. Passing `0` to `channel_edit` clears the
 channel's own limit and puts it back on the user-level one.
 
+## Effort, Spend Cap and Fallback Model
+
+Three more settings follow the same user-then-channel pattern, each passed to the CLI as a flag:
+
+```yaml
+users:
+  - id: alice
+    effort: high                     # --effort: low | medium | high | xhigh | max | ultracode
+    fallback_model: claude-sonnet-5  # --fallback-model, tried when the main model is overloaded
+    channels:
+      - name: triage
+        effort: low                  # quick answers here
+      - name: nightly-report
+        max_budget_usd: 2            # --max-budget-usd: the turn stops once it has spent $2
+```
+
+A channel's value wins field by field, so the triage channel above still falls back to Sonnet. Unset,
+or zero for the budget, means inherit; with neither set the CLI's own default applies. A turn stopped
+by the spend cap tells the chat so, and the next message carries on from where it stopped.
+`channel_create`, `channel_edit` and `channel_read` all take and show them; `channel_edit` clears one
+with an empty string, or `0` for the budget.
+
+`ultracode` lets the model fan work out to many subagents, and costs accordingly.
+
 ## The Retro Queue
 
 Corrections are captured as they happen and judged much later, by a session that did not make the

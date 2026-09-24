@@ -42,6 +42,19 @@ func channelEditDef() mcp.ToolDef {
 					"type": "integer",
 					"description": "Cap on agentic turns per message on this channel. Use 150 for dev, orchestration and single-task ephemeral channels doing long multi-step work, and 10 for triage channels that read something and reply, like email or notifications. Pass 0 to clear and inherit the user-level limit."
 				},
+				"effort": {
+					"type": "string",
+					"enum": ["", "low", "medium", "high", "xhigh", "max", "ultracode"],
+					"description": "How hard the model works each turn. Lower is faster and cheaper. ultracode also lets the model fan work out to many subagents, which is costly. Pass empty string to clear and inherit the user-level setting."
+				},
+				"max_budget_usd": {
+					"type": "number",
+					"description": "Stops a single message's turn once it has spent this many dollars, subagents included. Pass 0 to clear and inherit the user-level cap."
+				},
+				"fallback_model": {
+					"type": "string",
+					"description": "Model to switch to when this channel's model is overloaded or unavailable. Pass empty string to clear and inherit the user-level setting."
+				},
 				"allowed_users": {
 					"type": "array",
 					"items": {"type": "string"},
@@ -99,6 +112,9 @@ type channelEditArgs struct {
 	Purpose              *string         `json:"purpose"`
 	Model                *string         `json:"model"`
 	MaxTurns             *int            `json:"max_turns"`
+	Effort               *string         `json:"effort"`
+	MaxBudgetUSD         *float64        `json:"max_budget_usd"`
+	FallbackModel        *string         `json:"fallback_model"`
 	AllowedUsers         *[]string       `json:"allowed_users"`
 	ToolGroups           []string        `json:"tool_groups"`
 	AllowedTools         []string        `json:"allowed_tools"`
@@ -117,6 +133,7 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 		}
 
 		hasChange := a.Description != "" || a.Purpose != nil || a.Model != nil || a.MaxTurns != nil || a.AllowedUsers != nil ||
+			a.Effort != nil || a.MaxBudgetUSD != nil || a.FallbackModel != nil ||
 			a.ToolGroups != nil || a.AllowedTools != nil || a.DisallowedTools != nil ||
 			a.CreatableGroups != nil || a.Links != nil || a.Parent != nil ||
 			a.ClaudeSessionTimeout != nil
@@ -131,6 +148,21 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 
 		if a.MaxTurns != nil && *a.MaxTurns < 0 {
 			return nil, fmt.Errorf("max_turns must be zero (inherit the user-level limit) or positive, got %d", *a.MaxTurns)
+		}
+
+		// Only the fields being set are checked here; the stored ones already passed.
+		var requested claudecli.TurnSettings
+		if a.Effort != nil {
+			requested.Effort = claudecli.Effort(*a.Effort)
+		}
+		if a.MaxBudgetUSD != nil {
+			requested.MaxBudgetUSD = *a.MaxBudgetUSD
+		}
+		if a.FallbackModel != nil {
+			requested.FallbackModel = claudecli.Model(*a.FallbackModel)
+		}
+		if err := requested.Validate(); err != nil {
+			return nil, err
 		}
 
 		// Validate the timeout up front so we don't write a config that fails to reload.
@@ -202,6 +234,15 @@ func channelEditHandler(deps Deps) mcp.ToolHandler {
 			}
 			if a.MaxTurns != nil {
 				ch.MaxTurns = *a.MaxTurns
+			}
+			if a.Effort != nil {
+				ch.TurnSettings.Effort = requested.Effort
+			}
+			if a.MaxBudgetUSD != nil {
+				ch.TurnSettings.MaxBudgetUSD = requested.MaxBudgetUSD
+			}
+			if a.FallbackModel != nil {
+				ch.TurnSettings.FallbackModel = requested.FallbackModel
 			}
 			if len(toolGroups) > 0 {
 				ch.ToolGroups = toolGroups

@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -159,6 +160,12 @@ type Options struct {
 	// ChannelOutputStyles overrides OutputStyle per channel. The value "none"
 	// turns the style off there, which empty cannot mean.
 	ChannelOutputStyles map[channel.ChannelID]string
+
+	// TurnSettings apply to channels that set none of their own.
+	TurnSettings claudecli.TurnSettings
+
+	// ChannelTurnSettings override TurnSettings per channel, field by field.
+	ChannelTurnSettings map[channel.ChannelID]claudecli.TurnSettings
 
 	// Debug logs raw CLI event JSON for troubleshooting.
 	Debug bool
@@ -1009,6 +1016,10 @@ func resolveOutputStyleForChannel(opts Options, channelID channel.ChannelID) str
 	return opts.OutputStyle
 }
 
+func resolveTurnSettingsForChannel(opts Options, channelID channel.ChannelID) claudecli.TurnSettings {
+	return opts.ChannelTurnSettings[channelID].Over(opts.TurnSettings)
+}
+
 // outputStyleOff is the per-channel value that turns the user-level style off.
 const outputStyleOff = "none"
 
@@ -1128,6 +1139,7 @@ type buildArgsParams struct {
 	Model         claudecli.Model
 	MaxTurns      int
 	OutputStyle   string
+	TurnSettings  claudecli.TurnSettings
 	SessionID     string
 	SystemPrompt  string
 	Prompt        string
@@ -1158,6 +1170,15 @@ func buildArgs(p buildArgsParams) []string {
 		args = append(args, "--model", string(p.Model))
 	}
 	args = append(args, "--max-turns", fmt.Sprintf("%d", p.MaxTurns))
+	if p.TurnSettings.Effort != "" {
+		args = append(args, "--effort", string(p.TurnSettings.Effort))
+	}
+	if p.TurnSettings.MaxBudgetUSD > 0 {
+		args = append(args, "--max-budget-usd", strconv.FormatFloat(p.TurnSettings.MaxBudgetUSD, 'f', -1, 64))
+	}
+	if p.TurnSettings.FallbackModel != "" {
+		args = append(args, "--fallback-model", string(p.TurnSettings.FallbackModel))
+	}
 	if p.OutputStyle != "" {
 		// Passed as JSON rather than written into settings.json, which is mounted
 		// read-only so a prompt injection cannot install its own hooks. --settings

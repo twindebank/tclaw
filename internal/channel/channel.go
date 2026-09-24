@@ -4,7 +4,11 @@
 // tracking, and EphemeralProvisioner for platform-specific channel lifecycle management.
 package channel
 
-import "context"
+import (
+	"context"
+
+	"tclaw/internal/claudecli"
+)
 
 // MessageID identifies a sent message so it can be edited later.
 // The concrete value is transport-specific (e.g. telegram message ID,
@@ -67,8 +71,7 @@ type Info struct {
 	Purpose     string // optional behavioral guidance for the agent on this channel
 
 	// Model overrides the user-level model for turns on this channel. Empty
-	// means inherit (runtime override, then user-level model). Uses string
-	// (not claudecli.Model) to avoid a circular dependency.
+	// means inherit (runtime override, then user-level model).
 	Model string
 
 	// MaxTurns caps agentic turns per message on this channel. Zero means
@@ -79,9 +82,11 @@ type Info struct {
 	// "none" turns it off for this channel.
 	OutputStyle string
 
+	// TurnSettings override the user-level ones field by field; an unset field inherits.
+	TurnSettings claudecli.TurnSettings
+
 	// AllowedTools is the resolved set of tools this channel can use.
 	// Populated at creation time from tool_groups, role presets, or explicit lists.
-	// Uses []string (not []claudecli.Tool) to avoid circular dependency.
 	AllowedTools []string
 
 	// DisallowedTools are tools explicitly denied on this channel.
