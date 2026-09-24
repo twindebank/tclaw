@@ -49,34 +49,28 @@ const setupTokenTimeout = 5 * time.Minute
 // flyAppName is the Fly.io application name used for credential deployment.
 const flyAppName = "tclaw"
 
-// bold wraps text in bold markup appropriate for the channel.
-func bold(m channel.Markup, s string) string {
-	if m == channel.MarkupHTML {
-		return "<b>" + s + "</b>"
-	}
+// bold wraps text in markdown bold, which every channel renders.
+func bold(s string) string {
 	return "**" + s + "**"
 }
 
-// code wraps text in inline code markup appropriate for the channel.
-func code(m channel.Markup, s string) string {
-	if m == channel.MarkupHTML {
-		return "<code>" + s + "</code>"
-	}
+// code wraps text in markdown inline code, which every channel renders.
+func code(s string) string {
 	return "`" + s + "`"
 }
 
 // authPrompt builds the auth choice message for the given channel markup.
-func authPrompt(m channel.Markup) string {
-	return "🔐 " + bold(m, "Authentication required") + "\n\n" +
+func authPrompt() string {
+	return "🔐 " + bold("Authentication required") + "\n\n" +
 		"Choose how to authenticate:\n" +
-		bold(m, "1") + " — OAuth login (opens browser, local only)\n" +
-		bold(m, "2") + " — API key (paste an Anthropic API key)\n" +
-		bold(m, "3") + " — Cancel"
+		bold("1") + " — OAuth login (opens browser, local only)\n" +
+		bold("2") + " — API key (paste an Anthropic API key)\n" +
+		bold("3") + " — Cancel"
 }
 
 // apiKeyPrompt builds the API key entry prompt for the given channel markup.
-func apiKeyPrompt(m channel.Markup) string {
-	return "🔑 Paste your Anthropic API key (starts with " + code(m, "sk-ant-") + "):"
+func apiKeyPrompt() string {
+	return "🔑 Paste your Anthropic API key (starts with " + code("sk-ant-") + "):"
 }
 
 // oauthResult carries the outcome of an async `claude setup-token` goroutine
@@ -349,8 +343,7 @@ func handleAPIKeyEntry(ctx context.Context, opts Options, ch channel.Channel, ch
 	key = strings.TrimSpace(key)
 
 	if !ValidAPIKey(key) {
-		m := ch.Markup()
-		if _, err := opts.send(ctx, chID, "❌ Invalid key — must start with "+code(m, "sk-ant-")+" and be a valid length. Try again or type "+bold(m, "stop")+" to cancel."); err != nil {
+		if _, err := opts.send(ctx, chID, "❌ Invalid key — must start with "+code("sk-ant-")+" and be a valid length. Try again or type "+bold("stop")+" to cancel."); err != nil {
 			slog.Error("failed to send validation error", "err", err)
 		}
 		return false
@@ -381,17 +374,16 @@ func handleAuthStatus(ctx context.Context, opts Options, ch channel.Channel, chI
 	}
 
 	if !status.LoggedIn {
-		if _, sendErr := opts.send(ctx, chID, "🔒 Not logged in. Type "+bold(ch.Markup(), "login")+" to authenticate."); sendErr != nil {
+		if _, sendErr := opts.send(ctx, chID, "🔒 Not logged in. Type "+bold("login")+" to authenticate."); sendErr != nil {
 			slog.Error("failed to send auth status", "err", sendErr)
 		}
 		return
 	}
 
-	m := ch.Markup()
 	var msg string
 	if status.Email != "" {
 		msg = fmt.Sprintf("🔓 Logged in as %s (%s, %s)\nAuth: %s | Provider: %s",
-			bold(m, status.Email), status.OrgName, status.SubscriptionType,
+			bold(status.Email), status.OrgName, status.SubscriptionType,
 			status.AuthMethod, status.APIProvider)
 	} else {
 		msg = fmt.Sprintf("🔓 Logged in\nAuth: %s | Provider: %s",

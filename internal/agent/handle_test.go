@@ -34,7 +34,7 @@ func (m *mockChannel) Info() channel.Info                       { return m.info 
 func (m *mockChannel) Messages(_ context.Context) <-chan string { return nil }
 func (m *mockChannel) Done(_ context.Context) error             { return nil }
 func (m *mockChannel) SplitStatusMessages() bool                { return true }
-func (m *mockChannel) Markup() channel.Markup                   { return channel.MarkupHTML }
+func (m *mockChannel) Markup() channel.Markup                   { return channel.MarkupTelegram }
 func (m *mockChannel) StatusWrap() channel.StatusWrap           { return channel.StatusWrap{} }
 
 func (m *mockChannel) Send(_ context.Context, text string, _ channel.SendOpts) (channel.MessageID, error) {

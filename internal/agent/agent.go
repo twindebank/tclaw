@@ -589,8 +589,8 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				sendDenied(ctx, opts, msg.ChannelID)
 				continue
 			}
-			if ch, ok := opts.channels()[msg.ChannelID]; ok {
-				if _, err := opts.send(ctx, msg.ChannelID, authPrompt(ch.Markup())); err != nil {
+			if _, ok := opts.channels()[msg.ChannelID]; ok {
+				if _, err := opts.send(ctx, msg.ChannelID, authPrompt()); err != nil {
 					slog.Error("failed to send auth prompt", "err", err)
 				} else {
 					fm.StartAuth(msg.ChannelID, channel.TaggedMessage{})
@@ -732,8 +732,8 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				if errors.Is(result.err, ErrAuthRequired) {
 					slog.Info("auth required, starting auth flow", "channel", msg.ChannelID)
 					fm.StartAuth(msg.ChannelID, msg)
-					if ch, chOK := opts.channels()[msg.ChannelID]; chOK {
-						if _, sendErr := opts.send(ctx, msg.ChannelID, authPrompt(ch.Markup())); sendErr != nil {
+					if _, chOK := opts.channels()[msg.ChannelID]; chOK {
+						if _, sendErr := opts.send(ctx, msg.ChannelID, authPrompt()); sendErr != nil {
 							slog.Error("failed to send auth prompt, discarding flow", "err", sendErr)
 							fm.Cancel(msg.ChannelID)
 							goto done
@@ -748,11 +748,10 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 					slog.Info("tools denied, prompting for approval",
 						"channel", msg.ChannelID, "tools", denied.Tools)
 					fm.StartToolApproval(msg.ChannelID, msg, denied.Tools, denied.SessionID)
-					if approvalCh, chOK := opts.channels()[msg.ChannelID]; chOK {
-						m := approvalCh.Markup()
+					if _, chOK := opts.channels()[msg.ChannelID]; chOK {
 						toolList := strings.Join(denied.Tools, ", ")
 						prompt := fmt.Sprintf("⚠️ %s was not available on this channel.\nReply %s to retry with %s enabled, or send any other message to continue.",
-							bold(m, toolList), bold(m, "approve"), bold(m, toolList))
+							bold(toolList), bold("approve"), bold(toolList))
 						if _, sendErr := opts.send(ctx, msg.ChannelID, prompt); sendErr != nil {
 							slog.Error("failed to send tool approval prompt", "err", sendErr)
 						}

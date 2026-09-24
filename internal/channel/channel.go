@@ -29,8 +29,10 @@ type Markup string
 const (
 	// MarkupMarkdown is standard markdown (socket, stdio).
 	MarkupMarkdown Markup = "markdown"
-	// MarkupHTML is Telegram-style HTML (<b>, <code>, etc.).
-	MarkupHTML Markup = "html"
+
+	// MarkupTelegram is markdown that Telegram renders as a rich message: tables, headings, code
+	// blocks and maths, plus a few Telegram extras.
+	MarkupTelegram Markup = "telegram"
 )
 
 // FormattingInstructions returns agent-facing guidance for how to format
@@ -38,15 +40,16 @@ const (
 // system prompt so the agent adapts formatting to each channel's transport.
 func FormattingInstructions(m Markup) string {
 	switch m {
-	case MarkupHTML:
-		return "Format responses using Telegram HTML markup — Telegram does NOT support Markdown.\n" +
-			"Supported tags: <b>, <i>, <u>, <s>, <code>, <pre>, " +
-			"<pre><code class=\"language-python\">, <a href=\"url\">, " +
-			"<blockquote>, <blockquote expandable>, <tg-spoiler>.\n" +
-			"Use <b> for headings, <code>/<pre> for code, bullet characters (•, ▸) for lists. " +
-			"Keep messages concise — Telegram is typically mobile. " +
-			"Do NOT use markdown syntax (#, **, -) — it renders as literal text. " +
-			"Escape &, <, > as &amp;, &lt;, &gt;."
+	case MarkupTelegram:
+		return "Write replies in GitHub-flavoured markdown; Telegram renders it natively. " +
+			"Headings, **bold**, *italic*, `code`, fenced code blocks with a language, lists, task lists (- [ ]), " +
+			"> quotes, tables, --- dividers, footnotes and links all work, as do ==highlight==, ||spoiler||, " +
+			"inline $maths$ and $$block maths$$, and <details><summary>Title</summary>…</details> for a collapsible section.\n" +
+			"Use a table when comparing things; keep it to a few columns, since Telegram is usually read on a phone. " +
+			"Keep messages concise.\n" +
+			"To give a date or time, write it as ![22:45 tomorrow](tg://time?unix=1647531900&format=wDT) with the real unix time: " +
+			"Telegram shows it in the reader's own timezone. The format letters are w (weekday), d or D (short or long date), " +
+			"t or T (short or long time), or r on its own (relative, e.g. \"in 2 hours\")."
 	case MarkupMarkdown:
 		return ""
 	default:

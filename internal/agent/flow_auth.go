@@ -43,13 +43,12 @@ func handleAuthChoosing(
 	msg channel.TaggedMessage,
 ) FlowResult {
 	choice := strings.TrimSpace(strings.ToLower(msg.Text))
-	m := ch.Markup()
 
 	switch choice {
 	case "1", "oauth":
 		if !opts.Env.IsLocal() {
 			if _, err := opts.send(ctx, msg.ChannelID, "❌ OAuth login requires a browser and only works locally.\n"+
-				"Use option "+bold(m, "2")+" to paste an API key instead.\n\n"+authPrompt(m)); err != nil {
+				"Use option "+bold("2")+" to paste an API key instead.\n\n"+authPrompt()); err != nil {
 				slog.Error("failed to send non-local oauth error", "err", err)
 			}
 		} else {
@@ -61,7 +60,7 @@ func handleAuthChoosing(
 
 	case "2", "api", "key", "api key", "apikey":
 		flow.state = authAPIKeyEntry
-		if _, err := opts.send(ctx, msg.ChannelID, apiKeyPrompt(ch.Markup())); err != nil {
+		if _, err := opts.send(ctx, msg.ChannelID, apiKeyPrompt()); err != nil {
 			slog.Error("failed to send api key prompt", "err", err)
 		}
 
@@ -69,7 +68,7 @@ func handleAuthChoosing(
 		fm.Complete(msg.ChannelID)
 
 	default:
-		if _, err := opts.send(ctx, msg.ChannelID, "Please enter "+bold(m, "1")+" (OAuth) or "+bold(m, "2")+" (API key).\n\n"+authPrompt(m)); err != nil {
+		if _, err := opts.send(ctx, msg.ChannelID, "Please enter "+bold("1")+" (OAuth) or "+bold("2")+" (API key).\n\n"+authPrompt()); err != nil {
 			slog.Error("failed to send auth re-prompt", "err", err)
 		}
 	}
@@ -87,7 +86,6 @@ func handleAuthOAuthActive(
 ) FlowResult {
 	select {
 	case result := <-flow.oauthDone:
-		m := ch.Markup()
 		if result.setupToken != "" {
 			// Persist locally so the token survives agent restarts.
 			opts.SetupToken = result.setupToken
@@ -100,7 +98,7 @@ func handleAuthOAuthActive(
 				flow.setupToken = result.setupToken
 				flow.state = authDeployConfirm
 				if _, err := opts.send(ctx, msg.ChannelID, "✅ "+result.loginMessage+"\n\n"+
-					"Deploy setup token to production? Reply "+bold(m, "yes")+" or "+bold(m, "no")+"."); err != nil {
+					"Deploy setup token to production? Reply "+bold("yes")+" or "+bold("no")+"."); err != nil {
 					slog.Error("failed to send deploy prompt", "err", err)
 				}
 			} else {
@@ -138,7 +136,6 @@ func handleAuthDeployConfirm(
 	msg channel.TaggedMessage,
 ) FlowResult {
 	answer := strings.TrimSpace(strings.ToLower(msg.Text))
-	m := ch.Markup()
 	slog.Info("deploy confirm received", "answer", answer, "user_id", opts.UserID, "token_len", len(flow.setupToken))
 
 	switch answer {
@@ -170,7 +167,7 @@ func handleAuthDeployConfirm(
 		return retryResult(retryMsg)
 
 	default:
-		if _, err := opts.send(ctx, msg.ChannelID, "Reply "+bold(m, "yes")+" to deploy or "+bold(m, "no")+" to skip."); err != nil {
+		if _, err := opts.send(ctx, msg.ChannelID, "Reply "+bold("yes")+" to deploy or "+bold("no")+" to skip."); err != nil {
 			slog.Error("failed to send deploy re-prompt", "err", err)
 		}
 		return FlowResult{Handled: true}

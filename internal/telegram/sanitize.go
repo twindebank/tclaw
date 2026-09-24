@@ -138,11 +138,9 @@ func EscapeUnsupportedTags(s string) string {
 	})
 }
 
-// MarkdownToHTML converts common markdown patterns the model may
-// produce into Telegram-compatible HTML. This is a best-effort fallback —
-// the system prompt asks for HTML, but models sometimes slip into markdown.
-// It also escapes any HTML-like tags that Telegram doesn't support so they
-// don't cause parse errors.
+// MarkdownToHTML converts the common markdown patterns in a status message, the model's
+// thinking and tclaw's own notices, into Telegram HTML. It also escapes any HTML-like tags
+// that Telegram doesn't support so they don't cause parse errors.
 func MarkdownToHTML(s string) string {
 	// Always convert Markdown links — [text](url) does not overlap with HTML
 	// tags, so it is safe to convert unconditionally even in mixed responses.

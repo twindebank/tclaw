@@ -104,7 +104,7 @@ func (o *Oneshot) SplitStatusMessages() bool {
 
 func (o *Oneshot) Markup() channel.Markup {
 	if o.telegram {
-		return channel.MarkupHTML
+		return channel.MarkupTelegram
 	}
 	return channel.MarkupMarkdown
 }
