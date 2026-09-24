@@ -699,6 +699,10 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			}
 
 		case claudecli.EventMessageStart:
+			if streamingMessage {
+				// The previous message's stream broke off before its stop.
+				slog.Warn("message_start arrived before the previous message stopped", "channel", channelID)
+			}
 			streamingMessage = true
 
 		case claudecli.EventMessageStop:
@@ -805,8 +809,9 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				continue
 			}
 
-			if streamingMessage {
-				// Already written from the stream.
+			if streamingMessage && msg.Error == "" {
+				// Already written from the stream. An error message is the CLI's
+				// own and was never streamed, even when a stream broke off.
 				continue
 			}
 

@@ -532,6 +532,35 @@ func TestStreamResponse(t *testing.T) {
 		require.Equal(t, []string{"Not enough messages to compact."}, ch.sends)
 	})
 
+	t.Run("shows an unstreamed message after a streamed one, as a separate paragraph", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := newTestTurnWriter(ch)
+
+		runStream(t, tw,
+			streamLine(`{"type":"message_start"}`),
+			streamLine(`{"type":"content_block_start","content_block":{"type":"text","text":""}}`),
+			streamLine(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"Streamed"}}`),
+			`{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"text","text":"Streamed"}]}}`,
+			streamLine(`{"type":"content_block_stop"}`),
+			streamLine(`{"type":"message_stop"}`),
+			`{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"text","text":"Not streamed"}]}}`,
+		)
+
+		require.Equal(t, []string{"Streamed\n\nNot streamed"}, finalTexts(ch))
+	})
+
+	t.Run("shows the CLI's error message even when a stream broke off", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := newTestTurnWriter(ch)
+
+		runStream(t, tw,
+			streamLine(`{"type":"message_start"}`),
+			`{"type":"assistant","parent_tool_use_id":null,"error":"server_error","message":{"content":[{"type":"text","text":"API Error: overloaded"}]}}`,
+		)
+
+		require.Equal(t, []string{"API Error: overloaded"}, finalTexts(ch))
+	})
+
 	t.Run("writes no tool result line for a user event that is not a tool result", func(t *testing.T) {
 		ch := &mockChannel{}
 		tw := newTestTurnWriter(ch)
@@ -557,6 +586,7 @@ func streamLine(event string) string {
 func finalTexts(ch *mockChannel) []string {
 	texts := append([]string(nil), ch.sends...)
 	for _, e := range ch.edits {
+		// mockChannel's nth message ID is n copies of "m".
 		texts[len(e.id)-1] = e.text
 	}
 	return texts
