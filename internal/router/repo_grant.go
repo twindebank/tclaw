@@ -152,10 +152,14 @@ func newRepoGrantArmer(params armRepoGrantParams) func(context.Context, repotool
 		}
 
 		pending := channel.NewPendingAction(channel.PendingRepoGrant, payload)
+		var armErr error
 		if err := params.RuntimeState.Update(ctx, chName, func(rs *channel.RuntimeState) {
-			rs.PendingAction = pending
+			armErr = channel.ArmPendingAction(rs, pending, time.Now())
 		}); err != nil {
 			return fmt.Errorf("arm grant confirmation: %w", err)
+		}
+		if armErr != nil {
+			return armErr
 		}
 
 		if err := channel.Ask(ctx, channel.AskParams{

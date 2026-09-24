@@ -1138,6 +1138,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			},
 			OnTurnStart: func(channelName string) {
 				activeChannelName.Store(&channelName)
+				permPrompts.newTurn()
 				activityTracker.MessageReceived(channelName)
 				activityTracker.TurnStarted(channelName)
 			},
@@ -1185,6 +1186,11 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				tools := mcpHandler.ListTools()
 				names := make([]string, 0, len(tools))
 				for _, td := range tools {
+					if td.Name == ToolPermissionPrompt {
+						// The CLI's own; a wildcard allowing tclaw's tools must never
+						// hand it to the model.
+						continue
+					}
 					names = append(names, "mcp__tclaw__"+td.Name)
 				}
 				mcps, err := remoteMCPMgr.ListRemoteMCPs(dynamicCtx)

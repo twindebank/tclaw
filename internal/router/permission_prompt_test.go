@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -36,7 +37,7 @@ func TestAskPermission(t *testing.T) {
 		p, ch := permissionSetup(t)
 
 		answerPrompt(t, p, ch, func(prompt channel.SendPromptParams) channel.TaggedMessage {
-			require.Equal(t, "🔐 Allow **Bash**?\n\n`{\"command\":\"ls\"}`", prompt.Text)
+			require.Equal(t, "🔐 Allow **Bash**?\n\n`{\"command\":\"ls\"}`", prompt.Text, "the whole input is shown")
 			return userPress(prompt.PromptID, channel.ReplyNo)
 		})
 	})
@@ -50,7 +51,31 @@ func TestAskPermission(t *testing.T) {
 
 		decision := askPermission(context.Background(), p, permissionRequest{ToolName: "Bash", Input: json.RawMessage(`{}`)})
 
+		require.Equal(t, permissionDecision{Behavior: permissionDeny, Message: "This channel cannot ask for approval during a turn, so the call was refused."}, decision)
+	})
+
+	t.Run("refuses an input too long to show in full, without asking", func(t *testing.T) {
+		p, ch := permissionSetup(t)
+		long := `{"command":"` + strings.Repeat("x", permissionPromptInputMax) + `"}`
+
+		decision := askPermission(context.Background(), p, permissionRequest{ToolName: "Bash", Input: json.RawMessage(long)})
+
 		require.Equal(t, permissionDeny, decision.Behavior)
+		require.Contains(t, decision.Message, "too long to show the user in full")
+		require.Empty(t, ch.prompts, "the user is never shown part of a call to approve")
+	})
+
+	t.Run("refuses at once for the rest of a turn after a prompt went unanswered", func(t *testing.T) {
+		p, ch := permissionSetup(t)
+		p.Prompts.markUnanswered()
+
+		decision := askPermission(context.Background(), p, permissionRequest{ToolName: "Bash", Input: json.RawMessage(`{}`)})
+
+		require.Equal(t, permissionDeny, decision.Behavior)
+		require.Empty(t, ch.prompts)
+
+		p.Prompts.newTurn()
+		require.False(t, p.Prompts.alreadyUnanswered(), "the next turn asks again")
 	})
 
 	t.Run("refuses when the turn ends before an answer", func(t *testing.T) {
@@ -60,7 +85,7 @@ func TestAskPermission(t *testing.T) {
 
 		decision := askPermission(ctx, p, permissionRequest{ToolName: "Bash", Input: json.RawMessage(`{}`)})
 
-		require.Equal(t, permissionDeny, decision.Behavior)
+		require.Equal(t, permissionDecision{Behavior: permissionDeny, Message: "The turn ended before the user answered."}, decision)
 	})
 }
 
@@ -80,6 +105,15 @@ func TestPermissionPrompts_Resolve(t *testing.T) {
 
 		require.False(t, prompts.resolve(press))
 		require.Empty(t, reply)
+	})
+
+	t.Run("a press after the wait gave up is not consumed", func(t *testing.T) {
+		prompts := newPermissionPrompts()
+		promptID := channel.NewPromptID()
+		prompts.await(promptID)
+		prompts.forget(promptID)
+
+		require.False(t, prompts.resolve(userPress(promptID, channel.ReplyYes)))
 	})
 
 	t.Run("ordinary text is not consumed", func(t *testing.T) {

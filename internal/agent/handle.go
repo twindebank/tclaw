@@ -443,7 +443,11 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	case channel.SourceChild:
 		contextSection += fmt.Sprintf("Source: lifecycle event from child channel **%s**\n", source.ChildChannel)
 	case channel.SourceInitialMessage:
-		contextSection += "Source: the brief this channel was created with\n"
+		contextSection += "Source: the brief this channel was created with"
+		if source.FromChannel != "" {
+			contextSection += fmt.Sprintf(", by **%s**", source.FromChannel)
+		}
+		contextSection += "\n"
 	case channel.SourceResume:
 		contextSection += "Source: auto-resume after interrupted turn\n"
 	default:
@@ -467,6 +471,8 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		promptText = opts.ResumeNotice + promptText
 	}
 
+	unattended := !isUserMessage(msg)
+	promptTool := permissionPromptToolFor(opts, ch, unattended)
 	args := buildArgs(buildArgsParams{
 		Options:              opts,
 		Model:                model,
@@ -474,7 +480,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		OutputStyle:          resolveOutputStyleForChannel(opts, msg.ChannelID),
 		TurnSettings:         resolveTurnSettingsForChannel(opts, msg.ChannelID),
 		Unattended:           !isUserMessage(msg),
-		PermissionPromptTool: permissionPromptToolFor(opts, ch),
+		PermissionPromptTool: promptTool,
 		SessionID:            sessionID,
 		SystemPrompt:         systemPrompt,
 		Prompt:               promptText,
@@ -599,7 +605,13 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	}
 	cliStarted := time.Now()
 
-	newSessionID, err := streamResponse(ctx, opts, tw, stdout, allowed, msg.ChannelID, cliStarted)
+	offerable := allowed
+	if promptTool != "" {
+		// The user already answered every prompt this turn, or let it time out;
+		// offering the same tools again after the turn would ask them twice.
+		offerable = nil
+	}
+	newSessionID, err := streamResponse(ctx, opts, tw, stdout, offerable, msg.ChannelID, cliStarted)
 	// Sent even after a stop, so the reply shown as a draft is not lost.
 	if flushErr := tw.flushDraft(); flushErr != nil {
 		err = errors.Join(err, flushErr)
@@ -733,10 +745,8 @@ func allowedEnvVar(key string) bool {
 }
 
 // streamResponse parses stream-json events and sends them to the channel in
-// real time. Returns the session ID captured from init/result events.
-// allowedTools is the resolved allowed tool list for the channel — when
-// non-empty, tool_use events for tools not in this list are tracked and
-// returned as a ToolsDeniedError after the turn completes.
+// real time. Returns the session ID captured from init/result events. Tools the
+// CLI refused that are missing from allowedTools come back as a ToolsDeniedError.
 func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Reader, allowedTools []claudecli.Tool, channelID channel.ChannelID, cliStarted time.Time) (string, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 256*1024), 10*1024*1024)
@@ -838,7 +848,7 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 					return "", err
 				}
 			case claudecli.SystemSubtypePermissionDenied:
-				if err := tw.write(phaseStatus, fmt.Sprintf("\n🚫 %s is not allowed here\n", sys.ToolName)); err != nil {
+				if err := tw.write(phaseStatus, fmt.Sprintf("\n🚫 %s call was refused\n", sys.ToolName)); err != nil {
 					return "", err
 				}
 			case claudecli.SystemSubtypeCompactBoundary:
@@ -1037,6 +1047,10 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				slog.Warn("failed to parse result event", "err", err)
 				continue
 			}
+			if contextTokens > 0 && opts.OnContextSize != nil {
+				// Recorded for a failed turn too: the measurement stands either way.
+				opts.OnContextSize(tw.ch.Info().Name, contextTokens)
+			}
 			if result.IsError {
 				slog.Error("claude result error", "channel", channelID,
 					"subtype", result.Subtype, "result", result.Result)
@@ -1052,13 +1066,10 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			if result.SessionID != "" && sessionID == "" {
 				sessionID = result.SessionID
 			}
-			if contextTokens > 0 && opts.OnContextSize != nil {
-				opts.OnContextSize(tw.ch.Info().Name, contextTokens)
-			}
-			// The CLI's own record of what it refused. It also holds refusals by a
-			// hook or by the user, which re-running with the tool allowed would not
-			// change, so only tools missing from the channel's list are offered.
 			if len(allowedSet) > 0 {
+				// The CLI's own record of what it refused. It also holds refusals by a
+				// hook or by the user, which re-running with the tool allowed would not
+				// change, so only tools missing from the channel's list are offered.
 				for _, denial := range result.PermissionDenials {
 					if !allowedSet[claudecli.Tool(denial.ToolName)] {
 						deniedToolSet[denial.ToolName] = true
@@ -1114,16 +1125,11 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 	return sessionID, nil
 }
 
-// formatMCPProblems names each of tclaw's MCP servers that did not connect and each
-// config entry the CLI skipped, or is empty when there are none. Without it a server
-// that failed is simply missing for the turn, with nothing saying so.
+// formatMCPProblems names each MCP server that did not connect and each config entry the
+// CLI skipped, or is empty when there are none.
 func formatMCPProblems(sys claudecli.SystemEvent) string {
 	var b strings.Builder
 	for _, server := range sys.MCPServers {
-		if server.Source != claudecli.MCPServerSourceConfigFlag {
-			// Not one of tclaw's, e.g. a claude.ai connector.
-			continue
-		}
 		switch server.Status {
 		case claudecli.MCPServerConnected, claudecli.MCPServerPending:
 		default:
@@ -1197,10 +1203,10 @@ func friendlyErrorMessage(raw string, subtype claudecli.ResultSubtype) string {
 	}
 }
 
-// permissionPromptToolFor is the prompt tool to use on ch: only a channel with buttons can be
-// answered while the turn is still running.
-func permissionPromptToolFor(opts Options, ch channel.Channel) claudecli.Tool {
-	if _, ok := ch.(channel.Prompter); !ok {
+// permissionPromptToolFor is the prompt tool to use for a turn on ch, or "" for none. Only a
+// channel with buttons can be answered mid-turn, and in dontAsk mode the CLI never asks.
+func permissionPromptToolFor(opts Options, ch channel.Channel, unattended bool) claudecli.Tool {
+	if _, ok := ch.(channel.Prompter); !ok || unattended || opts.PermissionMode == claudecli.PermissionDontAsk {
 		return ""
 	}
 	return opts.PermissionPromptTool

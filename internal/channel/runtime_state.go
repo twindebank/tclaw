@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -40,7 +41,7 @@ type RuntimeState struct {
 	ContextTokens int `json:"context_tokens,omitempty"`
 
 	// ContextMeasuredAt is when ContextTokens was taken.
-	ContextMeasuredAt time.Time `json:"context_measured_at,omitempty"`
+	ContextMeasuredAt time.Time `json:"context_measured_at,omitzero"`
 }
 
 // PendingActionKind identifies what a pending confirmation will do.
@@ -80,6 +81,19 @@ type PendingAction struct {
 	// PromptID is carried by the prompt's buttons, so only a press on this
 	// prompt's buttons answers it.
 	PromptID string `json:"prompt_id,omitempty"`
+}
+
+// ErrPromptWaiting is returned when a confirmation is asked for while another is still open:
+// replacing it would change the question under the user.
+var ErrPromptWaiting = errors.New("another confirmation is waiting for the user's answer; try again once they have answered it")
+
+// ArmPendingAction sets pending on rs unless an unexpired confirmation is already open.
+func ArmPendingAction(rs *RuntimeState, pending *PendingAction, now time.Time) error {
+	if rs.PendingAction != nil && !rs.PendingAction.Expired(now) {
+		return ErrPromptWaiting
+	}
+	rs.PendingAction = pending
+	return nil
 }
 
 // Expired reports whether the confirmation window has passed.

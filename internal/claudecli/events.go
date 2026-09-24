@@ -113,7 +113,6 @@ type SystemEvent struct {
 type MCPServerState struct {
 	Name   string          `json:"name"`
 	Status MCPServerStatus `json:"status"`
-	Source MCPServerSource `json:"source"`
 }
 
 // MCPServerStatus is whether an MCP server connected.
@@ -126,16 +125,9 @@ const (
 	MCPServerNeedsAuth MCPServerStatus = "needs-auth"
 )
 
-// MCPServerSource is where an MCP server's configuration came from.
-type MCPServerSource string
-
-// MCPServerSourceConfigFlag is a server from --mcp-config, which is where tclaw's own come from.
-const MCPServerSourceConfigFlag MCPServerSource = "dynamic"
-
 // MCPServerError is an --mcp-config entry the CLI skipped as invalid.
 type MCPServerError struct {
 	Name    string `json:"name"`
-	Type    string `json:"type"`
 	Message string `json:"message"`
 }
 

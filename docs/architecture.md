@@ -80,7 +80,10 @@ The hooks are registered in each user's `settings.json`, which is **mounted read
 the same protection that stops a prompt injection installing its own `SessionStart` hook stops one
 turning these off. The CLI's working directory is the agent's memory, where a `.claude/settings.json`
 the agent wrote would load as project settings and could switch every hook off or allow tools the
-channel does not; tclaw keeps nothing in that `.claude/`, so it is mounted read-only as well. The registrations are rebuilt from `hooks.Manifest` on every boot, so a hook cannot
+channel does not; tclaw keeps nothing in that `.claude/`, so the sandbox sees it as an empty read-only
+directory. For the same reason the CLI runs with `--strict-mcp-config`, using only the MCP servers
+tclaw passes: a `.mcp.json` the agent wrote is ignored, and so are claude.ai connectors, which tclaw
+does not use. The registrations are rebuilt from `hooks.Manifest` on every boot, so a hook cannot
 be implemented and left unregistered. Commands carry the binary path in full: a hook runs under a shell
 that reads no profile, so a command relying on an environment variable runs nothing, on every tool call.
 
@@ -103,8 +106,11 @@ cannot draw a button of its own: its replies have any button markup escaped befo
 On a channel with buttons, a tool call that needs approval is also asked about **mid-turn**. The CLI's
 `--permission-prompt-tool` is `permission_prompt`, a tclaw MCP tool that is also in `--disallowedTools`:
 the CLI still calls it, the model cannot. It sends the prompt, and the router's message bridge, which
-keeps reading while a turn runs, hands the press straight to the waiting call. No answer in four minutes
-refuses the call, keeping inside the CLI's five-minute limit on a silent MCP call. A turn nobody started
+keeps reading while a turn runs, hands the press straight to the waiting call. The prompt shows the
+call's whole input, and an input too long to show in full is refused rather than shown in part. No
+answer in four minutes refuses the call, keeping inside the CLI's five-minute limit on a silent MCP
+call, and refuses the rest of that turn's prompts at once, so an absent user holds up their other
+channels for one wait rather than one per call. A turn nobody started
 never asks; it passes `--permission-prompts none` and is refused instead. In `dontAsk` mode the CLI
 refuses without asking, and the approval offer after the turn, which re-runs it, is what remains.
 

@@ -17,17 +17,26 @@ import (
 // tool call needs the user's approval. The model is kept from calling it with --disallowedTools.
 const ToolPermissionPrompt = "permission_prompt"
 
-// permissionPromptTimeout is how long a turn waits for an answer before the call is refused.
-// It stays under the CLI's five-minute limit on a silent MCP call, and the user's other
-// channels wait behind the turn for as long as it runs.
+// permissionPromptTimeout is how long a call waits for an answer, inside the CLI's five-minute
+// limit on a silent MCP call. The user's other channels wait behind the turn meanwhile.
 const permissionPromptTimeout = 4 * time.Minute
 
-// permissionPrompts holds the approvals the CLI is waiting on, by prompt id. A button press
-// reaches it from the router's message bridge, which reads while a turn runs; the agent's
-// own queue only reads between turns.
+// permissionPrompts holds the approvals the CLI is waiting on, by prompt id, for the router's
+// message bridge to answer: it reads while a turn runs, and the agent's queue does not.
 type permissionPrompts struct {
 	mu      sync.Mutex
 	waiting map[string]chan channel.PromptReply
+
+	// unanswered is set once a prompt times out, and refuses the rest of that turn's prompts
+	// at once, so a turn cannot hold the user's other channels for four minutes a call.
+	unanswered bool
+}
+
+// newTurn clears what the last turn left, at the start of each one.
+func (p *permissionPrompts) newTurn() {
+	p.mu.Lock()
+	p.unanswered = false
+	p.mu.Unlock()
 }
 
 func newPermissionPrompts() *permissionPrompts {
@@ -62,6 +71,18 @@ func (p *permissionPrompts) await(promptID string) chan channel.PromptReply {
 	p.waiting[promptID] = reply
 	p.mu.Unlock()
 	return reply
+}
+
+func (p *permissionPrompts) markUnanswered() {
+	p.mu.Lock()
+	p.unanswered = true
+	p.mu.Unlock()
+}
+
+func (p *permissionPrompts) alreadyUnanswered() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.unanswered
 }
 
 func (p *permissionPrompts) forget(promptID string) {
@@ -122,20 +143,31 @@ func askPermission(ctx context.Context, p permissionPromptParams, request permis
 		slog.Error("permission prompt with no live channel to ask on", "tool", request.ToolName)
 		return permissionDecision{Behavior: permissionDeny, Message: "There was no channel to ask the user on, so the call was refused."}
 	}
-	if _, ok := ch.(channel.Prompter); !ok {
+	prompter, ok := ch.(channel.Prompter)
+	if !ok {
 		// A typed reply would wait in the queue until this turn ends, so without
 		// buttons there is no way to answer in time.
 		return permissionDecision{Behavior: permissionDeny, Message: "This channel cannot ask for approval during a turn, so the call was refused."}
+	}
+	if p.Prompts.alreadyUnanswered() {
+		return permissionDecision{Behavior: permissionDeny, Message: "An earlier approval this turn went unanswered, so the user is away; the call was refused."}
+	}
+	input := strings.TrimSpace(string(request.Input))
+	if n := len([]rune(input)); n > permissionPromptInputMax {
+		// The user approves what they are shown. Showing only the start would let
+		// the rest of the call through unseen.
+		return permissionDecision{Behavior: permissionDeny, Message: fmt.Sprintf(
+			"The call's input is %d characters, too long to show the user in full for approval (the limit is %d). Split it into smaller calls.",
+			n, permissionPromptInputMax)}
 	}
 
 	promptID := channel.NewPromptID()
 	reply := p.Prompts.await(promptID)
 	defer p.Prompts.forget(promptID)
-	if err := channel.Ask(ctx, channel.AskParams{
-		Channel:  ch,
-		Text:     permissionPromptText(request),
+	if _, err := prompter.SendPrompt(ctx, channel.SendPromptParams{
+		Text:     permissionPromptText(request.ToolName, input),
 		PromptID: promptID,
-		SendText: func(context.Context, string) error { return fmt.Errorf("channel %s has no buttons", chID) },
+		Replies:  []channel.PromptReply{channel.ReplyYes, channel.ReplyNo},
 	}); err != nil {
 		slog.Error("failed to ask for tool approval", "channel", chID, "tool", request.ToolName, "err", err)
 		return permissionDecision{Behavior: permissionDeny, Message: "The approval prompt could not be sent, so the call was refused."}
@@ -150,7 +182,12 @@ func askPermission(ctx context.Context, p permissionPromptParams, request permis
 	case <-ctx.Done():
 		return permissionDecision{Behavior: permissionDeny, Message: "The turn ended before the user answered."}
 	case <-time.After(permissionPromptTimeout):
-		return permissionDecision{Behavior: permissionDeny, Message: "The user did not answer within 4 minutes, so the call was refused."}
+		p.Prompts.markUnanswered()
+		if _, err := ch.Send(ctx, fmt.Sprintf("⌛ No answer in %s, so the %s call was refused.", permissionPromptTimeout, request.ToolName), channel.SendOpts{}); err != nil {
+			slog.Warn("failed to say an approval timed out", "channel", chID, "err", err)
+		}
+		return permissionDecision{Behavior: permissionDeny, Message: fmt.Sprintf(
+			"The user did not answer within %s, so the call was refused.", permissionPromptTimeout)}
 	}
 }
 
@@ -164,16 +201,13 @@ func channelIDByName(channels map[channel.ChannelID]channel.Channel, name string
 	return ""
 }
 
-// permissionPromptInputMax caps how much of a tool's input the prompt shows.
-const permissionPromptInputMax = 600
+// permissionPromptInputMax is the longest input the prompt shows, in characters: comfortably
+// inside a Telegram message with the rest of the prompt around it.
+const permissionPromptInputMax = 3000
 
-// permissionPromptText names the tool and shows what it would be called with, so the user is
-// approving a specific call rather than a tool in general.
-func permissionPromptText(request permissionRequest) string {
+// permissionPromptText names the tool and shows the whole input it would be called with, so
+// the user is approving a specific call rather than a tool in general.
+func permissionPromptText(toolName, input string) string {
 	// Shown as inline code, which a backtick in the input would end early.
-	input := strings.ReplaceAll(strings.TrimSpace(string(request.Input)), "`", "'")
-	if runes := []rune(input); len(runes) > permissionPromptInputMax {
-		input = string(runes[:permissionPromptInputMax]) + "…"
-	}
-	return fmt.Sprintf("🔐 Allow **%s**?\n\n`%s`", request.ToolName, input)
+	return fmt.Sprintf("🔐 Allow **%s**?\n\n`%s`", toolName, strings.ReplaceAll(input, "`", "'"))
 }

@@ -130,7 +130,8 @@ const (
 type MessageSourceInfo struct {
 	Source MessageSource `json:"source"`
 
-	// FromChannel is the name of the source channel (set when Source == SourceChannel).
+	// FromChannel is the name of the source channel: the sender for SourceChannel, the creator
+	// for SourceInitialMessage when it had one.
 	FromChannel string `json:"from_channel,omitempty"`
 
 	// ScheduleName is the schedule's human-readable name (set when Source == SourceSchedule).

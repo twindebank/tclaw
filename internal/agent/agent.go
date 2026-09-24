@@ -66,11 +66,9 @@ const helpText = "🛠 Commands:\n" +
 // compactPrompt is the CLI's own compact command, which print mode runs rather than sending to the model.
 const compactPrompt = "/compact"
 
-// IsControlCommand reports whether raw user text is a builtin command
-// (stop / login / auth / compact / help / fresh-session synonyms) that must be handled
-// on its own turn and never coalesced with sibling messages by the queue. The
-// queue can't import this package (agent imports queue), so the router injects
-// this classifier into the queue as QueueParams.IsControlMessage.
+// IsControlCommand reports whether text must run on its own turn and never be
+// batched with sibling messages: a built-in command or a button press. The queue
+// can't import this package, so the router injects this as QueueParams.IsControlMessage.
 func IsControlCommand(text string) bool {
 	t := strings.TrimSpace(text)
 	switch {
@@ -558,6 +556,10 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				notification = fmt.Sprintf("↩️ Message from %s channel", msg.SourceInfo.FromChannel)
 			case channel.SourceChild:
 				notification = fmt.Sprintf("👶 Event from child channel %s", msg.SourceInfo.ChildChannel)
+			case channel.SourceInitialMessage:
+				if msg.SourceInfo.FromChannel != "" {
+					notification = fmt.Sprintf("↩️ Brief from %s channel", msg.SourceInfo.FromChannel)
+				}
 			}
 			if notification != "" {
 				if _, err := opts.send(ctx, msg.ChannelID, notification); err != nil {
@@ -649,6 +651,12 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			if err := opts.done(ctx, msg.ChannelID); err != nil {
 				slog.Error("failed to close turn after auth status", "err", err)
 			}
+			continue
+		}
+
+		if f := fm.Active(msg.ChannelID); f != nil && f.Kind == FlowAuth && channel.ParseButtonPress(msg.Text) != nil {
+			// A press from an older prompt, not an answer to the sign-in steps.
+			sendStaleButtonNotice(ctx, opts, msg.ChannelID)
 			continue
 		}
 
@@ -774,10 +782,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		for {
 			select {
 			case result := <-handleDone:
-				// A turn nobody started must not replace a prompt the user is in the
-				// middle of answering, such as an OAuth login or a tool approval.
-				if (errors.Is(result.err, ErrAuthRequired) || errors.As(result.err, new(*ToolsDeniedError))) &&
-					!isUserMessage(msg) && fm.Active(msg.ChannelID) != nil {
+				if wouldReplaceOpenPrompt(msg, result.err, fm) {
 					slog.Info("leaving the open prompt alone for a turn nobody started",
 						"channel", msg.ChannelID, "err", result.err)
 					if _, sendErr := opts.send(ctx, msg.ChannelID, "⚠️ An automated message needed sign-in or a tool approval, but another prompt is waiting for you, so it was skipped."); sendErr != nil {
@@ -866,6 +871,13 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 						cancelTurn()
 						stopped = true
 						stoppedChannels[msg.ChannelID] = true
+					}
+				} else if channel.ParseButtonPress(newMsg.Text) != nil {
+					// A press that reached the agent mid-turn answers nothing: the
+					// router hands the presses that do count straight to what waits
+					// for them. Queuing it would read as if it will still take effect.
+					if _, err := opts.send(ctx, newMsg.ChannelID, staleButtonNotice); err != nil {
+						slog.Error("failed to send stale button notice", "err", err)
 					}
 				} else {
 					if opts.Queue != nil {

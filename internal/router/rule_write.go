@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"tclaw/internal/channel"
 	"tclaw/internal/memorylayout"
@@ -130,10 +131,14 @@ func newRuleWriteArmer(params armRuleWriteParams) func(context.Context, ruletool
 		}
 
 		pending := channel.NewPendingAction(channel.PendingRuleWrite, payload)
+		var armErr error
 		if err := params.RuntimeState.Update(ctx, chName, func(rs *channel.RuntimeState) {
-			rs.PendingAction = pending
+			armErr = channel.ArmPendingAction(rs, pending, time.Now())
 		}); err != nil {
 			return fmt.Errorf("arm rule confirmation: %w", err)
+		}
+		if armErr != nil {
+			return armErr
 		}
 
 		if err := channel.Ask(ctx, channel.AskParams{

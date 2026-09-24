@@ -121,15 +121,13 @@ func channelReadHandler(deps Deps) mcp.ToolHandler {
 			if ch.Telegram != nil {
 				entry.Telegram = &telegramSummary{HasToken: ch.Telegram.Token != ""}
 			}
-			if deps.RuntimeState != nil {
-				rs, err := deps.RuntimeState.Get(ctx, ch.Name)
-				if err != nil {
-					return nil, fmt.Errorf("read runtime state for %q: %w", ch.Name, err)
-				}
-				if rs.ContextTokens > 0 {
-					entry.ContextTokens = rs.ContextTokens
-					entry.ContextMeasuredAt = rs.ContextMeasuredAt.Format(time.RFC3339)
-				}
+			rs, err := deps.RuntimeState.Get(ctx, ch.Name)
+			if err != nil {
+				return nil, fmt.Errorf("read runtime state for %q: %w", ch.Name, err)
+			}
+			if rs.ContextTokens > 0 {
+				entry.ContextTokens = rs.ContextTokens
+				entry.ContextMeasuredAt = rs.ContextMeasuredAt.Format(time.RFC3339)
 			}
 			return json.Marshal(entry)
 		}

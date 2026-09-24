@@ -61,31 +61,3 @@ func TestBuildArgs_OutputStyle(t *testing.T) {
 		require.Contains(t, args, `{"outputStyle":"Odd\" name"}`)
 	})
 }
-
-func TestBuildArgs_Permissions(t *testing.T) {
-	t.Run("a turn the user started asks through the prompt tool, which the model may not call", func(t *testing.T) {
-		args := buildArgs(buildArgsParams{MaxTurns: 10, Prompt: "hello", PermissionPromptTool: "mcp__tclaw__permission_prompt"})
-
-		require.Equal(t, "mcp__tclaw__permission_prompt", flagValue(t, args, "--permission-prompt-tool"))
-		require.Equal(t, "mcp__tclaw__permission_prompt", flagValue(t, args, "--disallowedTools"))
-	})
-
-	t.Run("an unattended turn never asks, even with a prompt tool", func(t *testing.T) {
-		args := buildArgs(buildArgsParams{MaxTurns: 10, Prompt: "hello", Unattended: true, PermissionPromptTool: "mcp__tclaw__permission_prompt"})
-
-		require.NotContains(t, args, "--permission-prompt-tool")
-		require.Equal(t, "none", flagValue(t, args, "--permission-prompts"))
-	})
-
-	t.Run("an unattended turn refuses whatever would prompt", func(t *testing.T) {
-		args := buildArgs(buildArgsParams{MaxTurns: 10, Prompt: "hello", Unattended: true})
-
-		require.Equal(t, "none", flagValue(t, args, "--permission-prompts"))
-	})
-
-	t.Run("a turn the user started leaves prompting to the CLI", func(t *testing.T) {
-		args := buildArgs(buildArgsParams{MaxTurns: 10, Prompt: "hello"})
-
-		require.NotContains(t, args, "--permission-prompts")
-	})
-}

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -121,6 +122,37 @@ func TestHandleToolApprovalFlow(t *testing.T) {
 		require.NotNil(t, fm.Active("ch1"))
 		require.Contains(t, ch.sends[len(ch.sends)-1], "out of date")
 	})
+}
+
+func TestWouldReplaceOpenPrompt(t *testing.T) {
+	scheduled := channel.TaggedMessage{ChannelID: "ch1", SourceInfo: &channel.MessageSourceInfo{Source: channel.SourceSchedule}}
+	typed := channel.TaggedMessage{ChannelID: "ch1", SourceInfo: &channel.MessageSourceInfo{Source: channel.SourceUser}}
+	denied := &ToolsDeniedError{Tools: []string{"Bash"}}
+
+	withOpenApproval := func() *FlowManager {
+		fm := NewFlowManager()
+		fm.StartToolApproval("ch1", channel.TaggedMessage{ChannelID: "ch1"}, []string{"Write"}, "s1")
+		return fm
+	}
+
+	tests := []struct {
+		name string
+		msg  channel.TaggedMessage
+		err  error
+		fm   *FlowManager
+		want bool
+	}{
+		{name: "a scheduled turn denied a tool while an approval is open", msg: scheduled, err: denied, fm: withOpenApproval(), want: true},
+		{name: "a scheduled turn needing sign-in while an approval is open", msg: scheduled, err: ErrAuthRequired, fm: withOpenApproval(), want: true},
+		{name: "a scheduled turn with nothing open", msg: scheduled, err: denied, fm: NewFlowManager(), want: false},
+		{name: "the user's own turn moves them on", msg: typed, err: denied, fm: withOpenApproval(), want: false},
+		{name: "a turn that opens no prompt", msg: scheduled, err: errors.New("boom"), fm: withOpenApproval(), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, wouldReplaceOpenPrompt(tt.msg, tt.err, tt.fm))
+		})
+	}
 }
 
 func TestIsUserMessage(t *testing.T) {

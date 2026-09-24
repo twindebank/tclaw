@@ -669,7 +669,7 @@ func TestStreamResponse(t *testing.T) {
 		require.Equal(t, []string{"API Error: overloaded"}, finalTexts(ch))
 	})
 
-	t.Run("names tclaw's MCP servers that did not connect, and config entries skipped", func(t *testing.T) {
+	t.Run("names MCP servers that did not connect, and config entries skipped", func(t *testing.T) {
 		ch := &mockChannel{}
 		tw := newTestTurnWriter(ch)
 
@@ -677,13 +677,13 @@ func TestStreamResponse(t *testing.T) {
 			`{"type":"system","subtype":"init","session_id":"s1","mcp_servers":[`+
 				`{"name":"tclaw","status":"connected","source":"dynamic"},`+
 				`{"name":"strava","status":"failed","source":"dynamic"},`+
-				`{"name":"claude.ai Gmail","status":"needs-auth","source":"claudeai"}],`+
+				`{"name":"calendar","status":"pending","source":"dynamic"}],`+
 				`"mcp_server_errors":[{"name":"broken","type":"url_missing_type","message":"has a url but no type"}]}`,
 		)
 
 		require.Contains(t, ch.sends[0], "⚠️ MCP server strava is unavailable this turn (failed)")
 		require.Contains(t, ch.sends[0], "⚠️ MCP server broken was skipped: has a url but no type")
-		require.NotContains(t, ch.sends[0], "Gmail", "a claude.ai connector is not tclaw's to report")
+		require.NotContains(t, ch.sends[0], "calendar", "a server still connecting may yet arrive")
 	})
 
 	t.Run("says the CLI is retrying a failed request", func(t *testing.T) {
@@ -710,7 +710,7 @@ func TestStreamResponse(t *testing.T) {
 		var denied *ToolsDeniedError
 		require.ErrorAs(t, err, &denied)
 		require.Equal(t, []string{"Bash"}, denied.Tools, "Write is allowed, so a hook or the user refused it")
-		require.Contains(t, ch.sends[0], "🚫 Bash is not allowed here")
+		require.Contains(t, ch.sends[0], "🚫 Bash call was refused")
 	})
 
 	t.Run("reports the conversation's size from the last main-thread request", func(t *testing.T) {

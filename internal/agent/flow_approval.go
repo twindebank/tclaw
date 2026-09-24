@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 
@@ -71,14 +72,25 @@ func handleToolApprovalFlow(
 	}
 }
 
+// staleButtonNotice answers a press whose prompt nothing is waiting on any more.
+const staleButtonNotice = "⌛ That button is out of date: its prompt was already answered or has expired."
+
 // sendStaleButtonNotice tells the user a button they pressed answers nothing any more.
 func sendStaleButtonNotice(ctx context.Context, opts Options, chID channel.ChannelID) {
-	if _, err := opts.send(ctx, chID, "⌛ That button is out of date: its prompt was already answered or has expired."); err != nil {
+	if _, err := opts.send(ctx, chID, staleButtonNotice); err != nil {
 		slog.Error("failed to send stale button notice", "err", err)
 	}
 	if err := opts.done(ctx, chID); err != nil {
 		slog.Error("failed to close turn after stale button notice", "err", err)
 	}
+}
+
+// wouldReplaceOpenPrompt reports whether a turn's outcome would open a prompt over one the user
+// is in the middle of answering, such as an OAuth login or a tool approval. Only a turn nobody
+// started is held back; the user's own turn replacing their own prompt is them moving on.
+func wouldReplaceOpenPrompt(msg channel.TaggedMessage, err error, fm *FlowManager) bool {
+	opensPrompt := errors.Is(err, ErrAuthRequired) || errors.As(err, new(*ToolsDeniedError))
+	return opensPrompt && !isUserMessage(msg) && fm.Active(msg.ChannelID) != nil
 }
 
 // isUserMessage reports whether a message was typed or pressed by the user, which is the only

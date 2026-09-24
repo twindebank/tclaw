@@ -53,7 +53,7 @@ func injectInitialMessages(ctx context.Context, userID user.ID, configWriter *co
 		msg := channel.TaggedMessage{
 			ChannelID:  targetID,
 			Text:       cfg.InitialMessage,
-			SourceInfo: &channel.MessageSourceInfo{Source: channel.SourceInitialMessage},
+			SourceInfo: &channel.MessageSourceInfo{Source: channel.SourceInitialMessage, FromChannel: cfg.Parent},
 		}
 		select {
 		case output <- msg:

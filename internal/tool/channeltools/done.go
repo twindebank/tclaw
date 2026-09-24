@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"tclaw/internal/channel"
 	"tclaw/internal/mcp"
@@ -111,10 +112,14 @@ func channelDoneHandler(deps Deps) mcp.ToolHandler {
 			// nothing is armed, slip past the intercept, and reach the agent — which
 			// would then process and answer its own confirmation prompt.
 			pending := channel.NewPendingAction(channel.PendingChannelDone, nil)
+			var armErr error
 			if updateErr := deps.RuntimeState.Update(ctx, a.ChannelName, func(rs *channel.RuntimeState) {
-				rs.PendingAction = pending
+				armErr = channel.ArmPendingAction(rs, pending, time.Now())
 			}); updateErr != nil {
 				return nil, fmt.Errorf("arm teardown confirmation for channel %q: %w", a.ChannelName, updateErr)
+			}
+			if armErr != nil {
+				return nil, armErr
 			}
 
 			if promptErr := provisioner.SendTeardownPrompt(ctx, token, runtimeState.PlatformState, pending.PromptID); promptErr != nil {
