@@ -113,7 +113,7 @@ func TestHandleToolApprovalFlow(t *testing.T) {
 		fm, approval, ch, opts := approvalSetup(t)
 
 		result := handleToolApprovalFlow(context.Background(), opts, fm, approval, ch,
-			channel.TaggedMessage{ChannelID: "ch1", Text: channel.ButtonPressText(channel.ButtonPress{PromptID: "older", Reply: channel.ReplyYes})},
+			channel.TaggedMessage{ChannelID: "ch1", Text: channel.ButtonPressText(channel.ButtonPress{PromptID: channel.NewPromptID(), Reply: channel.ReplyYes})},
 			map[channel.ChannelID]string{})
 
 		require.True(t, result.Handled)
@@ -124,12 +124,22 @@ func TestHandleToolApprovalFlow(t *testing.T) {
 }
 
 func TestIsUserMessage(t *testing.T) {
-	t.Run("only the user's own messages may answer a prompt", func(t *testing.T) {
-		require.True(t, isUserMessage(channel.TaggedMessage{}))
-		require.True(t, isUserMessage(channel.TaggedMessage{SourceInfo: &channel.MessageSourceInfo{Source: channel.SourceUser}}))
-		require.False(t, isUserMessage(channel.TaggedMessage{SourceInfo: &channel.MessageSourceInfo{Source: channel.SourceChannel}}))
-		require.False(t, isUserMessage(channel.TaggedMessage{SourceInfo: &channel.MessageSourceInfo{Source: channel.SourceSchedule}}))
-	})
+	tests := []struct {
+		name   string
+		source *channel.MessageSourceInfo
+		want   bool
+	}{
+		{name: "no source is the user's", source: nil, want: true},
+		{name: "typed by the user", source: &channel.MessageSourceInfo{Source: channel.SourceUser}, want: true},
+		{name: "sent from another channel", source: &channel.MessageSourceInfo{Source: channel.SourceChannel}, want: false},
+		{name: "fired by a schedule", source: &channel.MessageSourceInfo{Source: channel.SourceSchedule}, want: false},
+		{name: "a channel's creation brief", source: &channel.MessageSourceInfo{Source: channel.SourceInitialMessage}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, isUserMessage(channel.TaggedMessage{SourceInfo: tt.source}))
+		})
+	}
 }
 
 // --- helpers ---

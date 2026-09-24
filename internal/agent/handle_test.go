@@ -362,6 +362,21 @@ func TestWriteSplit(t *testing.T) {
 		require.Equal(t, []string{"Half an answer"}, ch.sends, "the stop cancelled the turn, not the reply the user watched")
 	})
 
+	t.Run("drafts: keeps the draft when a stop lands during an update, and sends it at the end", func(t *testing.T) {
+		ch := &draftChannel{}
+		ctx, cancel := context.WithCancel(context.Background())
+		tw := newTurnWriter(ctx, Options{Channels: map[channel.ChannelID]channel.Channel{testChannelID: ch}}, testChannelID, ch)
+
+		require.NoError(t, tw.write(phaseResponse, "Half"))
+		cancel()
+		tw.lastDraft = time.Time{} // the next update goes out, and fails on the stopped turn
+		require.NoError(t, tw.write(phaseResponse, " an answer"))
+		require.Empty(t, ch.sends, "a failed update on a stopped turn is not a reason to send early")
+		require.NoError(t, tw.flushDraft())
+
+		require.Equal(t, []string{"Half an answer"}, ch.sends)
+	})
+
 	t.Run("drafts: holds back updates inside the interval, and sends the whole reply at the end", func(t *testing.T) {
 		ch := &draftChannel{}
 		tw := newTurnWriter(context.Background(), Options{Channels: map[channel.ChannelID]channel.Channel{testChannelID: ch}}, testChannelID, ch)
@@ -775,7 +790,10 @@ type draftChannel struct {
 	draftErr error
 }
 
-func (d *draftChannel) StreamDraft(_ context.Context, p channel.StreamDraftParams) error {
+func (d *draftChannel) StreamDraft(ctx context.Context, p channel.StreamDraftParams) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if d.draftErr != nil {
 		return d.draftErr
 	}

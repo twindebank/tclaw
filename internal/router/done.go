@@ -2,7 +2,6 @@ package router
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -33,34 +32,6 @@ type confirmParams struct {
 
 	OnChannelChange func()
 	MemoryDir       string
-}
-
-// confirmationPrompt is a pending action's question, sent to the chat.
-type confirmationPrompt struct {
-	Channel   channel.Channel
-	ChannelID channel.ChannelID
-	Text      string
-	PromptID  string
-	Send      func(context.Context, channel.ChannelID, string, channel.SendOpts) (channel.MessageID, error)
-}
-
-// sendConfirmationPrompt asks with yes/no buttons where the channel has them, and as plain text
-// otherwise. Typing the answer works either way.
-func sendConfirmationPrompt(ctx context.Context, p confirmationPrompt) error {
-	if prompter, ok := p.Channel.(channel.Prompter); ok {
-		if _, err := prompter.SendPrompt(ctx, channel.SendPromptParams{
-			Text:     p.Text,
-			PromptID: p.PromptID,
-			Replies:  []channel.PromptReply{channel.ReplyYes, channel.ReplyNo},
-		}); err != nil {
-			return fmt.Errorf("send prompt with buttons: %w", err)
-		}
-		return nil
-	}
-	if _, err := p.Send(ctx, p.ChannelID, p.Text, channel.SendOpts{}); err != nil {
-		return fmt.Errorf("send prompt: %w", err)
-	}
-	return nil
 }
 
 // interceptPendingConfirmation checks whether an inbound message answers a

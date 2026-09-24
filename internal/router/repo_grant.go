@@ -158,7 +158,15 @@ func newRepoGrantArmer(params armRepoGrantParams) func(context.Context, repotool
 			return fmt.Errorf("arm grant confirmation: %w", err)
 		}
 
-		if err := sendConfirmationPrompt(ctx, confirmationPrompt{Channel: ch, ChannelID: chID, Text: repoGrantPrompt(request), PromptID: pending.PromptID, Send: params.Send}); err != nil {
+		if err := channel.Ask(ctx, channel.AskParams{
+			Channel:  ch,
+			Text:     repoGrantPrompt(request),
+			PromptID: pending.PromptID,
+			SendText: func(ctx context.Context, text string) error {
+				_, err := params.Send(ctx, chID, text, channel.SendOpts{})
+				return err
+			},
+		}); err != nil {
 			// Roll back so the channel isn't left armed for a grant the user
 			// was never actually asked about.
 			if clearErr := params.RuntimeState.Update(ctx, chName, func(rs *channel.RuntimeState) {

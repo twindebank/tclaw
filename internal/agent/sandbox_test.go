@@ -15,8 +15,10 @@ func TestWrapWithSandbox_CommandStructure(t *testing.T) {
 	original.Env = []string{"PATH=/usr/bin", "HOME=/data/tclaw/alice/home"}
 
 	paths := sandboxPaths{
-		ReadWrite: []string{"/data/tclaw/alice/memory", "/data/tclaw/alice/home"},
-		ReadOnly:  []string{"/usr", "/bin", "/lib"},
+		ReadWrite:       []string{"/data/tclaw/alice/memory", "/data/tclaw/alice/home"},
+		ReadOnly:        []string{"/usr", "/bin", "/lib"},
+		ReadOnlyOverlay: []string{"/data/tclaw/alice/memory/rules"},
+		Sealed:          []string{"/data/tclaw/alice/memory/.claude"},
 	}
 
 	wrapped := wrapWithSandbox(context.Background(), original, paths)
@@ -42,6 +44,21 @@ func TestWrapWithSandbox_CommandStructure(t *testing.T) {
 			}
 			require.True(t, found, "expected --bind %s %s in bwrap args", p, p)
 		}
+	})
+
+	t.Run("binds a read-only overlay after the writable parent it sits in", func(t *testing.T) {
+		parent := slices.Index(args, "/data/tclaw/alice/memory")
+		overlay := slices.Index(args, "/data/tclaw/alice/memory/rules")
+		require.Greater(t, overlay, parent, "bwrap applies binds in order, so the later one wins")
+		require.Equal(t, "--ro-bind-try", args[overlay-1])
+	})
+
+	t.Run("seals a path as an empty read-only directory", func(t *testing.T) {
+		sealed := "/data/tclaw/alice/memory/.claude"
+		i := slices.Index(args, sealed)
+		require.GreaterOrEqual(t, i, 1)
+		require.Equal(t, []string{"--tmpfs", sealed, "--remount-ro", sealed}, args[i-1:i+3],
+			"whatever is already there stays hidden, and nothing new can be written")
 	})
 
 	t.Run("sets chdir to working directory", func(t *testing.T) {

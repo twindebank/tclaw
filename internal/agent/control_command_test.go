@@ -17,6 +17,7 @@ func TestIsControlCommand(t *testing.T) {
 		{name: "auth", text: "auth", want: true},
 		{name: "compact", text: "compact", want: true},
 		{name: "help", text: "help", want: true},
+		{name: "button press is never batched", text: "🔘 yes (prompt abc)", want: true},
 		{name: "fresh session new", text: "new", want: true},
 		{name: "fresh session synonym reset", text: "reset", want: true},
 		{name: "fresh session synonym clear", text: "clear", want: true},

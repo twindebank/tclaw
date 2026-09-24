@@ -81,6 +81,11 @@ func IsControlCommand(text string) bool {
 		strings.EqualFold(t, CmdHelp):
 		return true
 	}
+	if channel.ParseButtonPress(t) != nil {
+		// Joined with a message typed straight after it, a press would no longer
+		// read as one.
+		return true
+	}
 	return isFreshSessionCommand(t)
 }
 
@@ -765,6 +770,18 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		for {
 			select {
 			case result := <-handleDone:
+				// A turn nobody started must not replace a prompt the user is in the
+				// middle of answering, such as an OAuth login or a tool approval.
+				if (errors.Is(result.err, ErrAuthRequired) || errors.As(result.err, new(*ToolsDeniedError))) &&
+					!isUserMessage(msg) && fm.Active(msg.ChannelID) != nil {
+					slog.Info("leaving the open prompt alone for a turn nobody started",
+						"channel", msg.ChannelID, "err", result.err)
+					if _, sendErr := opts.send(ctx, msg.ChannelID, "⚠️ An automated message needed sign-in or a tool approval, but another prompt is waiting for you, so it was skipped."); sendErr != nil {
+						slog.Error("failed to send skipped-prompt notice", "err", sendErr)
+					}
+					goto done
+				}
+
 				// Auth failure: start the interactive auth flow.
 				if errors.Is(result.err, ErrAuthRequired) {
 					slog.Info("auth required, starting auth flow", "channel", msg.ChannelID)
@@ -789,7 +806,15 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 						toolList := strings.Join(denied.Tools, ", ")
 						prompt := fmt.Sprintf("⚠️ %s was not available on this channel.\nReply %s to retry with %s enabled, or send any other message to continue.",
 							bold(toolList), bold("approve"), bold(toolList))
-						if sendErr := sendApprovalPrompt(ctx, opts, approvalCh, msg.ChannelID, prompt, promptID); sendErr != nil {
+						if sendErr := channel.Ask(ctx, channel.AskParams{
+							Channel:  approvalCh,
+							Text:     prompt,
+							PromptID: promptID,
+							SendText: func(ctx context.Context, text string) error {
+								_, err := opts.send(ctx, msg.ChannelID, text)
+								return err
+							},
+						}); sendErr != nil {
 							slog.Error("failed to send tool approval prompt", "err", sendErr)
 						}
 					}
@@ -1204,6 +1229,9 @@ func buildArgs(p buildArgsParams) []string {
 		// A subagent's text, so the status message can show what it is doing
 		// rather than one long silent tool call.
 		"--forward-subagent-text",
+		// Only the servers tclaw passes, not a .mcp.json the agent could write into
+		// its working directory.
+		"--strict-mcp-config",
 	}
 	if p.SessionID != "" {
 		args = append(args, "--resume", p.SessionID)

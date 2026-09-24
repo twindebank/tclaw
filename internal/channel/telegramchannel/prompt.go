@@ -101,19 +101,27 @@ func (t *Telegram) handleCallbackQuery(ctx context.Context, b *bot.Bot, query *m
 		return
 	}
 
-	t.answerCallback(ctx, b, query.ID, "")
-	if msg := query.Message.Message; msg != nil {
-		// The buttons go once pressed, leaving the answer given in their place.
-		t.replaceButtons(ctx, b, msg, press.Reply)
-	}
-
 	select {
 	case out <- channel.ButtonPressText(*press):
 	case <-ctx.Done():
-	case <-time.After(30 * time.Second):
+		return
+	case <-time.After(pressHandoffTimeout):
 		slog.Warn("telegram button press dropped, pipeline blocked", "channel", t.name)
+		t.answerCallback(ctx, b, query.ID, "Not delivered, please try again")
+		return
+	}
+
+	t.answerCallback(ctx, b, query.ID, "")
+	if msg := query.Message.Message; msg != nil {
+		// Only once the press is on its way do the buttons go, leaving the answer
+		// given in their place. Whether it answered anything is for the agent.
+		t.replaceButtons(ctx, b, msg, press.Reply)
 	}
 }
+
+// pressHandoffTimeout bounds the wait to hand a press on. Telegram shows the button as loading
+// until it is answered, so this stays well short of the message pipeline's own drop timeout.
+const pressHandoffTimeout = 10 * time.Second
 
 // parsePromptCallback reads a prompt button's callback data. Nil means it is not one.
 func parsePromptCallback(data string) *channel.ButtonPress {

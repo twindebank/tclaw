@@ -346,8 +346,9 @@ users:
   lone messages). Set `"0s"` to opt out and process every message immediately.
 - The window **resets on each arrival** (a trickling album stays together), bounded by an
   internal 5s cap so a steady stream can't defer processing forever.
-- **Control commands** (`stop`, `login`, `auth`, `compact`, and the fresh-session synonyms
-  `new`/`reset`/`clear`/`delete`) are never batched — they always run on their own turn.
+- **Control commands** (`stop`, `login`, `auth`, `compact`, `help`, and the fresh-session synonyms
+  `new`/`reset`/`clear`/`delete`) and button presses are never batched — they always run on
+  their own turn.
 - Implemented once at the queue layer (`internal/queue/queue.go`), so it covers every channel
   and plain-text bursts too, not just Telegram albums.
 

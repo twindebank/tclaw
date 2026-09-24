@@ -42,7 +42,7 @@
 - [x] Show tool arguments — display tool call parameters alongside tool use events
 - [x] Chat keywords — builtin commands: `stop` (abort current response), `compact` (compact context), `new`/`reset`/`clear`/`delete` (start a fresh session), `login`/`auth` (interactive auth flow)
 - [x] Model switching — `model_get` / `model_set` MCP tools with runtime ModelFunc support
-- [ ] Chat keywords (remaining) — `help` (list commands); Telegram lists the keywords in its "/" command menu
+- [x] Chat keywords (remaining) — `help` (list commands); Telegram lists the keywords in its "/" command menu
 - [ ] Render markdown in chat — parse and render markdown formatting in the TUI client
 - [ ] Web browser tool / Selenium — give the agent the ability to browse and interact with web pages
 

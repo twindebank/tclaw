@@ -115,12 +115,15 @@ type Link struct {
 type MessageSource string
 
 const (
-	SourceUser         MessageSource = "user"         // typed by a human on the channel
-	SourceSchedule     MessageSource = "schedule"     // fired by a cron schedule
-	SourceChannel      MessageSource = "channel"      // sent from another channel via channel_send
-	SourceResume       MessageSource = "resume"       // auto-injected to continue interrupted work
-	SourceNotification MessageSource = "notification" // pushed by a notification subscription
-	SourceChild        MessageSource = "child"        // lifecycle event from a child channel
+	SourceUser     MessageSource = "user"     // typed by a human on the channel
+	SourceSchedule MessageSource = "schedule" // fired by a cron schedule
+	SourceChannel  MessageSource = "channel"  // sent from another channel via channel_send
+
+	// SourceInitialMessage is the brief a channel was created with, written by the agent.
+	SourceInitialMessage MessageSource = "initial_message"
+	SourceResume         MessageSource = "resume"       // auto-injected to continue interrupted work
+	SourceNotification   MessageSource = "notification" // pushed by a notification subscription
+	SourceChild          MessageSource = "child"        // lifecycle event from a child channel
 )
 
 // MessageSourceInfo carries attribution details for a message.

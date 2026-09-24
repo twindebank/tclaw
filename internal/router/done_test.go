@@ -176,7 +176,7 @@ func TestInterceptPendingDone(t *testing.T) {
 
 		consumed := interceptDone(
 			context.Background(),
-			doneTaggedMsg("ephemeral-id", channel.ButtonPressText(channel.ButtonPress{PromptID: "an-old-prompt", Reply: channel.ReplyYes})),
+			doneTaggedMsg("ephemeral-id", channel.ButtonPressText(channel.ButtonPress{PromptID: channel.NewPromptID(), Reply: channel.ReplyYes})),
 			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeSocket),
 			rs, cw, testUserID, ss,
 			provLookup(channel.TypeSocket, prov),

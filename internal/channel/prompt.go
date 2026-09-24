@@ -3,7 +3,6 @@ package channel
 import (
 	"context"
 	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"strings"
 )
@@ -32,13 +31,32 @@ type Prompter interface {
 	SendPrompt(ctx context.Context, p SendPromptParams) (MessageID, error)
 }
 
+// AskParams is a yes/no question for the user.
+type AskParams struct {
+	Channel  Channel
+	Text     string
+	PromptID string
+
+	// SendText sends the question as a plain message, on a channel without buttons.
+	SendText func(ctx context.Context, text string) error
+}
+
+// Ask puts a yes/no question to the user, with buttons where the channel has them. Typing the
+// answer works either way.
+func Ask(ctx context.Context, p AskParams) error {
+	prompter, ok := p.Channel.(Prompter)
+	if !ok {
+		return p.SendText(ctx, p.Text)
+	}
+	if _, err := prompter.SendPrompt(ctx, SendPromptParams{Text: p.Text, PromptID: p.PromptID, Replies: []PromptReply{ReplyYes, ReplyNo}}); err != nil {
+		return fmt.Errorf("send prompt with buttons: %w", err)
+	}
+	return nil
+}
+
 // NewPromptID returns a random prompt identifier, short enough to fit in a button's data.
 func NewPromptID() string {
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand failed: " + err.Error())
-	}
-	return hex.EncodeToString(b)
+	return rand.Text()
 }
 
 // ButtonPress is a user pressing one of a prompt's buttons.

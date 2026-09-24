@@ -92,6 +92,14 @@ a guard cannot be written that stops something without leaving the evidence a la
 same queue is where `lesson-capture` puts the user's own pushback — see the retro section in
 `docs/deployment.md` for what it captures and what it deliberately ignores.
 
+**Confirmation prompts** — tool approval, repo access, rulebook changes and channel teardown — go
+straight to the chat, and only the user's own reply answers one: a message typed on that channel, or
+a press on the prompt's buttons. A message that arrived any other way (`channel_send`, a schedule, a
+channel's creation brief) never counts. Each prompt carries a random id in its buttons' data, and a
+press answers only the prompt with that id, so an old button cannot confirm a newer prompt. A press
+counts only from an allowlisted Telegram user, and never when the allowlist is empty. The agent
+cannot draw a button of its own: its replies have any button markup escaped before they are sent.
+
 ### 4. MCP Tool Boundary
 - Per-user MCP server on localhost with random bearer token.
 - 1 MiB request body limit, audit logging, permission-gated via `tool_groups`.

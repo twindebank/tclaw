@@ -30,6 +30,10 @@ type sandboxPaths struct {
 	// parent — a repo clone scoped to another channel stays on disk but reads
 	// as empty for this turn.
 	Masked []string
+
+	// Sealed paths are masked like Masked, and the empty tmpfs is then made
+	// read-only, so nothing already there is seen and nothing new can be put there.
+	Sealed []string
 }
 
 // systemReadOnlyPaths are the minimal system paths needed for the claude CLI
@@ -87,6 +91,9 @@ func wrapWithSandbox(ctx context.Context, original *exec.Cmd, paths sandboxPaths
 	// hiding its contents. Applied last so it wins over any earlier bind.
 	for _, p := range paths.Masked {
 		bwrapArgs = append(bwrapArgs, "--tmpfs", p)
+	}
+	for _, p := range paths.Sealed {
+		bwrapArgs = append(bwrapArgs, "--tmpfs", p, "--remount-ro", p)
 	}
 
 	// Kernel filesystems and private /tmp.

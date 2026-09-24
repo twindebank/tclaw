@@ -442,6 +442,8 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		contextSection += fmt.Sprintf("Source: notification subscription (%s)\n", source.SubscriptionLabel)
 	case channel.SourceChild:
 		contextSection += fmt.Sprintf("Source: lifecycle event from child channel **%s**\n", source.ChildChannel)
+	case channel.SourceInitialMessage:
+		contextSection += "Source: the brief this channel was created with\n"
 	case channel.SourceResume:
 		contextSection += "Source: auto-resume after interrupted turn\n"
 	default:
@@ -526,16 +528,17 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 			rulesDir := memorylayout.RulesDir(opts.MemoryDir)
 
 			// The memory dir is the CLI's working directory, so its .claude/ is
-			// where project settings load from; one the agent wrote could turn the
-			// hooks off or allow tools the channel does not. tclaw keeps nothing
-			// there, so it is mounted read-only and empty-handed.
+			// where project settings load from; one the agent wrote, this turn or
+			// any earlier one, could turn the hooks off or allow tools the channel
+			// does not. tclaw keeps nothing there, so the sandbox sees it empty and
+			// cannot write to it.
 			projectConfigDir := filepath.Join(opts.MemoryDir, memorylayout.ConfigDirName)
 			for _, dir := range []string{rulesDir, projectConfigDir} {
 				if err := os.MkdirAll(dir, 0o700); err != nil {
 					return "", fmt.Errorf("create %s before sandboxing it: %w", dir, err)
 				}
 			}
-			readOnlyOverlay := append([]string{settingsPath, rulesDir, projectConfigDir}, readOnlyDirs...)
+			readOnlyOverlay := append([]string{settingsPath, rulesDir}, readOnlyDirs...)
 
 			readWrite := []string{opts.MemoryDir, opts.HomeDir}
 			readWrite = append(readWrite, opts.AddDirs...)
@@ -545,6 +548,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 				ReadOnly:        readOnly,
 				ReadOnlyOverlay: readOnlyOverlay,
 				Masked:          maskedDirs,
+				Sealed:          []string{projectConfigDir},
 			}
 			cmd = wrapWithSandbox(ctx, cmd, paths)
 		}
@@ -595,8 +599,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	cliStarted := time.Now()
 
 	newSessionID, err := streamResponse(ctx, opts, tw, stdout, allowed, msg.ChannelID, cliStarted)
-	// Even after a stop, so the reply the user watched arrive as a draft is sent
-	// rather than vanishing.
+	// Sent even after a stop, so the reply shown as a draft is not lost.
 	if flushErr := tw.flushDraft(); flushErr != nil {
 		err = errors.Join(err, flushErr)
 	}

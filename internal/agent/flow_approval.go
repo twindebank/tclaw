@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"strings"
 
@@ -70,25 +69,6 @@ func handleToolApprovalFlow(
 			FallThroughMsg: &msg,
 		}
 	}
-}
-
-// sendApprovalPrompt asks with approve and cancel buttons where the channel has them, and as
-// plain text otherwise. Typing the answer works either way.
-func sendApprovalPrompt(ctx context.Context, opts Options, ch channel.Channel, chID channel.ChannelID, text, promptID string) error {
-	if prompter, ok := ch.(channel.Prompter); ok {
-		if _, err := prompter.SendPrompt(ctx, channel.SendPromptParams{
-			Text:     text,
-			PromptID: promptID,
-			Replies:  []channel.PromptReply{channel.ReplyYes, channel.ReplyNo},
-		}); err != nil {
-			return fmt.Errorf("send approval prompt with buttons: %w", err)
-		}
-		return nil
-	}
-	if _, err := opts.send(ctx, chID, text); err != nil {
-		return fmt.Errorf("send approval prompt: %w", err)
-	}
-	return nil
 }
 
 // sendStaleButtonNotice tells the user a button they pressed answers nothing any more.
