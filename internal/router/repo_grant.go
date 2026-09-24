@@ -150,9 +150,7 @@ func newRepoGrantArmer(params armRepoGrantParams) func(context.Context, repotool
 			return fmt.Errorf("encode grant: %w", err)
 		}
 
-		if err := params.RuntimeState.Update(ctx, chName, func(rs *channel.RuntimeState) {
-			rs.PendingAction = channel.NewPendingAction(channel.PendingRepoGrant, payload)
-		}); err != nil {
+		if err := params.RuntimeState.ArmPendingAction(ctx, chName, channel.NewPendingAction(channel.PendingRepoGrant, payload)); err != nil {
 			return fmt.Errorf("arm grant confirmation: %w", err)
 		}
 

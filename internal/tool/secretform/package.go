@@ -20,6 +20,9 @@ type Package struct {
 	// ResolveSlotField lets forms fill a declared credential slot. Nil leaves
 	// forms able to write bare keys only.
 	ResolveSlotField ResolveSlotField
+
+	// ArmSecretDelete asks the user to confirm removing a stored secret.
+	ArmSecretDelete func(ctx context.Context, request DeleteRequest) error
 }
 
 func (p *Package) Name() string { return "secret_form" }
@@ -53,6 +56,8 @@ func (p *Package) Register(handler *mcp.Handler, regCtx toolpkg.RegistrationCont
 		BaseURL:          p.BaseURL,
 		RegisterHandler:  p.RegisterHandler,
 		ResolveSlotField: p.ResolveSlotField,
+		ArmSecretDelete:  p.ArmSecretDelete,
+		StateStore:       regCtx.StateStore,
 	}
 
 	RegisterTools(handler, deps)

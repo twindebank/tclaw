@@ -73,7 +73,8 @@
 - [x] Remote MCP channel scope is stored as a list of channel names. A registration that names none reaches every channel, and boot reports it.
 - [x] Prune a deleted channel from remote MCP registrations — every path that deletes a channel (`channel_delete`, `channel_done`, the user-confirmed teardown, the ephemeral reaper) takes the name off the servers scoped to it. A server the channel was the *only* scope of keeps the name and is reported instead, because emptying its list would make it reach every channel. `remote_mcp_update` still accepts a stale name so those, and any left from before this shipped, can be dropped.
 - [ ] Remote MCP tools in one-shot runs — `tclaw oneshot` builds the tool registry without a remote MCP manager or a channel list, so the `remote_mcp_*` tools are skipped there while every other package is registered. Wire both in, or decide one-shot does not need them.
-- [ ] Remove a runtime secret — `credential_clear` only covers declared credential slots, so a stray key (a token collected for a registration that was then replaced) can only be deleted by hand on the volume.
+- [x] Remove a runtime secret — `secret_form_delete` asks the user and the router deletes on their reply. Only keys the user supplied through a secret form are deletable; a package's own keys and credential slots are not.
+- [ ] Record user-supplied secrets from before the allowlist — a key collected through a form before `secret_form_delete` shipped was never recorded, so it cannot be deleted through the tool. Either backfill the record by hand or accept that older strays are cleared on the volume.
 - [x] OAuth connections — provider-based OAuth flow via callback server, credential encryption, per-user isolation
 - [x] Google Workspace — Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks via `gws` binary
 

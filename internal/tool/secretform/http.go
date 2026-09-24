@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"tclaw/internal/libraries/secret"
+	"tclaw/internal/libraries/store"
 )
 
 // setSecurityHeaders applies standard security headers to all form responses.
@@ -24,7 +25,7 @@ func setSecurityHeaders(w http.ResponseWriter) {
 
 // newFormHTTPHandler returns an http.Handler that serves the form (GET) and
 // processes submissions (POST) at /secret-form/{state}.
-func newFormHTTPHandler(secretStore secret.Store, pending *sync.Map) http.Handler {
+func newFormHTTPHandler(secretStore secret.Store, stateStore store.Store, pending *sync.Map) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		setSecurityHeaders(w)
 
@@ -61,7 +62,7 @@ func newFormHTTPHandler(secretStore secret.Store, pending *sync.Map) http.Handle
 		case http.MethodGet:
 			handleFormGET(w, req)
 		case http.MethodPost:
-			handleFormPOST(w, r, req, secretStore)
+			handleFormPOST(w, r, req, secretStore, stateStore)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -75,7 +76,7 @@ func handleFormGET(w http.ResponseWriter, req *PendingRequest) {
 	}
 }
 
-func handleFormPOST(w http.ResponseWriter, r *http.Request, req *PendingRequest, secretStore secret.Store) {
+func handleFormPOST(w http.ResponseWriter, r *http.Request, req *PendingRequest, secretStore secret.Store, stateStore store.Store) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form data", http.StatusBadRequest)
 		return
@@ -111,6 +112,16 @@ func handleFormPOST(w http.ResponseWriter, r *http.Request, req *PendingRequest,
 			slog.Error("store secret form value", "key", field.StoreKey, "err", err)
 			http.Error(w, "failed to store value", http.StatusInternalServerError)
 			return
+		}
+		if field.Key == "" || stateStore == nil {
+			// A credential slot, not a bare key the agent named, so it is
+			// cleared through credential_clear rather than by deletion.
+			continue
+		}
+		if err := recordCollectedKey(r.Context(), stateStore, field.Key); err != nil {
+			// The value is stored either way; failing here only means the agent
+			// cannot later offer to delete it, which is the safe direction.
+			slog.Error("record user-supplied secret key", "key", field.Key, "err", err)
 		}
 	}
 
