@@ -58,9 +58,11 @@ channel and may not write any of them.
 That split needs two enforcement points, because they catch different things. `rule_propose` is the
 route a change takes: it arms a `PendingAction`, the prompt goes straight to the chat, and the router
 writes the file on the user's reply — outside the sandbox, so the approved text is what lands. But an
-MCP tool cannot see the agent editing a file directly, so the `rules-gate` hook refuses any write to
-that directory from inside the sandbox. Tool-side alone would be bypassable with Write; hook-side alone
-would have no approved way through.
+MCP tool cannot see the agent editing a file directly, so the rules directory is **mounted read-only**
+in the sandbox, which stops every route in, Bash included. The `rules-gate` hook refuses a write tool
+aimed there before it runs, so the agent is told why and pointed at `rule_propose` rather than meeting
+a bare permission error; it is also the only guard in local dev, which has no sandbox. Tool-side alone
+would be bypassable; the mount alone would have no approved way through.
 
 Both hooks are visible in the chat, not only to the agent. The CLI announces nothing when a hook runs
 on a tool event, so a hook is seen only through what it hands back, and there are two of those. A
@@ -76,7 +78,9 @@ to its first line, and says how many lines it dropped.
 
 The hooks are registered in each user's `settings.json`, which is **mounted read-only** in the sandbox —
 the same protection that stops a prompt injection installing its own `SessionStart` hook stops one
-turning these off. The registrations are rebuilt from `hooks.Manifest` on every boot, so a hook cannot
+turning these off. The CLI is also told to load user settings only (`--setting-sources user`): its
+working directory is the agent's memory, where a `.claude/settings.json` the agent wrote would
+otherwise load as project settings and could switch every hook off or allow tools the channel does not. The registrations are rebuilt from `hooks.Manifest` on every boot, so a hook cannot
 be implemented and left unregistered. Commands carry the binary path in full: a hook runs under a shell
 that reads no profile, so a command relying on an environment variable runs nothing, on every tool call.
 

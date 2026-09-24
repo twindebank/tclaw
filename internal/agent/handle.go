@@ -511,7 +511,19 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 			// creating malicious CLI hooks (SessionStart) via the agent's
 			// file access. The file is pre-seeded during seedUserMemory().
 			settingsPath := filepath.Join(opts.HomeDir, ".claude", "settings.json")
-			readOnlyOverlay := append([]string{settingsPath}, readOnlyDirs...)
+
+			// The rulebooks are read-only too. rules-gate only sees the write
+			// tools, and Bash can write a file just as well; the router writes an
+			// approved rulebook from outside the sandbox. Created first, because a
+			// bind of a missing path is skipped.
+			if opts.MemoryDir == "" {
+				return "", fmt.Errorf("sandboxed turn has no memory directory")
+			}
+			rulesDir := memorylayout.RulesDir(opts.MemoryDir)
+			if err := os.MkdirAll(rulesDir, 0o700); err != nil {
+				return "", fmt.Errorf("create rules dir before sandboxing it: %w", err)
+			}
+			readOnlyOverlay := append([]string{settingsPath, rulesDir}, readOnlyDirs...)
 
 			readWrite := []string{opts.MemoryDir, opts.HomeDir}
 			readWrite = append(readWrite, opts.AddDirs...)

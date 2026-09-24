@@ -61,3 +61,12 @@ func TestBuildArgs_OutputStyle(t *testing.T) {
 		require.Contains(t, args, `{"outputStyle":"Odd\" name"}`)
 	})
 }
+
+func TestBuildArgs_SettingSources(t *testing.T) {
+	t.Run("loads only the user-level settings tclaw writes", func(t *testing.T) {
+		args := buildArgs(buildArgsParams{MaxTurns: 10, Prompt: "hello"})
+
+		require.Equal(t, "user", flagValue(t, args, "--setting-sources"),
+			"project and local settings come from the agent's writable memory dir")
+	})
+}

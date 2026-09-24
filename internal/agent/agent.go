@@ -1160,6 +1160,11 @@ func buildArgs(p buildArgsParams) []string {
 		// Without it the CLI sends each assistant message only once it is
 		// complete, so nothing reaches the chat until then.
 		"--include-partial-messages",
+		// Only the user-level settings.json, which tclaw writes and the sandbox
+		// mounts read-only. Project and local settings are read from the working
+		// directory, the agent's own memory, where a file it wrote could turn the
+		// hooks off or allow tools the channel does not.
+		"--setting-sources", "user",
 	}
 	if p.SessionID != "" {
 		args = append(args, "--resume", p.SessionID)
