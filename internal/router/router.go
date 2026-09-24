@@ -28,13 +28,11 @@ import (
 	"tclaw/internal/dev"
 	"tclaw/internal/egressproxy"
 	"tclaw/internal/gitproxy"
-	"tclaw/internal/hooks"
 	"tclaw/internal/libraries/logbuffer"
 	"tclaw/internal/libraries/secret"
 	"tclaw/internal/libraries/store"
 	"tclaw/internal/mcp"
 	"tclaw/internal/mcp/discovery"
-	"tclaw/internal/memorylayout"
 	"tclaw/internal/notification"
 	"tclaw/internal/oauth"
 	"tclaw/internal/onboarding"
@@ -227,20 +225,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		slog.Error("failed to seed credential slots", "user", mu.cfg.ID, "err", err)
 		return
 	}
-
-	// Hooks are answered here, outside the sandbox, on a listener of their own so
-	// nothing the MCP server limits can make a hook fail and the call slip through.
-	hookServer := hooks.NewServer(hooks.Env{MemoryDir: memoryDir, ConfigDir: memorylayout.ConfigDir(homeDir)})
-	hookServerURL, err := hookServer.Start("127.0.0.1:0")
-	if err != nil {
-		slog.Error("failed to start hook server", "user", mu.cfg.ID, "err", err)
-		return
-	}
-	defer func() {
-		if err := hookServer.Stop(context.Background()); err != nil {
-			slog.Warn("failed to stop hook server", "user", mu.cfg.ID, "err", err)
-		}
-	}()
 
 	mcpServer := mcp.NewServer(mcpHandler)
 	mcpToken := mcpServer.Token()
@@ -655,7 +639,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// Seed memory/CLAUDE.md and the home/.claude/ symlink on each iteration.
 		// This is idempotent — only writes if the file/link doesn't exist — and
 		// ensures re-seeding after a reset that clears these files.
-		seedUserMemory(mu.cfg.ID, memoryDir, homeDir, hookServerURL)
+		seedUserMemory(mu.cfg.ID, memoryDir, homeDir)
 
 		// Re-seed the knowledge skill each iteration (idempotent overwrite) so a
 		// reset that cleared home/.claude/ is repaired before the next agent spawn.
@@ -1069,7 +1053,6 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			OutputStyle:         mu.cfg.OutputStyle,
 			ChannelOutputStyles: channelOutputStyles,
 			TurnSettings:        mu.cfg.TurnSettings,
-			HookToken:           hookServer.Token(),
 			ChannelTurnSettings: channelTurnSettings,
 			Debug:               mu.cfg.Debug,
 			APIKey:              mu.cfg.APIKey,

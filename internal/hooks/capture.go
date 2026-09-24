@@ -1,8 +1,11 @@
 package hooks
 
 import (
+	"os"
 	"regexp"
 	"strings"
+
+	"tclaw/internal/memorylayout"
 )
 
 // A verdict on the work itself. Nothing in a task brief sounds like this, so
@@ -121,15 +124,16 @@ var (
 
 // lessonCapture queues the user's own words for a later retro. The only thing it
 // puts into the model's context is what the marker means; judging stays out.
-func lessonCapture(env Env, p payload) Outcome {
+func lessonCapture() {
+	p := readPayload()
 	prompt := stripInjectedPreamble(p.Prompt)
 	if prompt == "" || injectedPrompt(prompt) {
-		return Outcome{}
+		pass()
 	}
 
 	notes := []string{}
 	if explicitLogMarker(prompt) {
-		queueFeedback(env, feedbackEntry{
+		queueFeedback(feedbackEntry{
 			SessionID: p.SessionID,
 			Kind:      KindUserCorrection,
 			Trigger:   "!log",
@@ -141,7 +145,7 @@ func lessonCapture(env Env, p payload) Outcome {
 		notes = append(notes, "📝 Filed for the retro. `!log` means do not action, debate or write this up "+
 			"now — say you have got it in one line, apply it from here on, and carry on with the task in hand.")
 	} else if trigger := correctionTrigger(prompt); trigger != "" {
-		queueFeedback(env, feedbackEntry{
+		queueFeedback(feedbackEntry{
 			SessionID: p.SessionID,
 			Kind:      KindUserCorrection,
 			Trigger:   trigger,
@@ -149,15 +153,15 @@ func lessonCapture(env Env, p payload) Outcome {
 		})
 	}
 
-	if env.ConfigDir != "" {
-		if nudge := retroNudge(env.ConfigDir); nudge != "" {
+	if configDir := os.Getenv(memorylayout.EnvConfigDir); configDir != "" {
+		if nudge := retroNudge(configDir); nudge != "" {
 			notes = append(notes, nudge)
 		}
 	}
 	if len(notes) == 0 {
-		return Outcome{}
+		pass()
 	}
-	return Outcome{Context: strings.Join(notes, "\n\n")}
+	advise(advice{Event: eventUserPromptSubmit, Context: strings.Join(notes, "\n\n")})
 }
 
 // correctionTrigger returns the pattern that made a prompt read as pushback, or

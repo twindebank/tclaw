@@ -2,11 +2,9 @@ package hooks_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"io"
-	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -21,7 +19,7 @@ func TestRulesGate(t *testing.T) {
 	t.Run("refuses a write to a rulebook", func(t *testing.T) {
 		h := setup(t)
 
-		code, out := runHook(t, h, "rules-gate", "admin", map[string]any{
+		code, out := runHook(t, h.Bin, "rules-gate", hookEnv(h, "admin"), map[string]any{
 			"tool_name":  "Write",
 			"tool_input": map[string]any{"file_path": filepath.Join(h.MemoryDir, "rules", "invoices.md")},
 		})
@@ -34,7 +32,7 @@ func TestRulesGate(t *testing.T) {
 	t.Run("allows a write anywhere else in memory", func(t *testing.T) {
 		h := setup(t)
 
-		code, out := runHook(t, h, "rules-gate", "admin", map[string]any{
+		code, out := runHook(t, h.Bin, "rules-gate", hookEnv(h, "admin"), map[string]any{
 			"tool_name":  "Write",
 			"tool_input": map[string]any{"file_path": filepath.Join(h.MemoryDir, "shopping-list.md")},
 		})
@@ -47,7 +45,7 @@ func TestRulesGate(t *testing.T) {
 
 		// Choosing what a channel loads is the agent's own memory work — only the
 		// rulebook itself needs the user.
-		code, out := runHook(t, h, "rules-gate", "admin", map[string]any{
+		code, out := runHook(t, h.Bin, "rules-gate", hookEnv(h, "admin"), map[string]any{
 			"tool_name":  "Edit",
 			"tool_input": map[string]any{"file_path": filepath.Join(h.MemoryDir, "channels", "admin", "CLAUDE.md")},
 		})
@@ -58,7 +56,7 @@ func TestRulesGate(t *testing.T) {
 	t.Run("passes when it cannot tell where memory is", func(t *testing.T) {
 		h := setup(t)
 
-		code, out := runHook(t, withoutDirs(h), "rules-gate", "", map[string]any{
+		code, out := runHook(t, h.Bin, "rules-gate", []string{}, map[string]any{
 			"tool_name":  "Write",
 			"tool_input": map[string]any{"file_path": filepath.Join(h.MemoryDir, "rules", "invoices.md")},
 		})
@@ -66,41 +64,14 @@ func TestRulesGate(t *testing.T) {
 		require.Equal(t, 0, code, "a guard with no memory dir must fail open: %s", out)
 	})
 
-	t.Run("refuses a request it cannot read", func(t *testing.T) {
+	t.Run("passes on an unreadable payload", func(t *testing.T) {
 		h := setup(t)
 
-		// The write might be aimed at a rulebook, and letting it through is the
-		// one outcome the gate exists to prevent.
-		code, out := postHook(t, h, "rules-gate", h.Server.Token(), "admin", []byte("not json"))
-
-		require.Equal(t, 2, code, "output: %s", out)
-		require.Contains(t, out, "could not read this tool call")
-	})
-
-	t.Run("refuses a request without the user's token", func(t *testing.T) {
-		h := setup(t)
-		body, err := json.Marshal(map[string]any{
-			"tool_name":  "Write",
-			"tool_input": map[string]any{"file_path": filepath.Join(h.MemoryDir, "shopping-list.md")},
-		})
-		require.NoError(t, err)
-
-		code, out := postHook(t, h, "rules-gate", "not-the-token", "admin", body)
-
-		require.Equal(t, 2, code, "output: %s", out)
-		require.Contains(t, out, "not authenticated")
-	})
-}
-
-func TestServer_UnknownHook(t *testing.T) {
-	t.Run("passes a hook it does not know", func(t *testing.T) {
-		h := setup(t)
-
-		// A stale registration must not start refusing tool calls.
-		code, out := postHook(t, h, "retired-hook", h.Server.Token(), "admin", []byte("{}"))
-
-		require.Equal(t, 0, code)
-		require.Empty(t, out)
+		cmd := exec.Command(h.Bin, "rules-gate")
+		cmd.Env = append(os.Environ(), hookEnv(h, "admin")...)
+		cmd.Stdin = nil
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "output: %s", out)
 	})
 }
 
@@ -109,7 +80,7 @@ func TestRulesIndex(t *testing.T) {
 		h := setup(t)
 		writeFile(t, filepath.Join(h.MemoryDir, "rules", "invoices.md"), "## some rule")
 
-		code, out := runHook(t, h, "rules-index", "admin", map[string]any{
+		code, out := runHook(t, h.Bin, "rules-index", hookEnv(h, "admin"), map[string]any{
 			"tool_name":  "Write",
 			"tool_input": map[string]any{"file_path": filepath.Join(h.MemoryDir, "rules", "invoices.md")},
 		})
@@ -141,7 +112,7 @@ func TestRulesIndex(t *testing.T) {
 		writeFile(t, filepath.Join(h.MemoryDir, "channels", "admin", "CLAUDE.md"),
 			"# admin\n\n@../../rules/invoices.md\n")
 
-		code, out := runHook(t, h, "rules-index", "admin", map[string]any{
+		code, out := runHook(t, h.Bin, "rules-index", hookEnv(h, "admin"), map[string]any{
 			"tool_name":  "Write",
 			"tool_input": map[string]any{"file_path": filepath.Join(h.MemoryDir, "rules", "invoices.md")},
 		})
@@ -154,7 +125,7 @@ func TestRulesIndex(t *testing.T) {
 		h := setup(t)
 		writeFile(t, filepath.Join(h.MemoryDir, "rules", "README.md"), "# Rulebooks")
 
-		code, out := runHook(t, h, "rules-index", "admin", map[string]any{
+		code, out := runHook(t, h.Bin, "rules-index", hookEnv(h, "admin"), map[string]any{
 			"tool_name":  "Write",
 			"tool_input": map[string]any{"file_path": filepath.Join(h.MemoryDir, "rules", "README.md")},
 		})
@@ -165,17 +136,15 @@ func TestRulesIndex(t *testing.T) {
 }
 
 func TestSettingsBlock(t *testing.T) {
-	t.Run("registers every hook in the manifest at the user's hook server", func(t *testing.T) {
-		raw, err := hooks.SettingsBlock("http://127.0.0.1:4100")
+	t.Run("registers every hook in the manifest", func(t *testing.T) {
+		raw, err := hooks.SettingsBlock("/usr/local/bin/tclaw-hooks")
 		require.NoError(t, err)
 
 		var events map[string][]struct {
 			Matcher string `json:"matcher"`
 			Hooks   []struct {
-				Type           string            `json:"type"`
-				URL            string            `json:"url"`
-				Headers        map[string]string `json:"headers"`
-				AllowedEnvVars []string          `json:"allowedEnvVars"`
+				Type    string `json:"type"`
+				Command string `json:"command"`
 			} `json:"hooks"`
 		}
 		require.NoError(t, json.Unmarshal(raw, &events))
@@ -184,12 +153,13 @@ func TestSettingsBlock(t *testing.T) {
 		for event, groups := range events {
 			for _, group := range groups {
 				for _, hook := range group.Hooks {
-					require.Equal(t, "http", hook.Type)
-					require.Equal(t, "Bearer $"+memorylayout.EnvHookToken, hook.Headers["Authorization"])
-					// The CLI only fills in variables the registration lists; any
-					// other reference would be sent empty.
-					require.ElementsMatch(t, []string{memorylayout.EnvHookToken, memorylayout.EnvChannel}, hook.AllowedEnvVars)
-					name := strings.TrimPrefix(hook.URL, "http://127.0.0.1:4100/hooks/")
+					require.Equal(t, "command", hook.Type)
+					// The command carries the path in full: hooks run under a shell
+					// that reads no profile, so a variable here would expand to
+					// nothing and fail on every tool call.
+					require.Contains(t, hook.Command, `"/usr/local/bin/tclaw-hooks"`)
+					require.NotContains(t, hook.Command, "$")
+					name := hook.Command[len(`"/usr/local/bin/tclaw-hooks" `):]
 					registered[name] = hooks.HookEvent(event)
 				}
 			}
@@ -201,7 +171,7 @@ func TestSettingsBlock(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects an empty server URL", func(t *testing.T) {
+	t.Run("rejects an empty binary path", func(t *testing.T) {
 		_, err := hooks.SettingsBlock("")
 		require.Error(t, err)
 	})
@@ -209,37 +179,41 @@ func TestSettingsBlock(t *testing.T) {
 
 // --- helpers ---
 
-// harness is a running hook server and the directories one turn runs against.
+// harness is a built hook binary and the directories one turn runs against.
 type harness struct {
-	Server    *hooks.Server
-	URL       string
+	Bin       string
 	MemoryDir string
 	ConfigDir string
 }
 
-// setup starts a hook server over a fresh memory directory holding a rules pool
-// and one channel, plus an empty config directory. The hooks are exercised over
-// HTTP because what is being tested is how they answer the CLI.
+// setup builds the hook binary and returns it with a fresh memory directory
+// holding a rules pool and one channel, plus an empty config directory.
 func setup(t *testing.T) harness {
 	t.Helper()
 	memoryDir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(memoryDir, "rules"), 0o700))
 	require.NoError(t, os.MkdirAll(filepath.Join(memoryDir, "channels", "admin"), 0o700))
-	return startServer(t, memoryDir, t.TempDir())
+	return harness{Bin: buildHooks(t), MemoryDir: memoryDir, ConfigDir: t.TempDir()}
 }
 
-// withoutDirs is h's directories behind a server that was told neither of them.
-func withoutDirs(h harness) harness {
-	return harness{MemoryDir: h.MemoryDir, ConfigDir: h.ConfigDir, Server: nil}
-}
-
-func startServer(t *testing.T, memoryDir, configDir string) harness {
+// buildHooks compiles the hook binary. The guards are exercised through the real
+// binary because what is being tested is how it behaves as a hook — its exit
+// code and what it writes — not the functions underneath.
+func buildHooks(t *testing.T) string {
 	t.Helper()
-	server := hooks.NewServer(hooks.Env{MemoryDir: memoryDir, ConfigDir: configDir})
-	url, err := server.Start("127.0.0.1:0")
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, server.Stop(context.Background())) })
-	return harness{Server: server, URL: url, MemoryDir: memoryDir, ConfigDir: configDir}
+	bin := filepath.Join(t.TempDir(), "tclaw-hooks")
+	build := exec.Command("go", "build", "-o", bin, "tclaw/cmd/tclaw-hooks")
+	out, err := build.CombinedOutput()
+	require.NoError(t, err, "build tclaw-hooks: %s", out)
+	return bin
+}
+
+func hookEnv(h harness, channelName string) []string {
+	return []string{
+		memorylayout.EnvMemoryDir + "=" + h.MemoryDir,
+		memorylayout.EnvChannel + "=" + channelName,
+		memorylayout.EnvConfigDir + "=" + h.ConfigDir,
+	}
 }
 
 // readInbox returns the rows the retro queue holds, newest last.
@@ -273,44 +247,21 @@ type queuedRow struct {
 	Detail    string `json:"detail"`
 }
 
-// runHook sends the hook a JSON payload as the CLI would, and returns 2 when it
-// refused the call, as the old exit code did, or 0, with the response body.
-func runHook(t *testing.T, h harness, name, channelName string, payload any) (int, string) {
+func runHook(t *testing.T, bin, name string, env []string, payload any) (int, string) {
 	t.Helper()
 	body, err := json.Marshal(payload)
 	require.NoError(t, err)
-	if h.Server == nil {
-		// A server told neither directory, in front of the same files.
-		h = startServer(t, "", "")
-	}
-	return postHook(t, h, name, h.Server.Token(), channelName, body)
-}
 
-func postHook(t *testing.T, h harness, name, token, channelName string, body []byte) (int, string) {
-	t.Helper()
-	req, err := http.NewRequest(http.MethodPost, h.URL+"/hooks/"+name, bytes.NewReader(body))
-	require.NoError(t, err)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("X-Tclaw-Channel", channelName)
-	rsp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer rsp.Body.Close()
-	out, err := io.ReadAll(rsp.Body)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, rsp.StatusCode, "any other status lets the call through: %s", out)
-
-	var decision struct {
-		HookSpecificOutput struct {
-			PermissionDecision string `json:"permissionDecision"`
-		} `json:"hookSpecificOutput"`
+	cmd := exec.Command(bin, name)
+	cmd.Env = append(os.Environ(), env...)
+	cmd.Stdin = bytes.NewReader(body)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return 0, string(out)
 	}
-	if len(out) > 0 {
-		require.NoError(t, json.Unmarshal(out, &decision), "output: %s", out)
-	}
-	if decision.HookSpecificOutput.PermissionDecision == "deny" {
-		return 2, string(out)
-	}
-	return 0, string(out)
+	var exit *exec.ExitError
+	require.ErrorAs(t, err, &exit, "unexpected failure running %s: %s", name, out)
+	return exit.ExitCode(), string(out)
 }
 
 func writeFile(t *testing.T, path, content string) {

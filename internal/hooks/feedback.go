@@ -42,7 +42,7 @@ type feedbackEvent struct {
 const detailCap = 2000
 
 // feedbackEntry is what a caller knows about an event. queueFeedback stamps the
-// time and the channel.
+// time and the channel, which come from the environment rather than the caller.
 type feedbackEntry struct {
 	SessionID string
 	Kind      FeedbackKind
@@ -52,8 +52,8 @@ type feedbackEntry struct {
 
 // queueFeedback appends one event to the retro queue. A row that cannot be
 // written is logged and dropped: a lost row beats a hook that breaks the turn.
-func queueFeedback(env Env, entry feedbackEntry) {
-	configDir := env.ConfigDir
+func queueFeedback(entry feedbackEntry) {
+	configDir := os.Getenv(memorylayout.EnvConfigDir)
 	if configDir == "" {
 		slog.Warn("no config dir, dropping feedback row", "kind", entry.Kind, "trigger", entry.Trigger)
 		return
@@ -66,7 +66,7 @@ func queueFeedback(env Env, entry feedbackEntry) {
 	encoded, err := json.Marshal(feedbackEvent{
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		SessionID: session,
-		Channel:   env.Channel,
+		Channel:   os.Getenv(memorylayout.EnvChannel),
 		Kind:      entry.Kind,
 		Trigger:   flatten(entry.Trigger),
 		Detail:    flatten(capDetail(entry.Detail)),

@@ -104,10 +104,9 @@ func TestFormatToolUse(t *testing.T) {
 
 func TestFormatToolResult(t *testing.T) {
 	t.Run("a refusal names tclaw's own hook and the tool it stopped", func(t *testing.T) {
-		// The CLI writes an HTTP hook's refusal reason as-is after the marker, and
-		// tclaw's reasons lead with the hook's name in brackets.
+		// The text is a real refusal captured from the CLI, path and all.
 		got := formatToolResult(toolResult(t,
-			`Error: PreToolUse:Write hook error: [rules-gate]: `+
+			`Error: PreToolUse:Write hook error: ["/usr/local/bin/tclaw-hooks" rules-gate]: `+
 				"Refused: git.md is a rulebook, and rulebooks are the user's standing decisions."+
 				"\n\nUse `rule_propose` with the full text you want the file to have.\n"))
 

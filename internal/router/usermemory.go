@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"tclaw/internal/agent"
@@ -14,7 +15,7 @@ import (
 // seedUserMemory ensures memory/CLAUDE.md exists, the home/.claude/CLAUDE.md
 // symlink points to it, and settings.json exists with safe defaults.
 // Idempotent — only writes if the file/link doesn't exist.
-func seedUserMemory(userID user.ID, memoryDir, homeDir, hookServerURL string) {
+func seedUserMemory(userID user.ID, memoryDir, homeDir string) {
 	memoryMDPath := filepath.Join(memoryDir, "CLAUDE.md")
 	if _, statErr := os.Stat(memoryMDPath); os.IsNotExist(statErr) {
 		if mkErr := os.MkdirAll(memoryDir, 0o700); mkErr != nil {
@@ -53,7 +54,7 @@ func seedUserMemory(userID user.ID, memoryDir, homeDir, hookServerURL string) {
 		}
 	}
 
-	seedHooks(userID, settingsPath, hookServerURL)
+	seedHooks(userID, settingsPath)
 }
 
 // seedHooks writes tclaw's hook registrations into the user's settings.json on
@@ -63,8 +64,19 @@ func seedUserMemory(userID user.ID, memoryDir, homeDir, hookServerURL string) {
 // Registration belongs to tclaw rather than the agent: the file is mounted
 // read-only in the sandbox, which is what stops a prompt injection from turning
 // hooks off or pointing one somewhere else.
-func seedHooks(userID user.ID, settingsPath, hookServerURL string) {
-	block, err := hooks.SettingsBlock(hookServerURL)
+func seedHooks(userID user.ID, settingsPath string) {
+	binary, err := exec.LookPath(hooks.BinaryName)
+	if err != nil {
+		// The agent runs unhooked rather than failing every tool call on a missing
+		// binary. Said at WARN because an absent guard looks identical to a guard
+		// with nothing to complain about: without this line, rulebooks would appear
+		// to be enforced while the agent could rewrite any of them.
+		slog.Warn("hook binary not found — rulebooks are NOT enforced this run; build it with `tclaw install`",
+			"user", userID, "binary", hooks.BinaryName, "err", err)
+		return
+	}
+
+	block, err := hooks.SettingsBlock(binary)
 	if err != nil {
 		slog.Error("failed to build hook registrations", "user", userID, "err", err)
 		return
@@ -95,5 +107,5 @@ func seedHooks(userID user.ID, settingsPath, hookServerURL string) {
 		slog.Error("failed to write hook registrations", "user", userID, "err", err)
 		return
 	}
-	slog.Debug("registered hooks", "user", userID, "count", len(hooks.Manifest), "url", hookServerURL)
+	slog.Debug("registered hooks", "user", userID, "count", len(hooks.Manifest), "binary", binary)
 }

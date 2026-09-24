@@ -1,6 +1,7 @@
 // Package memorylayout names the paths and environment variables shared between
-// the agent loop and the hooks. Both need to agree on where rulebooks live and how
-// a hook learns which channel a turn belongs to.
+// the agent loop and the hook binary. Both need to agree on where rulebooks live
+// and how a hook learns which channel a turn belongs to, and the hook binary runs
+// on every tool call, so it stays out of the heavier agent package.
 package memorylayout
 
 import (
@@ -19,15 +20,13 @@ const (
 	// that is loaded only on that channel's turns.
 	ChannelsDirName = "channels"
 
-	// EnvMemoryDir tells the agent's tools where the memory directory is.
+	// EnvMemoryDir tells the hook binary where the memory directory is. It is set
+	// on the claude subprocess, so a hook inherits it and the agent cannot change
+	// it for its own hooks.
 	EnvMemoryDir = "TCLAW_MEMORY_DIR"
 
-	// EnvChannel names the channel whose turn is running. It is set on the claude
-	// subprocess, which sends it to the hooks, so the agent cannot change it for them.
+	// EnvChannel names the channel whose turn is running.
 	EnvChannel = "TCLAW_CHANNEL"
-
-	// EnvHookToken carries the bearer token the CLI presents to the user's hook server.
-	EnvHookToken = "TCLAW_HOOK_TOKEN"
 
 	// EnvConfigDir is Claude Code's own config directory variable, set to the
 	// path the CLI already defaults to so hooks and skills name the same files.

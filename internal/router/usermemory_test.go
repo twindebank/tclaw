@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -19,7 +18,7 @@ func TestSeedUserMemory(t *testing.T) {
 		memoryDir := filepath.Join(base, "memory")
 		homeDir := filepath.Join(base, "home")
 
-		seedUserMemory(user.ID("testuser"), memoryDir, homeDir, "http://127.0.0.1:1")
+		seedUserMemory(user.ID("testuser"), memoryDir, homeDir)
 
 		data, err := os.ReadFile(filepath.Join(memoryDir, "CLAUDE.md"))
 		require.NoError(t, err)
@@ -35,12 +34,12 @@ func TestSeedUserMemory(t *testing.T) {
 		memoryDir := filepath.Join(base, "memory")
 		homeDir := filepath.Join(base, "home")
 
-		seedUserMemory(user.ID("testuser"), memoryDir, homeDir, "http://127.0.0.1:1")
+		seedUserMemory(user.ID("testuser"), memoryDir, homeDir)
 
 		claudePath := filepath.Join(memoryDir, "CLAUDE.md")
 		require.NoError(t, os.WriteFile(claudePath, []byte("custom content"), 0o600))
 
-		seedUserMemory(user.ID("testuser"), memoryDir, homeDir, "http://127.0.0.1:1")
+		seedUserMemory(user.ID("testuser"), memoryDir, homeDir)
 
 		data, err := os.ReadFile(claudePath)
 		require.NoError(t, err)
@@ -52,11 +51,11 @@ func TestSeedUserMemory(t *testing.T) {
 		memoryDir := filepath.Join(base, "memory")
 		homeDir := filepath.Join(base, "home")
 
-		seedUserMemory(user.ID("testuser"), memoryDir, homeDir, "http://127.0.0.1:1")
+		seedUserMemory(user.ID("testuser"), memoryDir, homeDir)
 		require.NoError(t, os.RemoveAll(memoryDir))
 		require.NoError(t, os.RemoveAll(filepath.Join(homeDir, ".claude")))
 
-		seedUserMemory(user.ID("testuser"), memoryDir, homeDir, "http://127.0.0.1:1")
+		seedUserMemory(user.ID("testuser"), memoryDir, homeDir)
 
 		_, err := os.Stat(filepath.Join(memoryDir, "CLAUDE.md"))
 		require.NoError(t, err, "CLAUDE.md should be re-created")
@@ -73,7 +72,12 @@ func TestSeedHooks(t *testing.T) {
 		settingsPath := filepath.Join(claudeDir, "settings.json")
 		require.NoError(t, os.WriteFile(settingsPath, []byte(`{"model":"opus","hooks":{"Stop":[]}}`), 0o600))
 
-		seedHooks("alice", settingsPath, "http://127.0.0.1:4100")
+		// The binary is found on PATH, which is how the router locates it in the
+		// image. Without it the router leaves settings.json alone, so the test
+		// supplies one.
+		t.Setenv("PATH", fakeHookBinary(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+		seedHooks("alice", settingsPath)
 
 		raw, err := os.ReadFile(settingsPath)
 		require.NoError(t, err)
@@ -84,22 +88,17 @@ func TestSeedHooks(t *testing.T) {
 
 		var events map[string][]struct {
 			Hooks []struct {
-				URL string `json:"url"`
+				Command string `json:"command"`
 			} `json:"hooks"`
 		}
 		require.NoError(t, json.Unmarshal(settings["hooks"], &events))
-		var urls []string
+		registered := 0
 		for _, groups := range events {
 			for _, group := range groups {
-				for _, hook := range group.Hooks {
-					urls = append(urls, hook.URL)
-				}
+				registered += len(group.Hooks)
 			}
 		}
-		require.Len(t, urls, len(hooks.Manifest), "every hook in the manifest must be registered")
-		for _, url := range urls {
-			require.True(t, strings.HasPrefix(url, "http://127.0.0.1:4100/hooks/"), "hook %s must point at the user's hook server", url)
-		}
+		require.Equal(t, len(hooks.Manifest), registered, "every hook in the manifest must be registered")
 	})
 
 	t.Run("leaves a settings file it cannot parse alone", func(t *testing.T) {
@@ -108,11 +107,23 @@ func TestSeedHooks(t *testing.T) {
 		require.NoError(t, os.MkdirAll(claudeDir, 0o700))
 		settingsPath := filepath.Join(claudeDir, "settings.json")
 		require.NoError(t, os.WriteFile(settingsPath, []byte("not json"), 0o600))
+		t.Setenv("PATH", fakeHookBinary(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-		seedHooks("alice", settingsPath, "http://127.0.0.1:4100")
+		seedHooks("alice", settingsPath)
 
 		raw, err := os.ReadFile(settingsPath)
 		require.NoError(t, err)
 		require.Equal(t, "not json", string(raw), "a file that cannot be read must not be overwritten")
 	})
+}
+
+// fakeHookBinary puts an executable named like the hook binary on PATH and
+// returns its directory. What it does is irrelevant: registration only records
+// where it is.
+func fakeHookBinary(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, hooks.BinaryName)
+	require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755))
+	return dir
 }
