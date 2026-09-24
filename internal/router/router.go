@@ -509,6 +509,15 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		TelegramUserID:   mu.cfg.TelegramUserID,
 	})
 
+	// Tool approvals asked mid-turn: the CLI calls this tool, and a button press
+	// reaches the waiting call through the message bridge below.
+	permPrompts := newPermissionPrompts()
+	registerPermissionPrompt(mcpHandler, permissionPromptParams{
+		Prompts:       permPrompts,
+		ActiveChannel: activeChannelFunc,
+		Channels:      channelSet.Snapshot,
+	})
+
 	regCtx := toolpkg.RegistrationContext{
 		SecretStore:       secretStore,
 		StateStore:        s,
@@ -978,6 +987,9 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 							slog.Error("failed to report confirmation outcome", "channel", chID, "err", sendErr)
 						}
 					}
+					if permPrompts.resolve(msg) {
+						continue
+					}
 					if interceptPendingConfirmation(agentCtx, msg, confirmParams{
 						ChannelsFunc:    channelsFunc,
 						RuntimeState:    runtimeState,
@@ -1047,18 +1059,19 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				// per-channel models beneath it. See resolveModelForChannel.
 				return modeltools.LoadOverride(s)
 			},
-			ChannelModels:       channelModels,
-			MaxTurns:            mu.cfg.MaxTurns,
-			ChannelMaxTurns:     channelMaxTurns,
-			OutputStyle:         mu.cfg.OutputStyle,
-			ChannelOutputStyles: channelOutputStyles,
-			TurnSettings:        mu.cfg.TurnSettings,
-			ChannelTurnSettings: channelTurnSettings,
-			Debug:               mu.cfg.Debug,
-			APIKey:              mu.cfg.APIKey,
-			HomeDir:             homeDir,
-			MemoryDir:           memoryDir,
-			AddDirs:             addDirs,
+			ChannelModels:        channelModels,
+			MaxTurns:             mu.cfg.MaxTurns,
+			ChannelMaxTurns:      channelMaxTurns,
+			OutputStyle:          mu.cfg.OutputStyle,
+			ChannelOutputStyles:  channelOutputStyles,
+			TurnSettings:         mu.cfg.TurnSettings,
+			ChannelTurnSettings:  channelTurnSettings,
+			PermissionPromptTool: claudecli.Tool("mcp__tclaw__" + ToolPermissionPrompt),
+			Debug:                mu.cfg.Debug,
+			APIKey:               mu.cfg.APIKey,
+			HomeDir:              homeDir,
+			MemoryDir:            memoryDir,
+			AddDirs:              addDirs,
 			AddDirsFunc: func(chID channel.ChannelID) []string {
 				// Read from the dev store each turn so worktrees created
 				// mid-session (via dev_start) are immediately accessible.

@@ -188,6 +188,10 @@ type Options struct {
 	// ChannelTurnSettings override TurnSettings per channel, field by field.
 	ChannelTurnSettings map[channel.ChannelID]claudecli.TurnSettings
 
+	// PermissionPromptTool is the MCP tool the CLI asks when a tool call needs approval, on a
+	// turn the user started on a channel that can show buttons. Empty leaves the CLI to deny.
+	PermissionPromptTool claudecli.Tool
+
 	// Debug logs raw CLI event JSON for troubleshooting.
 	Debug bool
 
@@ -1208,14 +1212,18 @@ type buildArgsParams struct {
 	TurnSettings claudecli.TurnSettings
 	SessionID    string
 
-	// Unattended is a turn no person started, such as a schedule, so no one can
-	// answer a permission prompt.
-	Unattended    bool
 	SystemPrompt  string
 	Prompt        string
 	Allowed       []claudecli.Tool
 	Disallowed    []claudecli.Tool
 	MCPConfigPath string
+
+	// Unattended is a turn no person started, such as a schedule, so no one can
+	// answer a permission prompt.
+	Unattended bool
+
+	// PermissionPromptTool, when set, asks the user mid-turn instead of refusing.
+	PermissionPromptTool claudecli.Tool
 }
 
 func buildArgs(p buildArgsParams) []string {
@@ -1246,10 +1254,16 @@ func buildArgs(p buildArgsParams) []string {
 		args = append(args, "--model", string(p.Model))
 	}
 	args = append(args, "--max-turns", fmt.Sprintf("%d", p.MaxTurns))
-	if p.Unattended {
+	switch {
+	case p.Unattended:
 		// Refuse anything that would prompt, and tell the model nobody can approve
 		// it, rather than leave it retrying.
 		args = append(args, "--permission-prompts", "none")
+	case p.PermissionPromptTool != "":
+		// The CLI still calls a disallowed tool as its prompt tool; disallowing it
+		// only keeps the model from calling it and approving its own actions.
+		args = append(args, "--permission-prompt-tool", string(p.PermissionPromptTool),
+			"--disallowedTools", string(p.PermissionPromptTool))
 	}
 	if p.TurnSettings.Effort != "" {
 		args = append(args, "--effort", string(p.TurnSettings.Effort))

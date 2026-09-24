@@ -468,18 +468,19 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	}
 
 	args := buildArgs(buildArgsParams{
-		Options:       opts,
-		Model:         model,
-		MaxTurns:      resolveMaxTurnsForChannel(opts, msg.ChannelID),
-		OutputStyle:   resolveOutputStyleForChannel(opts, msg.ChannelID),
-		TurnSettings:  resolveTurnSettingsForChannel(opts, msg.ChannelID),
-		Unattended:    !isUserMessage(msg),
-		SessionID:     sessionID,
-		SystemPrompt:  systemPrompt,
-		Prompt:        promptText,
-		Allowed:       allowed,
-		Disallowed:    disallowed,
-		MCPConfigPath: mcpConfigPath,
+		Options:              opts,
+		Model:                model,
+		MaxTurns:             resolveMaxTurnsForChannel(opts, msg.ChannelID),
+		OutputStyle:          resolveOutputStyleForChannel(opts, msg.ChannelID),
+		TurnSettings:         resolveTurnSettingsForChannel(opts, msg.ChannelID),
+		Unattended:           !isUserMessage(msg),
+		PermissionPromptTool: permissionPromptToolFor(opts, ch),
+		SessionID:            sessionID,
+		SystemPrompt:         systemPrompt,
+		Prompt:               promptText,
+		Allowed:              allowed,
+		Disallowed:           disallowed,
+		MCPConfigPath:        mcpConfigPath,
 	})
 	env := buildEnv(opts, ch.Info().Name)
 
@@ -1194,6 +1195,15 @@ func friendlyErrorMessage(raw string, subtype claudecli.ResultSubtype) string {
 	default:
 		return "claude error: " + raw
 	}
+}
+
+// permissionPromptToolFor is the prompt tool to use on ch: only a channel with buttons can be
+// answered while the turn is still running.
+func permissionPromptToolFor(opts Options, ch channel.Channel) claudecli.Tool {
+	if _, ok := ch.(channel.Prompter); !ok {
+		return ""
+	}
+	return opts.PermissionPromptTool
 }
 
 // newDraftID returns a random draft identifier. It stays below 2^31 so any client

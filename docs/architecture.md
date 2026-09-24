@@ -100,6 +100,14 @@ press answers only the prompt with that id, so an old button cannot confirm a ne
 counts only from an allowlisted Telegram user, and never when the allowlist is empty. The agent
 cannot draw a button of its own: its replies have any button markup escaped before they are sent.
 
+On a channel with buttons, a tool call that needs approval is also asked about **mid-turn**. The CLI's
+`--permission-prompt-tool` is `permission_prompt`, a tclaw MCP tool that is also in `--disallowedTools`:
+the CLI still calls it, the model cannot. It sends the prompt, and the router's message bridge, which
+keeps reading while a turn runs, hands the press straight to the waiting call. No answer in four minutes
+refuses the call, keeping inside the CLI's five-minute limit on a silent MCP call. A turn nobody started
+never asks; it passes `--permission-prompts none` and is refused instead. In `dontAsk` mode the CLI
+refuses without asking, and the approval offer after the turn, which re-runs it, is what remains.
+
 ### 4. MCP Tool Boundary
 - Per-user MCP server on localhost with random bearer token.
 - 1 MiB request body limit, audit logging, permission-gated via `tool_groups`.
