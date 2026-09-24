@@ -15,14 +15,19 @@ const cliWaitDelay = 5 * time.Second
 
 // interruptCLI sends the CLI SIGINT, which ends the turn cleanly. Inside the sandbox the CLI is
 // signalled directly, because bwrap does not forward signals and dies on SIGINT, killing the CLI.
-func interruptCLI(pid int, sandboxed bool) error {
-	target := pid
-	if sandboxed {
-		found, err := sandboxedCommandPID("/proc", pid)
-		if err != nil {
-			return fmt.Errorf("find the CLI inside the sandbox: %w", err)
+func interruptCLI(process *os.Process, sandboxed bool) error {
+	if !sandboxed {
+		// Signalling through the Process reports os.ErrProcessDone once it has been reaped,
+		// rather than signalling a pid that may since have been reused.
+		if err := process.Signal(os.Interrupt); err != nil {
+			return fmt.Errorf("interrupt pid %d: %w", process.Pid, err)
 		}
-		target = found
+		return nil
+	}
+
+	target, err := sandboxedCommandPID("/proc", process.Pid)
+	if err != nil {
+		return fmt.Errorf("find the CLI inside the sandbox: %w", err)
 	}
 	if err := syscall.Kill(target, syscall.SIGINT); err != nil {
 		return fmt.Errorf("interrupt pid %d: %w", target, err)
@@ -30,9 +35,8 @@ func interruptCLI(pid int, sandboxed bool) error {
 	return nil
 }
 
-// sandboxedCommandPID returns the command bwrap is running. With a private PID namespace bwrap
-// runs a second bwrap as the namespace's init, which starts the command; anything the command
-// orphans is re-parented to that init too, so the command is its earliest-started child.
+// sandboxedCommandPID returns the command bwrap is running. With a private PID namespace, a second
+// bwrap runs as the namespace's init and starts it.
 func sandboxedCommandPID(procRoot string, bwrapPID int) (int, error) {
 	procs, err := readProcs(procRoot)
 	if err != nil {
@@ -43,6 +47,8 @@ func sandboxedCommandPID(procRoot string, bwrapPID int) (int, error) {
 		if init.ParentPID != bwrapPID || init.Comm != "bwrap" {
 			continue
 		}
+		// Anything the command orphans is re-parented to the init as well, so the command is the
+		// earliest-started of its children.
 		var command *procInfo
 		for i, p := range procs {
 			if p.ParentPID == init.PID && (command == nil || p.StartTime < command.StartTime) {

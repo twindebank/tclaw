@@ -69,7 +69,7 @@ type fakeProc struct {
 	StartTime uint64
 }
 
-// writeProc fakes /proc/<pid>/stat in the kernel's layout: pid, (comm), then fields 3 to 22.
+// writeProc fakes /proc/<pid>/stat in the kernel's layout: pid, (comm), then fields 3 onwards.
 func writeProc(t *testing.T, root string, p fakeProc) {
 	t.Helper()
 	dir := filepath.Join(root, strconv.Itoa(p.PID))

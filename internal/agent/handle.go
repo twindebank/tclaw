@@ -433,11 +433,14 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		// actually runs, which the sandbox replaces.
 		sandboxed := sandboxEnabled()
 		cmd.Cancel = func() error {
-			if err := interruptCLI(cmd.Process.Pid, sandboxed); err != nil {
+			err := interruptCLI(cmd.Process, sandboxed)
+			switch {
+			case err == nil, errors.Is(err, os.ErrProcessDone):
+				return nil
+			default:
 				slog.Warn("could not interrupt the CLI, stopping it outright", "err", err)
 				return cmd.Process.Signal(syscall.SIGTERM)
 			}
-			return nil
 		}
 		cmd.WaitDelay = cliWaitDelay
 
