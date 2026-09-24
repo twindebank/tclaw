@@ -95,14 +95,14 @@ func TestParseBotUsernames(t *testing.T) {
 	t.Run("extracts bot usernames, strips the @, skips control buttons and duplicates", func(t *testing.T) {
 		msg := &tg.Message{
 			ReplyMarkup: &tg.ReplyInlineMarkup{
-				Rows: []tg.KeyboardButtonRow{
-					{Buttons: []tg.KeyboardButtonClass{
-						&tg.KeyboardButtonCallback{Text: "@tclaw_ab12cd34_bot"},
-						&tg.KeyboardButtonCallback{Text: "@tclaw_ef56gh78_bot"},
+				Rows: []tg.KeyboardInlineButtonRow{
+					{Buttons: []tg.KeyboardInlineButton{
+						{Text: "@tclaw_ab12cd34_bot", Type: &tg.InlineButtonTypeCallback{}},
+						{Text: "@tclaw_ef56gh78_bot", Type: &tg.InlineButtonTypeCallback{}},
 					}},
-					{Buttons: []tg.KeyboardButtonClass{
-						&tg.KeyboardButtonCallback{Text: "« Back"},
-						&tg.KeyboardButtonCallback{Text: "@tclaw_ab12cd34_bot"},
+					{Buttons: []tg.KeyboardInlineButton{
+						{Text: "« Back", Type: &tg.InlineButtonTypeCallback{}},
+						{Text: "@tclaw_ab12cd34_bot", Type: &tg.InlineButtonTypeCallback{}},
 					}},
 				},
 			},
@@ -142,13 +142,13 @@ func TestFindNextPageButton(t *testing.T) {
 	t.Run("returns the callback data of the forward-navigation button", func(t *testing.T) {
 		msg := &tg.Message{
 			ReplyMarkup: &tg.ReplyInlineMarkup{
-				Rows: []tg.KeyboardButtonRow{
-					{Buttons: []tg.KeyboardButtonClass{
-						&tg.KeyboardButtonCallback{Text: "@tclaw_ab12cd34_bot"},
+				Rows: []tg.KeyboardInlineButtonRow{
+					{Buttons: []tg.KeyboardInlineButton{
+						{Text: "@tclaw_ab12cd34_bot", Type: &tg.InlineButtonTypeCallback{}},
 					}},
-					{Buttons: []tg.KeyboardButtonClass{
-						&tg.KeyboardButtonCallback{Text: "«", Data: []byte("prev")},
-						&tg.KeyboardButtonCallback{Text: "»", Data: []byte("next-page")},
+					{Buttons: []tg.KeyboardInlineButton{
+						{Text: "«", Type: &tg.InlineButtonTypeCallback{Data: []byte("prev")}},
+						{Text: "»", Type: &tg.InlineButtonTypeCallback{Data: []byte("next-page")}},
 					}},
 				},
 			},
@@ -162,10 +162,10 @@ func TestFindNextPageButton(t *testing.T) {
 	t.Run("returns false when there is no forward-navigation button", func(t *testing.T) {
 		msg := &tg.Message{
 			ReplyMarkup: &tg.ReplyInlineMarkup{
-				Rows: []tg.KeyboardButtonRow{
-					{Buttons: []tg.KeyboardButtonClass{
-						&tg.KeyboardButtonCallback{Text: "@tclaw_ab12cd34_bot"},
-						&tg.KeyboardButtonCallback{Text: "«", Data: []byte("prev")},
+				Rows: []tg.KeyboardInlineButtonRow{
+					{Buttons: []tg.KeyboardInlineButton{
+						{Text: "@tclaw_ab12cd34_bot", Type: &tg.InlineButtonTypeCallback{}},
+						{Text: "«", Type: &tg.InlineButtonTypeCallback{Data: []byte("prev")}},
 					}},
 				},
 			},
@@ -184,18 +184,18 @@ func TestFindNextPageButton(t *testing.T) {
 func TestKeyboardSignature(t *testing.T) {
 	page1 := &tg.Message{
 		ReplyMarkup: &tg.ReplyInlineMarkup{
-			Rows: []tg.KeyboardButtonRow{
-				{Buttons: []tg.KeyboardButtonClass{
-					&tg.KeyboardButtonCallback{Text: "@tclaw_ab12cd34_bot"},
+			Rows: []tg.KeyboardInlineButtonRow{
+				{Buttons: []tg.KeyboardInlineButton{
+					{Text: "@tclaw_ab12cd34_bot", Type: &tg.InlineButtonTypeCallback{}},
 				}},
 			},
 		},
 	}
 	page2 := &tg.Message{
 		ReplyMarkup: &tg.ReplyInlineMarkup{
-			Rows: []tg.KeyboardButtonRow{
-				{Buttons: []tg.KeyboardButtonClass{
-					&tg.KeyboardButtonCallback{Text: "@tclaw_ef56ab78_bot"},
+			Rows: []tg.KeyboardInlineButtonRow{
+				{Buttons: []tg.KeyboardInlineButton{
+					{Text: "@tclaw_ef56ab78_bot", Type: &tg.InlineButtonTypeCallback{}},
 				}},
 			},
 		},

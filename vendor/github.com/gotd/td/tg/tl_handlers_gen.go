@@ -1710,6 +1710,56 @@ func (u UpdateDispatcher) OnWebBrowserException(handler WebBrowserExceptionHandl
 	}
 }
 
+// NewEphemeralMessageHandler is a NewEphemeralMessage event handler.
+type NewEphemeralMessageHandler func(ctx context.Context, e Entities, update *UpdateNewEphemeralMessage) error
+
+// OnNewEphemeralMessage sets NewEphemeralMessage handler.
+func (u UpdateDispatcher) OnNewEphemeralMessage(handler NewEphemeralMessageHandler) {
+	u.handlers[UpdateNewEphemeralMessageTypeID] = func(ctx context.Context, e Entities, update UpdateClass) error {
+		return handler(ctx, e, update.(*UpdateNewEphemeralMessage))
+	}
+}
+
+// DeleteEphemeralMessagesHandler is a DeleteEphemeralMessages event handler.
+type DeleteEphemeralMessagesHandler func(ctx context.Context, e Entities, update *UpdateDeleteEphemeralMessages) error
+
+// OnDeleteEphemeralMessages sets DeleteEphemeralMessages handler.
+func (u UpdateDispatcher) OnDeleteEphemeralMessages(handler DeleteEphemeralMessagesHandler) {
+	u.handlers[UpdateDeleteEphemeralMessagesTypeID] = func(ctx context.Context, e Entities, update UpdateClass) error {
+		return handler(ctx, e, update.(*UpdateDeleteEphemeralMessages))
+	}
+}
+
+// EditEphemeralMessageHandler is a EditEphemeralMessage event handler.
+type EditEphemeralMessageHandler func(ctx context.Context, e Entities, update *UpdateEditEphemeralMessage) error
+
+// OnEditEphemeralMessage sets EditEphemeralMessage handler.
+func (u UpdateDispatcher) OnEditEphemeralMessage(handler EditEphemeralMessageHandler) {
+	u.handlers[UpdateEditEphemeralMessageTypeID] = func(ctx context.Context, e Entities, update UpdateClass) error {
+		return handler(ctx, e, update.(*UpdateEditEphemeralMessage))
+	}
+}
+
+// EphemeralBotCallbackQueryHandler is a EphemeralBotCallbackQuery event handler.
+type EphemeralBotCallbackQueryHandler func(ctx context.Context, e Entities, update *UpdateEphemeralBotCallbackQuery) error
+
+// OnEphemeralBotCallbackQuery sets EphemeralBotCallbackQuery handler.
+func (u UpdateDispatcher) OnEphemeralBotCallbackQuery(handler EphemeralBotCallbackQueryHandler) {
+	u.handlers[UpdateEphemeralBotCallbackQueryTypeID] = func(ctx context.Context, e Entities, update UpdateClass) error {
+		return handler(ctx, e, update.(*UpdateEphemeralBotCallbackQuery))
+	}
+}
+
+// BotStarsSubscriptionHandler is a BotStarsSubscription event handler.
+type BotStarsSubscriptionHandler func(ctx context.Context, e Entities, update *UpdateBotStarsSubscription) error
+
+// OnBotStarsSubscription sets BotStarsSubscription handler.
+func (u UpdateDispatcher) OnBotStarsSubscription(handler BotStarsSubscriptionHandler) {
+	u.handlers[UpdateBotStarsSubscriptionTypeID] = func(ctx context.Context, e Entities, update UpdateClass) error {
+		return handler(ctx, e, update.(*UpdateBotStarsSubscription))
+	}
+}
+
 // OnFallback sets fallback handler.
 func (u *UpdateDispatcher) OnFallback(handler Handler) {
 	u.fallback = handler

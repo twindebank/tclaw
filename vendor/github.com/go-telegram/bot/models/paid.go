@@ -2,7 +2,6 @@ package models
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 )
 
@@ -67,13 +66,20 @@ func (m *InputPaidMediaVideo) GetMedia() string {
 	return m.Media
 }
 
+func (m *InputPaidMediaVideo) GetThumbnail() InputFile {
+	return m.Thumbnail
+}
+
 func (m *InputPaidMediaVideo) MarshalInputMedia() ([]byte, error) {
+	normalized := *m
+	normalized.Thumbnail = normalizeInputFile(normalized.Thumbnail)
+
 	ret := struct {
 		Type string `json:"type"`
 		*InputPaidMediaVideo
 	}{
 		Type:                "video",
-		InputPaidMediaVideo: m,
+		InputPaidMediaVideo: &normalized,
 	}
 
 	return json.Marshal(&ret)
@@ -105,6 +111,10 @@ func (p *PaidMedia) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
+	if v.Type == "" {
+		return missingDiscriminator("PaidMedia")
+	}
+
 	p.Type = v.Type
 
 	switch v.Type {
@@ -117,9 +127,9 @@ func (p *PaidMedia) UnmarshalJSON(data []byte) error {
 	case PaidMediaTypeVideo:
 		p.Video = &PaidMediaVideo{}
 		return json.Unmarshal(data, p.Video)
-	default:
-		return fmt.Errorf("unsupported PaidMedia type, %v", v.Type)
 	}
+
+	return nil
 }
 
 // PaidMediaPreview https://core.telegram.org/bots/api#paidmediapreview

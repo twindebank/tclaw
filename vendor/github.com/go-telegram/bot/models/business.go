@@ -45,7 +45,7 @@ type BusinessOpeningHoursInterval struct {
 type BusinessBotRights struct {
 	CanReply                   bool `json:"can_reply,omitempty"`
 	CanReadMessages            bool `json:"can_read_messages,omitempty"`
-	CanDeleteOutgoingMessages  bool `json:"can_delete_outgoing_messages,omitempty"`
+	CanDeleteSentMessages      bool `json:"can_delete_sent_messages,omitempty"`
 	CanDeleteAllMessages       bool `json:"can_delete_all_messages,omitempty"`
 	CanEditName                bool `json:"can_edit_name,omitempty"`
 	CanEditBio                 bool `json:"can_edit_bio,omitempty"`

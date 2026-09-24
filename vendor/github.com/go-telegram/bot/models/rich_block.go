@@ -2,34 +2,36 @@ package models
 
 import (
 	"encoding/json"
-	"fmt"
 )
 
 // RichBlockType https://core.telegram.org/bots/api#richblock
 type RichBlockType string
 
 const (
-	RichBlockTypeParagraph              RichBlockType = "paragraph"
-	RichBlockTypeSectionHeading         RichBlockType = "heading"
-	RichBlockTypePreformatted           RichBlockType = "pre"
-	RichBlockTypeFooter                 RichBlockType = "footer"
-	RichBlockTypeDivider                RichBlockType = "divider"
-	RichBlockTypeMathematicalExpression RichBlockType = "mathematical_expression"
-	RichBlockTypeAnchor                 RichBlockType = "anchor"
-	RichBlockTypeList                   RichBlockType = "list"
-	RichBlockTypeBlockQuotation         RichBlockType = "blockquote"
-	RichBlockTypePullQuotation          RichBlockType = "pullquote"
-	RichBlockTypeCollage                RichBlockType = "collage"
-	RichBlockTypeSlideshow              RichBlockType = "slideshow"
-	RichBlockTypeTable                  RichBlockType = "table"
-	RichBlockTypeDetails                RichBlockType = "details"
-	RichBlockTypeMap                    RichBlockType = "map"
-	RichBlockTypeAnimation              RichBlockType = "animation"
-	RichBlockTypeAudio                  RichBlockType = "audio"
-	RichBlockTypePhoto                  RichBlockType = "photo"
-	RichBlockTypeVideo                  RichBlockType = "video"
-	RichBlockTypeVoiceNote              RichBlockType = "voice_note"
-	RichBlockTypeThinking               RichBlockType = "thinking"
+	RichBlockTypeParagraph                RichBlockType = "paragraph"
+	RichBlockTypeSectionHeading           RichBlockType = "heading"
+	RichBlockTypePreformatted             RichBlockType = "pre"
+	RichBlockTypeFooter                   RichBlockType = "footer"
+	RichBlockTypeDivider                  RichBlockType = "divider"
+	RichBlockTypeMathematicalExpression   RichBlockType = "mathematical_expression"
+	RichBlockTypeAnchor                   RichBlockType = "anchor"
+	RichBlockTypeList                     RichBlockType = "list"
+	RichBlockTypeBlockQuotation           RichBlockType = "blockquote"
+	RichBlockTypeExpandableBlockQuotation RichBlockType = "expandable_blockquote"
+	RichBlockTypePullQuotation            RichBlockType = "pullquote"
+	RichBlockTypeCollage                  RichBlockType = "collage"
+	RichBlockTypeSlideshow                RichBlockType = "slideshow"
+	RichBlockTypeTable                    RichBlockType = "table"
+	RichBlockTypeDetails                  RichBlockType = "details"
+	RichBlockTypeMap                      RichBlockType = "map"
+	RichBlockTypeButtons                  RichBlockType = "buttons"
+	RichBlockTypeAnimation                RichBlockType = "animation"
+	RichBlockTypeAudio                    RichBlockType = "audio"
+	RichBlockTypeDocument                 RichBlockType = "document"
+	RichBlockTypePhoto                    RichBlockType = "photo"
+	RichBlockTypeVideo                    RichBlockType = "video"
+	RichBlockTypeVoiceNote                RichBlockType = "voice_note"
+	RichBlockTypeThinking                 RichBlockType = "thinking"
 )
 
 // RichBlock https://core.telegram.org/bots/api#richblock
@@ -39,27 +41,30 @@ const (
 type RichBlock struct {
 	Type RichBlockType
 
-	RichBlockParagraph              *RichBlockParagraph
-	RichBlockSectionHeading         *RichBlockSectionHeading
-	RichBlockPreformatted           *RichBlockPreformatted
-	RichBlockFooter                 *RichBlockFooter
-	RichBlockDivider                *RichBlockDivider
-	RichBlockMathematicalExpression *RichBlockMathematicalExpression
-	RichBlockAnchor                 *RichBlockAnchor
-	RichBlockList                   *RichBlockList
-	RichBlockBlockQuotation         *RichBlockBlockQuotation
-	RichBlockPullQuotation          *RichBlockPullQuotation
-	RichBlockCollage                *RichBlockCollage
-	RichBlockSlideshow              *RichBlockSlideshow
-	RichBlockTable                  *RichBlockTable
-	RichBlockDetails                *RichBlockDetails
-	RichBlockMap                    *RichBlockMap
-	RichBlockAnimation              *RichBlockAnimation
-	RichBlockAudio                  *RichBlockAudio
-	RichBlockPhoto                  *RichBlockPhoto
-	RichBlockVideo                  *RichBlockVideo
-	RichBlockVoiceNote              *RichBlockVoiceNote
-	RichBlockThinking               *RichBlockThinking
+	RichBlockParagraph                *RichBlockParagraph
+	RichBlockSectionHeading           *RichBlockSectionHeading
+	RichBlockPreformatted             *RichBlockPreformatted
+	RichBlockFooter                   *RichBlockFooter
+	RichBlockDivider                  *RichBlockDivider
+	RichBlockMathematicalExpression   *RichBlockMathematicalExpression
+	RichBlockAnchor                   *RichBlockAnchor
+	RichBlockList                     *RichBlockList
+	RichBlockBlockQuotation           *RichBlockBlockQuotation
+	RichBlockExpandableBlockQuotation *RichBlockExpandableBlockQuotation
+	RichBlockPullQuotation            *RichBlockPullQuotation
+	RichBlockCollage                  *RichBlockCollage
+	RichBlockSlideshow                *RichBlockSlideshow
+	RichBlockTable                    *RichBlockTable
+	RichBlockDetails                  *RichBlockDetails
+	RichBlockMap                      *RichBlockMap
+	RichBlockButtons                  *RichBlockButtons
+	RichBlockAnimation                *RichBlockAnimation
+	RichBlockAudio                    *RichBlockAudio
+	RichBlockDocument                 *RichBlockDocument
+	RichBlockPhoto                    *RichBlockPhoto
+	RichBlockVideo                    *RichBlockVideo
+	RichBlockVoiceNote                *RichBlockVoiceNote
+	RichBlockThinking                 *RichBlockThinking
 }
 
 // MarshalJSON implements json.Marshaler. The value receiver ensures the encoding
@@ -67,71 +72,56 @@ type RichBlock struct {
 func (rb RichBlock) MarshalJSON() ([]byte, error) {
 	switch rb.Type {
 	case RichBlockTypeParagraph:
-		rb.RichBlockParagraph.Type = RichBlockTypeParagraph
-		return json.Marshal(rb.RichBlockParagraph)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockParagraph, func(v *RichBlockParagraph) { v.Type = rb.Type })
 	case RichBlockTypeSectionHeading:
-		rb.RichBlockSectionHeading.Type = RichBlockTypeSectionHeading
-		return json.Marshal(rb.RichBlockSectionHeading)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockSectionHeading, func(v *RichBlockSectionHeading) { v.Type = rb.Type })
 	case RichBlockTypePreformatted:
-		rb.RichBlockPreformatted.Type = RichBlockTypePreformatted
-		return json.Marshal(rb.RichBlockPreformatted)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockPreformatted, func(v *RichBlockPreformatted) { v.Type = rb.Type })
 	case RichBlockTypeFooter:
-		rb.RichBlockFooter.Type = RichBlockTypeFooter
-		return json.Marshal(rb.RichBlockFooter)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockFooter, func(v *RichBlockFooter) { v.Type = rb.Type })
 	case RichBlockTypeDivider:
-		rb.RichBlockDivider.Type = RichBlockTypeDivider
-		return json.Marshal(rb.RichBlockDivider)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockDivider, func(v *RichBlockDivider) { v.Type = rb.Type })
 	case RichBlockTypeMathematicalExpression:
-		rb.RichBlockMathematicalExpression.Type = RichBlockTypeMathematicalExpression
-		return json.Marshal(rb.RichBlockMathematicalExpression)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockMathematicalExpression, func(v *RichBlockMathematicalExpression) { v.Type = rb.Type })
 	case RichBlockTypeAnchor:
-		rb.RichBlockAnchor.Type = RichBlockTypeAnchor
-		return json.Marshal(rb.RichBlockAnchor)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockAnchor, func(v *RichBlockAnchor) { v.Type = rb.Type })
 	case RichBlockTypeList:
-		rb.RichBlockList.Type = RichBlockTypeList
-		return json.Marshal(rb.RichBlockList)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockList, func(v *RichBlockList) { v.Type = rb.Type })
 	case RichBlockTypeBlockQuotation:
-		rb.RichBlockBlockQuotation.Type = RichBlockTypeBlockQuotation
-		return json.Marshal(rb.RichBlockBlockQuotation)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockBlockQuotation, func(v *RichBlockBlockQuotation) { v.Type = rb.Type })
+	case RichBlockTypeExpandableBlockQuotation:
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockExpandableBlockQuotation, func(v *RichBlockExpandableBlockQuotation) { v.Type = rb.Type })
 	case RichBlockTypePullQuotation:
-		rb.RichBlockPullQuotation.Type = RichBlockTypePullQuotation
-		return json.Marshal(rb.RichBlockPullQuotation)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockPullQuotation, func(v *RichBlockPullQuotation) { v.Type = rb.Type })
 	case RichBlockTypeCollage:
-		rb.RichBlockCollage.Type = RichBlockTypeCollage
-		return json.Marshal(rb.RichBlockCollage)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockCollage, func(v *RichBlockCollage) { v.Type = rb.Type })
 	case RichBlockTypeSlideshow:
-		rb.RichBlockSlideshow.Type = RichBlockTypeSlideshow
-		return json.Marshal(rb.RichBlockSlideshow)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockSlideshow, func(v *RichBlockSlideshow) { v.Type = rb.Type })
 	case RichBlockTypeTable:
-		rb.RichBlockTable.Type = RichBlockTypeTable
-		return json.Marshal(rb.RichBlockTable)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockTable, func(v *RichBlockTable) { v.Type = rb.Type })
 	case RichBlockTypeDetails:
-		rb.RichBlockDetails.Type = RichBlockTypeDetails
-		return json.Marshal(rb.RichBlockDetails)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockDetails, func(v *RichBlockDetails) { v.Type = rb.Type })
 	case RichBlockTypeMap:
-		rb.RichBlockMap.Type = RichBlockTypeMap
-		return json.Marshal(rb.RichBlockMap)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockMap, func(v *RichBlockMap) { v.Type = rb.Type })
+	case RichBlockTypeButtons:
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockButtons, func(v *RichBlockButtons) { v.Type = rb.Type })
 	case RichBlockTypeAnimation:
-		rb.RichBlockAnimation.Type = RichBlockTypeAnimation
-		return json.Marshal(rb.RichBlockAnimation)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockAnimation, func(v *RichBlockAnimation) { v.Type = rb.Type })
 	case RichBlockTypeAudio:
-		rb.RichBlockAudio.Type = RichBlockTypeAudio
-		return json.Marshal(rb.RichBlockAudio)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockAudio, func(v *RichBlockAudio) { v.Type = rb.Type })
+	case RichBlockTypeDocument:
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockDocument, func(v *RichBlockDocument) { v.Type = rb.Type })
 	case RichBlockTypePhoto:
-		rb.RichBlockPhoto.Type = RichBlockTypePhoto
-		return json.Marshal(rb.RichBlockPhoto)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockPhoto, func(v *RichBlockPhoto) { v.Type = rb.Type })
 	case RichBlockTypeVideo:
-		rb.RichBlockVideo.Type = RichBlockTypeVideo
-		return json.Marshal(rb.RichBlockVideo)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockVideo, func(v *RichBlockVideo) { v.Type = rb.Type })
 	case RichBlockTypeVoiceNote:
-		rb.RichBlockVoiceNote.Type = RichBlockTypeVoiceNote
-		return json.Marshal(rb.RichBlockVoiceNote)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockVoiceNote, func(v *RichBlockVoiceNote) { v.Type = rb.Type })
 	case RichBlockTypeThinking:
-		rb.RichBlockThinking.Type = RichBlockTypeThinking
-		return json.Marshal(rb.RichBlockThinking)
+		return marshalVariant("RichBlock", rb.Type, rb.RichBlockThinking, func(v *RichBlockThinking) { v.Type = rb.Type })
 	}
 
-	return nil, fmt.Errorf("unsupported RichBlock type %q", rb.Type)
+	return marshalUnknownVariant("RichBlock", "type", rb.Type)
 }
 
 func (rb *RichBlock) UnmarshalJSON(data []byte) error {
@@ -142,94 +132,88 @@ func (rb *RichBlock) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
+	if v.Type == "" {
+		return missingDiscriminator("RichBlock")
+	}
+
+	rb.Type = v.Type
+
 	switch v.Type {
 	case RichBlockTypeParagraph:
-		rb.Type = RichBlockTypeParagraph
 		rb.RichBlockParagraph = &RichBlockParagraph{}
 		return json.Unmarshal(data, rb.RichBlockParagraph)
 	case RichBlockTypeSectionHeading:
-		rb.Type = RichBlockTypeSectionHeading
 		rb.RichBlockSectionHeading = &RichBlockSectionHeading{}
 		return json.Unmarshal(data, rb.RichBlockSectionHeading)
 	case RichBlockTypePreformatted:
-		rb.Type = RichBlockTypePreformatted
 		rb.RichBlockPreformatted = &RichBlockPreformatted{}
 		return json.Unmarshal(data, rb.RichBlockPreformatted)
 	case RichBlockTypeFooter:
-		rb.Type = RichBlockTypeFooter
 		rb.RichBlockFooter = &RichBlockFooter{}
 		return json.Unmarshal(data, rb.RichBlockFooter)
 	case RichBlockTypeDivider:
-		rb.Type = RichBlockTypeDivider
 		rb.RichBlockDivider = &RichBlockDivider{}
 		return json.Unmarshal(data, rb.RichBlockDivider)
 	case RichBlockTypeMathematicalExpression:
-		rb.Type = RichBlockTypeMathematicalExpression
 		rb.RichBlockMathematicalExpression = &RichBlockMathematicalExpression{}
 		return json.Unmarshal(data, rb.RichBlockMathematicalExpression)
 	case RichBlockTypeAnchor:
-		rb.Type = RichBlockTypeAnchor
 		rb.RichBlockAnchor = &RichBlockAnchor{}
 		return json.Unmarshal(data, rb.RichBlockAnchor)
 	case RichBlockTypeList:
-		rb.Type = RichBlockTypeList
 		rb.RichBlockList = &RichBlockList{}
 		return json.Unmarshal(data, rb.RichBlockList)
 	case RichBlockTypeBlockQuotation:
-		rb.Type = RichBlockTypeBlockQuotation
 		rb.RichBlockBlockQuotation = &RichBlockBlockQuotation{}
 		return json.Unmarshal(data, rb.RichBlockBlockQuotation)
+	case RichBlockTypeExpandableBlockQuotation:
+		rb.RichBlockExpandableBlockQuotation = &RichBlockExpandableBlockQuotation{}
+		return json.Unmarshal(data, rb.RichBlockExpandableBlockQuotation)
 	case RichBlockTypePullQuotation:
-		rb.Type = RichBlockTypePullQuotation
 		rb.RichBlockPullQuotation = &RichBlockPullQuotation{}
 		return json.Unmarshal(data, rb.RichBlockPullQuotation)
 	case RichBlockTypeCollage:
-		rb.Type = RichBlockTypeCollage
 		rb.RichBlockCollage = &RichBlockCollage{}
 		return json.Unmarshal(data, rb.RichBlockCollage)
 	case RichBlockTypeSlideshow:
-		rb.Type = RichBlockTypeSlideshow
 		rb.RichBlockSlideshow = &RichBlockSlideshow{}
 		return json.Unmarshal(data, rb.RichBlockSlideshow)
 	case RichBlockTypeTable:
-		rb.Type = RichBlockTypeTable
 		rb.RichBlockTable = &RichBlockTable{}
 		return json.Unmarshal(data, rb.RichBlockTable)
 	case RichBlockTypeDetails:
-		rb.Type = RichBlockTypeDetails
 		rb.RichBlockDetails = &RichBlockDetails{}
 		return json.Unmarshal(data, rb.RichBlockDetails)
 	case RichBlockTypeMap:
-		rb.Type = RichBlockTypeMap
 		rb.RichBlockMap = &RichBlockMap{}
 		return json.Unmarshal(data, rb.RichBlockMap)
+	case RichBlockTypeButtons:
+		rb.RichBlockButtons = &RichBlockButtons{}
+		return json.Unmarshal(data, rb.RichBlockButtons)
 	case RichBlockTypeAnimation:
-		rb.Type = RichBlockTypeAnimation
 		rb.RichBlockAnimation = &RichBlockAnimation{}
 		return json.Unmarshal(data, rb.RichBlockAnimation)
 	case RichBlockTypeAudio:
-		rb.Type = RichBlockTypeAudio
 		rb.RichBlockAudio = &RichBlockAudio{}
 		return json.Unmarshal(data, rb.RichBlockAudio)
+	case RichBlockTypeDocument:
+		rb.RichBlockDocument = &RichBlockDocument{}
+		return json.Unmarshal(data, rb.RichBlockDocument)
 	case RichBlockTypePhoto:
-		rb.Type = RichBlockTypePhoto
 		rb.RichBlockPhoto = &RichBlockPhoto{}
 		return json.Unmarshal(data, rb.RichBlockPhoto)
 	case RichBlockTypeVideo:
-		rb.Type = RichBlockTypeVideo
 		rb.RichBlockVideo = &RichBlockVideo{}
 		return json.Unmarshal(data, rb.RichBlockVideo)
 	case RichBlockTypeVoiceNote:
-		rb.Type = RichBlockTypeVoiceNote
 		rb.RichBlockVoiceNote = &RichBlockVoiceNote{}
 		return json.Unmarshal(data, rb.RichBlockVoiceNote)
 	case RichBlockTypeThinking:
-		rb.Type = RichBlockTypeThinking
 		rb.RichBlockThinking = &RichBlockThinking{}
 		return json.Unmarshal(data, rb.RichBlockThinking)
 	}
 
-	return fmt.Errorf("unsupported RichBlock type %q", v.Type)
+	return nil
 }
 
 // RichBlockParagraph https://core.telegram.org/bots/api#richblockparagraph
@@ -288,6 +272,13 @@ type RichBlockBlockQuotation struct {
 	Credit *RichText     `json:"credit,omitempty"`
 }
 
+// RichBlockExpandableBlockQuotation https://core.telegram.org/bots/api#richblockexpandableblockquotation
+type RichBlockExpandableBlockQuotation struct {
+	Type   RichBlockType `json:"type"`
+	Text   RichText      `json:"text"`
+	Credit *RichText     `json:"credit,omitempty"`
+}
+
 // RichBlockPullQuotation https://core.telegram.org/bots/api#richblockpullquotation
 type RichBlockPullQuotation struct {
 	Type   RichBlockType `json:"type"`
@@ -315,6 +306,7 @@ type RichBlockTable struct {
 	Cells      [][]RichBlockTableCell `json:"cells"`
 	IsBordered bool                   `json:"is_bordered,omitempty"`
 	IsStriped  bool                   `json:"is_striped,omitempty"`
+	IsCompact  bool                   `json:"is_compact,omitempty"`
 	Caption    *RichText              `json:"caption,omitempty"`
 }
 
@@ -336,6 +328,13 @@ type RichBlockMap struct {
 	Caption  *RichBlockCaption `json:"caption,omitempty"`
 }
 
+// RichBlockButtons https://core.telegram.org/bots/api#richblockbuttons
+type RichBlockButtons struct {
+	Type    RichBlockType       `json:"type"`
+	Buttons []RichMessageButton `json:"buttons"`
+	Align   string              `json:"align,omitempty"`
+}
+
 // RichBlockAnimation https://core.telegram.org/bots/api#richblockanimation
 type RichBlockAnimation struct {
 	Type       RichBlockType     `json:"type"`
@@ -349,6 +348,13 @@ type RichBlockAudio struct {
 	Type    RichBlockType     `json:"type"`
 	Audio   Audio             `json:"audio"`
 	Caption *RichBlockCaption `json:"caption,omitempty"`
+}
+
+// RichBlockDocument https://core.telegram.org/bots/api#richblockdocument
+type RichBlockDocument struct {
+	Type     RichBlockType     `json:"type"`
+	Document Document          `json:"document"`
+	Caption  *RichBlockCaption `json:"caption,omitempty"`
 }
 
 // RichBlockPhoto https://core.telegram.org/bots/api#richblockphoto

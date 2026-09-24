@@ -88,6 +88,8 @@ type Message struct {
 	SenderBoostCount              int                            `json:"sender_boost_count,omitempty"`
 	SenderBusinessBot             *User                          `json:"sender_business_bot,omitempty"`
 	SenderTag                     string                         `json:"sender_tag,omitempty"`
+	ReceiverUser                  *User                          `json:"receiver_user,omitempty"`
+	EphemeralMessageID            int                            `json:"ephemeral_message_id,omitempty"`
 	Date                          int                            `json:"date"`
 	BusinessConnectionID          string                         `json:"business_connection_id,omitempty"`
 	Chat                          Chat                           `json:"chat"`
@@ -97,7 +99,7 @@ type Message struct {
 	ReplyToMessage                *Message                       `json:"reply_to_message,omitempty"`
 	ExternalReply                 *ExternalReplyInfo             `json:"external_reply,omitempty"`
 	Quote                         *TextQuote                     `json:"quote,omitempty"`
-	ReplyToStore                  *Story                         `json:"reply_to_store,omitempty"`
+	ReplyToStory                  *Story                         `json:"reply_to_story,omitempty"`
 	ReplyToChecklistTaskID        int                            `json:"reply_to_checklist_task_id,omitempty"`
 	ViaBot                        *User                          `json:"via_bot,omitempty"`
 	EditDate                      int                            `json:"edit_date,omitempty"`
@@ -176,6 +178,9 @@ type Message struct {
 	PaidMessagePriceChanged       *PaidMessagePriceChanged       `json:"paid_message_price_changed,omitempty"`
 	ChatOwnerLeft                 *ChatOwnerLeft                 `json:"chat_owner_left,omitempty"`
 	ChatOwnerChanged              *ChatOwnerChanged              `json:"chat_owner_changed,omitempty"`
+	CommunityChatAdded            *CommunityChatAdded            `json:"community_chat_added,omitempty"`
+	CommunityChatJoined           *CommunityChatJoined           `json:"community_chat_joined,omitempty"`
+	CommunityChatRemoved          *CommunityChatRemoved          `json:"community_chat_removed,omitempty"`
 	SuggestedPostApproved         *SuggestedPostApproved         `json:"suggested_post_approved,omitempty"`
 	SuggestedPostApprovalFailed   *SuggestedPostApprovalFailed   `json:"suggested_post_approval_failed,omitempty"`
 	SuggestedPostDeclined         *SuggestedPostDeclined         `json:"suggested_post_declined,omitempty"`

@@ -4536,6 +4536,414 @@ func (t *TextDate) GetDate() (value int) {
 	return t.Date
 }
 
+// TextDiff represents TL type `textDiff#9686cb50`.
+//
+// See https://core.telegram.org/constructor/textDiff for reference.
+type TextDiff struct {
+	// Text field of TextDiff.
+	Text RichTextClass
+	// OldText field of TextDiff.
+	OldText RichTextClass
+}
+
+// TextDiffTypeID is TL type id of TextDiff.
+const TextDiffTypeID = 0x9686cb50
+
+// construct implements constructor of RichTextClass.
+func (t TextDiff) construct() RichTextClass { return &t }
+
+// Ensuring interfaces in compile-time for TextDiff.
+var (
+	_ bin.Encoder     = &TextDiff{}
+	_ bin.Decoder     = &TextDiff{}
+	_ bin.BareEncoder = &TextDiff{}
+	_ bin.BareDecoder = &TextDiff{}
+
+	_ RichTextClass = &TextDiff{}
+)
+
+func (t *TextDiff) Zero() bool {
+	if t == nil {
+		return true
+	}
+	if !(t.Text == nil) {
+		return false
+	}
+	if !(t.OldText == nil) {
+		return false
+	}
+
+	return true
+}
+
+// String implements fmt.Stringer.
+func (t *TextDiff) String() string {
+	if t == nil {
+		return "TextDiff(nil)"
+	}
+	type Alias TextDiff
+	return fmt.Sprintf("TextDiff%+v", Alias(*t))
+}
+
+// FillFrom fills TextDiff from given interface.
+func (t *TextDiff) FillFrom(from interface {
+	GetText() (value RichTextClass)
+	GetOldText() (value RichTextClass)
+}) {
+	t.Text = from.GetText()
+	t.OldText = from.GetOldText()
+}
+
+// TypeID returns type id in TL schema.
+//
+// See https://core.telegram.org/mtproto/TL-tl#remarks.
+func (*TextDiff) TypeID() uint32 {
+	return TextDiffTypeID
+}
+
+// TypeName returns name of type in TL schema.
+func (*TextDiff) TypeName() string {
+	return "textDiff"
+}
+
+// TypeInfo returns info about TL type.
+func (t *TextDiff) TypeInfo() tdp.Type {
+	typ := tdp.Type{
+		Name: "textDiff",
+		ID:   TextDiffTypeID,
+	}
+	if t == nil {
+		typ.Null = true
+		return typ
+	}
+	typ.Fields = []tdp.Field{
+		{
+			Name:       "Text",
+			SchemaName: "text",
+		},
+		{
+			Name:       "OldText",
+			SchemaName: "old_text",
+		},
+	}
+	return typ
+}
+
+// Encode implements bin.Encoder.
+func (t *TextDiff) Encode(b *bin.Buffer) error {
+	if t == nil {
+		return fmt.Errorf("can't encode textDiff#9686cb50 as nil")
+	}
+	b.PutID(TextDiffTypeID)
+	return t.EncodeBare(b)
+}
+
+// EncodeBare implements bin.BareEncoder.
+func (t *TextDiff) EncodeBare(b *bin.Buffer) error {
+	if t == nil {
+		return fmt.Errorf("can't encode textDiff#9686cb50 as nil")
+	}
+	if t.Text == nil {
+		return fmt.Errorf("unable to encode textDiff#9686cb50: field text is nil")
+	}
+	if err := t.Text.Encode(b); err != nil {
+		return fmt.Errorf("unable to encode textDiff#9686cb50: field text: %w", err)
+	}
+	if t.OldText == nil {
+		return fmt.Errorf("unable to encode textDiff#9686cb50: field old_text is nil")
+	}
+	if err := t.OldText.Encode(b); err != nil {
+		return fmt.Errorf("unable to encode textDiff#9686cb50: field old_text: %w", err)
+	}
+	return nil
+}
+
+// Decode implements bin.Decoder.
+func (t *TextDiff) Decode(b *bin.Buffer) error {
+	if t == nil {
+		return fmt.Errorf("can't decode textDiff#9686cb50 to nil")
+	}
+	if err := b.ConsumeID(TextDiffTypeID); err != nil {
+		return fmt.Errorf("unable to decode textDiff#9686cb50: %w", err)
+	}
+	return t.DecodeBare(b)
+}
+
+// DecodeBare implements bin.BareDecoder.
+func (t *TextDiff) DecodeBare(b *bin.Buffer) error {
+	if t == nil {
+		return fmt.Errorf("can't decode textDiff#9686cb50 to nil")
+	}
+	{
+		value, err := DecodeRichText(b)
+		if err != nil {
+			return fmt.Errorf("unable to decode textDiff#9686cb50: field text: %w", err)
+		}
+		t.Text = value
+	}
+	{
+		value, err := DecodeRichText(b)
+		if err != nil {
+			return fmt.Errorf("unable to decode textDiff#9686cb50: field old_text: %w", err)
+		}
+		t.OldText = value
+	}
+	return nil
+}
+
+// GetText returns value of Text field.
+func (t *TextDiff) GetText() (value RichTextClass) {
+	if t == nil {
+		return
+	}
+	return t.Text
+}
+
+// GetOldText returns value of OldText field.
+func (t *TextDiff) GetOldText() (value RichTextClass) {
+	if t == nil {
+		return
+	}
+	return t.OldText
+}
+
+// TextButton represents TL type `textButton#afc79cd6`.
+//
+// See https://core.telegram.org/constructor/textButton for reference.
+type TextButton struct {
+	// Flags field of TextButton.
+	Flags bin.Fields
+	// Text field of TextButton.
+	Text RichTextClass
+	// Type field of TextButton.
+	Type InlineButtonTypeClass
+	// Style field of TextButton.
+	//
+	// Use SetStyle and GetStyle helpers.
+	Style RichButtonStyle
+}
+
+// TextButtonTypeID is TL type id of TextButton.
+const TextButtonTypeID = 0xafc79cd6
+
+// construct implements constructor of RichTextClass.
+func (t TextButton) construct() RichTextClass { return &t }
+
+// Ensuring interfaces in compile-time for TextButton.
+var (
+	_ bin.Encoder     = &TextButton{}
+	_ bin.Decoder     = &TextButton{}
+	_ bin.BareEncoder = &TextButton{}
+	_ bin.BareDecoder = &TextButton{}
+
+	_ RichTextClass = &TextButton{}
+)
+
+func (t *TextButton) Zero() bool {
+	if t == nil {
+		return true
+	}
+	if !(t.Flags.Zero()) {
+		return false
+	}
+	if !(t.Text == nil) {
+		return false
+	}
+	if !(t.Type == nil) {
+		return false
+	}
+	if !(t.Style.Zero()) {
+		return false
+	}
+
+	return true
+}
+
+// String implements fmt.Stringer.
+func (t *TextButton) String() string {
+	if t == nil {
+		return "TextButton(nil)"
+	}
+	type Alias TextButton
+	return fmt.Sprintf("TextButton%+v", Alias(*t))
+}
+
+// FillFrom fills TextButton from given interface.
+func (t *TextButton) FillFrom(from interface {
+	GetText() (value RichTextClass)
+	GetType() (value InlineButtonTypeClass)
+	GetStyle() (value RichButtonStyle, ok bool)
+}) {
+	t.Text = from.GetText()
+	t.Type = from.GetType()
+	if val, ok := from.GetStyle(); ok {
+		t.Style = val
+	}
+
+}
+
+// TypeID returns type id in TL schema.
+//
+// See https://core.telegram.org/mtproto/TL-tl#remarks.
+func (*TextButton) TypeID() uint32 {
+	return TextButtonTypeID
+}
+
+// TypeName returns name of type in TL schema.
+func (*TextButton) TypeName() string {
+	return "textButton"
+}
+
+// TypeInfo returns info about TL type.
+func (t *TextButton) TypeInfo() tdp.Type {
+	typ := tdp.Type{
+		Name: "textButton",
+		ID:   TextButtonTypeID,
+	}
+	if t == nil {
+		typ.Null = true
+		return typ
+	}
+	typ.Fields = []tdp.Field{
+		{
+			Name:       "Text",
+			SchemaName: "text",
+		},
+		{
+			Name:       "Type",
+			SchemaName: "type",
+		},
+		{
+			Name:       "Style",
+			SchemaName: "style",
+			Null:       !t.Flags.Has(0),
+		},
+	}
+	return typ
+}
+
+// SetFlags sets flags for non-zero fields.
+func (t *TextButton) SetFlags() {
+	if !(t.Style.Zero()) {
+		t.Flags.Set(0)
+	}
+}
+
+// Encode implements bin.Encoder.
+func (t *TextButton) Encode(b *bin.Buffer) error {
+	if t == nil {
+		return fmt.Errorf("can't encode textButton#afc79cd6 as nil")
+	}
+	b.PutID(TextButtonTypeID)
+	return t.EncodeBare(b)
+}
+
+// EncodeBare implements bin.BareEncoder.
+func (t *TextButton) EncodeBare(b *bin.Buffer) error {
+	if t == nil {
+		return fmt.Errorf("can't encode textButton#afc79cd6 as nil")
+	}
+	t.SetFlags()
+	if err := t.Flags.Encode(b); err != nil {
+		return fmt.Errorf("unable to encode textButton#afc79cd6: field flags: %w", err)
+	}
+	if t.Text == nil {
+		return fmt.Errorf("unable to encode textButton#afc79cd6: field text is nil")
+	}
+	if err := t.Text.Encode(b); err != nil {
+		return fmt.Errorf("unable to encode textButton#afc79cd6: field text: %w", err)
+	}
+	if t.Type == nil {
+		return fmt.Errorf("unable to encode textButton#afc79cd6: field type is nil")
+	}
+	if err := t.Type.Encode(b); err != nil {
+		return fmt.Errorf("unable to encode textButton#afc79cd6: field type: %w", err)
+	}
+	if t.Flags.Has(0) {
+		if err := t.Style.Encode(b); err != nil {
+			return fmt.Errorf("unable to encode textButton#afc79cd6: field style: %w", err)
+		}
+	}
+	return nil
+}
+
+// Decode implements bin.Decoder.
+func (t *TextButton) Decode(b *bin.Buffer) error {
+	if t == nil {
+		return fmt.Errorf("can't decode textButton#afc79cd6 to nil")
+	}
+	if err := b.ConsumeID(TextButtonTypeID); err != nil {
+		return fmt.Errorf("unable to decode textButton#afc79cd6: %w", err)
+	}
+	return t.DecodeBare(b)
+}
+
+// DecodeBare implements bin.BareDecoder.
+func (t *TextButton) DecodeBare(b *bin.Buffer) error {
+	if t == nil {
+		return fmt.Errorf("can't decode textButton#afc79cd6 to nil")
+	}
+	{
+		if err := t.Flags.Decode(b); err != nil {
+			return fmt.Errorf("unable to decode textButton#afc79cd6: field flags: %w", err)
+		}
+	}
+	{
+		value, err := DecodeRichText(b)
+		if err != nil {
+			return fmt.Errorf("unable to decode textButton#afc79cd6: field text: %w", err)
+		}
+		t.Text = value
+	}
+	{
+		value, err := DecodeInlineButtonType(b)
+		if err != nil {
+			return fmt.Errorf("unable to decode textButton#afc79cd6: field type: %w", err)
+		}
+		t.Type = value
+	}
+	if t.Flags.Has(0) {
+		if err := t.Style.Decode(b); err != nil {
+			return fmt.Errorf("unable to decode textButton#afc79cd6: field style: %w", err)
+		}
+	}
+	return nil
+}
+
+// GetText returns value of Text field.
+func (t *TextButton) GetText() (value RichTextClass) {
+	if t == nil {
+		return
+	}
+	return t.Text
+}
+
+// GetType returns value of Type field.
+func (t *TextButton) GetType() (value InlineButtonTypeClass) {
+	if t == nil {
+		return
+	}
+	return t.Type
+}
+
+// SetStyle sets value of Style conditional field.
+func (t *TextButton) SetStyle(value RichButtonStyle) {
+	t.Flags.Set(0)
+	t.Style = value
+}
+
+// GetStyle returns value of Style conditional field and
+// boolean which is true if field was set.
+func (t *TextButton) GetStyle() (value RichButtonStyle, ok bool) {
+	if t == nil {
+		return
+	}
+	if !t.Flags.Has(0) {
+		return value, false
+	}
+	return t.Style, true
+}
+
 // RichTextClassName is schema name of RichTextClass.
 const RichTextClassName = "RichText"
 
@@ -4573,6 +4981,8 @@ const RichTextClassName = "RichText"
 //   - [TextBankCard]
 //   - [TextMentionName]
 //   - [TextDate]
+//   - [TextDiff]
+//   - [TextButton]
 //
 // Example:
 //
@@ -4610,6 +5020,8 @@ const RichTextClassName = "RichText"
 //	case *tg.TextBankCard: // textBankCard#b956812d
 //	case *tg.TextMentionName: // textMentionName#1a9fbfc
 //	case *tg.TextDate: // textDate#a5b45e2b
+//	case *tg.TextDiff: // textDiff#9686cb50
+//	case *tg.TextButton: // textButton#afc79cd6
 //	default: panic(v)
 //	}
 type RichTextClass interface {
@@ -4837,6 +5249,20 @@ func DecodeRichText(buf *bin.Buffer) (RichTextClass, error) {
 	case TextDateTypeID:
 		// Decoding textDate#a5b45e2b.
 		v := TextDate{}
+		if err := v.Decode(buf); err != nil {
+			return nil, fmt.Errorf("unable to decode RichTextClass: %w", err)
+		}
+		return &v, nil
+	case TextDiffTypeID:
+		// Decoding textDiff#9686cb50.
+		v := TextDiff{}
+		if err := v.Decode(buf); err != nil {
+			return nil, fmt.Errorf("unable to decode RichTextClass: %w", err)
+		}
+		return &v, nil
+	case TextButtonTypeID:
+		// Decoding textButton#afc79cd6.
+		v := TextButton{}
 		if err := v.Decode(buf); err != nil {
 			return nil, fmt.Errorf("unable to decode RichTextClass: %w", err)
 		}
