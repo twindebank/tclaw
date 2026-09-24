@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"tclaw/internal/channel"
@@ -395,12 +394,6 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		}
 	} else {
 		cmd := exec.CommandContext(ctx, "claude", args...)
-		// Send SIGTERM on context cancel instead of the default SIGKILL, giving
-		// the CLI and its Node.js child processes a chance to exit cleanly.
-		cmd.Cancel = func() error {
-			return cmd.Process.Signal(syscall.SIGTERM)
-		}
-		cmd.WaitDelay = 3 * time.Second
 		cmd.Env = env
 		cmd.Dir = dir
 
@@ -432,6 +425,15 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 			}
 			cmd = wrapWithSandbox(ctx, cmd, paths)
 		}
+
+		// Interrupt rather than kill on context cancel, so the CLI records the end of the turn
+		// and the next --resume doesn't pick up a half-finished one. Set on the command that
+		// actually runs, which the sandbox replaces.
+		sandboxed := sandboxEnabled()
+		cmd.Cancel = func() error {
+			return interruptCLI(interruptCLIParams{PID: cmd.Process.Pid, Sandboxed: sandboxed, ProcRoot: "/proc"})
+		}
+		cmd.WaitDelay = cliWaitDelay
 
 		var err error
 		stdout, err = cmd.StdoutPipe()
