@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -455,5 +456,54 @@ func TestSandboxPaths(t *testing.T) {
 			}
 		}
 		require.True(t, found, "systemReadOnlyPaths must include /usr/local/go for dev sessions")
+	})
+}
+
+func TestStreamResponse(t *testing.T) {
+	t.Run("streams wrapped text deltas into the response as they arrive", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := newTestTurnWriter(ch)
+
+		_, err := streamResponse(context.Background(), tw.opts, tw, strings.NewReader(strings.Join([]string{
+			`{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_start","content_block":{"type":"text","text":""}}}`,
+			`{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hel"}}}`,
+			`{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"lo"}}}`,
+			`{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_stop"}}`,
+			`{"type":"assistant","message":{"content":[{"type":"text","text":"Hello"}]}}`,
+		}, "\n")), nil, testChannelID, time.Now())
+		require.NoError(t, err)
+
+		require.Equal(t, []string{"Hel"}, ch.sends, "the first delta should open the response message")
+		require.Equal(t, "Hello", ch.edits[len(ch.edits)-1].text, "later deltas should extend it, and the complete message must not be written again")
+	})
+
+	t.Run("shows a tool call with the input that streamed in after it started", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := newTestTurnWriter(ch)
+
+		_, err := streamResponse(context.Background(), tw.opts, tw, strings.NewReader(strings.Join([]string{
+			`{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_start","content_block":{"type":"tool_use","id":"t1","name":"Bash","input":{}}}}`,
+			`{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{\"command\":"}}}`,
+			`{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"\"echo hi\"}"}}}`,
+			`{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_stop"}}`,
+		}, "\n")), nil, testChannelID, time.Now())
+		require.NoError(t, err)
+
+		require.Len(t, ch.sends, 1)
+		require.Contains(t, ch.sends[0], "command=echo hi", "the tool line should carry the streamed input")
+	})
+
+	t.Run("keeps a subagent's streamed text out of the reply", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := newTestTurnWriter(ch)
+
+		_, err := streamResponse(context.Background(), tw.opts, tw, strings.NewReader(strings.Join([]string{
+			`{"type":"stream_event","parent_tool_use_id":"t1","event":{"type":"content_block_start","content_block":{"type":"text","text":""}}}`,
+			`{"type":"stream_event","parent_tool_use_id":"t1","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"subagent notes"}}}`,
+			`{"type":"stream_event","parent_tool_use_id":"t1","event":{"type":"content_block_stop"}}`,
+		}, "\n")), nil, testChannelID, time.Now())
+		require.NoError(t, err)
+
+		require.Empty(t, ch.sends, "nothing from a subagent belongs in the main reply")
 	})
 }

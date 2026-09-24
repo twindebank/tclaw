@@ -102,47 +102,68 @@ func (t Turn) CommandFunc() CommandFunc {
 				"session_id": sessionID,
 			})
 
-			// Content blocks.
+			// Content blocks, in the shape --include-partial-messages gives:
+			// each API event wrapped in a stream_event, then the complete
+			// assistant message.
+			var fullContent []map[string]any
 			for _, block := range t.Blocks {
 				switch block.Type {
 				case claudecli.ContentText:
-					enc.Encode(map[string]any{
+					encodeStreamEvent(enc, map[string]any{
 						"type":          "content_block_start",
 						"content_block": map[string]any{"type": "text", "text": ""},
 					})
-					enc.Encode(map[string]any{
+					encodeStreamEvent(enc, map[string]any{
 						"type":  "content_block_delta",
 						"delta": map[string]any{"type": "text_delta", "text": block.Text},
 					})
-					enc.Encode(map[string]any{"type": "content_block_stop"})
+					encodeStreamEvent(enc, map[string]any{"type": "content_block_stop"})
+					fullContent = append(fullContent, map[string]any{"type": "text", "text": block.Text})
 
 				case claudecli.ContentToolUse:
 					input := block.ToolInput
 					if input == nil {
 						input = json.RawMessage(`{}`)
 					}
-					enc.Encode(map[string]any{
+					toolID := id.Generate("tool")
+					// The real CLI starts a tool block with an empty input and
+					// streams the input afterwards.
+					encodeStreamEvent(enc, map[string]any{
 						"type": "content_block_start",
 						"content_block": map[string]any{
 							"type":  "tool_use",
-							"id":    id.Generate("tool"),
+							"id":    toolID,
 							"name":  block.ToolName,
-							"input": json.RawMessage(input),
+							"input": map[string]any{},
 						},
 					})
-					enc.Encode(map[string]any{"type": "content_block_stop"})
+					encodeStreamEvent(enc, map[string]any{
+						"type":  "content_block_delta",
+						"delta": map[string]any{"type": "input_json_delta", "partial_json": string(input)},
+					})
+					encodeStreamEvent(enc, map[string]any{"type": "content_block_stop"})
+					fullContent = append(fullContent, map[string]any{
+						"type": "tool_use", "id": toolID, "name": block.ToolName, "input": input,
+					})
 
 				case claudecli.ContentThinking:
-					enc.Encode(map[string]any{
+					encodeStreamEvent(enc, map[string]any{
 						"type":          "content_block_start",
 						"content_block": map[string]any{"type": "thinking", "thinking": ""},
 					})
-					enc.Encode(map[string]any{
+					encodeStreamEvent(enc, map[string]any{
 						"type":  "content_block_delta",
 						"delta": map[string]any{"type": "thinking_delta", "thinking": block.Text},
 					})
-					enc.Encode(map[string]any{"type": "content_block_stop"})
+					encodeStreamEvent(enc, map[string]any{"type": "content_block_stop"})
+					fullContent = append(fullContent, map[string]any{"type": "thinking", "thinking": block.Text})
 				}
+			}
+			if len(fullContent) > 0 {
+				enc.Encode(map[string]any{
+					"type":    "assistant",
+					"message": map[string]any{"content": fullContent},
+				})
 			}
 
 			// Result event.
@@ -205,4 +226,13 @@ func MatchPrompt(substr string) func([]string) bool {
 	return func(args []string) bool {
 		return strings.Contains(ExtractPrompt(args), substr)
 	}
+}
+
+// encodeStreamEvent writes one API event wrapped the way the CLI wraps it.
+func encodeStreamEvent(enc *json.Encoder, event map[string]any) {
+	enc.Encode(map[string]any{
+		"type":               "stream_event",
+		"event":              event,
+		"parent_tool_use_id": nil,
+	})
 }

@@ -11,6 +11,35 @@ import (
 	"tclaw/internal/claudecli"
 )
 
+func TestFormatCompactBoundary(t *testing.T) {
+	tests := []struct {
+		name     string
+		meta     *claudecli.CompactMetadata
+		expected string
+	}{
+		{
+			name:     "manual compaction shows the size before and after",
+			meta:     &claudecli.CompactMetadata{Trigger: claudecli.CompactTriggerManual, PreTokens: 28968, PostTokens: 2958},
+			expected: "\n🗜️ Context compacted: 29k → 3k tokens\n",
+		},
+		{
+			name:     "automatic compaction says the CLI did it",
+			meta:     &claudecli.CompactMetadata{Trigger: claudecli.CompactTriggerAuto, PreTokens: 950000, PostTokens: 800},
+			expected: "\n🗜️ Context was full, compacted automatically: 950k → 800 tokens\n",
+		},
+		{
+			name:     "missing metadata still reports the compaction",
+			meta:     nil,
+			expected: "\n🗜️ Context compacted\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.expected, formatCompactBoundary(tt.meta))
+		})
+	}
+}
+
 func TestFormatToolUse(t *testing.T) {
 	t.Run("skill use is led by the skill name under its own icon", func(t *testing.T) {
 		got := formatToolUse(claudecli.ContentBlock{

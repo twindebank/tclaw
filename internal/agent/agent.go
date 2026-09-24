@@ -41,8 +41,8 @@ const (
 	// CmdAuthStatus shows current authentication status.
 	CmdAuthStatus = "auth"
 
-	// CmdCompact compacts the conversation context. Rewritten into a prompt
-	// that asks Claude to summarize and discard verbose history.
+	// CmdCompact compacts the conversation context by running the CLI's own
+	// /compact command on the channel's session.
 	CmdCompact = "compact"
 
 	// CmdNew starts a fresh session on the current channel immediately — no
@@ -50,8 +50,9 @@ const (
 	CmdNew = "new"
 )
 
-// compactPrompt is injected as the user message when the compact command is used.
-const compactPrompt = "Please compact your conversation context now. Summarize the key points and discard verbose history."
+// compactPrompt is sent as the prompt when the compact command is used. The CLI runs it as a
+// command in print mode; asking the model in words to compact does not shrink anything.
+const compactPrompt = "/compact"
 
 // IsControlCommand reports whether raw user text is a builtin command
 // (stop / login / auth / compact / fresh-session synonyms) that must be handled
@@ -541,8 +542,8 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			continue
 		}
 
-		// Compact: rewrite the message into a prompt and fall through to
-		// normal handling so it works on all channels.
+		// Compact: rewrite the message into the CLI command and fall through
+		// to normal handling so it works on all channels.
 		if strings.EqualFold(msg.Text, CmdCompact) {
 			if !isBuiltinAllowed(opts, msg.ChannelID, claudecli.BuiltinCompact) {
 				sendDenied(ctx, opts, msg.ChannelID)
@@ -1141,6 +1142,9 @@ func buildArgs(p buildArgsParams) []string {
 		"--output-format", "stream-json",
 		"--verbose",
 		"--print",
+		// Without it the CLI sends each assistant message only once it is
+		// complete, so nothing reaches the chat until then.
+		"--include-partial-messages",
 	}
 	if p.SessionID != "" {
 		args = append(args, "--resume", p.SessionID)

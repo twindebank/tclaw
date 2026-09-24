@@ -14,6 +14,10 @@ const (
 	EventContentBlockStop  EventType = "content_block_stop"
 	EventRateLimit         EventType = "rate_limit_event"
 	EventResult            EventType = "result"
+
+	// EventStreamEvent wraps one raw API streaming event, sent only with
+	// --include-partial-messages. The content_block_* types arrive inside it.
+	EventStreamEvent EventType = "stream_event"
 )
 
 // ContentBlockType identifies the kind of content within a message.
@@ -34,6 +38,9 @@ const (
 	// SystemSubtypeInformational carries a notice for the user, and is how a
 	// hook's systemMessage reaches the stream.
 	SystemSubtypeInformational SystemEventSubtype = "informational"
+
+	// SystemSubtypeCompactBoundary marks a finished compaction, manual or automatic.
+	SystemSubtypeCompactBoundary SystemEventSubtype = "compact_boundary"
 )
 
 // NoticeLevel is how prominently the CLI means an informational notice to be shown.
@@ -53,6 +60,16 @@ type Event struct {
 	Type EventType `json:"type"`
 }
 
+// StreamEvent carries one API streaming event, such as a content_block_delta.
+type StreamEvent struct {
+	Type  EventType       `json:"type"`
+	Event json.RawMessage `json:"event"`
+
+	// ParentToolUseID is set when the event comes from a subagent rather than
+	// the main conversation.
+	ParentToolUseID *string `json:"parent_tool_use_id"`
+}
+
 // SystemEvent is emitted at the start of a session with metadata like session_id.
 type SystemEvent struct {
 	Type      EventType          `json:"type"`
@@ -64,7 +81,25 @@ type SystemEvent struct {
 	Content string `json:"content,omitempty"`
 
 	Level NoticeLevel `json:"level,omitempty"`
+
+	// CompactMetadata is set on a compact_boundary event.
+	CompactMetadata *CompactMetadata `json:"compact_metadata,omitempty"`
 }
+
+// CompactMetadata describes one compaction of a session's context.
+type CompactMetadata struct {
+	Trigger    CompactTrigger `json:"trigger"`
+	PreTokens  int            `json:"pre_tokens"`
+	PostTokens int            `json:"post_tokens"`
+}
+
+// CompactTrigger says whether a person asked for a compaction or the CLI started it.
+type CompactTrigger string
+
+const (
+	CompactTriggerManual CompactTrigger = "manual"
+	CompactTriggerAuto   CompactTrigger = "auto"
+)
 
 // AssistantEvent is the complete assistant message returned by --print mode.
 // When the CLI cannot authenticate, the Error field is set (e.g. "authentication_failed")
@@ -137,6 +172,10 @@ type Delta struct {
 	Type     DeltaType `json:"type"`
 	Text     string    `json:"text,omitempty"`
 	Thinking string    `json:"thinking,omitempty"`
+
+	// PartialJSON is a fragment of a tool call's input. The fragments of one
+	// block join into its complete input.
+	PartialJSON string `json:"partial_json,omitempty"`
 }
 
 // RateLimitEvent is emitted when the CLI encounters a rate limit and is waiting to retry.

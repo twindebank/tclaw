@@ -610,6 +610,9 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 	// The CLI may not stream tool_use (or may use a type we don't
 	// recognize), so we extract them from the assistant event if missing.
 	gotStreamedToolUse := false
+	// A streamed tool_use block and its input, gathered until the block stops.
+	var pendingToolUse claudecli.ContentBlock
+	var pendingToolInput strings.Builder
 	// Track whether we've already emitted a text block so we can insert
 	// a newline separator before the next one.
 	hadTextBlock := false
@@ -637,6 +640,24 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 		}
 		if opts.Debug {
 			slog.Debug("cli event", "type", ev.Type, "json", string(line))
+		}
+
+		if ev.Type == claudecli.EventStreamEvent {
+			var wrapped claudecli.StreamEvent
+			if err := json.Unmarshal(line, &wrapped); err != nil {
+				slog.Warn("failed to parse stream_event", "err", err)
+				continue
+			}
+			if wrapped.ParentToolUseID != nil {
+				// A subagent's tokens would otherwise be written into the
+				// main reply.
+				continue
+			}
+			line = wrapped.Event
+			if err := json.Unmarshal(line, &ev); err != nil {
+				slog.Warn("failed to parse wrapped stream event", "err", err)
+				continue
+			}
 		}
 
 		switch ev.Type {
@@ -672,6 +693,10 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				if err := tw.write(phaseStatus, notice); err != nil {
 					return "", err
 				}
+			case claudecli.SystemSubtypeCompactBoundary:
+				if err := tw.write(phaseStatus, formatCompactBoundary(sys.CompactMetadata)); err != nil {
+					return "", err
+				}
 			default:
 				slog.Debug("unhandled system event subtype", "subtype", sys.Subtype)
 			}
@@ -698,9 +723,10 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				}
 			case claudecli.ContentToolUse:
 				gotStreamedToolUse = true
-				if err := tw.write(phaseStatus, formatToolUse(start.ContentBlock)); err != nil {
-					return "", err
-				}
+				// The input streams in afterwards as input_json_delta
+				// fragments, so the line is written once the block stops.
+				pendingToolUse = start.ContentBlock
+				pendingToolInput.Reset()
 				// Track tools the model tried to use that aren't in the allowed list.
 				// Only applies when an allowlist is configured (non-empty).
 				if len(allowedSet) > 0 && start.ContentBlock.Name != "" {
@@ -728,10 +754,20 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				if err := tw.write(phaseThinking, delta.Delta.Thinking); err != nil {
 					return "", err
 				}
+			case claudecli.DeltaInputJSON:
+				pendingToolInput.WriteString(delta.Delta.PartialJSON)
 			}
 
 		case claudecli.EventContentBlockStop:
 			switch currentBlockType {
+			case claudecli.ContentToolUse:
+				block := pendingToolUse
+				if input := pendingToolInput.String(); input != "" {
+					block.Input = json.RawMessage(input)
+				}
+				if err := tw.write(phaseStatus, formatToolUse(block)); err != nil {
+					return "", err
+				}
 			case claudecli.ContentText:
 				hadTextBlock = true
 			case claudecli.ContentThinking:
