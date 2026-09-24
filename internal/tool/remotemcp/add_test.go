@@ -18,651 +18,650 @@ import (
 	"tclaw/internal/tool/remotemcp"
 )
 
-func TestRemoteMCPAdd_SkipAuthDiscoveryWithHeaders(t *testing.T) {
-	t.Run("stores static headers and reaches ready state", func(t *testing.T) {
-		server := fakeMCPServer(t, []string{"ha_tool_a", "ha_tool_b"})
-		h, mgr, updated := setup(t, withHTTPClient(server.Client()))
+func TestRemoteMCPAdd(t *testing.T) {
+	t.Run("skip_auth_discovery with headers", func(t *testing.T) {
+		t.Run("stores static headers and reaches ready state", func(t *testing.T) {
+			server := fakeMCPServer(t, []string{"ha_tool_a", "ha_tool_b"})
+			h, mgr, updated := setup(t, withHTTPClient(server.Client()))
 
-		result := callTool(t, h, "remote_mcp_add", map[string]any{
-			"name":                "home-assistant",
-			"url":                 server.URL + "/mcp_abc",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-			"headers": map[string]string{
-				"CF-Access-Client-Id":     "client-id",
-				"CF-Access-Client-Secret": "client-secret",
-			},
+			result := callTool(t, h, "remote_mcp_add", map[string]any{
+				"name":                "home-assistant",
+				"url":                 server.URL + "/mcp_abc",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+				"headers": map[string]string{
+					"CF-Access-Client-Id":     "client-id",
+					"CF-Access-Client-Secret": "client-secret",
+				},
+			})
+
+			var got map[string]any
+			require.NoError(t, json.Unmarshal(result, &got))
+			require.Equal(t, "ready", got["status"])
+			require.Equal(t, "home-assistant", got["name"])
+			require.Equal(t, false, got["url_is_secret"], "inline url is not sensitive")
+			require.Equal(t, server.URL+"/mcp_abc", got["url"], "full url present for inline registration")
+
+			auth, err := mgr.GetRemoteMCPAuth(context.Background(), "home-assistant")
+			require.NoError(t, err)
+			require.NotNil(t, auth)
+			require.Equal(t, "client-id", auth.StaticHeaders["CF-Access-Client-Id"])
+			require.Equal(t, "client-secret", auth.StaticHeaders["CF-Access-Client-Secret"])
+			require.Empty(t, auth.AccessToken)
+
+			entry, err := mgr.GetRemoteMCP(context.Background(), "home-assistant")
+			require.NoError(t, err)
+			require.Equal(t, []string{"ha_tool_a", "ha_tool_b"}, entry.ToolNames,
+				"tool names from server should be persisted")
+
+			require.Equal(t, 1, *updated, "config updater should fire once after add")
 		})
 
-		var got map[string]any
-		require.NoError(t, json.Unmarshal(result, &got))
-		require.Equal(t, "ready", got["status"])
-		require.Equal(t, "home-assistant", got["name"])
-		require.Equal(t, false, got["url_is_secret"], "inline url is not sensitive")
-		require.Equal(t, server.URL+"/mcp_abc", got["url"], "full url present for inline registration")
+		t.Run("skip_auth_discovery without headers still persists entry", func(t *testing.T) {
+			server := fakeMCPServer(t, []string{"open_tool"})
+			h, mgr, _ := setup(t, withHTTPClient(server.Client()))
 
-		auth, err := mgr.GetRemoteMCPAuth(context.Background(), "home-assistant")
-		require.NoError(t, err)
-		require.NotNil(t, auth)
-		require.Equal(t, "client-id", auth.StaticHeaders["CF-Access-Client-Id"])
-		require.Equal(t, "client-secret", auth.StaticHeaders["CF-Access-Client-Secret"])
-		require.Empty(t, auth.AccessToken)
+			_ = callTool(t, h, "remote_mcp_add", map[string]any{
+				"name":                "open-mcp",
+				"url":                 server.URL + "/mcp",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+			})
 
-		entry, err := mgr.GetRemoteMCP(context.Background(), "home-assistant")
-		require.NoError(t, err)
-		require.Equal(t, []string{"ha_tool_a", "ha_tool_b"}, entry.ToolNames,
-			"tool names from server should be persisted")
+			mcps, err := mgr.ListRemoteMCPs(context.Background())
+			require.NoError(t, err)
+			require.Len(t, mcps, 1)
 
-		require.Equal(t, 1, *updated, "config updater should fire once after add")
+			// No auth entry should be stored when no headers were supplied.
+			auth, err := mgr.GetRemoteMCPAuth(context.Background(), "open-mcp")
+			require.NoError(t, err)
+			require.Nil(t, auth)
+		})
+
+		t.Run("rejects headers without skip_auth_discovery", func(t *testing.T) {
+			h, _, _ := setup(t)
+
+			err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
+				"name":     "bad",
+				"url":      "https://example.com/mcp",
+				"channels": []string{"desktop"},
+				"headers":  map[string]string{"X-Foo": "bar"},
+			})
+			require.Contains(t, err.Error(), "skip_auth_discovery=true")
+		})
+
+		t.Run("rejects invalid header name", func(t *testing.T) {
+			h, _, _ := setup(t)
+
+			err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
+				"name":                "bad",
+				"url":                 "https://example.com/mcp",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+				"headers":             map[string]string{"bad header": "value"},
+			})
+			require.Contains(t, err.Error(), "invalid header name")
+		})
+
+		t.Run("rejects empty header value", func(t *testing.T) {
+			h, _, _ := setup(t)
+
+			err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
+				"name":                "bad",
+				"url":                 "https://example.com/mcp",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+				"headers":             map[string]string{"X-Foo": ""},
+			})
+			require.Contains(t, err.Error(), "invalid header value")
+		})
+
+		t.Run("rejects CRLF injection in header value", func(t *testing.T) {
+			h, _, _ := setup(t)
+
+			err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
+				"name":                "bad",
+				"url":                 "https://example.com/mcp",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+				"headers":             map[string]string{"X-Foo": "ok\r\nX-Evil: injected"},
+			})
+			require.Contains(t, err.Error(), "control character")
+		})
 	})
 
-	t.Run("skip_auth_discovery without headers still persists entry", func(t *testing.T) {
-		server := fakeMCPServer(t, []string{"open_tool"})
-		h, mgr, _ := setup(t, withHTTPClient(server.Client()))
+	t.Run("captures the server's instructions", func(t *testing.T) {
+		const instructions = "One persistent browser session per connection; state resets when you reconnect."
 
-		_ = callTool(t, h, "remote_mcp_add", map[string]any{
-			"name":                "open-mcp",
-			"url":                 server.URL + "/mcp",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
+		t.Run("echoes server instructions in the add response and persists them", func(t *testing.T) {
+			server := fakeMCPServerWithInstructions(t, []string{"browser_navigate"}, instructions)
+			th := setupHarness(t, withHTTPClient(server.Client()))
+
+			result := callTool(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "browser-mcp",
+				"url":                 server.URL + "/mcp",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+			})
+
+			var got map[string]any
+			require.NoError(t, json.Unmarshal(result, &got))
+			require.Equal(t, "ready", got["status"])
+			require.Equal(t, instructions, got["instructions"],
+				"the server's how-to-use instructions should be echoed on add")
+
+			entry, err := th.manager.GetRemoteMCP(context.Background(), "browser-mcp")
+			require.NoError(t, err)
+			require.NotNil(t, entry)
+			require.Equal(t, instructions, entry.Instructions, "instructions should be persisted on the entry")
 		})
 
-		mcps, err := mgr.ListRemoteMCPs(context.Background())
-		require.NoError(t, err)
-		require.Len(t, mcps, 1)
+		t.Run("remote_mcp_list surfaces persisted instructions", func(t *testing.T) {
+			server := fakeMCPServerWithInstructions(t, []string{"browser_navigate"}, instructions)
+			th := setupHarness(t, withHTTPClient(server.Client()))
 
-		// No auth entry should be stored when no headers were supplied.
-		auth, err := mgr.GetRemoteMCPAuth(context.Background(), "open-mcp")
-		require.NoError(t, err)
-		require.Nil(t, auth)
+			_ = callTool(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "browser-mcp",
+				"url":                 server.URL + "/mcp",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+			})
+
+			listed := callTool(t, th.handler, "remote_mcp_list", map[string]any{})
+			var entries []map[string]any
+			require.NoError(t, json.Unmarshal(listed, &entries))
+			require.Len(t, entries, 1)
+			require.Equal(t, instructions, entries[0]["instructions"])
+		})
+
+		t.Run("omits the instructions field when the server exposes none", func(t *testing.T) {
+			server := fakeMCPServer(t, []string{"browser_navigate"})
+			th := setupHarness(t, withHTTPClient(server.Client()))
+
+			result := callTool(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "silent",
+				"url":                 server.URL + "/mcp",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+			})
+
+			var got map[string]any
+			require.NoError(t, json.Unmarshal(result, &got))
+			require.NotContains(t, got, "instructions", "no instructions field when the server set none")
+		})
 	})
 
-	t.Run("rejects headers without skip_auth_discovery", func(t *testing.T) {
-		h, _, _ := setup(t)
+	t.Run("auth discovery", func(t *testing.T) {
+		// Regression: a probe failure with no WWW-Authenticate header, as a
+		// hosted MCP server behind a WAF returns, was treated as "no auth
+		// needed" — registering a server with zero tools and no way to
+		// authorize it.
+		t.Run("registers successfully when the probe reports no auth required", func(t *testing.T) {
+			server := fakeMCPServer(t, []string{"open_tool_a", "open_tool_b"})
+			h, mgr, updated := setup(t, withHTTPClient(server.Client()))
 
-		err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
-			"name":     "bad",
-			"url":      "https://example.com/mcp",
-			"channels": []string{"desktop"},
-			"headers":  map[string]string{"X-Foo": "bar"},
+			result := callTool(t, h, "remote_mcp_add", map[string]any{
+				"name":     "open-mcp",
+				"url":      server.URL + "/mcp",
+				"channels": []string{"desktop"},
+			})
+
+			var got map[string]any
+			require.NoError(t, json.Unmarshal(result, &got))
+			require.Equal(t, "ready", got["status"])
+
+			entry, err := mgr.GetRemoteMCP(context.Background(), "open-mcp")
+			require.NoError(t, err)
+			require.NotNil(t, entry)
+			require.Equal(t, []string{"open_tool_a", "open_tool_b"}, entry.ToolNames)
+			require.Equal(t, 1, *updated)
 		})
-		require.Contains(t, err.Error(), "skip_auth_discovery=true")
+
+		t.Run("does not register the server when the probe returns an unexpected status", func(t *testing.T) {
+			// Simulates a server whose endpoint is blocked by a WAF/bot layer and
+			// returns a bare 403 (no WWW-Authenticate header) for every request,
+			// regardless of whether the caller is authenticated — the Strava
+			// repro. This must NOT be treated as "no auth needed".
+			server := fakeStatusServer(t, http.StatusForbidden)
+			h, mgr, updated := setup(t, withHTTPClient(server.Client()))
+
+			err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
+				"name":     "strava",
+				"url":      server.URL + "/mcp",
+				"channels": []string{"running"},
+			})
+			require.Contains(t, err.Error(), "could not determine whether remote MCP")
+			require.Contains(t, err.Error(), "skip_auth_discovery=true")
+
+			mcps, listErr := mgr.ListRemoteMCPs(context.Background())
+			require.NoError(t, listErr)
+			require.Empty(t, mcps, "a failed auth-discovery probe must not leave a broken zero-tool registration behind")
+			require.Equal(t, 0, *updated, "config must not be regenerated for a registration that never completed")
+		})
+
+		t.Run("does not register the server when the probe is unreachable", func(t *testing.T) {
+			server := fakeMCPServer(t, []string{"ignored"})
+			client := server.Client()
+			server.Close() // immediately close so the probe fails outright
+
+			h, mgr, updated := setup(t, withHTTPClient(client))
+
+			err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
+				"name":     "dead-server",
+				"url":      server.URL + "/mcp",
+				"channels": []string{"desktop"},
+			})
+			require.Contains(t, err.Error(), "could not determine whether remote MCP")
+
+			mcps, listErr := mgr.ListRemoteMCPs(context.Background())
+			require.NoError(t, listErr)
+			require.Empty(t, mcps, "failed registration must not leave state behind")
+			require.Equal(t, 0, *updated)
+		})
 	})
 
-	t.Run("rejects invalid header name", func(t *testing.T) {
-		h, _, _ := setup(t)
+	t.Run("http on a fly private host", func(t *testing.T) {
+		t.Run("allows http past the https gate for a Fly private host", func(t *testing.T) {
+			h, _, _ := setup(t)
 
-		err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
-			"name":                "bad",
-			"url":                 "https://example.com/mcp",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-			"headers":             map[string]string{"bad header": "value"},
+			// The private host doesn't resolve in a test, so the add fails at tool
+			// discovery — but reaching that stage (rather than an "only HTTPS"
+			// rejection) proves http was allowed for the Fly private host.
+			err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
+				"name":                "private-mcp",
+				"url":                 "http://svc.flycast:8000/mcp",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+			})
+			require.Contains(t, err.Error(), "failed to list tools")
+			require.NotContains(t, err.Error(), "HTTPS")
 		})
-		require.Contains(t, err.Error(), "invalid header name")
+
+		t.Run("rejects http on a public host", func(t *testing.T) {
+			h, _, _ := setup(t)
+
+			err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
+				"name":                "bad",
+				"url":                 "http://example.com/mcp",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+			})
+			require.Contains(t, err.Error(), "HTTPS")
+		})
 	})
 
-	t.Run("rejects empty header value", func(t *testing.T) {
-		h, _, _ := setup(t)
+	t.Run("tls pin", func(t *testing.T) {
+		validPin := strings.Repeat("ab", 32)
 
-		err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
-			"name":                "bad",
-			"url":                 "https://example.com/mcp",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-			"headers":             map[string]string{"X-Foo": ""},
+		t.Run("stores the cert pin on the entry", func(t *testing.T) {
+			server := fakeMCPServer(t, []string{"browse"})
+			th := setupHarness(t, withHTTPClient(server.Client()))
+			sum := sha256.Sum256(server.Certificate().Raw)
+			pin := hex.EncodeToString(sum[:])
+
+			result := callTool(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "pinned-mcp",
+				"url":                 server.URL + "/mcp",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+				"tls_pin_sha256":      pin,
+			})
+
+			var got map[string]any
+			require.NoError(t, json.Unmarshal(result, &got))
+			require.Equal(t, "ready", got["status"])
+
+			entry, err := th.manager.GetRemoteMCP(context.Background(), "pinned-mcp")
+			require.NoError(t, err)
+			require.NotNil(t, entry)
+			require.Equal(t, pin, entry.TLSPinSHA256)
 		})
-		require.Contains(t, err.Error(), "invalid header value")
+
+		t.Run("rejects a pin on a non-https url", func(t *testing.T) {
+			th := setupHarness(t)
+
+			err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "pinned-mcp",
+				"url":                 "http://svc.flycast:8000/mcp",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+				"tls_pin_sha256":      validPin,
+			})
+			require.Contains(t, err.Error(), "requires an https URL")
+		})
+
+		t.Run("rejects a malformed pin", func(t *testing.T) {
+			server := fakeMCPServer(t, []string{"browse"})
+			th := setupHarness(t, withHTTPClient(server.Client()))
+
+			err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "pinned-mcp",
+				"url":                 server.URL + "/mcp",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+				"tls_pin_sha256":      "not-a-real-fingerprint",
+			})
+			require.Contains(t, err.Error(), "tls pin")
+		})
 	})
 
-	t.Run("rejects CRLF injection in header value", func(t *testing.T) {
-		h, _, _ := setup(t)
+	t.Run("header secret keys", func(t *testing.T) {
+		t.Run("resolves values from secret store and stores as static headers", func(t *testing.T) {
+			server := fakeMCPServer(t, []string{"ha_one", "ha_two"})
+			th := setupHarness(t, withHTTPClient(server.Client()))
+			th.secrets.data["ha_mcp_cf_access_client_id"] = "client-id-from-store"
+			th.secrets.data["ha_mcp_cf_access_client_secret"] = "client-secret-from-store"
 
-		err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
-			"name":                "bad",
-			"url":                 "https://example.com/mcp",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-			"headers":             map[string]string{"X-Foo": "ok\r\nX-Evil: injected"},
-		})
-		require.Contains(t, err.Error(), "control character")
-	})
-}
+			result := callTool(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "home-assistant",
+				"url":                 server.URL + "/mcp_abc",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+				"header_secret_keys": map[string]string{
+					"CF-Access-Client-Id":     "ha_mcp_cf_access_client_id",
+					"CF-Access-Client-Secret": "ha_mcp_cf_access_client_secret",
+				},
+			})
 
-func TestRemoteMCPAdd_CapturesInstructions(t *testing.T) {
-	const instructions = "One persistent browser session per connection; state resets when you reconnect."
+			var got map[string]any
+			require.NoError(t, json.Unmarshal(result, &got))
+			require.Equal(t, "ready", got["status"])
 
-	t.Run("echoes server instructions in the add response and persists them", func(t *testing.T) {
-		server := fakeMCPServerWithInstructions(t, []string{"browser_navigate"}, instructions)
-		th := setupHarness(t, withHTTPClient(server.Client()))
-
-		result := callTool(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":                "browser-mcp",
-			"url":                 server.URL + "/mcp",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-		})
-
-		var got map[string]any
-		require.NoError(t, json.Unmarshal(result, &got))
-		require.Equal(t, "ready", got["status"])
-		require.Equal(t, instructions, got["instructions"],
-			"the server's how-to-use instructions should be echoed on add")
-
-		entry, err := th.manager.GetRemoteMCP(context.Background(), "browser-mcp")
-		require.NoError(t, err)
-		require.NotNil(t, entry)
-		require.Equal(t, instructions, entry.Instructions, "instructions should be persisted on the entry")
-	})
-
-	t.Run("remote_mcp_list surfaces persisted instructions", func(t *testing.T) {
-		server := fakeMCPServerWithInstructions(t, []string{"browser_navigate"}, instructions)
-		th := setupHarness(t, withHTTPClient(server.Client()))
-
-		_ = callTool(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":                "browser-mcp",
-			"url":                 server.URL + "/mcp",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
+			auth, err := th.manager.GetRemoteMCPAuth(context.Background(), "home-assistant")
+			require.NoError(t, err)
+			require.NotNil(t, auth)
+			require.Equal(t, "client-id-from-store", auth.StaticHeaders["CF-Access-Client-Id"])
+			require.Equal(t, "client-secret-from-store", auth.StaticHeaders["CF-Access-Client-Secret"])
 		})
 
-		listed := callTool(t, th.handler, "remote_mcp_list", map[string]any{})
-		var entries []map[string]any
-		require.NoError(t, json.Unmarshal(listed, &entries))
-		require.Len(t, entries, 1)
-		require.Equal(t, instructions, entries[0]["instructions"])
-	})
+		t.Run("combines inline headers with secret-resolved headers", func(t *testing.T) {
+			server := fakeMCPServer(t, []string{"combo_tool"})
+			th := setupHarness(t, withHTTPClient(server.Client()))
+			th.secrets.data["tenant_token"] = "resolved-value"
 
-	t.Run("omits the instructions field when the server exposes none", func(t *testing.T) {
-		server := fakeMCPServer(t, []string{"browser_navigate"})
-		th := setupHarness(t, withHTTPClient(server.Client()))
+			_ = callTool(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "combo",
+				"url":                 server.URL + "/mcp",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+				"headers": map[string]string{
+					"X-Tenant": "acme",
+				},
+				"header_secret_keys": map[string]string{
+					"X-Auth-Token": "tenant_token",
+				},
+			})
 
-		result := callTool(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":                "silent",
-			"url":                 server.URL + "/mcp",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
+			auth, err := th.manager.GetRemoteMCPAuth(context.Background(), "combo")
+			require.NoError(t, err)
+			require.Equal(t, "acme", auth.StaticHeaders["X-Tenant"])
+			require.Equal(t, "resolved-value", auth.StaticHeaders["X-Auth-Token"])
 		})
 
-		var got map[string]any
-		require.NoError(t, json.Unmarshal(result, &got))
-		require.NotContains(t, got, "instructions", "no instructions field when the server set none")
-	})
-}
+		t.Run("errors clearly when referenced secret is missing", func(t *testing.T) {
+			th := setupHarness(t)
 
-// TestRemoteMCPAdd_AuthDiscovery exercises remote_mcp_add without
-// skip_auth_discovery, i.e. the path that probes the server to decide
-// whether OAuth is required. Regression coverage for a bug where a
-// discovery failure (e.g. an unexpected status code with no
-// WWW-Authenticate header, as returned by Strava's hosted MCP server) was
-// silently treated the same as "no auth needed" — registering the server
-// with zero tools and no way to ever authorize it.
-func TestRemoteMCPAdd_AuthDiscovery(t *testing.T) {
-	t.Run("registers successfully when the probe reports no auth required", func(t *testing.T) {
-		server := fakeMCPServer(t, []string{"open_tool_a", "open_tool_b"})
-		h, mgr, updated := setup(t, withHTTPClient(server.Client()))
-
-		result := callTool(t, h, "remote_mcp_add", map[string]any{
-			"name":     "open-mcp",
-			"url":      server.URL + "/mcp",
-			"channels": []string{"desktop"},
+			err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "bad",
+				"url":                 "https://example.com/mcp",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+				"header_secret_keys": map[string]string{
+					"CF-Access-Client-Id": "missing_key",
+				},
+			})
+			require.Contains(t, err.Error(), "missing_key")
+			require.Contains(t, err.Error(), "secret_form_request")
 		})
 
-		var got map[string]any
-		require.NoError(t, json.Unmarshal(result, &got))
-		require.Equal(t, "ready", got["status"])
+		t.Run("error message does not leak the secret value on unset key", func(t *testing.T) {
+			th := setupHarness(t)
 
-		entry, err := mgr.GetRemoteMCP(context.Background(), "open-mcp")
-		require.NoError(t, err)
-		require.NotNil(t, entry)
-		require.Equal(t, []string{"open_tool_a", "open_tool_b"}, entry.ToolNames)
-		require.Equal(t, 1, *updated)
-	})
-
-	t.Run("does not register the server when the probe returns an unexpected status", func(t *testing.T) {
-		// Simulates a server whose endpoint is blocked by a WAF/bot layer and
-		// returns a bare 403 (no WWW-Authenticate header) for every request,
-		// regardless of whether the caller is authenticated — the Strava
-		// repro. This must NOT be treated as "no auth needed".
-		server := fakeStatusServer(t, http.StatusForbidden)
-		h, mgr, updated := setup(t, withHTTPClient(server.Client()))
-
-		err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
-			"name":     "strava",
-			"url":      server.URL + "/mcp",
-			"channels": []string{"running"},
+			err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "bad",
+				"url":                 "https://example.com/mcp",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+				"header_secret_keys": map[string]string{
+					"CF-Access-Client-Secret": "never_set",
+				},
+			})
+			// The error references the header name and key but not any value.
+			require.Contains(t, err.Error(), "CF-Access-Client-Secret")
+			require.Contains(t, err.Error(), "never_set")
 		})
-		require.Contains(t, err.Error(), "could not determine whether remote MCP")
-		require.Contains(t, err.Error(), "skip_auth_discovery=true")
 
-		mcps, listErr := mgr.ListRemoteMCPs(context.Background())
-		require.NoError(t, listErr)
-		require.Empty(t, mcps, "a failed auth-discovery probe must not leave a broken zero-tool registration behind")
-		require.Equal(t, 0, *updated, "config must not be regenerated for a registration that never completed")
-	})
+		t.Run("rejects duplicate header across inline and secret_keys", func(t *testing.T) {
+			th := setupHarness(t)
+			th.secrets.data["key1"] = "value-from-secret"
 
-	t.Run("does not register the server when the probe is unreachable", func(t *testing.T) {
-		server := fakeMCPServer(t, []string{"ignored"})
-		client := server.Client()
-		server.Close() // immediately close so the probe fails outright
-
-		h, mgr, updated := setup(t, withHTTPClient(client))
-
-		err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
-			"name":     "dead-server",
-			"url":      server.URL + "/mcp",
-			"channels": []string{"desktop"},
+			err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "bad",
+				"url":                 "https://example.com/mcp",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+				"headers": map[string]string{
+					"X-Foo": "inline-value",
+				},
+				"header_secret_keys": map[string]string{
+					"X-Foo": "key1",
+				},
+			})
+			require.Contains(t, err.Error(), "choose one source")
 		})
-		require.Contains(t, err.Error(), "could not determine whether remote MCP")
 
-		mcps, listErr := mgr.ListRemoteMCPs(context.Background())
-		require.NoError(t, listErr)
-		require.Empty(t, mcps, "failed registration must not leave state behind")
-		require.Equal(t, 0, *updated)
-	})
-}
+		t.Run("rejects secret headers without skip_auth_discovery", func(t *testing.T) {
+			th := setupHarness(t)
+			th.secrets.data["k"] = "v"
 
-func TestRemoteMCPAdd_PrivateHostHTTP(t *testing.T) {
-	t.Run("allows http past the https gate for a Fly private host", func(t *testing.T) {
-		h, _, _ := setup(t)
-
-		// The private host doesn't resolve in a test, so the add fails at tool
-		// discovery — but reaching that stage (rather than an "only HTTPS"
-		// rejection) proves http was allowed for the Fly private host.
-		err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
-			"name":                "private-mcp",
-			"url":                 "http://svc.flycast:8000/mcp",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
+			err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":     "bad",
+				"url":      "https://example.com/mcp",
+				"channels": []string{"desktop"},
+				"header_secret_keys": map[string]string{
+					"X-Foo": "k",
+				},
+			})
+			require.Contains(t, err.Error(), "skip_auth_discovery=true")
 		})
-		require.Contains(t, err.Error(), "failed to list tools")
-		require.NotContains(t, err.Error(), "HTTPS")
+
+		t.Run("rejects empty secret key", func(t *testing.T) {
+			th := setupHarness(t)
+
+			err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "bad",
+				"url":                 "https://example.com/mcp",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+				"header_secret_keys": map[string]string{
+					"X-Foo": "",
+				},
+			})
+			require.Contains(t, err.Error(), "empty")
+		})
 	})
 
-	t.Run("rejects http on a public host", func(t *testing.T) {
-		h, _, _ := setup(t)
+	t.Run("url secret key", func(t *testing.T) {
+		t.Run("resolves URL from secret store", func(t *testing.T) {
+			server := fakeMCPServer(t, []string{"secret_tool"})
+			th := setupHarness(t, withHTTPClient(server.Client()))
+			th.secrets.data["mcp_url"] = server.URL + "/abc_secret_xyz"
 
-		err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
-			"name":                "bad",
-			"url":                 "http://example.com/mcp",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-		})
-		require.Contains(t, err.Error(), "HTTPS")
-	})
-}
+			_ = callTool(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "private",
+				"url_secret_key":      "mcp_url",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+			})
 
-func TestRemoteMCPAdd_TLSPin(t *testing.T) {
-	validPin := strings.Repeat("ab", 32)
-
-	t.Run("stores the cert pin on the entry", func(t *testing.T) {
-		server := fakeMCPServer(t, []string{"browse"})
-		th := setupHarness(t, withHTTPClient(server.Client()))
-		sum := sha256.Sum256(server.Certificate().Raw)
-		pin := hex.EncodeToString(sum[:])
-
-		result := callTool(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":                "pinned-mcp",
-			"url":                 server.URL + "/mcp",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-			"tls_pin_sha256":      pin,
+			mcps, err := th.manager.ListRemoteMCPs(context.Background())
+			require.NoError(t, err)
+			require.Len(t, mcps, 1)
+			require.Equal(t, server.URL+"/abc_secret_xyz", mcps[0].URL,
+				"resolved URL should be stored as the remote MCP URL")
 		})
 
-		var got map[string]any
-		require.NoError(t, json.Unmarshal(result, &got))
-		require.Equal(t, "ready", got["status"])
+		t.Run("combines url_secret_key with header_secret_keys", func(t *testing.T) {
+			server := fakeMCPServer(t, []string{"full_tool"})
+			th := setupHarness(t, withHTTPClient(server.Client()))
+			th.secrets.data["mcp_url"] = server.URL + "/abc_xyz"
+			th.secrets.data["cf_id"] = "cf-client-id"
+			th.secrets.data["cf_secret"] = "cf-client-secret"
 
-		entry, err := th.manager.GetRemoteMCP(context.Background(), "pinned-mcp")
-		require.NoError(t, err)
-		require.NotNil(t, entry)
-		require.Equal(t, pin, entry.TLSPinSHA256)
-	})
+			_ = callTool(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "full-secret",
+				"url_secret_key":      "mcp_url",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+				"header_secret_keys": map[string]string{
+					"CF-Access-Client-Id":     "cf_id",
+					"CF-Access-Client-Secret": "cf_secret",
+				},
+			})
 
-	t.Run("rejects a pin on a non-https url", func(t *testing.T) {
-		th := setupHarness(t)
+			mcps, err := th.manager.ListRemoteMCPs(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, server.URL+"/abc_xyz", mcps[0].URL)
 
-		err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":                "pinned-mcp",
-			"url":                 "http://svc.flycast:8000/mcp",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-			"tls_pin_sha256":      validPin,
-		})
-		require.Contains(t, err.Error(), "requires an https URL")
-	})
-
-	t.Run("rejects a malformed pin", func(t *testing.T) {
-		server := fakeMCPServer(t, []string{"browse"})
-		th := setupHarness(t, withHTTPClient(server.Client()))
-
-		err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":                "pinned-mcp",
-			"url":                 server.URL + "/mcp",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-			"tls_pin_sha256":      "not-a-real-fingerprint",
-		})
-		require.Contains(t, err.Error(), "tls pin")
-	})
-}
-
-func TestRemoteMCPAdd_HeaderSecretKeys(t *testing.T) {
-	t.Run("resolves values from secret store and stores as static headers", func(t *testing.T) {
-		server := fakeMCPServer(t, []string{"ha_one", "ha_two"})
-		th := setupHarness(t, withHTTPClient(server.Client()))
-		th.secrets.data["ha_mcp_cf_access_client_id"] = "client-id-from-store"
-		th.secrets.data["ha_mcp_cf_access_client_secret"] = "client-secret-from-store"
-
-		result := callTool(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":                "home-assistant",
-			"url":                 server.URL + "/mcp_abc",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-			"header_secret_keys": map[string]string{
-				"CF-Access-Client-Id":     "ha_mcp_cf_access_client_id",
-				"CF-Access-Client-Secret": "ha_mcp_cf_access_client_secret",
-			},
+			auth, err := th.manager.GetRemoteMCPAuth(context.Background(), "full-secret")
+			require.NoError(t, err)
+			require.Equal(t, "cf-client-id", auth.StaticHeaders["CF-Access-Client-Id"])
+			require.Equal(t, "cf-client-secret", auth.StaticHeaders["CF-Access-Client-Secret"])
 		})
 
-		var got map[string]any
-		require.NoError(t, json.Unmarshal(result, &got))
-		require.Equal(t, "ready", got["status"])
+		t.Run("rejects when both url and url_secret_key provided", func(t *testing.T) {
+			th := setupHarness(t)
+			th.secrets.data["k"] = "https://other.example.com/"
 
-		auth, err := th.manager.GetRemoteMCPAuth(context.Background(), "home-assistant")
-		require.NoError(t, err)
-		require.NotNil(t, auth)
-		require.Equal(t, "client-id-from-store", auth.StaticHeaders["CF-Access-Client-Id"])
-		require.Equal(t, "client-secret-from-store", auth.StaticHeaders["CF-Access-Client-Secret"])
-	})
-
-	t.Run("combines inline headers with secret-resolved headers", func(t *testing.T) {
-		server := fakeMCPServer(t, []string{"combo_tool"})
-		th := setupHarness(t, withHTTPClient(server.Client()))
-		th.secrets.data["tenant_token"] = "resolved-value"
-
-		_ = callTool(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":                "combo",
-			"url":                 server.URL + "/mcp",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-			"headers": map[string]string{
-				"X-Tenant": "acme",
-			},
-			"header_secret_keys": map[string]string{
-				"X-Auth-Token": "tenant_token",
-			},
+			err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "bad",
+				"url":                 "https://inline.example.com/",
+				"url_secret_key":      "k",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+			})
+			require.Contains(t, err.Error(), "only one of url or url_secret_key")
 		})
 
-		auth, err := th.manager.GetRemoteMCPAuth(context.Background(), "combo")
-		require.NoError(t, err)
-		require.Equal(t, "acme", auth.StaticHeaders["X-Tenant"])
-		require.Equal(t, "resolved-value", auth.StaticHeaders["X-Auth-Token"])
+		t.Run("rejects when neither url nor url_secret_key provided", func(t *testing.T) {
+			th := setupHarness(t)
+
+			err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "bad",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+			})
+			require.Contains(t, err.Error(), "url or url_secret_key is required")
+		})
+
+		t.Run("rejects when referenced url secret is missing", func(t *testing.T) {
+			th := setupHarness(t)
+
+			err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "bad",
+				"url_secret_key":      "never_set_key",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+			})
+			require.Contains(t, err.Error(), "never_set_key")
+			require.Contains(t, err.Error(), "secret_form_request")
+		})
+
+		t.Run("validates resolved URL is https", func(t *testing.T) {
+			th := setupHarness(t)
+			th.secrets.data["bad_url"] = "http://not-tls.example.com/"
+
+			err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "bad",
+				"url_secret_key":      "bad_url",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+			})
+			require.Contains(t, err.Error(), "HTTPS")
+		})
+
+		t.Run("validates resolved URL is well-formed", func(t *testing.T) {
+			th := setupHarness(t)
+			th.secrets.data["bad_url"] = "not a url at all"
+
+			err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "bad",
+				"url_secret_key":      "bad_url",
+				"channels":            []string{"desktop"},
+				"skip_auth_discovery": true,
+			})
+			require.Contains(t, err.Error(), "valid absolute URL")
+		})
 	})
 
-	t.Run("errors clearly when referenced secret is missing", func(t *testing.T) {
-		th := setupHarness(t)
+	t.Run("channels", func(t *testing.T) {
+		t.Run("one registration serves every channel it names", func(t *testing.T) {
+			server := fakeMCPServer(t, []string{"browser_navigate"})
+			th := setupHarness(t, withHTTPClient(server.Client()))
 
-		err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":                "bad",
-			"url":                 "https://example.com/mcp",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-			"header_secret_keys": map[string]string{
-				"CF-Access-Client-Id": "missing_key",
-			},
-		})
-		require.Contains(t, err.Error(), "missing_key")
-		require.Contains(t, err.Error(), "secret_form_request")
-	})
+			_ = callTool(t, th.handler, "remote_mcp_add", map[string]any{
+				"name":                "browser-mcp",
+				"url":                 server.URL + "/mcp",
+				"channels":            []string{"desktop", "shopping"},
+				"skip_auth_discovery": true,
+			})
 
-	t.Run("error message does not leak the secret value on unset key", func(t *testing.T) {
-		th := setupHarness(t)
+			entry, err := th.manager.GetRemoteMCP(context.Background(), "browser-mcp")
+			require.NoError(t, err)
+			require.Equal(t, []string{"desktop", "shopping"}, entry.Channels)
 
-		err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":                "bad",
-			"url":                 "https://example.com/mcp",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-			"header_secret_keys": map[string]string{
-				"CF-Access-Client-Secret": "never_set",
-			},
-		})
-		// The error references the header name and key but not any value.
-		require.Contains(t, err.Error(), "CF-Access-Client-Secret")
-		require.Contains(t, err.Error(), "never_set")
-	})
-
-	t.Run("rejects duplicate header across inline and secret_keys", func(t *testing.T) {
-		th := setupHarness(t)
-		th.secrets.data["key1"] = "value-from-secret"
-
-		err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":                "bad",
-			"url":                 "https://example.com/mcp",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-			"headers": map[string]string{
-				"X-Foo": "inline-value",
-			},
-			"header_secret_keys": map[string]string{
-				"X-Foo": "key1",
-			},
-		})
-		require.Contains(t, err.Error(), "choose one source")
-	})
-
-	t.Run("rejects secret headers without skip_auth_discovery", func(t *testing.T) {
-		th := setupHarness(t)
-		th.secrets.data["k"] = "v"
-
-		err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":     "bad",
-			"url":      "https://example.com/mcp",
-			"channels": []string{"desktop"},
-			"header_secret_keys": map[string]string{
-				"X-Foo": "k",
-			},
-		})
-		require.Contains(t, err.Error(), "skip_auth_discovery=true")
-	})
-
-	t.Run("rejects empty secret key", func(t *testing.T) {
-		th := setupHarness(t)
-
-		err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":                "bad",
-			"url":                 "https://example.com/mcp",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-			"header_secret_keys": map[string]string{
-				"X-Foo": "",
-			},
-		})
-		require.Contains(t, err.Error(), "empty")
-	})
-}
-
-func TestRemoteMCPAdd_URLSecretKey(t *testing.T) {
-	t.Run("resolves URL from secret store", func(t *testing.T) {
-		server := fakeMCPServer(t, []string{"secret_tool"})
-		th := setupHarness(t, withHTTPClient(server.Client()))
-		th.secrets.data["mcp_url"] = server.URL + "/abc_secret_xyz"
-
-		_ = callTool(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":                "private",
-			"url_secret_key":      "mcp_url",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
+			listed := callTool(t, th.handler, "remote_mcp_list", map[string]any{})
+			var entries []map[string]any
+			require.NoError(t, json.Unmarshal(listed, &entries))
+			require.Len(t, entries, 1)
+			require.Equal(t, []any{"desktop", "shopping"}, entries[0]["channels"],
+				"the agent needs the current list to pass it back to remote_mcp_update")
 		})
 
-		mcps, err := th.manager.ListRemoteMCPs(context.Background())
-		require.NoError(t, err)
-		require.Len(t, mcps, 1)
-		require.Equal(t, server.URL+"/abc_secret_xyz", mcps[0].URL,
-			"resolved URL should be stored as the remote MCP URL")
-	})
+		t.Run("rejects an empty channel list", func(t *testing.T) {
+			h, mgr, _ := setup(t)
 
-	t.Run("combines url_secret_key with header_secret_keys", func(t *testing.T) {
-		server := fakeMCPServer(t, []string{"full_tool"})
-		th := setupHarness(t, withHTTPClient(server.Client()))
-		th.secrets.data["mcp_url"] = server.URL + "/abc_xyz"
-		th.secrets.data["cf_id"] = "cf-client-id"
-		th.secrets.data["cf_secret"] = "cf-client-secret"
+			err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
+				"name":                "browser-mcp",
+				"url":                 "https://browser-mcp.example.com/mcp",
+				"channels":            []string{},
+				"skip_auth_discovery": true,
+			})
+			require.Contains(t, err.Error(), "channels is required")
 
-		_ = callTool(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":                "full-secret",
-			"url_secret_key":      "mcp_url",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-			"header_secret_keys": map[string]string{
-				"CF-Access-Client-Id":     "cf_id",
-				"CF-Access-Client-Secret": "cf_secret",
-			},
+			mcps, listErr := mgr.ListRemoteMCPs(context.Background())
+			require.NoError(t, listErr)
+			require.Empty(t, mcps, "a rejected registration must leave nothing behind")
 		})
 
-		mcps, err := th.manager.ListRemoteMCPs(context.Background())
-		require.NoError(t, err)
-		require.Equal(t, server.URL+"/abc_xyz", mcps[0].URL)
+		t.Run("rejects a channel listed twice", func(t *testing.T) {
+			h, _, _ := setup(t)
 
-		auth, err := th.manager.GetRemoteMCPAuth(context.Background(), "full-secret")
-		require.NoError(t, err)
-		require.Equal(t, "cf-client-id", auth.StaticHeaders["CF-Access-Client-Id"])
-		require.Equal(t, "cf-client-secret", auth.StaticHeaders["CF-Access-Client-Secret"])
-	})
-
-	t.Run("rejects when both url and url_secret_key provided", func(t *testing.T) {
-		th := setupHarness(t)
-		th.secrets.data["k"] = "https://other.example.com/"
-
-		err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":                "bad",
-			"url":                 "https://inline.example.com/",
-			"url_secret_key":      "k",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-		})
-		require.Contains(t, err.Error(), "only one of url or url_secret_key")
-	})
-
-	t.Run("rejects when neither url nor url_secret_key provided", func(t *testing.T) {
-		th := setupHarness(t)
-
-		err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":                "bad",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-		})
-		require.Contains(t, err.Error(), "url or url_secret_key is required")
-	})
-
-	t.Run("rejects when referenced url secret is missing", func(t *testing.T) {
-		th := setupHarness(t)
-
-		err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":                "bad",
-			"url_secret_key":      "never_set_key",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-		})
-		require.Contains(t, err.Error(), "never_set_key")
-		require.Contains(t, err.Error(), "secret_form_request")
-	})
-
-	t.Run("validates resolved URL is https", func(t *testing.T) {
-		th := setupHarness(t)
-		th.secrets.data["bad_url"] = "http://not-tls.example.com/"
-
-		err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":                "bad",
-			"url_secret_key":      "bad_url",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-		})
-		require.Contains(t, err.Error(), "HTTPS")
-	})
-
-	t.Run("validates resolved URL is well-formed", func(t *testing.T) {
-		th := setupHarness(t)
-		th.secrets.data["bad_url"] = "not a url at all"
-
-		err := callToolExpectError(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":                "bad",
-			"url_secret_key":      "bad_url",
-			"channels":            []string{"desktop"},
-			"skip_auth_discovery": true,
-		})
-		require.Contains(t, err.Error(), "valid absolute URL")
-	})
-}
-
-func TestRemoteMCPAdd_Channels(t *testing.T) {
-	t.Run("one registration serves every channel it names", func(t *testing.T) {
-		server := fakeMCPServer(t, []string{"browser_navigate"})
-		th := setupHarness(t, withHTTPClient(server.Client()))
-
-		_ = callTool(t, th.handler, "remote_mcp_add", map[string]any{
-			"name":                "browser-mcp",
-			"url":                 server.URL + "/mcp",
-			"channels":            []string{"desktop", "shopping"},
-			"skip_auth_discovery": true,
+			err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
+				"name":                "browser-mcp",
+				"url":                 "https://browser-mcp.example.com/mcp",
+				"channels":            []string{"desktop", "desktop"},
+				"skip_auth_discovery": true,
+			})
+			require.Contains(t, err.Error(), "listed twice")
 		})
 
-		entry, err := th.manager.GetRemoteMCP(context.Background(), "browser-mcp")
-		require.NoError(t, err)
-		require.Equal(t, []string{"desktop", "shopping"}, entry.Channels)
+		t.Run("rejects a channel that does not exist", func(t *testing.T) {
+			h, mgr, _ := setup(t)
 
-		listed := callTool(t, th.handler, "remote_mcp_list", map[string]any{})
-		var entries []map[string]any
-		require.NoError(t, json.Unmarshal(listed, &entries))
-		require.Len(t, entries, 1)
-		require.Equal(t, []any{"desktop", "shopping"}, entries[0]["channels"],
-			"the agent needs the current list to pass it back to remote_mcp_update")
-	})
+			err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
+				"name":                "browser-mcp",
+				"url":                 "https://browser-mcp.example.com/mcp",
+				"channels":            []string{"desktop", "deskotp"},
+				"skip_auth_discovery": true,
+			})
+			require.Contains(t, err.Error(), `no channel named "deskotp"`)
+			require.Contains(t, err.Error(), "desktop", "the error should name the channels that do exist")
 
-	t.Run("rejects an empty channel list", func(t *testing.T) {
-		h, mgr, _ := setup(t)
-
-		err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
-			"name":                "browser-mcp",
-			"url":                 "https://browser-mcp.example.com/mcp",
-			"channels":            []string{},
-			"skip_auth_discovery": true,
+			mcps, listErr := mgr.ListRemoteMCPs(context.Background())
+			require.NoError(t, listErr)
+			require.Empty(t, mcps, "a typo must not register a server scoped to nothing")
 		})
-		require.Contains(t, err.Error(), "channels is required")
-
-		mcps, listErr := mgr.ListRemoteMCPs(context.Background())
-		require.NoError(t, listErr)
-		require.Empty(t, mcps, "a rejected registration must leave nothing behind")
-	})
-
-	t.Run("rejects a channel listed twice", func(t *testing.T) {
-		h, _, _ := setup(t)
-
-		err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
-			"name":                "browser-mcp",
-			"url":                 "https://browser-mcp.example.com/mcp",
-			"channels":            []string{"desktop", "desktop"},
-			"skip_auth_discovery": true,
-		})
-		require.Contains(t, err.Error(), "listed twice")
-	})
-
-	t.Run("rejects a channel that does not exist", func(t *testing.T) {
-		h, mgr, _ := setup(t)
-
-		err := callToolExpectError(t, h, "remote_mcp_add", map[string]any{
-			"name":                "browser-mcp",
-			"url":                 "https://browser-mcp.example.com/mcp",
-			"channels":            []string{"desktop", "deskotp"},
-			"skip_auth_discovery": true,
-		})
-		require.Contains(t, err.Error(), `no channel named "deskotp"`)
-		require.Contains(t, err.Error(), "desktop", "the error should name the channels that do exist")
-
-		mcps, listErr := mgr.ListRemoteMCPs(context.Background())
-		require.NoError(t, listErr)
-		require.Empty(t, mcps, "a typo must not register a server scoped to nothing")
 	})
 }
 
