@@ -604,3 +604,71 @@ func runStream(t *testing.T, tw *turnWriter, lines ...string) {
 	_, err := streamResponse(context.Background(), tw.opts, tw, strings.NewReader(strings.Join(lines, "\n")), nil, testChannelID, time.Now())
 	require.NoError(t, err)
 }
+
+func TestTurnWriter_Drafts(t *testing.T) {
+	t.Run("streams the reply as a draft and sends it once, in full, when status follows", func(t *testing.T) {
+		ch := &draftChannel{}
+		tw := newTurnWriter(context.Background(), Options{Channels: map[channel.ChannelID]channel.Channel{testChannelID: ch}}, testChannelID, ch)
+
+		require.NoError(t, tw.write(phaseResponse, "Hello"))
+		tw.lastDraft = time.Time{} // the next update is not held back by the interval
+		require.NoError(t, tw.write(phaseResponse, " world"))
+		require.Empty(t, ch.sends, "nothing is a message while it is a draft")
+		require.Equal(t, []string{"Hello", "Hello world"}, ch.drafts)
+
+		require.NoError(t, tw.write(phaseStatus, "📊 stats\n"))
+
+		require.Equal(t, []string{"Hello world", "📊 stats\n"}, ch.sends, "the reply arrives before the status below it")
+	})
+
+	t.Run("sends a reply still shown as a draft when the turn ends", func(t *testing.T) {
+		ch := &draftChannel{}
+		tw := newTurnWriter(context.Background(), Options{Channels: map[channel.ChannelID]channel.Channel{testChannelID: ch}}, testChannelID, ch)
+
+		require.NoError(t, tw.write(phaseResponse, "Partial"))
+		require.NoError(t, tw.finish())
+
+		require.Equal(t, []string{"Partial"}, ch.sends)
+	})
+
+	t.Run("falls back to an ordinary message when the channel refuses a draft", func(t *testing.T) {
+		ch := &draftChannel{draftErr: errors.New("drafts are not allowed")}
+		tw := newTurnWriter(context.Background(), Options{Channels: map[channel.ChannelID]channel.Channel{testChannelID: ch}}, testChannelID, ch)
+
+		require.NoError(t, tw.write(phaseResponse, "Hello"))
+		require.NoError(t, tw.write(phaseResponse, " world"))
+		require.NoError(t, tw.finish())
+
+		require.Equal(t, []string{"Hello"}, ch.sends)
+		require.Equal(t, "Hello world", ch.edits[len(ch.edits)-1].text)
+	})
+
+	t.Run("continues a reply over the channel's rich limit in a new message", func(t *testing.T) {
+		ch := &draftChannel{}
+		tw := newTurnWriter(context.Background(), Options{Channels: map[channel.ChannelID]channel.Channel{testChannelID: ch}}, testChannelID, ch)
+		first := strings.Repeat("a", ch.MaxRichReplyLen()-10)
+
+		require.NoError(t, tw.write(phaseResponse, first))
+		require.NoError(t, tw.write(phaseResponse, strings.Repeat("b", 20)))
+		require.NoError(t, tw.finish())
+
+		require.Equal(t, []string{first, strings.Repeat("b", 20)}, ch.sends)
+	})
+}
+
+// draftChannel is a split-status channel that shows drafts and takes long rich replies.
+type draftChannel struct {
+	mockChannel
+	drafts   []string
+	draftErr error
+}
+
+func (d *draftChannel) StreamDraft(_ context.Context, p channel.StreamDraftParams) error {
+	if d.draftErr != nil {
+		return d.draftErr
+	}
+	d.drafts = append(d.drafts, p.Text)
+	return nil
+}
+
+func (d *draftChannel) MaxRichReplyLen() int { return 5000 }

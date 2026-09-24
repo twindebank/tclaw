@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,8 +65,9 @@ const (
 )
 
 // maxMessageLen is the threshold at which split-mode messages are rotated
-// to a new message. Telegram's hard limit is 4096 chars; we use 3500 for
-// safe headroom (HTML entities, emoji encoding, etc.).
+// to a new message, unless the channel gives a longer one for replies. Telegram's
+// hard limit is 4096 chars; we use 3500 for safe headroom (HTML entities, emoji
+// encoding, etc.).
 const maxMessageLen = 3500
 
 // telegramTruncateLen is the cap applied to status messages before Send/Edit.
@@ -112,6 +115,80 @@ type turnWriter struct {
 	// content before every send/edit so intermediate states render
 	// valid markup.
 	statusWrapOpen bool
+
+	// drafts shows the reply live while it is written, on a channel that can. It is
+	// dropped for the rest of the turn if the channel refuses one.
+	drafts channel.DraftStreamer
+
+	// draftID identifies the reply currently shown as a draft; zero when none is.
+	draftID int64
+
+	// lastDraft is when the draft was last updated, so updates can be spaced out.
+	lastDraft time.Time
+}
+
+// draftInterval spaces out draft updates. Telegram animates each one, and a reply
+// arrives in many more fragments than a reader needs to see.
+const draftInterval = 700 * time.Millisecond
+
+// newTurnWriter builds the writer for one turn on ch.
+func newTurnWriter(ctx context.Context, opts Options, channelID channel.ChannelID, ch channel.Channel) *turnWriter {
+	tw := &turnWriter{ch: ch, opts: opts, channelID: channelID, ctx: ctx, split: ch.SplitStatusMessages(), statusWrap: ch.StatusWrap()}
+	if streamer, ok := ch.(channel.DraftStreamer); ok && tw.split {
+		tw.drafts = streamer
+	}
+	return tw
+}
+
+// replyLimit is the length at which a reply continues in a new message.
+func (tw *turnWriter) replyLimit() int {
+	if rich, ok := tw.ch.(channel.RichReplier); ok {
+		return rich.MaxRichReplyLen()
+	}
+	return maxMessageLen
+}
+
+// finish sends the reply still showing as a draft, if any. It runs even when the
+// turn was stopped, so the words the user watched arrive rather than vanish.
+func (tw *turnWriter) finish() error {
+	return tw.flushDraft()
+}
+
+// flushDraft sends the reply shown as a draft as a real message. A draft is only
+// a temporary preview, so the reply exists only once this has run.
+func (tw *turnWriter) flushDraft() error {
+	if tw.draftID == 0 {
+		return nil
+	}
+	tw.draftID = 0
+	// Sent even after a stop: the turn's context is cancelled by then.
+	id, err := tw.opts.sendReply(context.WithoutCancel(tw.ctx), tw.channelID, tw.respBuf.String())
+	if err != nil {
+		return fmt.Errorf("send response: %w", err)
+	}
+	tw.respID = id
+	return nil
+}
+
+// streamDraft shows the reply so far as a draft. It reports false when the
+// channel refused, and the caller carries on with an ordinary message.
+func (tw *turnWriter) streamDraft(content string) bool {
+	if tw.draftID == 0 {
+		tw.draftID = newDraftID()
+		tw.lastDraft = time.Time{}
+	}
+	if time.Since(tw.lastDraft) < draftInterval {
+		return true
+	}
+	err := tw.drafts.StreamDraft(tw.ctx, channel.StreamDraftParams{DraftID: tw.draftID, Text: content})
+	if err != nil {
+		slog.Warn("draft refused, sending the reply as a message instead", "channel", tw.channelID, "err", err)
+		tw.drafts = nil
+		tw.draftID = 0
+		return false
+	}
+	tw.lastDraft = time.Now()
+	return true
 }
 
 func (tw *turnWriter) write(phase writePhase, text string) error {
@@ -170,6 +247,12 @@ func (tw *turnWriter) statusPrefix(content string) string {
 func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 	switch phase {
 	case phaseStatus:
+		// A reply shown as a draft becomes a message before any status goes
+		// below it, keeping the chat in order.
+		if err := tw.flushDraft(); err != nil {
+			return err
+		}
+
 		// Once response text has appeared, start a fresh status message
 		// so subsequent status (later-turn thinking, tools, stats) shows
 		// below the response in chat order.
@@ -250,19 +333,24 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 		if tw.respID == "" {
 			tw.statusSealed = true
 		}
+
+		// Proactive split: rotate to a new message before hitting the limit.
+		if tw.respBuf.Len() > 0 && tw.respBuf.Len()+len(text) > tw.replyLimit() {
+			if err := tw.flushDraft(); err != nil {
+				return err
+			}
+			tw.respBuf.Reset()
+			tw.respID = ""
+		}
 		tw.respBuf.WriteString(text)
 		content := tw.respBuf.String()
 
-		// Proactive split: rotate to a new message before hitting the limit.
-		if tw.respID != "" && len(content) > maxMessageLen {
-			tw.respBuf.Reset()
-			tw.respBuf.WriteString(text)
-			tw.respID = ""
-			content = text
+		if tw.drafts != nil && tw.respID == "" && tw.streamDraft(content) {
+			return nil
 		}
 
 		if tw.respID == "" {
-			id, err := tw.opts.sendNotify(tw.ctx, tw.channelID, content)
+			id, err := tw.opts.sendReply(tw.ctx, tw.channelID, content)
 			if err != nil {
 				return fmt.Errorf("send response: %w", err)
 			}
@@ -279,7 +367,7 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 			tw.respBuf.Reset()
 			tw.respBuf.WriteString(text)
 			tw.respID = ""
-			id, err := tw.opts.sendNotify(tw.ctx, tw.channelID, text)
+			id, err := tw.opts.sendReply(tw.ctx, tw.channelID, text)
 			if err != nil {
 				return fmt.Errorf("send replacement response: %w", err)
 			}
@@ -324,9 +412,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		opts.AddDirs = append(opts.AddDirs, channelDir)
 	}
 
-	split := ch.SplitStatusMessages()
-
-	tw := &turnWriter{ch: ch, opts: opts, channelID: msg.ChannelID, ctx: ctx, split: split, statusWrap: ch.StatusWrap()}
+	tw := newTurnWriter(ctx, opts, msg.ChannelID, ch)
 	thinkingMsg := "🤔 Thinking...\n"
 	if msg.SourceInfo != nil && msg.SourceInfo.Source == channel.SourceResume {
 		thinkingMsg = "🔄 Resuming interrupted turn...\n"
@@ -485,6 +571,10 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	cliStarted := time.Now()
 
 	newSessionID, err := streamResponse(ctx, opts, tw, stdout, allowed, msg.ChannelID, cliStarted)
+	if finishErr := tw.finish(); finishErr != nil {
+		// The user watched the reply being written and would otherwise never get it.
+		err = errors.Join(err, finishErr)
+	}
 	if err != nil {
 		// Reap the subprocess before bailing — otherwise it lingers as a zombie
 		// until fly's init catches it, and the next turn can race against the
@@ -1019,6 +1109,12 @@ func friendlyErrorMessage(raw string, subtype claudecli.ResultSubtype) string {
 	default:
 		return "claude error: " + raw
 	}
+}
+
+// newDraftID returns a random draft identifier. It stays below 2^31 so any client
+// reading it as a 32-bit integer agrees, and is never zero, which Telegram refuses.
+func newDraftID() int64 {
+	return rand.Int64N(math.MaxInt32) + 1
 }
 
 // truncateForTelegram caps s at telegramTruncateLen and appends a truncation

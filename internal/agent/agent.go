@@ -782,9 +782,10 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 						slog.Info("session started", "channel", msg.ChannelID, "session_id", result.sessionID)
 					}
 					sessions[msg.ChannelID] = result.sessionID
-					// Call on every successful turn so the persistence layer
-					// can bump the session's last-used timestamp — that's
-					// what SessionResolver's idle-timeout check keys off.
+					// Call on every turn that has a session, failed ones
+					// included, so the persistence layer bumps the session's
+					// last-used timestamp — that's what SessionResolver's
+					// idle-timeout check keys off.
 					if opts.OnSessionUpdate != nil {
 						opts.OnSessionUpdate(msg.ChannelID, result.sessionID)
 					}
@@ -965,11 +966,10 @@ func (opts Options) send(ctx context.Context, chID channel.ChannelID, text strin
 	return opts.sendWithOpts(ctx, chID, text, channel.SendOpts{})
 }
 
-// sendNotify delivers a message that should trigger a user notification. Only
-// the final agent response text uses this — everything else stays silent via
-// send to keep the allowlist tight.
-func (opts Options) sendNotify(ctx context.Context, chID channel.ChannelID, text string) (channel.MessageID, error) {
-	return opts.sendWithOpts(ctx, chID, text, channel.SendOpts{Notify: true})
+// sendReply delivers the agent's reply: it notifies the user, and a transport
+// that renders replies richly does so. Everything else stays silent via send.
+func (opts Options) sendReply(ctx context.Context, chID channel.ChannelID, text string) (channel.MessageID, error) {
+	return opts.sendWithOpts(ctx, chID, text, channel.SendOpts{Notify: true, Rich: true})
 }
 
 func (opts Options) sendWithOpts(ctx context.Context, chID channel.ChannelID, text string, sendOpts channel.SendOpts) (channel.MessageID, error) {
