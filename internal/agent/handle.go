@@ -148,12 +148,6 @@ func (tw *turnWriter) replyLimit() int {
 	return maxMessageLen
 }
 
-// finish sends the reply still showing as a draft, if any. It runs even when the
-// turn was stopped, so the words the user watched arrive rather than vanish.
-func (tw *turnWriter) finish() error {
-	return tw.flushDraft()
-}
-
 // flushDraft sends the reply shown as a draft as a real message. A draft is only
 // a temporary preview, so the reply exists only once this has run.
 func (tw *turnWriter) flushDraft() error {
@@ -181,6 +175,10 @@ func (tw *turnWriter) streamDraft(content string) bool {
 		return true
 	}
 	err := tw.drafts.StreamDraft(tw.ctx, channel.StreamDraftParams{DraftID: tw.draftID, Text: content})
+	if err != nil && tw.ctx.Err() != nil {
+		// Stopped mid-update. The draft stays, and the end of the turn sends it.
+		return true
+	}
 	if err != nil {
 		slog.Warn("draft refused, sending the reply as a message instead", "channel", tw.channelID, "err", err)
 		tw.drafts = nil
@@ -345,6 +343,11 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 		tw.respBuf.WriteString(text)
 		content := tw.respBuf.String()
 
+		if strings.TrimSpace(content) == "" {
+			// Only the separator before a new text block so far; there is nothing
+			// to show yet, and Telegram refuses an empty message.
+			return nil
+		}
 		if tw.drafts != nil && tw.respID == "" && tw.streamDraft(content) {
 			return nil
 		}
@@ -514,16 +517,24 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 
 			// The rulebooks are read-only too. rules-gate only sees the write
 			// tools, and Bash can write a file just as well; the router writes an
-			// approved rulebook from outside the sandbox. Created first, because a
-			// bind of a missing path is skipped.
+			// approved rulebook from outside the sandbox. Each directory is created
+			// first, because a bind of a missing path is skipped.
 			if opts.MemoryDir == "" {
 				return "", fmt.Errorf("sandboxed turn has no memory directory")
 			}
 			rulesDir := memorylayout.RulesDir(opts.MemoryDir)
-			if err := os.MkdirAll(rulesDir, 0o700); err != nil {
-				return "", fmt.Errorf("create rules dir before sandboxing it: %w", err)
+
+			// The memory dir is the CLI's working directory, so its .claude/ is
+			// where project settings load from; one the agent wrote could turn the
+			// hooks off or allow tools the channel does not. tclaw keeps nothing
+			// there, so it is mounted read-only and empty-handed.
+			projectConfigDir := filepath.Join(opts.MemoryDir, memorylayout.ConfigDirName)
+			for _, dir := range []string{rulesDir, projectConfigDir} {
+				if err := os.MkdirAll(dir, 0o700); err != nil {
+					return "", fmt.Errorf("create %s before sandboxing it: %w", dir, err)
+				}
 			}
-			readOnlyOverlay := append([]string{settingsPath, rulesDir}, readOnlyDirs...)
+			readOnlyOverlay := append([]string{settingsPath, rulesDir, projectConfigDir}, readOnlyDirs...)
 
 			readWrite := []string{opts.MemoryDir, opts.HomeDir}
 			readWrite = append(readWrite, opts.AddDirs...)
@@ -583,9 +594,10 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	cliStarted := time.Now()
 
 	newSessionID, err := streamResponse(ctx, opts, tw, stdout, allowed, msg.ChannelID, cliStarted)
-	if finishErr := tw.finish(); finishErr != nil {
-		// The user watched the reply being written and would otherwise never get it.
-		err = errors.Join(err, finishErr)
+	// Even after a stop, so the reply the user watched arrive as a draft is sent
+	// rather than vanishing.
+	if flushErr := tw.flushDraft(); flushErr != nil {
+		err = errors.Join(err, flushErr)
 	}
 	if err != nil {
 		// Reap the subprocess before bailing — otherwise it lingers as a zombie

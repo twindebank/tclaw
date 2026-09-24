@@ -37,13 +37,13 @@
 
 ## UX
 - [x] Split thinking and final message — separate thinking/tool-use status from response text into distinct messages (Telegram split mode)
-- [ ] Typing indicator — show typing state in the interface while agent is working
+- [x] Typing indicator — show typing state in the interface while agent is working (Telegram draft streaming shows the reply as it is written)
 - [x] Timestamps on messages — show when each message was sent/received
 - [x] Visual message separation — clearer boundaries between messages in the chat UI
 - [x] Show tool arguments — display tool call parameters alongside tool use events
 - [x] Chat keywords — builtin commands: `stop` (abort current response), `compact` (compact context), `new`/`reset`/`clear`/`delete` (start a fresh session), `login`/`auth` (interactive auth flow)
 - [x] Model switching — `model_get` / `model_set` MCP tools with runtime ModelFunc support
-- [ ] Chat keywords (remaining) — `help` (list commands)
+- [ ] Chat keywords (remaining) — `help` (list commands); Telegram lists the keywords in its "/" command menu
 - [ ] Render markdown in chat — parse and render markdown formatting in the TUI client
 - [ ] Web browser tool / Selenium — give the agent the ability to browse and interact with web pages
 
@@ -58,7 +58,10 @@
 - [x] Edit message — allow the channel to update/edit previously sent messages (e.g. for streaming edits in place)
 - [x] Channel-specific config in system prompt — per-channel context (name, type, description) injected into the agent's system prompt
 - [x] Dynamic channels — agent can create, edit, and delete channels at runtime via MCP tools
-- [x] Telegram support — Bot API with long polling (local) and webhooks (production), HTML markup
+- [x] Telegram support — Bot API with long polling (local) and webhooks (production), rich markdown replies
+- [ ] Decide how Telegram channels map onto bots. Today each channel is its own bot, created by driving BotFather through the user's own Telegram account (MTProto login with the app API id and hash, OTP and 2FA) and deleted the same way at teardown. Two Bot API features could replace that:
+  - **Forum topics in a private chat** (Bot API 9.3/9.4): one bot, with `createForumTopic` making a topic per channel and every message carrying `message_thread_id`. Channel creation becomes one API call with no BotFather automation and no user-account login. The cost is that channels lose their own name, avatar and mute setting in the chat list, and every place that keys a channel on bot token and chat ID changes, plus migrating existing channels. A middle way: dedicated bots for long-lived channels, topics in one bot for ephemeral ones.
+  - **Managed bots** (Bot API 9.6): if channels stay one bot each, a manager bot in "Bot Management Mode" sends a `t.me/newbot/...` link or a `request_managed_bot` button, the user taps to confirm, and `getManagedBotToken` returns the new bot's token. `setManagedBotAccessSettings` (10.0) can lock it to the owner. One tap per new channel, in exchange for tclaw no longer holding a logged-in session for the user's own account.
 - [ ] Slack support
 - [ ] Signal support
 - [ ] Channel history store — archive deleted channels (name, type, session ID, dev session, timestamps) so the agent can reference past ephemeral tasks. `channel_history` MCP tool for querying.

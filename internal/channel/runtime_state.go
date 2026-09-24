@@ -69,6 +69,10 @@ type PendingAction struct {
 	// after this is treated as an ordinary message, so a stale prompt answered
 	// hours later cannot silently grant something.
 	ExpiresAt time.Time `json:"expires_at"`
+
+	// PromptID is carried by the prompt's buttons, so only a press on this
+	// prompt's buttons answers it.
+	PromptID string `json:"prompt_id,omitempty"`
 }
 
 // Expired reports whether the confirmation window has passed.
@@ -89,6 +93,7 @@ func NewPendingAction(kind PendingActionKind, payload json.RawMessage) *PendingA
 		Payload:     payload,
 		RequestedAt: now,
 		ExpiresAt:   now.Add(PendingConfirmationTTL),
+		PromptID:    NewPromptID(),
 	}
 }
 

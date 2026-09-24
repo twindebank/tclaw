@@ -142,6 +142,80 @@ func TestInterceptPendingDone(t *testing.T) {
 		require.Nil(t, state.PendingAction)
 	})
 
+	t.Run("a press on this prompt's yes button tears down", func(t *testing.T) {
+		rs, ss, cw := setupDoneTest(t)
+		pending := channel.NewPendingAction(channel.PendingChannelDone, nil)
+		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
+			s.PendingAction = pending
+			s.TeardownState = telegramchannel.NewTeardownState("tclaw_test_bot")
+		}))
+		require.NoError(t, ss.Set(context.Background(), channel.ChannelSecretKey("ephemeral"), "fake-token"))
+		require.NoError(t, cw.AddChannel(testUserID, config.Channel{Type: channel.TypeTelegram, Name: "ephemeral", Description: "test"}))
+		prov := &mockDoneProvisioner{}
+
+		consumed := interceptDone(
+			context.Background(),
+			doneTaggedMsg("ephemeral-id", channel.ButtonPressText(channel.ButtonPress{PromptID: pending.PromptID, Reply: channel.ReplyYes})),
+			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeTelegram),
+			rs, cw, testUserID, ss,
+			provLookup(channel.TypeTelegram, prov),
+			func() {},
+			"",
+		)
+
+		require.True(t, consumed)
+		require.True(t, prov.teardownCalled)
+	})
+
+	t.Run("a press on another prompt's button answers nothing and leaves this one armed", func(t *testing.T) {
+		rs, ss, cw := setupDoneTest(t)
+		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
+			s.PendingAction = channel.NewPendingAction(channel.PendingChannelDone, nil)
+		}))
+		prov := &mockDoneProvisioner{}
+
+		consumed := interceptDone(
+			context.Background(),
+			doneTaggedMsg("ephemeral-id", channel.ButtonPressText(channel.ButtonPress{PromptID: "an-old-prompt", Reply: channel.ReplyYes})),
+			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeSocket),
+			rs, cw, testUserID, ss,
+			provLookup(channel.TypeSocket, prov),
+			func() {},
+			"",
+		)
+
+		require.False(t, consumed, "whatever armed that prompt decides what the press means")
+		require.False(t, prov.teardownCalled)
+		state, err := rs.Get(context.Background(), "ephemeral")
+		require.NoError(t, err)
+		require.NotNil(t, state.PendingAction)
+	})
+
+	t.Run("a press on this prompt's no button declines without reaching the agent", func(t *testing.T) {
+		rs, ss, cw := setupDoneTest(t)
+		pending := channel.NewPendingAction(channel.PendingChannelDone, nil)
+		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
+			s.PendingAction = pending
+		}))
+		prov := &mockDoneProvisioner{}
+
+		consumed := interceptDone(
+			context.Background(),
+			doneTaggedMsg("ephemeral-id", channel.ButtonPressText(channel.ButtonPress{PromptID: pending.PromptID, Reply: channel.ReplyNo})),
+			doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeSocket),
+			rs, cw, testUserID, ss,
+			provLookup(channel.TypeSocket, prov),
+			func() {},
+			"",
+		)
+
+		require.True(t, consumed)
+		require.False(t, prov.teardownCalled)
+		state, err := rs.Get(context.Background(), "ephemeral")
+		require.NoError(t, err)
+		require.Nil(t, state.PendingAction)
+	})
+
 	t.Run("accepts y as confirmation", func(t *testing.T) {
 		rs, ss, cw := setupDoneTest(t)
 
@@ -439,7 +513,7 @@ func (m *mockDoneProvisioner) Teardown(_ context.Context, _ channel.TeardownStat
 	m.teardownCalled = true
 	return m.teardownErr
 }
-func (m *mockDoneProvisioner) SendTeardownPrompt(_ context.Context, _ string, _ channel.PlatformState) error {
+func (m *mockDoneProvisioner) SendTeardownPrompt(_ context.Context, _ string, _ channel.PlatformState, _ string) error {
 	return nil
 }
 func (m *mockDoneProvisioner) SendClosingMessage(_ context.Context, _ string, _ channel.PlatformState) error {
@@ -500,6 +574,7 @@ func interceptDone(
 		Provisioners:    provisioners,
 		OnChannelChange: onChannelChange,
 		MemoryDir:       memoryDir,
+		Notify:          func(context.Context, channel.ChannelID, string) {},
 	})
 }
 

@@ -1782,7 +1782,7 @@ func (m *mockProvisioner) Teardown(_ context.Context, state channel.TeardownStat
 	return m.teardownErr
 }
 
-func (m *mockProvisioner) SendTeardownPrompt(_ context.Context, _ string, _ channel.PlatformState) error {
+func (m *mockProvisioner) SendTeardownPrompt(_ context.Context, _ string, _ channel.PlatformState, _ string) error {
 	m.sendTeardownPromptCalled = true
 	return m.sendTeardownPromptErr
 }

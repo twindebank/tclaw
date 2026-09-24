@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -93,4 +94,51 @@ func TestFlowManager(t *testing.T) {
 		require.Nil(t, fm.Active("ch1"))
 		require.NotNil(t, fm.Active("ch2"))
 	})
+}
+
+func TestHandleToolApprovalFlow(t *testing.T) {
+	t.Run("a press on this prompt's yes button retries with the tools", func(t *testing.T) {
+		fm, approval, ch, opts := approvalSetup(t)
+
+		result := handleToolApprovalFlow(context.Background(), opts, fm, approval, ch,
+			channel.TaggedMessage{ChannelID: "ch1", Text: channel.ButtonPressText(channel.ButtonPress{PromptID: approval.promptID, Reply: channel.ReplyYes})},
+			map[channel.ChannelID]string{})
+
+		require.NotNil(t, result.FallThroughMsg)
+		require.Equal(t, "original", result.FallThroughMsg.Text, "the original message is retried")
+		require.Nil(t, fm.Active("ch1"))
+	})
+
+	t.Run("a press on an older prompt's button leaves this one open", func(t *testing.T) {
+		fm, approval, ch, opts := approvalSetup(t)
+
+		result := handleToolApprovalFlow(context.Background(), opts, fm, approval, ch,
+			channel.TaggedMessage{ChannelID: "ch1", Text: channel.ButtonPressText(channel.ButtonPress{PromptID: "older", Reply: channel.ReplyYes})},
+			map[channel.ChannelID]string{})
+
+		require.True(t, result.Handled)
+		require.Nil(t, result.FallThroughMsg, "nothing is retried")
+		require.NotNil(t, fm.Active("ch1"))
+		require.Contains(t, ch.sends[len(ch.sends)-1], "out of date")
+	})
+}
+
+func TestIsUserMessage(t *testing.T) {
+	t.Run("only the user's own messages may answer a prompt", func(t *testing.T) {
+		require.True(t, isUserMessage(channel.TaggedMessage{}))
+		require.True(t, isUserMessage(channel.TaggedMessage{SourceInfo: &channel.MessageSourceInfo{Source: channel.SourceUser}}))
+		require.False(t, isUserMessage(channel.TaggedMessage{SourceInfo: &channel.MessageSourceInfo{Source: channel.SourceChannel}}))
+		require.False(t, isUserMessage(channel.TaggedMessage{SourceInfo: &channel.MessageSourceInfo{Source: channel.SourceSchedule}}))
+	})
+}
+
+// --- helpers ---
+
+func approvalSetup(t *testing.T) (*FlowManager, *pendingToolApproval, *mockChannel, Options) {
+	t.Helper()
+	fm := NewFlowManager()
+	fm.StartToolApproval("ch1", channel.TaggedMessage{ChannelID: "ch1", Text: "original"}, []string{"Bash"}, "sess-1")
+	ch := &mockChannel{}
+	opts := Options{Channels: map[channel.ChannelID]channel.Channel{"ch1": ch}}
+	return fm, fm.Active("ch1").ToolApproval, ch, opts
 }

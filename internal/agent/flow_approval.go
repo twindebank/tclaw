@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -21,6 +22,14 @@ func handleToolApprovalFlow(
 	sessions map[channel.ChannelID]string,
 ) FlowResult {
 	answer := strings.TrimSpace(strings.ToLower(msg.Text))
+	if press := channel.ParseButtonPress(msg.Text); press != nil {
+		if press.PromptID != approval.promptID {
+			// An older prompt's button. The approval stays open for this one.
+			sendStaleButtonNotice(ctx, opts, msg.ChannelID)
+			return FlowResult{Handled: true}
+		}
+		answer = string(press.Reply)
+	}
 
 	switch answer {
 	case "approve", "yes", "y":
@@ -61,4 +70,39 @@ func handleToolApprovalFlow(
 			FallThroughMsg: &msg,
 		}
 	}
+}
+
+// sendApprovalPrompt asks with approve and cancel buttons where the channel has them, and as
+// plain text otherwise. Typing the answer works either way.
+func sendApprovalPrompt(ctx context.Context, opts Options, ch channel.Channel, chID channel.ChannelID, text, promptID string) error {
+	if prompter, ok := ch.(channel.Prompter); ok {
+		if _, err := prompter.SendPrompt(ctx, channel.SendPromptParams{
+			Text:     text,
+			PromptID: promptID,
+			Replies:  []channel.PromptReply{channel.ReplyYes, channel.ReplyNo},
+		}); err != nil {
+			return fmt.Errorf("send approval prompt with buttons: %w", err)
+		}
+		return nil
+	}
+	if _, err := opts.send(ctx, chID, text); err != nil {
+		return fmt.Errorf("send approval prompt: %w", err)
+	}
+	return nil
+}
+
+// sendStaleButtonNotice tells the user a button they pressed answers nothing any more.
+func sendStaleButtonNotice(ctx context.Context, opts Options, chID channel.ChannelID) {
+	if _, err := opts.send(ctx, chID, "⌛ That button is out of date: its prompt was already answered or has expired."); err != nil {
+		slog.Error("failed to send stale button notice", "err", err)
+	}
+	if err := opts.done(ctx, chID); err != nil {
+		slog.Error("failed to close turn after stale button notice", "err", err)
+	}
+}
+
+// isUserMessage reports whether a message was typed or pressed by the user, which is the only
+// source that may answer a prompt. A missing source is the user's, as everywhere in the loop.
+func isUserMessage(msg channel.TaggedMessage) bool {
+	return msg.SourceInfo == nil || msg.SourceInfo.Source == channel.SourceUser
 }

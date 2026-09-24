@@ -58,6 +58,20 @@ func TestTelegram_SendRich(t *testing.T) {
 		require.Empty(t, calls[1].Form["parse_mode"], "the fallback must not be parsed at all")
 	})
 
+	t.Run("a plain fallback is cut to the plain message limit", func(t *testing.T) {
+		api := newRecordingAPI(t, map[string]fakeFailure{
+			"sendRichMessage": {Status: http.StatusBadRequest, Body: `{"ok":false,"error_code":400,"description":"Bad Request: too many blocks"}`},
+		})
+		tg := newTelegramWithAPI(t, api)
+
+		_, err := tg.Send(context.Background(), strings.Repeat("x", 10000), channel.SendOpts{Notify: true, Rich: true})
+		require.NoError(t, err)
+
+		text := api.Calls()[1].Form["text"]
+		require.LessOrEqual(t, len([]rune(text)), 4096)
+		require.True(t, strings.HasSuffix(text, "…"), "a cut reply says so")
+	})
+
 	t.Run("any other refusal is resent as plain text too", func(t *testing.T) {
 		api := newRecordingAPI(t, map[string]fakeFailure{
 			"sendRichMessage": {Status: http.StatusNotFound, Body: `{"ok":false,"error_code":404,"description":"Not Found: method not found"}`},

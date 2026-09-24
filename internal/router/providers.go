@@ -47,9 +47,17 @@ func injectInitialMessages(ctx context.Context, userID user.ID, configWriter *co
 			continue
 		}
 
+		// The agent wrote this message when it created the channel, so it is marked
+		// as coming from a channel: a message with no source counts as the user's,
+		// and the user's are the only ones that answer a confirmation prompt.
+		from := cfg.Parent
+		if from == "" {
+			from = "the channel that created this one"
+		}
 		msg := channel.TaggedMessage{
-			ChannelID: targetID,
-			Text:      cfg.InitialMessage,
+			ChannelID:  targetID,
+			Text:       cfg.InitialMessage,
+			SourceInfo: &channel.MessageSourceInfo{Source: channel.SourceChannel, FromChannel: from},
 		}
 		select {
 		case output <- msg:

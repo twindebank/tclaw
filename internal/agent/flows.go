@@ -67,16 +67,19 @@ func (fm *FlowManager) StartAuth(chID channel.ChannelID, originalMsg channel.Tag
 }
 
 // StartToolApproval begins a tool approval flow on a channel.
-func (fm *FlowManager) StartToolApproval(chID channel.ChannelID, originalMsg channel.TaggedMessage, deniedTools []string, sessionID string) {
+func (fm *FlowManager) StartToolApproval(chID channel.ChannelID, originalMsg channel.TaggedMessage, deniedTools []string, sessionID string) string {
 	fm.Cancel(chID)
+	promptID := channel.NewPromptID()
 	fm.flows[chID] = &ChannelFlow{
 		Kind: FlowToolApproval,
 		ToolApproval: &pendingToolApproval{
 			originalMsg: originalMsg,
 			deniedTools: deniedTools,
 			sessionID:   sessionID,
+			promptID:    promptID,
 		},
 	}
+	return promptID
 }
 
 // Cancel cancels whatever flow is active on this channel, cleaning up resources.

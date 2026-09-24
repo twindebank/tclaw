@@ -76,3 +76,16 @@ func TestBasicFlow(t *testing.T) {
 		require.Equal(t, "main", log[0].ChannelName)
 	})
 }
+
+func TestHelpCommand(t *testing.T) {
+	t.Run("lists the commands without running a turn", func(t *testing.T) {
+		h := NewHarness(t, Config{CommandFunc: Respond("the model should not be asked")})
+
+		h.Channel("main").Inject("help")
+		h.Channel("main").Close()
+
+		require.NoError(t, RunWithTimeout(t, h, 10*time.Second))
+		require.Contains(t, h.Channel("main").LastSend(), "**stop**")
+		require.Empty(t, h.TurnLog(), "help is answered by tclaw, not the model")
+	})
+}

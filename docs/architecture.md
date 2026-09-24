@@ -78,9 +78,9 @@ to its first line, and says how many lines it dropped.
 
 The hooks are registered in each user's `settings.json`, which is **mounted read-only** in the sandbox —
 the same protection that stops a prompt injection installing its own `SessionStart` hook stops one
-turning these off. The CLI is also told to load user settings only (`--setting-sources user`): its
-working directory is the agent's memory, where a `.claude/settings.json` the agent wrote would
-otherwise load as project settings and could switch every hook off or allow tools the channel does not. The registrations are rebuilt from `hooks.Manifest` on every boot, so a hook cannot
+turning these off. The CLI's working directory is the agent's memory, where a `.claude/settings.json`
+the agent wrote would load as project settings and could switch every hook off or allow tools the
+channel does not; tclaw keeps nothing in that `.claude/`, so it is mounted read-only as well. The registrations are rebuilt from `hooks.Manifest` on every boot, so a hook cannot
 be implemented and left unregistered. Commands carry the binary path in full: a hook runs under a shell
 that reads no profile, so a command relying on an environment variable runs nothing, on every tool call.
 

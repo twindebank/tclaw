@@ -49,13 +49,25 @@ const (
 	// CmdNew starts a fresh session on the current channel immediately — no
 	// menu, no confirmation. "reset", "clear", and "delete" are synonyms.
 	CmdNew = "new"
+
+	// CmdHelp lists these commands.
+	CmdHelp = "help"
 )
+
+// helpText describes the built-in commands, which are handled by tclaw rather than the model.
+const helpText = "🛠 Commands:\n" +
+	"• **stop** — stop the reply in progress\n" +
+	"• **new** (or reset, clear, delete) — start a fresh conversation on this channel\n" +
+	"• **compact** — shrink the conversation so far\n" +
+	"• **login** — sign in to Claude\n" +
+	"• **auth** — show sign-in status\n" +
+	"• **help** — this list"
 
 // compactPrompt is the CLI's own compact command, which print mode runs rather than sending to the model.
 const compactPrompt = "/compact"
 
 // IsControlCommand reports whether raw user text is a builtin command
-// (stop / login / auth / compact / fresh-session synonyms) that must be handled
+// (stop / login / auth / compact / help / fresh-session synonyms) that must be handled
 // on its own turn and never coalesced with sibling messages by the queue. The
 // queue can't import this package (agent imports queue), so the router injects
 // this classifier into the queue as QueueParams.IsControlMessage.
@@ -65,7 +77,8 @@ func IsControlCommand(text string) bool {
 	case strings.EqualFold(t, CmdStop),
 		strings.EqualFold(t, CmdLogin),
 		strings.EqualFold(t, CmdAuthStatus),
-		strings.EqualFold(t, CmdCompact):
+		strings.EqualFold(t, CmdCompact),
+		strings.EqualFold(t, CmdHelp):
 		return true
 	}
 	return isFreshSessionCommand(t)
@@ -128,6 +141,9 @@ type pendingToolApproval struct {
 	originalMsg channel.TaggedMessage
 	deniedTools []string
 	sessionID   string
+
+	// promptID is carried by the prompt's buttons, so only a press on them answers it.
+	promptID string
 }
 
 // Options configures the agent. All fields are immutable after creation.
@@ -601,6 +617,15 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			}
 			continue
 		}
+		if strings.EqualFold(strings.TrimSpace(msg.Text), CmdHelp) {
+			if _, err := opts.send(ctx, msg.ChannelID, helpText); err != nil {
+				slog.Error("failed to send help", "err", err)
+			}
+			if err := opts.done(ctx, msg.ChannelID); err != nil {
+				slog.Error("failed to close turn after help", "err", err)
+			}
+			continue
+		}
 		if strings.EqualFold(msg.Text, CmdAuthStatus) {
 			if !isBuiltinAllowed(opts, msg.ChannelID, claudecli.BuiltinAuth) {
 				sendDenied(ctx, opts, msg.ChannelID)
@@ -615,8 +640,9 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			continue
 		}
 
-		// Handle active auth flow.
-		if f := fm.Active(msg.ChannelID); f != nil && f.Kind == FlowAuth {
+		// Handle active auth flow. Only the user answers it: its last step deploys
+		// a credential, which a message from another channel must never confirm.
+		if f := fm.Active(msg.ChannelID); f != nil && f.Kind == FlowAuth && isUserMessage(msg) {
 			ch, chOK := opts.channels()[msg.ChannelID]
 			if !chOK {
 				fm.Complete(msg.ChannelID)
@@ -639,8 +665,9 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			continue
 		}
 
-		// Handle active tool approval flow.
-		if f := fm.Active(msg.ChannelID); f != nil && f.Kind == FlowToolApproval {
+		// Handle active tool approval flow. Only the user answers it, so the agent
+		// cannot approve its own tools by sending "yes" from another channel.
+		if f := fm.Active(msg.ChannelID); f != nil && f.Kind == FlowToolApproval && isUserMessage(msg) {
 			ch, chOK := opts.channels()[msg.ChannelID]
 			if !chOK {
 				fm.Complete(msg.ChannelID)
@@ -656,6 +683,13 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			} else if result.Handled {
 				continue
 			}
+		}
+
+		if channel.ParseButtonPress(msg.Text) != nil {
+			// A press nothing is waiting for: its prompt was answered, expired or
+			// belongs to a restart ago. It is not something to hand the model.
+			sendStaleButtonNotice(ctx, opts, msg.ChannelID)
+			continue
 		}
 
 		sessionID, sessionTimedOut := lookupSession(opts, sessions, msg.ChannelID)
@@ -747,12 +781,12 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				if errors.As(result.err, &denied) {
 					slog.Info("tools denied, prompting for approval",
 						"channel", msg.ChannelID, "tools", denied.Tools)
-					fm.StartToolApproval(msg.ChannelID, msg, denied.Tools, denied.SessionID)
-					if _, chOK := opts.channels()[msg.ChannelID]; chOK {
+					promptID := fm.StartToolApproval(msg.ChannelID, msg, denied.Tools, denied.SessionID)
+					if approvalCh, chOK := opts.channels()[msg.ChannelID]; chOK {
 						toolList := strings.Join(denied.Tools, ", ")
 						prompt := fmt.Sprintf("⚠️ %s was not available on this channel.\nReply %s to retry with %s enabled, or send any other message to continue.",
 							bold(toolList), bold("approve"), bold(toolList))
-						if _, sendErr := opts.send(ctx, msg.ChannelID, prompt); sendErr != nil {
+						if sendErr := sendApprovalPrompt(ctx, opts, approvalCh, msg.ChannelID, prompt, promptID); sendErr != nil {
 							slog.Error("failed to send tool approval prompt", "err", sendErr)
 						}
 					}
@@ -1160,11 +1194,6 @@ func buildArgs(p buildArgsParams) []string {
 		// Without it the CLI sends each assistant message only once it is
 		// complete, so nothing reaches the chat until then.
 		"--include-partial-messages",
-		// Only the user-level settings.json, which tclaw writes and the sandbox
-		// mounts read-only. Project and local settings are read from the working
-		// directory, the agent's own memory, where a file it wrote could turn the
-		// hooks off or allow tools the channel does not.
-		"--setting-sources", "user",
 	}
 	if p.SessionID != "" {
 		args = append(args, "--resume", p.SessionID)

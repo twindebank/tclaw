@@ -130,9 +130,10 @@ func newRepoGrantArmer(params armRepoGrantParams) func(context.Context, repotool
 		}
 
 		var chID channel.ChannelID
-		for id, ch := range params.Channels() {
-			if ch.Info().Name == chName {
-				chID = id
+		var ch channel.Channel
+		for id, candidate := range params.Channels() {
+			if candidate.Info().Name == chName {
+				chID, ch = id, candidate
 				break
 			}
 		}
@@ -150,13 +151,14 @@ func newRepoGrantArmer(params armRepoGrantParams) func(context.Context, repotool
 			return fmt.Errorf("encode grant: %w", err)
 		}
 
+		pending := channel.NewPendingAction(channel.PendingRepoGrant, payload)
 		if err := params.RuntimeState.Update(ctx, chName, func(rs *channel.RuntimeState) {
-			rs.PendingAction = channel.NewPendingAction(channel.PendingRepoGrant, payload)
+			rs.PendingAction = pending
 		}); err != nil {
 			return fmt.Errorf("arm grant confirmation: %w", err)
 		}
 
-		if _, err := params.Send(ctx, chID, repoGrantPrompt(request), channel.SendOpts{}); err != nil {
+		if err := sendConfirmationPrompt(ctx, confirmationPrompt{Channel: ch, ChannelID: chID, Text: repoGrantPrompt(request), PromptID: pending.PromptID, Send: params.Send}); err != nil {
 			// Roll back so the channel isn't left armed for a grant the user
 			// was never actually asked about.
 			if clearErr := params.RuntimeState.Update(ctx, chName, func(rs *channel.RuntimeState) {

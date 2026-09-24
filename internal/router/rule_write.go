@@ -109,9 +109,10 @@ func newRuleWriteArmer(params armRuleWriteParams) func(context.Context, ruletool
 		}
 
 		var chID channel.ChannelID
-		for id, ch := range params.Channels() {
-			if ch.Info().Name == chName {
-				chID = id
+		var ch channel.Channel
+		for id, candidate := range params.Channels() {
+			if candidate.Info().Name == chName {
+				chID, ch = id, candidate
 				break
 			}
 		}
@@ -128,13 +129,14 @@ func newRuleWriteArmer(params armRuleWriteParams) func(context.Context, ruletool
 			return fmt.Errorf("encode rule change: %w", err)
 		}
 
+		pending := channel.NewPendingAction(channel.PendingRuleWrite, payload)
 		if err := params.RuntimeState.Update(ctx, chName, func(rs *channel.RuntimeState) {
-			rs.PendingAction = channel.NewPendingAction(channel.PendingRuleWrite, payload)
+			rs.PendingAction = pending
 		}); err != nil {
 			return fmt.Errorf("arm rule confirmation: %w", err)
 		}
 
-		if _, err := params.Send(ctx, chID, ruleWritePrompt(request), channel.SendOpts{}); err != nil {
+		if err := sendConfirmationPrompt(ctx, confirmationPrompt{Channel: ch, ChannelID: chID, Text: ruleWritePrompt(request), PromptID: pending.PromptID, Send: params.Send}); err != nil {
 			// Roll back so the channel isn't left armed for a change the user
 			// was never actually asked about.
 			if clearErr := params.RuntimeState.Update(ctx, chName, func(rs *channel.RuntimeState) {

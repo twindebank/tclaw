@@ -76,7 +76,7 @@ func (s *stubProvisioner) Provision(context.Context, channel.ProvisionParams) (*
 
 func (s *stubProvisioner) Teardown(context.Context, channel.TeardownState) error { return nil }
 
-func (s *stubProvisioner) SendTeardownPrompt(context.Context, string, channel.PlatformState) error {
+func (s *stubProvisioner) SendTeardownPrompt(context.Context, string, channel.PlatformState, string) error {
 	return nil
 }
 

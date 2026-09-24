@@ -160,6 +160,10 @@ func (t *Telegram) Messages(ctx context.Context) <-chan string {
 					t.handleGenerationStopped(ctx, stopped, out)
 					return
 				}
+				if query := update.CallbackQuery; query != nil {
+					t.handleCallbackQuery(handlerCtx, b, query, out)
+					return
+				}
 				if update.Message == nil {
 					return
 				}
@@ -428,7 +432,7 @@ func (t *Telegram) sendRich(ctx context.Context, b *bot.Bot, chatID int64, text 
 	}
 	if err != nil {
 		slog.Warn("telegram send: rich message refused, falling back to plain text", "channel", t.name, "error", err)
-		msg, err = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: plainFallbackNotice + text, DisableNotification: silent})
+		msg, err = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: t.plainFallback(text), DisableNotification: silent})
 		if err != nil {
 			return "", fmt.Errorf("telegram send plain fallback: %w", err)
 		}
@@ -451,7 +455,7 @@ func (t *Telegram) editRich(ctx context.Context, b *bot.Bot, chatID int64, msgID
 	}
 
 	slog.Warn("telegram edit: rich message refused, falling back to plain text", "channel", t.name, "error", err)
-	_, err = b.EditMessageText(ctx, &bot.EditMessageTextParams{ChatID: chatID, MessageID: msgID, Text: plainFallbackNotice + text})
+	_, err = b.EditMessageText(ctx, &bot.EditMessageTextParams{ChatID: chatID, MessageID: msgID, Text: t.plainFallback(text)})
 	return err
 }
 
@@ -482,6 +486,19 @@ func (t *Telegram) StreamDraft(ctx context.Context, p channel.StreamDraftParams)
 		return fmt.Errorf("telegram draft: %w", err)
 	}
 	return nil
+}
+
+// plainMessageLimit is the most a plain message may hold, in UTF-16 units. A rich reply can run
+// to 32,768 characters, so its plain fallback can be far longer than this.
+const plainMessageLimit = 4096
+
+// plainFallback is text as a plain message: headed by the notice, and cut to fit.
+func (t *Telegram) plainFallback(text string) string {
+	fallback, cut := trimToUTF16Units(plainFallbackNotice+text, plainMessageLimit)
+	if cut {
+		slog.Warn("telegram plain fallback: reply cut to the plain message limit", "channel", t.name, "length", len(text))
+	}
+	return fallback
 }
 
 // plainFallbackNotice heads a reply that had to be sent without formatting.

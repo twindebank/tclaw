@@ -351,7 +351,7 @@ func (m *mockEphemeralProvisioner) Teardown(_ context.Context, _ channel.Teardow
 	m.teardownCalled = true
 	return m.teardownErr
 }
-func (m *mockEphemeralProvisioner) SendTeardownPrompt(_ context.Context, _ string, _ channel.PlatformState) error {
+func (m *mockEphemeralProvisioner) SendTeardownPrompt(_ context.Context, _ string, _ channel.PlatformState, _ string) error {
 	return nil
 }
 func (m *mockEphemeralProvisioner) SendClosingMessage(_ context.Context, _ string, _ channel.PlatformState) error {
