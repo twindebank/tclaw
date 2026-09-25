@@ -227,7 +227,7 @@ func TestInterceptPendingDone(t *testing.T) {
 		var notified string
 
 		consumed := interceptPendingConfirmation(context.Background(), doneTaggedMsg("ephemeral-id", "yes"), confirmParams{
-			ChannelsFunc: doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeSocket),
+			ChannelsFunc: promptChannelsFunc("ephemeral-id", "ephemeral"),
 			RuntimeState: rs,
 			AgentPrompts: agentPrompts,
 			ConfigWriter: cw,
@@ -238,10 +238,75 @@ func TestInterceptPendingDone(t *testing.T) {
 		})
 
 		require.True(t, consumed, "it must not reach the agent's prompt either")
-		require.Contains(t, notified, "Press the button on the one you mean")
+		require.Contains(t, notified, "To approve closing this channel, press its button")
 		state, err := rs.Get(context.Background(), "ephemeral")
 		require.NoError(t, err)
 		require.Equal(t, pending.PromptID, state.PendingAction.PromptID, "both prompts stay open")
+	})
+
+	t.Run("a press still answers its own prompt while the agent has one open", func(t *testing.T) {
+		rs, ss, cw := setupDoneTest(t)
+		pending := channel.NewPendingAction(channel.PendingChannelDone, nil)
+		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
+			s.PendingAction = pending
+			s.TeardownState = telegramchannel.NewTeardownState("tclaw_test_bot")
+		}))
+		require.NoError(t, ss.Set(context.Background(), channel.ChannelSecretKey("ephemeral"), "fake-token"))
+		require.NoError(t, cw.AddChannel(testUserID, config.Channel{Type: channel.TypeTelegram, Name: "ephemeral", Description: "test"}))
+		agentPrompts := channel.NewOpenPrompts()
+		agentPrompts.Set("ephemeral-id", true)
+		prov := &mockDoneProvisioner{}
+
+		consumed := interceptPendingConfirmation(context.Background(),
+			doneTaggedMsg("ephemeral-id", channel.ButtonPressText(channel.ButtonPress{PromptID: pending.PromptID, Reply: channel.ReplyYes})),
+			confirmParams{
+				ChannelsFunc:    promptChannelsFunc("ephemeral-id", "ephemeral"),
+				RuntimeState:    rs,
+				AgentPrompts:    agentPrompts,
+				ConfigWriter:    cw,
+				UserID:          testUserID,
+				SecretStore:     ss,
+				Provisioners:    provLookup(channel.TypeTelegram, prov),
+				Notify:          func(context.Context, channel.ChannelID, string) {},
+				OnChannelChange: func() {},
+			})
+
+		require.True(t, consumed)
+		require.True(t, prov.teardownCalled)
+	})
+
+	t.Run("without buttons, a typed yes answers this prompt and says so", func(t *testing.T) {
+		for _, typed := range []string{"yes", "y"} {
+			t.Run(typed, func(t *testing.T) {
+				rs, ss, cw := setupDoneTest(t)
+				require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
+					s.PendingAction = channel.NewPendingAction(channel.PendingChannelDone, nil)
+					s.TeardownState = telegramchannel.NewTeardownState("tclaw_test_bot")
+				}))
+				require.NoError(t, ss.Set(context.Background(), channel.ChannelSecretKey("ephemeral"), "fake-token"))
+				require.NoError(t, cw.AddChannel(testUserID, config.Channel{Type: channel.TypeTelegram, Name: "ephemeral", Description: "test"}))
+				agentPrompts := channel.NewOpenPrompts()
+				agentPrompts.Set("ephemeral-id", true)
+				prov := &mockDoneProvisioner{}
+				var notified string
+
+				consumed := interceptPendingConfirmation(context.Background(), doneTaggedMsg("ephemeral-id", typed), confirmParams{
+					ChannelsFunc:    doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeTelegram),
+					RuntimeState:    rs,
+					AgentPrompts:    agentPrompts,
+					ConfigWriter:    cw,
+					UserID:          testUserID,
+					SecretStore:     ss,
+					Provisioners:    provLookup(channel.TypeTelegram, prov),
+					Notify:          func(_ context.Context, _ channel.ChannelID, text string) { notified = text },
+					OnChannelChange: func() {},
+				})
+
+				require.True(t, consumed)
+				require.True(t, prov.teardownCalled, "a channel with no buttons still has a way to confirm")
+				require.Contains(t, notified, "Your yes approved closing this channel; the other is still open.")
+			})
+		}
 	})
 
 	t.Run("accepts y as confirmation", func(t *testing.T) {
@@ -750,4 +815,14 @@ func TestConfirmRepoGrant(t *testing.T) {
 		require.True(t, consumed)
 		require.Contains(t, notified, "no longer tracked")
 	})
+}
+
+// promptChannelsFunc is doneChannelsFunc for a channel that can show buttons.
+func promptChannelsFunc(id, name string) func() map[channel.ChannelID]channel.Channel {
+	return func() map[channel.ChannelID]channel.Channel {
+		return map[channel.ChannelID]channel.Channel{channel.ChannelID(id): &promptChannel{
+			stubDoneChannel: stubDoneChannel{info: channel.Info{Name: name, Type: channel.TypeTelegram}},
+			prompts:         make(chan channel.SendPromptParams, 1),
+		}}
+	}
 }

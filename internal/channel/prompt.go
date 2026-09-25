@@ -59,8 +59,8 @@ func Ask(ctx context.Context, p AskParams) error {
 	return nil
 }
 
-// OpenPrompts records which channels have one of the agent's own prompts open, such as a tool
-// approval, for the router, which answers its own confirmations before the agent sees a message.
+// OpenPrompts is which channels have one of the agent's own prompts open, such as a tool
+// approval. Safe to use from more than one goroutine.
 type OpenPrompts struct {
 	mu   sync.Mutex
 	open map[ChannelID]bool

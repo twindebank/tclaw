@@ -95,6 +95,23 @@ func TestFlowManager(t *testing.T) {
 		require.Nil(t, fm.Active("ch1"))
 		require.NotNil(t, fm.Active("ch2"))
 	})
+
+	t.Run("the shared set follows each flow opening and closing", func(t *testing.T) {
+		fm := NewFlowManager()
+		fm.open = channel.NewOpenPrompts()
+
+		fm.StartToolApproval("ch1", channel.TaggedMessage{ChannelID: "ch1"}, []string{"Bash"}, "s1")
+		require.True(t, fm.open.IsOpen("ch1"))
+
+		fm.Complete("ch1")
+		require.False(t, fm.open.IsOpen("ch1"))
+
+		fm.StartAuth("ch1", channel.TaggedMessage{ChannelID: "ch1"})
+		require.True(t, fm.open.IsOpen("ch1"))
+
+		fm.Cancel("ch1")
+		require.False(t, fm.open.IsOpen("ch1"))
+	})
 }
 
 func TestHandleToolApprovalFlow(t *testing.T) {
@@ -121,25 +138,6 @@ func TestHandleToolApprovalFlow(t *testing.T) {
 		require.Nil(t, result.FallThroughMsg, "nothing is retried")
 		require.NotNil(t, fm.Active("ch1"))
 		require.Contains(t, ch.sends[len(ch.sends)-1], "out of date")
-	})
-}
-
-func TestFlowManager_OpenPrompts(t *testing.T) {
-	t.Run("the shared set follows each flow opening and closing", func(t *testing.T) {
-		fm := NewFlowManager()
-		fm.open = channel.NewOpenPrompts()
-
-		fm.StartToolApproval("ch1", channel.TaggedMessage{ChannelID: "ch1"}, []string{"Bash"}, "s1")
-		require.True(t, fm.open.IsOpen("ch1"))
-
-		fm.Complete("ch1")
-		require.False(t, fm.open.IsOpen("ch1"))
-
-		fm.StartAuth("ch1", channel.TaggedMessage{ChannelID: "ch1"})
-		require.True(t, fm.open.IsOpen("ch1"))
-
-		fm.Cancel("ch1")
-		require.False(t, fm.open.IsOpen("ch1"))
 	})
 }
 

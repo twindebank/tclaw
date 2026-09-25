@@ -99,10 +99,11 @@ same queue is where `lesson-capture` puts the user's own pushback — see the re
 straight to the chat, and only the user's own reply answers one: a message typed on that channel, or
 a press on the prompt's buttons. A message that arrived any other way (`channel_send`, a schedule, a
 channel's creation brief) never counts. Each prompt carries a random id in its buttons' data, and a
-press answers only the prompt with that id, so an old button cannot confirm a newer prompt. A typed
-"yes" names no prompt, so when a router confirmation and one of the agent's own prompts (a tool
-approval, a sign-in) are open on the same channel it answers neither, and the user is asked to press
-the button on the one they mean. A press
+press answers only the prompt with that id, so an old button cannot confirm a newer prompt. A typed "yes"
+names no prompt, so when a router confirmation and one of the agent's own prompts (a tool approval,
+a sign-in) are open on the same channel, it answers neither where the confirmation has buttons, and
+the user is told to press its button. On a channel without buttons the yes answers the confirmation,
+as it always did, and the chat says which prompt it answered and that the other is still open. A press
 counts only from an allowlisted Telegram user, and never when the allowlist is empty. The agent
 cannot draw a button of its own: its replies have any button markup escaped before they are sent.
 

@@ -186,8 +186,8 @@ type Options struct {
 	// ChannelTurnSettings override TurnSettings per channel, field by field.
 	ChannelTurnSettings map[channel.ChannelID]claudecli.TurnSettings
 
-	// OpenPrompts is told which channels have a flow open, so the router can tell a typed
-	// "yes" that could answer two prompts at once. Nil in tests that need no router.
+	// OpenPrompts is told which channels have a flow open, so a typed "yes" that could
+	// answer two prompts at once is not given to either.
 	OpenPrompts *channel.OpenPrompts
 
 	// PermissionPromptTool is the MCP tool the CLI asks when a tool call needs approval, on a
