@@ -47,9 +47,13 @@ func injectInitialMessages(ctx context.Context, userID user.ID, configWriter *co
 			continue
 		}
 
+		// The agent wrote this message when it created the channel. Left without a
+		// source it would count as the user's, and the user's are the only messages
+		// that answer a confirmation prompt.
 		msg := channel.TaggedMessage{
-			ChannelID: targetID,
-			Text:      cfg.InitialMessage,
+			ChannelID:  targetID,
+			Text:       cfg.InitialMessage,
+			SourceInfo: &channel.MessageSourceInfo{Source: channel.SourceInitialMessage, FromChannel: cfg.Parent},
 		}
 		select {
 		case output <- msg:
@@ -73,6 +77,7 @@ func buildRegistryEntries(configChannels []config.Channel) []channel.RegistryEnt
 				Model:           string(cc.Model),
 				MaxTurns:        cc.MaxTurns,
 				OutputStyle:     cc.OutputStyle,
+				TurnSettings:    cc.TurnSettings,
 				AllowedTools:    resolveConfigChannelTools(cc),
 				DisallowedTools: cc.DisallowedTools,
 				CreatableGroups: toolGroupsToStrings(cc.CreatableGroups),

@@ -1,5 +1,194 @@
 # Changelog
 
+## v1.27.0 (2026-09-11)
+
+- Fix: a request can be retried by HTTP/2 after the server sends GOAWAY. `rawRequest`
+  streamed the multipart body through an `io.Pipe`, which `net/http` cannot replay,
+  so `Request.GetBody` was never set and `http2.Transport` failed every POST in
+  flight on a draining connection with `cannot retry err ... after Request.Body was
+  written`. Telegram drains connections routinely, and a bot on such a connection
+  kept receiving updates while every `sendMessage` / `editMessageText` /
+  `answerCallbackQuery` failed until the connection was dropped. The body is now
+  built into a buffer up front and handed over as a `*bytes.Reader`, so `net/http`
+  sets `ContentLength` and `GetBody` and the transport retries transparently. The
+  trade-off is that an upload is held in memory for the duration of the request
+  instead of being streamed (#275).
+- Fix: a method without fields (`getMe`, `logOut`, `close`, or a params struct whose
+  fields are all omitted) is sent without a body and without a multipart
+  `Content-Type`. The pipe-based request always declared a multipart body, empty or
+  not, which local `telegram-bot-api --local` servers reject with a bare `400`, so
+  `bot.New` against a local server failed with `unexpected end of JSON input`
+  (#285, #224).
+- Fix: `buildRequestForm` counts custom-marshaled fields (`BotCommandScope`,
+  `InlineQueryResult`) and `InputMedia` fields. They were written to the form but
+  not counted, so a request consisting only of such a field would have been sent
+  as empty.
+
+## v1.26.0 (2026-09-11)
+
+- Fix: an unknown polymorphic discriminator no longer stalls long polling. Fourteen
+  models (`ChatMember`, `ReactionType`, `ChatBoostSource`, `OwnedGift`, `MenuButton`,
+  `MessageOrigin`, `StoryAreaType`, `TransactionPartner`, `RevenueWithdrawalState`,
+  `BackgroundType`, `BackgroundFill`, `RichBlock`, `RichText`, `PaidMedia`) returned
+  `unsupported <Type> type` from `UnmarshalJSON` when the `type` / `status` / `source`
+  value was not in their switch. `getUpdates` decoded the whole batch with one
+  `json.Unmarshal`, so a single update carrying a value added by a Bot API release
+  failed the entire call, the offset never advanced, and the same batch was requested
+  and rejected forever. The wrapper now keeps the raw value in `Type` (`Source` for
+  `ChatBoostSource`), leaves every variant pointer nil and returns no error, so a
+  consumer switching on `Type` reaches its default branch instead of never seeing the
+  update. The webhook path gets the same tolerance through the models.
+- Fix: the nine unions with a `MarshalJSON` (`ChatMember`, `ReactionType`,
+  `ChatBoostSource`, `MenuButton`, `MessageOrigin`, `BackgroundType`, `BackgroundFill`,
+  `RichBlock`, `RichText`) encode an unknown discriminator as the bare
+  `{"type":"<Type>"}` (`status` / `source` where applicable) instead of returning
+  `unsupported <Type> type`, so an update that is logged, persisted or queued as JSON
+  still encodes on the day Telegram ships a new variant. Only the discriminator
+  survives: no variant was populated, so the other fields of the unknown object are
+  not kept and are not written back. The remaining five unions have no custom encoder
+  and are unchanged.
+- Fix: a tagged object without a discriminator (`{}`, or a `ChatMember` without
+  `status`) is rejected by `UnmarshalJSON` in all fourteen unions. It is a malformed
+  value rather than a variant from a future release, and `MarshalJSON` rejects an
+  empty `Type` on the way back out, so accepting it would produce values that decode
+  but cannot be encoded again. For `RichText` an empty `Type` is also its plain-string
+  form, so `{"text":"hi"}` would otherwise have decoded to an empty string.
+- Fix: `ReactionType.MarshalJSON` handles `paid`. The variant has been decodable since
+  Bot API 7.6 but had no marshal case, so a paid reaction read from an update could not
+  be encoded back, e.g. into `setMessageReaction`. All three `ReactionType` variants now
+  go through the shared `marshalVariant`, so a `Type` set without its variant pointer
+  returns an error instead of panicking inside `encoding/json`.
+- Fix: `getUpdates` decodes each update on its own. An update that still fails to
+  decode is reported through the errors handler with its `update_id` and its raw
+  payload, the offset moves past it, and the rest of the batch is delivered. When the
+  last update of a batch has no readable `update_id` (an unparsable id, a `null`
+  element, an object without the field) the offset cannot move and the same batch comes
+  back, so the poll backs off (100ms..5s, one step per request) as it does on a failed
+  request, instead of re-requesting it in a tight loop. Such an element is reported
+  and never delivered, and no longer resets the offset to zero.
+
+## v1.25.0 (2026-09-01)
+
+- Fix: attachments nested in a rich message are uploaded. `buildRequestForm` had
+  no case for `InputRichMessage`, so the field fell through to a plain
+  `json.Marshal` and the `attach://` references in `InputRichMessage.Media` and
+  in the media `InputRichBlock*` blocks were serialized without their file parts,
+  leaving Telegram nothing to resolve them against (#298).
+- Fix: the thumbnail of an `InputMedia` is uploaded. `InputFileUpload` nested in
+  an `InputMediaVideo`, `InputMediaAnimation`, `InputMediaAudio`,
+  `InputMediaDocument` or `InputPaidMediaVideo` was encoded as `"@<filename>"`,
+  which is not a Bot API reference, and no file part was written, so the
+  thumbnail was silently dropped by Telegram. It is now marshalled as
+  `attach://<filename>` and uploaded under that name. `InputFileUpload.MarshalJSON`
+  emits the same reference everywhere; at the top level of a request the field is
+  still sent as its own form part, so that path is unchanged.
+- Fix: a typed nil `InputFile` or `InputMedia` no longer panics while the form is
+  built. A typed nil in a top level `InputFile` field, in `InputMedia` /
+  `InputPaidMedia` (single or slice) or in `InputRichMessage.Media` is reported as
+  an error, and a typed nil thumbnail nested in an `InputMedia` is omitted from
+  the encoded media instead of being sent as a `null` the Bot API rejects.
+- Fix: a nested `InputFileUpload` with an empty `Filename` is rejected. `Filename`
+  is the `attach://` reference and the part name, so an empty one produced
+  `"thumbnail":"attach://"` and an opaque `Bad Request` from Telegram.
+- Fix: `InputFileUpload.MarshalJSON` and `InputFileString.MarshalJSON` escape
+  their value instead of concatenating it into a JSON string. A `Filename` or a
+  `file_id` containing a quote or a backslash produced invalid JSON, failing the
+  request after the file parts had already been streamed.
+- [BREAKING] Fix: two different files sharing a part name are rejected with an
+  error instead of both being written. The name of a part is what an `attach://`
+  reference resolves against, so a duplicate — most easily two thumbnails with
+  the same `Filename` — silently made Telegram resolve both references to the
+  first file. One file referenced from several entries under a single name still
+  works: the part is written once and reused. A file part and a form field of the
+  same name are the same ambiguity and are rejected too. A request that built
+  before can now fail early, most visibly when an `attach://` name matches the
+  name of a form field, e.g. `attach://media` in `sendMediaGroup`,
+  `editMessageMedia` or `sendPaidMedia`.
+
+## v1.24.0 (2026-08-26)
+
+- Support Bot API 10.3 (August 24, 2026 update):
+  - Rich Messages: new `RichMessageButton`; `RichTextButton` (via the `RichText`
+    union); `RichBlockButtons`, `RichBlockExpandableBlockQuotation`,
+    `RichBlockDocument` and their `InputRichBlock*` counterparts (via the
+    `RichBlock` / `InputRichBlock` unions); `is_compact` on `RichBlockTable` and
+    `InputRichBlockTable`; `tg://document?id=` links for `InputRichMessageMedia`.
+  - Ephemeral Messages: new `EphemeralMessageParameters` (with
+    `replace_callback_query_message`), sent as `ephemeral_message_parameters` by
+    the 13 send methods and `sendRichMessage`; `rich_message` on
+    `editEphemeralMessageText` (and `text` made optional);
+    `show_caption_above_media` on `editEphemeralMessageCaption`; upload of new
+    files in `editEphemeralMessageMedia`; `can_send_welcome_messages` on
+    `ChatAdministratorRights`, `ChatMemberAdministrator` and `promoteChatMember`.
+  - Reply markup: new `DisabledButton` with the `disabled` field on
+    `InlineKeyboardButton`; `force_reply` on `InlineKeyboardMarkup` and
+    `ReplyKeyboardMarkup`.
+  - General: `can_stop` and `keep_on_stop` on `sendMessageDraft` and
+    `sendRichMessageDraft`; new `MessageGenerationStopped` with the
+    `stopped_message_generation` field on `Update` (and the matching
+    allowed-update constant); new `CommunityChatJoined` with
+    `community_chat_joined` on `Message`; `text`, `entities` and `is_private` on
+    `UniqueGiftInfo`.
+- Fix: `attach://` with a nil reader returns an error instead of panicking.
+  `addFormFieldInputMediaItem` and `addFormFieldInputStickerSlice` copied the
+  reader without checking it, and since the form is built in a goroutine with no
+  recover, a missing `MediaAttachment` or `StickerAttachment` took the process
+  down instead of failing the call (#296).
+- Fix: `can_post_stories`, `can_edit_stories` and `can_delete_stories` are no
+  longer marked `omitempty` on `ChatAdministratorRights` and
+  `ChatMemberAdministrator`. They are required fields in the Bot API, so they
+  are now always sent, matching the rest of the required rights in those types.
+  The parameters of the same name on `promoteChatMember` are optional and are
+  unchanged.
+- Fix: the `getUpdates` loop honours `retry_after` on a 429 instead of its own
+  backoff, which starts at 100ms, doubles and caps at 5s. When Telegram asked
+  for a longer wait, the bot retried early and earned further 429s (#289).
+- [BREAKING] Fix: `Message.ReplyToStore` was tagged `reply_to_store`, a typo of
+  the Bot API field `reply_to_story`, so it was never unmarshalled. The field is
+  renamed to `ReplyToStory` (#287).
+- [BREAKING] Fix: `BusinessBotRights.CanDeleteOutgoingMessages` was tagged
+  `can_delete_outgoing_messages`, which does not exist in the Bot API. The right
+  was dropped on unmarshal and emitted under a key Telegram ignores. The field is
+  renamed to `CanDeleteSentMessages` with the correct
+  `can_delete_sent_messages` tag (#286).
+- [BREAKING] `ReceiverUserID` and `CallbackQueryID` are removed from the send
+  method params (`SendMessageParams`, `SendPhotoParams`, ...); Bot API 10.3
+  replaced them with `EphemeralMessageParameters`.
+
+## v1.23.0 (2026-08-03)
+
+- Support Bot API 10.2 (July 14, 2026 update):
+  - Rich Messages: new `InputRichMessageMedia`, `InputMediaVoiceNote`, the 21
+    `InputRichBlock*` block types (via the `InputRichBlock` tagged union) and
+    `InputRichBlockListItem`; added `blocks` and `media` fields to
+    `InputRichMessage`.
+  - Ephemeral Messages: new methods `editEphemeralMessageText`,
+    `editEphemeralMessageMedia`, `editEphemeralMessageCaption`,
+    `editEphemeralMessageReplyMarkup`, `deleteEphemeralMessage`; added
+    `receiver_user_id` and `callback_query_id` params to the 13 send methods;
+    `is_ephemeral` on `BotCommand`; `receiver_user` and `ephemeral_message_id`
+    on `Message`; `ephemeral_message_id` on `ReplyParameters` (and `message_id`
+    made optional).
+  - Communities: new `Community`, `CommunityChatAdded`, `CommunityChatRemoved`;
+    `community_chat_added` / `community_chat_removed` on `Message`; `community`
+    on `ChatFullInfo`.
+  - General: new `BotSubscriptionUpdated` with the `subscription` field on
+    `Update` (and `subscription` allowed-update constant).
+- Fix: `InputMedia` values now implement `json.Marshaler`, so the required `type`
+  discriminator is kept when they are encoded through a plain `json.Marshal`
+  (e.g. nested inside a rich message). Previously `type` was only emitted by
+  `MarshalInputMedia`, which nested values never reached.
+- Fix: `MarshalJSON` on the `InputRichBlock`, `RichBlock` and `RichText` tagged
+  unions returns an error instead of panicking when `Type` is set without its
+  matching variant pointer, and reports an unknown `Type` as unsupported rather
+  than as a missing variant. (Since v1.26.0 an unknown `Type` is not an error on
+  either side.)
+- Fix: marshaling those unions no longer writes the discriminator back into the
+  caller's variant. The `type` field is stamped on a copy, so encoding has no
+  side effects and the same value can be encoded from several goroutines.
+- Fix: `EditMessageCaptionParams.ShowCaptionAboveMedia` was sent under the field
+  name `k` instead of `show_caption_above_media`, so it never took effect.
+
 ## v1.22.0 (2026-06-30)
 
 - Support Bot API 10.1 (June 11, 2026 update) — Rich Messages:

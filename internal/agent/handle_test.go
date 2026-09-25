@@ -3,14 +3,17 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"tclaw/internal/channel"
+	"tclaw/internal/claudecli"
 	"tclaw/internal/memorylayout"
 )
 
@@ -32,7 +35,7 @@ func (m *mockChannel) Info() channel.Info                       { return m.info 
 func (m *mockChannel) Messages(_ context.Context) <-chan string { return nil }
 func (m *mockChannel) Done(_ context.Context) error             { return nil }
 func (m *mockChannel) SplitStatusMessages() bool                { return true }
-func (m *mockChannel) Markup() channel.Markup                   { return channel.MarkupHTML }
+func (m *mockChannel) Markup() channel.Markup                   { return channel.MarkupTelegram }
 func (m *mockChannel) StatusWrap() channel.StatusWrap           { return channel.StatusWrap{} }
 
 func (m *mockChannel) Send(_ context.Context, text string, _ channel.SendOpts) (channel.MessageID, error) {
@@ -54,13 +57,19 @@ func TestFriendlyErrorMessage(t *testing.T) {
 	tests := []struct {
 		name    string
 		raw     string
-		subtype string
+		subtype claudecli.ResultSubtype
 		want    string
 	}{
 		{
+			name:    "spend cap says which setting stopped the turn",
+			raw:     "",
+			subtype: claudecli.ResultErrorMaxBudget,
+			want:    "spend cap reached — the max_budget_usd cap stopped this turn. Send another message to carry on, or raise the cap",
+		},
+		{
 			name:    "empty error falls back to subtype",
 			raw:     "",
-			subtype: "error_during_execution",
+			subtype: claudecli.ResultErrorDuringExecution,
 			want:    "claude ended the turn with an error (error_during_execution) but gave no details — check the logs",
 		},
 		{
@@ -291,6 +300,105 @@ func TestWriteSplit(t *testing.T) {
 			t.Fatalf("expected 99 edits, got %d", len(ch.edits))
 		}
 	})
+
+	t.Run("drafts: streams the reply as a draft and sends it once, in full, when status follows", func(t *testing.T) {
+		ch := &draftChannel{}
+		tw := newTurnWriter(context.Background(), Options{Channels: map[channel.ChannelID]channel.Channel{testChannelID: ch}}, testChannelID, ch)
+
+		require.NoError(t, tw.write(phaseResponse, "Hello"))
+		tw.lastDraft = time.Time{} // the next update is not held back by the interval
+		require.NoError(t, tw.write(phaseResponse, " world"))
+		require.Empty(t, ch.sends, "nothing is a message while it is a draft")
+		require.Equal(t, []string{"Hello", "Hello world"}, ch.drafts)
+
+		require.NoError(t, tw.write(phaseStatus, "📊 stats\n"))
+
+		require.Equal(t, []string{"Hello world", "📊 stats\n"}, ch.sends, "the reply arrives before the status below it")
+	})
+
+	t.Run("drafts: sends a reply still shown as a draft when the turn ends", func(t *testing.T) {
+		ch := &draftChannel{}
+		tw := newTurnWriter(context.Background(), Options{Channels: map[channel.ChannelID]channel.Channel{testChannelID: ch}}, testChannelID, ch)
+
+		require.NoError(t, tw.write(phaseResponse, "Partial"))
+		require.NoError(t, tw.flushDraft())
+
+		require.Equal(t, []string{"Partial"}, ch.sends)
+	})
+
+	t.Run("drafts: falls back to an ordinary message when the channel refuses a draft", func(t *testing.T) {
+		ch := &draftChannel{draftErr: errors.New("drafts are not allowed")}
+		tw := newTurnWriter(context.Background(), Options{Channels: map[channel.ChannelID]channel.Channel{testChannelID: ch}}, testChannelID, ch)
+
+		require.NoError(t, tw.write(phaseResponse, "Hello"))
+		require.NoError(t, tw.write(phaseResponse, " world"))
+		require.NoError(t, tw.flushDraft())
+
+		require.Equal(t, []string{"Hello"}, ch.sends)
+		require.Equal(t, "Hello world", ch.edits[len(ch.edits)-1].text)
+	})
+
+	t.Run("drafts: continues a reply over the channel's rich limit in a new message", func(t *testing.T) {
+		ch := &draftChannel{}
+		tw := newTurnWriter(context.Background(), Options{Channels: map[channel.ChannelID]channel.Channel{testChannelID: ch}}, testChannelID, ch)
+		first := strings.Repeat("a", ch.MaxRichReplyLen()-10)
+
+		require.NoError(t, tw.write(phaseResponse, first))
+		require.NoError(t, tw.write(phaseResponse, strings.Repeat("b", 20)))
+		require.NoError(t, tw.flushDraft())
+
+		require.Equal(t, []string{first, strings.Repeat("b", 20)}, ch.sends)
+	})
+
+	t.Run("drafts: sends the reply in full when the turn was stopped", func(t *testing.T) {
+		ch := &draftChannel{}
+		ctx, cancel := context.WithCancel(context.Background())
+		tw := newTurnWriter(ctx, Options{Channels: map[channel.ChannelID]channel.Channel{testChannelID: ch}}, testChannelID, ch)
+
+		require.NoError(t, tw.write(phaseResponse, "Half an answer"))
+		cancel()
+		require.NoError(t, tw.flushDraft())
+
+		require.Equal(t, []string{"Half an answer"}, ch.sends, "the stop cancelled the turn, not the reply the user watched")
+	})
+
+	t.Run("drafts: keeps the draft when a stop lands during an update, and sends it at the end", func(t *testing.T) {
+		ch := &draftChannel{}
+		ctx, cancel := context.WithCancel(context.Background())
+		tw := newTurnWriter(ctx, Options{Channels: map[channel.ChannelID]channel.Channel{testChannelID: ch}}, testChannelID, ch)
+
+		require.NoError(t, tw.write(phaseResponse, "Half"))
+		cancel()
+		tw.lastDraft = time.Time{} // the next update goes out, and fails on the stopped turn
+		require.NoError(t, tw.write(phaseResponse, " an answer"))
+		require.Empty(t, ch.sends, "a failed update on a stopped turn is not a reason to send early")
+		require.NoError(t, tw.flushDraft())
+
+		require.Equal(t, []string{"Half an answer"}, ch.sends)
+	})
+
+	t.Run("drafts: holds back updates inside the interval, and sends the whole reply at the end", func(t *testing.T) {
+		ch := &draftChannel{}
+		tw := newTurnWriter(context.Background(), Options{Channels: map[channel.ChannelID]channel.Channel{testChannelID: ch}}, testChannelID, ch)
+
+		require.NoError(t, tw.write(phaseResponse, "One"))
+		require.NoError(t, tw.write(phaseResponse, " two"))
+		require.NoError(t, tw.flushDraft())
+
+		require.Equal(t, []string{"One"}, ch.drafts, "the second update came too soon to be shown")
+		require.Equal(t, []string{"One two"}, ch.sends)
+	})
+
+	t.Run("drafts: shows nothing for a new block that is only its separator so far", func(t *testing.T) {
+		ch := &draftChannel{}
+		tw := newTurnWriter(context.Background(), Options{Channels: map[channel.ChannelID]channel.Channel{testChannelID: ch}}, testChannelID, ch)
+
+		require.NoError(t, tw.write(phaseResponse, "\n\n"))
+
+		require.Empty(t, ch.drafts)
+		require.Empty(t, ch.sends)
+	})
+
 }
 
 const testChannelID = channel.ChannelID("test")
@@ -457,3 +565,240 @@ func TestSandboxPaths(t *testing.T) {
 		require.True(t, found, "systemReadOnlyPaths must include /usr/local/go for dev sessions")
 	})
 }
+
+func TestStreamResponse(t *testing.T) {
+	t.Run("streams text into the response as it arrives and never writes it twice", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := newTestTurnWriter(ch)
+
+		runStream(t, tw,
+			streamLine(`{"type":"message_start"}`),
+			streamLine(`{"type":"content_block_start","content_block":{"type":"text","text":""}}`),
+			streamLine(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hel"}}`),
+			streamLine(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"lo"}}`),
+			`{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"text","text":"Hello"}]}}`,
+			streamLine(`{"type":"content_block_stop"}`),
+			streamLine(`{"type":"message_stop"}`),
+		)
+
+		require.Equal(t, []string{"Hel"}, ch.sends, "the first delta should open the response message")
+		require.Equal(t, "Hello", ch.edits[len(ch.edits)-1].text, "the whole-block copy must not be appended again")
+	})
+
+	t.Run("shows a tool call with the input that streamed in after it started", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := newTestTurnWriter(ch)
+
+		runStream(t, tw,
+			streamLine(`{"type":"message_start"}`),
+			streamLine(`{"type":"content_block_start","content_block":{"type":"tool_use","id":"toolu_01A","name":"Bash","input":{}}}`),
+			streamLine(`{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{\"command\":"}}`),
+			streamLine(`{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"\"echo hi\"}"}}`),
+			`{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","id":"toolu_01A","name":"Bash","input":{"command":"echo hi"}}]}}`,
+			streamLine(`{"type":"content_block_stop"}`),
+			streamLine(`{"type":"message_stop"}`),
+		)
+
+		require.Len(t, ch.sends, 1)
+		require.Equal(t, 1, strings.Count(ch.sends[0], "Bash"), "the tool line should be written once")
+		require.Contains(t, ch.sends[0], "command=echo hi", "the tool line should carry the streamed input")
+	})
+
+	t.Run("shows a subagent's work as progress, never in the reply, when it arrives mid-block", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := newTestTurnWriter(ch)
+
+		// The interleaving a real Agent tool call produced: the subagent's whole
+		// messages arrive while the main thread's block is still streaming.
+		runStream(t, tw,
+			streamLine(`{"type":"message_start"}`),
+			streamLine(`{"type":"content_block_start","content_block":{"type":"text","text":""}}`),
+			`{"type":"assistant","parent_tool_use_id":"toolu_01B","message":{"content":[{"type":"tool_use","id":"toolu_01C","name":"Read","input":{"file_path":"notes.md"}}]}}`,
+			`{"type":"assistant","parent_tool_use_id":"toolu_01B","message":{"content":[{"type":"text","text":"subagent notes"}]}}`,
+			streamLine(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"Main answer"}}`),
+			`{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"text","text":"Main answer"}]}}`,
+			streamLine(`{"type":"content_block_stop"}`),
+			streamLine(`{"type":"message_stop"}`),
+		)
+
+		messages := finalTexts(ch)
+		require.Len(t, messages, 2, "one status message, then the reply")
+		require.Contains(t, messages[0], "Read(file_path=notes.md)", "a subagent's tool call should show as progress")
+		require.Contains(t, messages[0], "🤖 subagent notes", "so should what it says")
+		require.Equal(t, "Main answer", messages[1], "only the main thread's text is the reply")
+	})
+
+	t.Run("shows an assistant message that was not streamed", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := newTestTurnWriter(ch)
+
+		// A command's reply, e.g. /compact on an empty session, comes only whole.
+		runStream(t, tw,
+			`{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"text","text":"Not enough messages to compact."}]}}`,
+		)
+
+		require.Equal(t, []string{"Not enough messages to compact."}, ch.sends)
+	})
+
+	t.Run("shows an unstreamed message after a streamed one, as a separate paragraph", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := newTestTurnWriter(ch)
+
+		runStream(t, tw,
+			streamLine(`{"type":"message_start"}`),
+			streamLine(`{"type":"content_block_start","content_block":{"type":"text","text":""}}`),
+			streamLine(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"Streamed"}}`),
+			`{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"text","text":"Streamed"}]}}`,
+			streamLine(`{"type":"content_block_stop"}`),
+			streamLine(`{"type":"message_stop"}`),
+			`{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"text","text":"Not streamed"}]}}`,
+		)
+
+		require.Equal(t, []string{"Streamed\n\nNot streamed"}, finalTexts(ch))
+	})
+
+	t.Run("shows the CLI's error message even when a stream broke off", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := newTestTurnWriter(ch)
+
+		runStream(t, tw,
+			streamLine(`{"type":"message_start"}`),
+			`{"type":"assistant","parent_tool_use_id":null,"error":"server_error","message":{"content":[{"type":"text","text":"API Error: overloaded"}]}}`,
+		)
+
+		require.Equal(t, []string{"API Error: overloaded"}, finalTexts(ch))
+	})
+
+	t.Run("names MCP servers that did not connect, and config entries skipped", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := newTestTurnWriter(ch)
+
+		runStream(t, tw,
+			`{"type":"system","subtype":"init","session_id":"s1","mcp_servers":[`+
+				`{"name":"tclaw","status":"connected","source":"dynamic"},`+
+				`{"name":"strava","status":"failed","source":"dynamic"},`+
+				`{"name":"calendar","status":"pending","source":"dynamic"}],`+
+				`"mcp_server_errors":[{"name":"broken","type":"url_missing_type","message":"has a url but no type"}]}`,
+		)
+
+		require.Contains(t, ch.sends[0], "⚠️ MCP server strava is unavailable this turn (failed)")
+		require.Contains(t, ch.sends[0], "⚠️ MCP server broken was skipped: has a url but no type")
+		require.NotContains(t, ch.sends[0], "calendar", "a server still connecting may yet arrive")
+	})
+
+	t.Run("says the CLI is retrying a failed request", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := newTestTurnWriter(ch)
+
+		runStream(t, tw,
+			`{"type":"system","subtype":"api_retry","attempt":2,"max_retries":10,"retry_delay_ms":4200,"error":"overloaded"}`,
+		)
+
+		require.Equal(t, []string{"⏳ API error (overloaded) — retrying in 5s (attempt 2/10)\n"}, ch.sends)
+	})
+
+	t.Run("offers approval only for refused tools the channel does not allow", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := newTestTurnWriter(ch)
+
+		_, err := streamResponse(context.Background(), tw.opts, tw, strings.NewReader(strings.Join([]string{
+			`{"type":"system","subtype":"permission_denied","tool_name":"Bash"}`,
+			`{"type":"result","subtype":"success","session_id":"s1","permission_denials":[` +
+				`{"tool_name":"Bash","tool_use_id":"toolu_01A"},{"tool_name":"Write","tool_use_id":"toolu_01B"}]}`,
+		}, "\n")), []claudecli.Tool{"Read", "Write"}, testChannelID, time.Now())
+
+		var denied *ToolsDeniedError
+		require.ErrorAs(t, err, &denied)
+		require.Equal(t, []string{"Bash"}, denied.Tools, "Write is allowed, so a hook or the user refused it")
+		require.Contains(t, ch.sends[0], "🚫 Bash call was refused")
+	})
+
+	t.Run("reports the conversation's size from the last main-thread request", func(t *testing.T) {
+		ch := &mockChannel{info: channel.Info{Name: "dev"}}
+		tw := newTestTurnWriter(ch)
+		var reported []string
+		tw.opts.OnContextSize = func(name string, tokens int) { reported = append(reported, fmt.Sprintf("%s=%d", name, tokens)) }
+
+		runStream(t, tw,
+			streamLine(`{"type":"message_start","message":{"usage":{"input_tokens":5,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000}}}`),
+			streamLine(`{"type":"message_stop"}`),
+			// A subagent's request is not the channel's conversation.
+			`{"type":"stream_event","parent_tool_use_id":"toolu_01A","event":{"type":"message_start","message":{"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}}`,
+			streamLine(`{"type":"message_start","message":{"usage":{"input_tokens":7,"cache_creation_input_tokens":200,"cache_read_input_tokens":1100}}}`),
+			streamLine(`{"type":"message_stop"}`),
+			`{"type":"result","subtype":"success","session_id":"s1"}`,
+		)
+
+		require.Equal(t, []string{"dev=1307"}, reported)
+	})
+
+	t.Run("reports the size a compaction left", func(t *testing.T) {
+		ch := &mockChannel{info: channel.Info{Name: "dev"}}
+		tw := newTestTurnWriter(ch)
+		var reported []int
+		tw.opts.OnContextSize = func(_ string, tokens int) { reported = append(reported, tokens) }
+
+		runStream(t, tw,
+			`{"type":"system","subtype":"compact_boundary","compact_metadata":{"trigger":"manual","pre_tokens":28968,"post_tokens":2958}}`,
+			`{"type":"result","subtype":"success","session_id":"s1"}`,
+		)
+
+		require.Equal(t, []int{2958}, reported)
+	})
+
+	t.Run("writes no tool result line for a user event that is not a tool result", func(t *testing.T) {
+		ch := &mockChannel{}
+		tw := newTestTurnWriter(ch)
+
+		// What /compact feeds back: the summary and the command's output.
+		runStream(t, tw,
+			`{"type":"user","message":{"role":"user","content":"This session is being continued from a previous conversation."}}`,
+			`{"type":"user","message":{"role":"user","content":"<local-command-stdout>Compacted </local-command-stdout>"}}`,
+		)
+
+		require.Empty(t, ch.sends)
+	})
+}
+
+// --- helpers ---
+
+// streamLine wraps a main-thread API event the way the CLI does.
+func streamLine(event string) string {
+	return `{"type":"stream_event","parent_tool_use_id":null,"event":` + event + `}`
+}
+
+// finalTexts returns what each message the channel was sent reads as after its last edit.
+func finalTexts(ch *mockChannel) []string {
+	texts := append([]string(nil), ch.sends...)
+	for _, e := range ch.edits {
+		// mockChannel's nth message ID is n copies of "m".
+		texts[len(e.id)-1] = e.text
+	}
+	return texts
+}
+
+func runStream(t *testing.T, tw *turnWriter, lines ...string) {
+	t.Helper()
+	_, err := streamResponse(context.Background(), tw.opts, tw, strings.NewReader(strings.Join(lines, "\n")), nil, testChannelID, time.Now())
+	require.NoError(t, err)
+}
+
+// draftChannel is a split-status channel that shows drafts and takes long rich replies.
+type draftChannel struct {
+	mockChannel
+	drafts   []string
+	draftErr error
+}
+
+func (d *draftChannel) StreamDraft(ctx context.Context, p channel.StreamDraftParams) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if d.draftErr != nil {
+		return d.draftErr
+	}
+	d.drafts = append(d.drafts, p.Text)
+	return nil
+}
+
+func (d *draftChannel) MaxRichReplyLen() int { return 5000 }

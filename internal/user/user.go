@@ -24,6 +24,7 @@ type Config struct {
 	DisallowedTools []claudecli.Tool
 	MaxTurns        int
 	OutputStyle     string
+	TurnSettings    claudecli.TurnSettings
 	Debug           bool
 
 	// MessageDebounce coalesces same-channel user messages that arrive within

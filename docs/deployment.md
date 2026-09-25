@@ -270,6 +270,30 @@ The agent sets this itself when it stands up a channel: `channel_create` and `ch
 `max_turns`, and `channel_read` shows the current value. Passing `0` to `channel_edit` clears the
 channel's own limit and puts it back on the user-level one.
 
+## Effort, Spend Cap and Fallback Model
+
+Three more settings follow the same user-then-channel pattern, each passed to the CLI as a flag:
+
+```yaml
+users:
+  - id: alice
+    effort: high                     # --effort: low | medium | high | xhigh | max | ultracode
+    fallback_model: claude-sonnet-5  # --fallback-model, tried when the main model is overloaded
+    channels:
+      - name: triage
+        effort: low                  # quick answers here
+      - name: nightly-report
+        max_budget_usd: 2            # --max-budget-usd: the turn stops once it has spent $2
+```
+
+A channel's value wins field by field, so the triage channel above still falls back to Sonnet. Unset,
+or zero for the budget, means inherit; with neither set the CLI's own default applies. A turn stopped
+by the spend cap tells the chat so, and the next message carries on from where it stopped.
+`channel_create`, `channel_edit` and `channel_read` all take and show them; `channel_edit` clears one
+with an empty string, or `0` for the budget.
+
+`ultracode` lets the model fan work out to many subagents, and costs accordingly.
+
 ## The Retro Queue
 
 Corrections are captured as they happen and judged much later, by a session that did not make the
@@ -322,8 +346,9 @@ users:
   lone messages). Set `"0s"` to opt out and process every message immediately.
 - The window **resets on each arrival** (a trickling album stays together), bounded by an
   internal 5s cap so a steady stream can't defer processing forever.
-- **Control commands** (`stop`, `login`, `auth`, `compact`, and the fresh-session synonyms
-  `new`/`reset`/`clear`/`delete`) are never batched — they always run on their own turn.
+- **Control commands** (`stop`, `login`, `auth`, `compact`, `help`, and the fresh-session synonyms
+  `new`/`reset`/`clear`/`delete`) and button presses are never batched — they always run on
+  their own turn.
 - Implemented once at the queue layer (`internal/queue/queue.go`), so it covers every channel
   and plain-text bursts too, not just Telegram albums.
 

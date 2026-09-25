@@ -12,12 +12,22 @@ import (
 
 // BotSend sends a message via the Telegram Bot HTTP API and returns the message ID.
 func BotSend(token string, chatID int64, text string) (int, error) {
+	return BotSendWithKeyboard(token, chatID, text, "")
+}
+
+// BotSendWithKeyboard sends a message with an inline keyboard, given as its reply_markup JSON,
+// and returns the message ID. An empty keyboard sends none.
+func BotSendWithKeyboard(token string, chatID int64, text, keyboardJSON string) (int, error) {
 	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", token)
-	resp, err := http.PostForm(apiURL, url.Values{
+	form := url.Values{
 		"chat_id":    {strconv.FormatInt(chatID, 10)},
 		"text":       {text},
 		"parse_mode": {"HTML"},
-	})
+	}
+	if keyboardJSON != "" {
+		form.Set("reply_markup", keyboardJSON)
+	}
+	resp, err := http.PostForm(apiURL, form)
 	if err != nil {
 		return 0, fmt.Errorf("telegram sendMessage: %w", err)
 	}

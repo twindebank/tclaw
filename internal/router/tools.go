@@ -135,6 +135,23 @@ func buildChannelOutputStyles(
 	return styles
 }
 
+// buildChannelTurnSettings maps channel IDs to the turn settings set on each, leaving out
+// the channels that set none.
+func buildChannelTurnSettings(
+	allChMap map[channel.ChannelID]channel.Channel,
+	registry *channel.Registry,
+) map[channel.ChannelID]claudecli.TurnSettings {
+	settings := make(map[channel.ChannelID]claudecli.TurnSettings)
+	for chID, ch := range allChMap {
+		entry := registry.ByName(ch.Info().Name)
+		if entry == nil || entry.TurnSettings == (claudecli.TurnSettings{}) {
+			continue
+		}
+		settings[chID] = entry.TurnSettings
+	}
+	return settings
+}
+
 // buildChannelContext constructs the ChannelContext for role resolution by
 // looking up which provider connections and remote MCPs are scoped to this
 // channel.

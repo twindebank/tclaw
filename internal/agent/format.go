@@ -33,6 +33,36 @@ const (
 	iconNotice = "ℹ️"
 )
 
+// formatSubagentText renders the first line of what a subagent said, as progress.
+func formatSubagentText(text string) string {
+	line := strings.TrimSpace(firstLine(strings.TrimSpace(text)))
+	if line == "" {
+		return ""
+	}
+	return fmt.Sprintf("\n🤖 %s\n", truncate(line, quoteMaxLen))
+}
+
+// formatCompactBoundary renders a finished compaction, saying whether the CLI started it on its own.
+func formatCompactBoundary(meta *claudecli.CompactMetadata) string {
+	if meta == nil {
+		slog.Warn("compact_boundary event carried no metadata")
+		return "\n🗜️ Context compacted\n"
+	}
+	who := "Context compacted"
+	if meta.Trigger == claudecli.CompactTriggerAuto {
+		who = "Context was full, compacted automatically"
+	}
+	return fmt.Sprintf("\n🗜️ %s: %s → %s tokens\n", who, formatTokenCount(meta.PreTokens), formatTokenCount(meta.PostTokens))
+}
+
+// formatTokenCount shortens a token count to thousands, e.g. 28968 → "29k".
+func formatTokenCount(n int) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	return fmt.Sprintf("%dk", (n+500)/1000)
+}
+
 // noticeSpeaker separates what produced a notice from the notice itself, as in
 // "PostToolUse:Write says: <notice>". The CLI repeats it on every line.
 const noticeSpeaker = " says: "

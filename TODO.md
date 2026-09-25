@@ -13,9 +13,8 @@
 - [ ] Token exhausted state — when Claude API limit is hit, record reset time in channel state. Scheduled jobs should be deferred until reset time (not silently dropped). On reset, prompt user whether to run deferred schedules or skip them. Normal inbound messages should be queued and replayed (or flagged as unactioned) when the limit resets so nothing is silently lost.
 
 ## Token Optimisation
-- [ ] Auto-compact — track per-session context size (last turn's input tokens from ResultEvent), expose via `channel_read` tool, add `compact_channel` tool for programmatic compaction, set up 2am admin schedule to compact sessions above a threshold. Key design decision: use `LastTurnInputTokens` (the actual context window size on the most recent turn) as the compaction metric — not cumulative usage, which never resets and would re-trigger compaction every time.
-- [ ] `channel_read` tool — read a single channel's full config + session history (current + historical sessions with token stats and timestamps). Avoids forcing the agent to list all channels just to check one.
-- [ ] `compact_channel` tool — trigger compaction on any channel by injecting a "compact" message into the agent queue. Bypasses the link requirement of `channel_send` for admin use.
+- [x] Compaction — `compact` runs the CLI's real `/compact`, and the CLI compacts on its own when the context fills; both show a status line with the size before and after. `channel_read` shows each channel's `context_tokens` after its last turn, and `channel_send` with the word "compact" compacts another channel.
+- [ ] Scheduled compaction — an admin schedule that compacts channels whose `context_tokens` is over a threshold, using the two tools above.
 
 ## Memory & Context
 - [x] System and agent memories — system prompt (--append-system-prompt) for identity/rules, CLAUDE.md for persistent per-user memory, seeded on first startup
@@ -37,13 +36,13 @@
 
 ## UX
 - [x] Split thinking and final message — separate thinking/tool-use status from response text into distinct messages (Telegram split mode)
-- [ ] Typing indicator — show typing state in the interface while agent is working
+- [x] Typing indicator — show typing state in the interface while agent is working (Telegram draft streaming shows the reply as it is written)
 - [x] Timestamps on messages — show when each message was sent/received
 - [x] Visual message separation — clearer boundaries between messages in the chat UI
 - [x] Show tool arguments — display tool call parameters alongside tool use events
 - [x] Chat keywords — builtin commands: `stop` (abort current response), `compact` (compact context), `new`/`reset`/`clear`/`delete` (start a fresh session), `login`/`auth` (interactive auth flow)
 - [x] Model switching — `model_get` / `model_set` MCP tools with runtime ModelFunc support
-- [ ] Chat keywords (remaining) — `help` (list commands)
+- [x] Chat keywords (remaining) — `help` (list commands); Telegram lists the keywords in its "/" command menu
 - [ ] Render markdown in chat — parse and render markdown formatting in the TUI client
 - [ ] Web browser tool / Selenium — give the agent the ability to browse and interact with web pages
 
@@ -58,7 +57,11 @@
 - [x] Edit message — allow the channel to update/edit previously sent messages (e.g. for streaming edits in place)
 - [x] Channel-specific config in system prompt — per-channel context (name, type, description) injected into the agent's system prompt
 - [x] Dynamic channels — agent can create, edit, and delete channels at runtime via MCP tools
-- [x] Telegram support — Bot API with long polling (local) and webhooks (production), HTML markup
+- [x] Telegram support — Bot API with long polling (local) and webhooks (production), rich markdown replies
+- [ ] Decide how Telegram channels map onto bots. Today each channel is its own bot, created by driving BotFather through the user's own Telegram account (MTProto login with the app API id and hash, OTP and 2FA) and deleted the same way at teardown. Two Bot API features could replace that:
+  - **Forum topics in a private chat** (Bot API 9.3/9.4): one bot, with `createForumTopic` making a topic per channel and every message carrying `message_thread_id`. Channel creation becomes one API call with no BotFather automation and no user-account login. The cost is that channels lose their own name, avatar and mute setting in the chat list, and every place that keys a channel on bot token and chat ID changes, plus migrating existing channels. A middle way: dedicated bots for long-lived channels, topics in one bot for ephemeral ones.
+  - **Managed bots** (Bot API 9.6): if channels stay one bot each, a manager bot in "Bot Management Mode" sends a `t.me/newbot/...` link or a `request_managed_bot` button, the user taps to confirm, and `getManagedBotToken` returns the new bot's token. `setManagedBotAccessSettings` (10.0) can lock it to the owner. One tap per new channel, in exchange for tclaw no longer holding a logged-in session for the user's own account.
+- [ ] Telegram guest mode (Bot API 10.0) — mention the bot in any chat, without adding it, and it answers once. Not built: a guest query arrives as its own update type, gets exactly one reply through `answerGuestQuery`, and carries no history, so it needs a one-shot turn path of its own plus an owner-only check (anyone in that chat could mention the bot).
 - [ ] Slack support
 - [ ] Signal support
 - [ ] Channel history store — archive deleted channels (name, type, session ID, dev session, timestamps) so the agent can reference past ephemeral tasks. `channel_history` MCP tool for querying.

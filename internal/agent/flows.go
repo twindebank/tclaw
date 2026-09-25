@@ -30,6 +30,9 @@ type ChannelFlow struct {
 type FlowManager struct {
 	flows       map[channel.ChannelID]*ChannelFlow
 	OAuthNotify chan channel.ChannelID
+
+	// open, when set, mirrors which channels have a flow, for the router to read.
+	open *channel.OpenPrompts
 }
 
 // NewFlowManager creates a FlowManager ready for use.
@@ -63,20 +66,25 @@ func (fm *FlowManager) StartAuth(chID channel.ChannelID, originalMsg channel.Tag
 		Kind: FlowAuth,
 		Auth: auth,
 	}
+	fm.mirror(chID)
 	return auth
 }
 
 // StartToolApproval begins a tool approval flow on a channel.
-func (fm *FlowManager) StartToolApproval(chID channel.ChannelID, originalMsg channel.TaggedMessage, deniedTools []string, sessionID string) {
+func (fm *FlowManager) StartToolApproval(chID channel.ChannelID, originalMsg channel.TaggedMessage, deniedTools []string, sessionID string) string {
 	fm.Cancel(chID)
+	promptID := channel.NewPromptID()
 	fm.flows[chID] = &ChannelFlow{
 		Kind: FlowToolApproval,
 		ToolApproval: &pendingToolApproval{
 			originalMsg: originalMsg,
 			deniedTools: deniedTools,
 			sessionID:   sessionID,
+			promptID:    promptID,
 		},
 	}
+	fm.mirror(chID)
+	return promptID
 }
 
 // Cancel cancels whatever flow is active on this channel, cleaning up resources.
@@ -89,11 +97,20 @@ func (fm *FlowManager) Cancel(chID channel.ChannelID) {
 		f.Auth.cleanup()
 	}
 	delete(fm.flows, chID)
+	fm.mirror(chID)
 }
 
 // Complete removes the flow for this channel (successful completion).
 func (fm *FlowManager) Complete(chID channel.ChannelID) {
 	delete(fm.flows, chID)
+	fm.mirror(chID)
+}
+
+// mirror records whether chID has a flow in the shared set the router reads.
+func (fm *FlowManager) mirror(chID channel.ChannelID) {
+	if fm.open != nil {
+		fm.open.Set(chID, fm.flows[chID] != nil)
+	}
 }
 
 // FlowResult encodes the outcome of handling a message within a flow.

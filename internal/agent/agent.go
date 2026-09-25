@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,30 +42,46 @@ const (
 	// CmdAuthStatus shows current authentication status.
 	CmdAuthStatus = "auth"
 
-	// CmdCompact compacts the conversation context. Rewritten into a prompt
-	// that asks Claude to summarize and discard verbose history.
+	// CmdCompact compacts the conversation context by running the CLI's own
+	// /compact command on the channel's session.
 	CmdCompact = "compact"
 
 	// CmdNew starts a fresh session on the current channel immediately — no
 	// menu, no confirmation. "reset", "clear", and "delete" are synonyms.
 	CmdNew = "new"
+
+	// CmdHelp lists these commands.
+	CmdHelp = "help"
 )
 
-// compactPrompt is injected as the user message when the compact command is used.
-const compactPrompt = "Please compact your conversation context now. Summarize the key points and discard verbose history."
+// helpText describes the built-in commands, which are handled by tclaw rather than the model.
+const helpText = "🛠 Commands:\n" +
+	"• **stop** — stop the reply in progress\n" +
+	"• **new** (or reset, clear, delete) — start a fresh conversation on this channel\n" +
+	"• **compact** — shrink the conversation so far\n" +
+	"• **login** — sign in to Claude\n" +
+	"• **auth** — show sign-in status\n" +
+	"• **help** — this list"
 
-// IsControlCommand reports whether raw user text is a builtin command
-// (stop / login / auth / compact / fresh-session synonyms) that must be handled
-// on its own turn and never coalesced with sibling messages by the queue. The
-// queue can't import this package (agent imports queue), so the router injects
-// this classifier into the queue as QueueParams.IsControlMessage.
+// compactPrompt is the CLI's own compact command, which print mode runs rather than sending to the model.
+const compactPrompt = "/compact"
+
+// IsControlCommand reports whether text must run on its own turn and never be
+// batched with sibling messages: a built-in command or a button press. The queue
+// can't import this package, so the router injects this as QueueParams.IsControlMessage.
 func IsControlCommand(text string) bool {
 	t := strings.TrimSpace(text)
 	switch {
 	case strings.EqualFold(t, CmdStop),
 		strings.EqualFold(t, CmdLogin),
 		strings.EqualFold(t, CmdAuthStatus),
-		strings.EqualFold(t, CmdCompact):
+		strings.EqualFold(t, CmdCompact),
+		strings.EqualFold(t, CmdHelp):
+		return true
+	}
+	if channel.ParseButtonPress(t) != nil {
+		// Joined with a message typed straight after it, a press would no longer
+		// read as one.
 		return true
 	}
 	return isFreshSessionCommand(t)
@@ -127,6 +144,9 @@ type pendingToolApproval struct {
 	originalMsg channel.TaggedMessage
 	deniedTools []string
 	sessionID   string
+
+	// promptID is carried by the prompt's buttons, so only a press on them answers it.
+	promptID string
 }
 
 // Options configures the agent. All fields are immutable after creation.
@@ -159,6 +179,20 @@ type Options struct {
 	// ChannelOutputStyles overrides OutputStyle per channel. The value "none"
 	// turns the style off there, which empty cannot mean.
 	ChannelOutputStyles map[channel.ChannelID]string
+
+	// TurnSettings apply to channels that set none of their own.
+	TurnSettings claudecli.TurnSettings
+
+	// ChannelTurnSettings override TurnSettings per channel, field by field.
+	ChannelTurnSettings map[channel.ChannelID]claudecli.TurnSettings
+
+	// OpenPrompts is told which channels have a flow open, so a typed "yes" that could
+	// answer two prompts at once is not given to either.
+	OpenPrompts *channel.OpenPrompts
+
+	// PermissionPromptTool is the MCP tool the CLI asks when a tool call needs approval, on a
+	// turn the user started on a channel that can show buttons. Empty leaves the CLI to deny.
+	PermissionPromptTool claudecli.Tool
 
 	// Debug logs raw CLI event JSON for troubleshooting.
 	Debug bool
@@ -283,6 +317,9 @@ type Options struct {
 	// active channel for server-side validation of cross-channel sends.
 	// May be nil.
 	OnTurnStart func(channelName string)
+
+	// OnContextSize is called after a turn with the size of the channel's conversation.
+	OnContextSize func(channelName string, tokens int)
 
 	// OnTurnEnd is called after each message turn completes (whether
 	// successful, failed, or stopped), with the name of the channel.
@@ -432,6 +469,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 	// FlowManager tracks all per-channel interactive flows (auth, reset,
 	// tool approval) in one place with explicit typed states.
 	fm := NewFlowManager()
+	fm.open = opts.OpenPrompts
 
 	// stoppedChannels tracks channels where the user sent "stop" to cancel
 	// the previous turn. The next message on a stopped channel gets a system
@@ -523,6 +561,10 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				notification = fmt.Sprintf("↩️ Message from %s channel", msg.SourceInfo.FromChannel)
 			case channel.SourceChild:
 				notification = fmt.Sprintf("👶 Event from child channel %s", msg.SourceInfo.ChildChannel)
+			case channel.SourceInitialMessage:
+				if msg.SourceInfo.FromChannel != "" {
+					notification = fmt.Sprintf("↩️ Brief from %s channel", msg.SourceInfo.FromChannel)
+				}
 			}
 			if notification != "" {
 				if _, err := opts.send(ctx, msg.ChannelID, notification); err != nil {
@@ -541,8 +583,8 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			continue
 		}
 
-		// Compact: rewrite the message into a prompt and fall through to
-		// normal handling so it works on all channels.
+		// Compact: rewrite the message into the CLI command and fall through
+		// to normal handling so it works on all channels.
 		if strings.EqualFold(msg.Text, CmdCompact) {
 			if !isBuiltinAllowed(opts, msg.ChannelID, claudecli.BuiltinCompact) {
 				sendDenied(ctx, opts, msg.ChannelID)
@@ -582,8 +624,8 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				sendDenied(ctx, opts, msg.ChannelID)
 				continue
 			}
-			if ch, ok := opts.channels()[msg.ChannelID]; ok {
-				if _, err := opts.send(ctx, msg.ChannelID, authPrompt(ch.Markup())); err != nil {
+			if _, ok := opts.channels()[msg.ChannelID]; ok {
+				if _, err := opts.send(ctx, msg.ChannelID, authPrompt()); err != nil {
 					slog.Error("failed to send auth prompt", "err", err)
 				} else {
 					fm.StartAuth(msg.ChannelID, channel.TaggedMessage{})
@@ -591,6 +633,15 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			}
 			if err := opts.done(ctx, msg.ChannelID); err != nil {
 				slog.Error("failed to close turn after login prompt", "err", err)
+			}
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(msg.Text), CmdHelp) {
+			if _, err := opts.send(ctx, msg.ChannelID, helpText); err != nil {
+				slog.Error("failed to send help", "err", err)
+			}
+			if err := opts.done(ctx, msg.ChannelID); err != nil {
+				slog.Error("failed to close turn after help", "err", err)
 			}
 			continue
 		}
@@ -608,8 +659,15 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			continue
 		}
 
-		// Handle active auth flow.
-		if f := fm.Active(msg.ChannelID); f != nil && f.Kind == FlowAuth {
+		if f := fm.Active(msg.ChannelID); f != nil && f.Kind == FlowAuth && channel.ParseButtonPress(msg.Text) != nil {
+			// A press from an older prompt, not an answer to the sign-in steps.
+			sendStaleButtonNotice(ctx, opts, msg.ChannelID)
+			continue
+		}
+
+		// Handle active auth flow. Only the user answers it: its last step deploys
+		// a credential, which a message from another channel must never confirm.
+		if f := fm.Active(msg.ChannelID); f != nil && f.Kind == FlowAuth && isUserMessage(msg) {
 			ch, chOK := opts.channels()[msg.ChannelID]
 			if !chOK {
 				fm.Complete(msg.ChannelID)
@@ -632,8 +690,9 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			continue
 		}
 
-		// Handle active tool approval flow.
-		if f := fm.Active(msg.ChannelID); f != nil && f.Kind == FlowToolApproval {
+		// Handle active tool approval flow. Only the user answers it, so the agent
+		// cannot approve its own tools by sending "yes" from another channel.
+		if f := fm.Active(msg.ChannelID); f != nil && f.Kind == FlowToolApproval && isUserMessage(msg) {
 			ch, chOK := opts.channels()[msg.ChannelID]
 			if !chOK {
 				fm.Complete(msg.ChannelID)
@@ -649,6 +708,13 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 			} else if result.Handled {
 				continue
 			}
+		}
+
+		if channel.ParseButtonPress(msg.Text) != nil {
+			// A press nothing is waiting for: its prompt was answered, expired or
+			// belongs to a restart ago. It is not something to hand the model.
+			sendStaleButtonNotice(ctx, opts, msg.ChannelID)
+			continue
 		}
 
 		sessionID, sessionTimedOut := lookupSession(opts, sessions, msg.ChannelID)
@@ -721,12 +787,21 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 		for {
 			select {
 			case result := <-handleDone:
+				if wouldReplaceOpenPrompt(msg, result.err, fm) {
+					slog.Info("leaving the open prompt alone for a turn nobody started",
+						"channel", msg.ChannelID, "err", result.err)
+					if _, sendErr := opts.send(ctx, msg.ChannelID, "⚠️ An automated message needed sign-in or a tool approval, but another prompt is waiting for you, so it was skipped."); sendErr != nil {
+						slog.Error("failed to send skipped-prompt notice", "err", sendErr)
+					}
+					goto done
+				}
+
 				// Auth failure: start the interactive auth flow.
 				if errors.Is(result.err, ErrAuthRequired) {
 					slog.Info("auth required, starting auth flow", "channel", msg.ChannelID)
 					fm.StartAuth(msg.ChannelID, msg)
-					if ch, chOK := opts.channels()[msg.ChannelID]; chOK {
-						if _, sendErr := opts.send(ctx, msg.ChannelID, authPrompt(ch.Markup())); sendErr != nil {
+					if _, chOK := opts.channels()[msg.ChannelID]; chOK {
+						if _, sendErr := opts.send(ctx, msg.ChannelID, authPrompt()); sendErr != nil {
 							slog.Error("failed to send auth prompt, discarding flow", "err", sendErr)
 							fm.Cancel(msg.ChannelID)
 							goto done
@@ -740,13 +815,20 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 				if errors.As(result.err, &denied) {
 					slog.Info("tools denied, prompting for approval",
 						"channel", msg.ChannelID, "tools", denied.Tools)
-					fm.StartToolApproval(msg.ChannelID, msg, denied.Tools, denied.SessionID)
+					promptID := fm.StartToolApproval(msg.ChannelID, msg, denied.Tools, denied.SessionID)
 					if approvalCh, chOK := opts.channels()[msg.ChannelID]; chOK {
-						m := approvalCh.Markup()
 						toolList := strings.Join(denied.Tools, ", ")
 						prompt := fmt.Sprintf("⚠️ %s was not available on this channel.\nReply %s to retry with %s enabled, or send any other message to continue.",
-							bold(m, toolList), bold(m, "approve"), bold(m, toolList))
-						if _, sendErr := opts.send(ctx, msg.ChannelID, prompt); sendErr != nil {
+							bold(toolList), bold("approve"), bold(toolList))
+						if sendErr := channel.Ask(ctx, channel.AskParams{
+							Channel:  approvalCh,
+							Text:     prompt,
+							PromptID: promptID,
+							SendText: func(ctx context.Context, text string) error {
+								_, err := opts.send(ctx, msg.ChannelID, text)
+								return err
+							},
+						}); sendErr != nil {
 							slog.Error("failed to send tool approval prompt", "err", sendErr)
 						}
 					}
@@ -763,14 +845,20 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 						slog.Error("failed to send error notification", "err", sendErr)
 					}
 				}
+				var turnErr *TurnError
+				if errors.As(result.err, &turnErr) && turnErr.SessionID != "" {
+					// Keep the session so the next message carries on in it.
+					result.sessionID = turnErr.SessionID
+				}
 				if result.sessionID != "" {
 					if result.sessionID != sessionID {
 						slog.Info("session started", "channel", msg.ChannelID, "session_id", result.sessionID)
 					}
 					sessions[msg.ChannelID] = result.sessionID
-					// Call on every successful turn so the persistence layer
-					// can bump the session's last-used timestamp — that's
-					// what SessionResolver's idle-timeout check keys off.
+					// Call on every turn that has a session, failed ones
+					// included, so the persistence layer bumps the session's
+					// last-used timestamp — that's what SessionResolver's
+					// idle-timeout check keys off.
 					if opts.OnSessionUpdate != nil {
 						opts.OnSessionUpdate(msg.ChannelID, result.sessionID)
 					}
@@ -788,6 +876,13 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 						cancelTurn()
 						stopped = true
 						stoppedChannels[msg.ChannelID] = true
+					}
+				} else if press := channel.ParseButtonPress(newMsg.Text); press != nil && !answersOpenApproval(fm, newMsg.ChannelID, press) {
+					// A press for nothing still open. The router hands mid-turn
+					// approvals and confirmations their presses directly, and queuing
+					// it would read as if it will still take effect.
+					if _, err := opts.send(ctx, newMsg.ChannelID, staleButtonNotice); err != nil {
+						slog.Error("failed to send stale button notice", "err", err)
 					}
 				} else {
 					if opts.Queue != nil {
@@ -951,11 +1046,10 @@ func (opts Options) send(ctx context.Context, chID channel.ChannelID, text strin
 	return opts.sendWithOpts(ctx, chID, text, channel.SendOpts{})
 }
 
-// sendNotify delivers a message that should trigger a user notification. Only
-// the final agent response text uses this — everything else stays silent via
-// send to keep the allowlist tight.
-func (opts Options) sendNotify(ctx context.Context, chID channel.ChannelID, text string) (channel.MessageID, error) {
-	return opts.sendWithOpts(ctx, chID, text, channel.SendOpts{Notify: true})
+// sendReply delivers the agent's reply: it notifies the user, and a transport
+// that renders replies richly does so. Everything else stays silent via send.
+func (opts Options) sendReply(ctx context.Context, chID channel.ChannelID, text string) (channel.MessageID, error) {
+	return opts.sendWithOpts(ctx, chID, text, channel.SendOpts{Notify: true, Rich: true})
 }
 
 func (opts Options) sendWithOpts(ctx context.Context, chID channel.ChannelID, text string, sendOpts channel.SendOpts) (channel.MessageID, error) {
@@ -1007,6 +1101,10 @@ func resolveOutputStyleForChannel(opts Options, channelID channel.ChannelID) str
 		return style
 	}
 	return opts.OutputStyle
+}
+
+func resolveTurnSettingsForChannel(opts Options, channelID channel.ChannelID) claudecli.TurnSettings {
+	return opts.ChannelTurnSettings[channelID].Over(opts.TurnSettings)
 }
 
 // outputStyleOff is the per-channel value that turns the user-level style off.
@@ -1124,16 +1222,25 @@ func resolveMCPConfigPath(opts Options, channelID channel.ChannelID) string {
 // buildArgsParams carries the per-turn values already resolved for this
 // channel, alongside the immutable Options.
 type buildArgsParams struct {
-	Options       Options
-	Model         claudecli.Model
-	MaxTurns      int
-	OutputStyle   string
-	SessionID     string
+	Options      Options
+	Model        claudecli.Model
+	MaxTurns     int
+	OutputStyle  string
+	TurnSettings claudecli.TurnSettings
+	SessionID    string
+
 	SystemPrompt  string
 	Prompt        string
 	Allowed       []claudecli.Tool
 	Disallowed    []claudecli.Tool
 	MCPConfigPath string
+
+	// Unattended is a turn no person started, such as a schedule, so no one can
+	// answer a permission prompt.
+	Unattended bool
+
+	// PermissionPromptTool, when set, asks the user mid-turn instead of refusing.
+	PermissionPromptTool claudecli.Tool
 }
 
 func buildArgs(p buildArgsParams) []string {
@@ -1141,6 +1248,15 @@ func buildArgs(p buildArgsParams) []string {
 		"--output-format", "stream-json",
 		"--verbose",
 		"--print",
+		// Without it the CLI sends each assistant message only once it is
+		// complete, so nothing reaches the chat until then.
+		"--include-partial-messages",
+		// A subagent's text, so the status message can show what it is doing
+		// rather than one long silent tool call.
+		"--forward-subagent-text",
+		// Only the servers tclaw passes, not a .mcp.json the agent could write into
+		// its working directory.
+		"--strict-mcp-config",
 	}
 	if p.SessionID != "" {
 		args = append(args, "--resume", p.SessionID)
@@ -1155,6 +1271,26 @@ func buildArgs(p buildArgsParams) []string {
 		args = append(args, "--model", string(p.Model))
 	}
 	args = append(args, "--max-turns", fmt.Sprintf("%d", p.MaxTurns))
+	switch {
+	case p.Unattended:
+		// Refuse anything that would prompt, and tell the model nobody can approve
+		// it, rather than leave it retrying.
+		args = append(args, "--permission-prompts", "none")
+	case p.PermissionPromptTool != "":
+		// The CLI still calls a disallowed tool as its prompt tool; disallowing it
+		// only keeps the model from calling it and approving its own actions.
+		args = append(args, "--permission-prompt-tool", string(p.PermissionPromptTool),
+			"--disallowedTools", string(p.PermissionPromptTool))
+	}
+	if p.TurnSettings.Effort != "" {
+		args = append(args, "--effort", string(p.TurnSettings.Effort))
+	}
+	if p.TurnSettings.MaxBudgetUSD > 0 {
+		args = append(args, "--max-budget-usd", strconv.FormatFloat(p.TurnSettings.MaxBudgetUSD, 'f', -1, 64))
+	}
+	if p.TurnSettings.FallbackModel != "" {
+		args = append(args, "--fallback-model", string(p.TurnSettings.FallbackModel))
+	}
 	if p.OutputStyle != "" {
 		// Passed as JSON rather than written into settings.json, which is mounted
 		// read-only so a prompt injection cannot install its own hooks. --settings

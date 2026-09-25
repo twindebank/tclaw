@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -30,8 +31,26 @@ type confirmParams struct {
 	RemoteMCPs   *remotemcpstore.Manager
 	Notify       func(ctx context.Context, chID channel.ChannelID, text string)
 
+	// AgentPrompts says which channels also have one of the agent's own prompts open.
+	AgentPrompts *channel.OpenPrompts
+
 	OnChannelChange func()
 	MemoryDir       string
+}
+
+// pendingDescription names what a confirmation approves, in the user's terms.
+func pendingDescription(kind channel.PendingActionKind) string {
+	switch kind {
+	case channel.PendingChannelDone:
+		return "closing this channel"
+	case channel.PendingRepoGrant:
+		return "the repo access request"
+	case channel.PendingRuleWrite:
+		return "the rulebook change"
+	default:
+		slog.Error("confirmation of unknown kind has no description", "kind", kind)
+		return "the confirmation"
+	}
 }
 
 // interceptPendingConfirmation checks whether an inbound message answers a
@@ -87,6 +106,38 @@ func interceptPendingConfirmation(ctx context.Context, msg channel.TaggedMessage
 	}
 
 	text := strings.TrimSpace(strings.ToLower(msg.Text))
+	press := channel.ParseButtonPress(msg.Text)
+	if press != nil {
+		if press.PromptID != pending.PromptID {
+			// Another prompt's button: not an answer to this one, and not a reason
+			// to drop it. Whatever armed that prompt decides what it means.
+			return false
+		}
+		if press.Reply != channel.ReplyYes {
+			// A press is the whole answer; there is no message behind it for the agent.
+			clearPendingAction(ctx, params.RuntimeState, chName)
+			slog.Info("pending confirmation declined with a button", "channel", chName, "kind", pending.Kind)
+			params.Notify(ctx, msg.ChannelID, "✖️ Declined.")
+			return true
+		}
+		text = string(press.Reply)
+	}
+	bothOpen := press == nil && (text == "yes" || text == "y") && params.AgentPrompts.IsOpen(msg.ChannelID)
+	if _, hasButtons := ch.(channel.Prompter); bothOpen && hasButtons {
+		// A typed yes could be meant for either prompt. This one has buttons, and a
+		// press names its prompt, so that is how to answer it; both stay open.
+		params.Notify(ctx, msg.ChannelID, fmt.Sprintf(
+			"❓ Two prompts are waiting here, so a typed yes could answer either. To approve %s, press its button. To answer the other, answer this one first.",
+			pendingDescription(pending.Kind)))
+		return true
+	}
+	if bothOpen {
+		// No buttons to tell them apart, so the yes answers this one as it always
+		// has; the user is told which, and that the other is still open.
+		params.Notify(ctx, msg.ChannelID, fmt.Sprintf(
+			"ℹ️ Two prompts were waiting here. Your yes approved %s; the other is still open.",
+			pendingDescription(pending.Kind)))
+	}
 	if text != "yes" && text != "y" {
 		// User declined — clear the action and forward to agent.
 		clearPendingAction(ctx, params.RuntimeState, chName)

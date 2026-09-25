@@ -58,9 +58,11 @@ channel and may not write any of them.
 That split needs two enforcement points, because they catch different things. `rule_propose` is the
 route a change takes: it arms a `PendingAction`, the prompt goes straight to the chat, and the router
 writes the file on the user's reply — outside the sandbox, so the approved text is what lands. But an
-MCP tool cannot see the agent editing a file directly, so the `rules-gate` hook refuses any write to
-that directory from inside the sandbox. Tool-side alone would be bypassable with Write; hook-side alone
-would have no approved way through.
+MCP tool cannot see the agent editing a file directly, so the rules directory is **mounted read-only**
+in the sandbox, which stops every route in, Bash included. The `rules-gate` hook refuses a write tool
+aimed there before it runs, so the agent is told why and pointed at `rule_propose` rather than meeting
+a bare permission error; it is also the only guard in local dev, which has no sandbox. Tool-side alone
+would be bypassable; the mount alone would have no approved way through.
 
 Both hooks are visible in the chat, not only to the agent. The CLI announces nothing when a hook runs
 on a tool event, so a hook is seen only through what it hands back, and there are two of those. A
@@ -76,7 +78,12 @@ to its first line, and says how many lines it dropped.
 
 The hooks are registered in each user's `settings.json`, which is **mounted read-only** in the sandbox —
 the same protection that stops a prompt injection installing its own `SessionStart` hook stops one
-turning these off. The registrations are rebuilt from `hooks.Manifest` on every boot, so a hook cannot
+turning these off. The CLI's working directory is the agent's memory, where a `.claude/settings.json`
+the agent wrote would load as project settings and could switch every hook off or allow tools the
+channel does not; tclaw keeps nothing in that `.claude/`, so the sandbox sees it as an empty read-only
+directory. For the same reason the CLI runs with `--strict-mcp-config`, using only the MCP servers
+tclaw passes: a `.mcp.json` the agent wrote is ignored, and so are claude.ai connectors, which tclaw
+does not use. The registrations are rebuilt from `hooks.Manifest` on every boot, so a hook cannot
 be implemented and left unregistered. Commands carry the binary path in full: a hook runs under a shell
 that reads no profile, so a command relying on an environment variable runs nothing, on every tool call.
 
@@ -87,6 +94,30 @@ A refusal also files a row in the retro queue, from inside `block()` rather than
 a guard cannot be written that stops something without leaving the evidence a later retro reads. The
 same queue is where `lesson-capture` puts the user's own pushback — see the retro section in
 `docs/deployment.md` for what it captures and what it deliberately ignores.
+
+**Confirmation prompts** — tool approval, repo access, rulebook changes and channel teardown — go
+straight to the chat, and only the user's own reply answers one: a message typed on that channel, or
+a press on the prompt's buttons. A message that arrived any other way (`channel_send`, a schedule, a
+channel's creation brief) never counts. Each prompt carries a random id in its buttons' data, and a
+press answers only the prompt with that id, so an old button cannot confirm a newer prompt. A typed "yes"
+names no prompt, so when a router confirmation and one of the agent's own prompts (a tool approval,
+a sign-in) are open on the same channel, it answers neither where the confirmation has buttons, and
+the user is told to press its button. On a channel without buttons the yes answers the confirmation,
+as it always did, and the chat says which prompt it answered and that the other is still open. A press
+counts only from an allowlisted Telegram user, and never when the allowlist is empty. The agent
+cannot draw a button of its own: its replies have any button markup escaped before they are sent.
+
+On a channel with buttons, a tool call that needs approval is also asked about **mid-turn**. The CLI's
+`--permission-prompt-tool` is `permission_prompt`, a tclaw MCP tool that is also in `--disallowedTools`:
+the CLI still calls it, the model cannot. It sends the prompt, and the router's message bridge, which
+keeps reading while a turn runs, hands the press straight to the waiting call. The prompt shows the
+call's whole input exactly, escaped rather than formatted, and an input too long to show in full is
+refused rather than shown in part; a call refused without asking is reported in the chat. No
+answer in four minutes refuses the call, keeping inside the CLI's five-minute limit on a silent MCP
+call, and refuses the rest of that turn's prompts at once, so an absent user holds up their other
+channels for one wait rather than one per call. A turn nobody started
+never asks; it passes `--permission-prompts none` and is refused instead. In `dontAsk` mode the CLI
+refuses without asking, and the approval offer after the turn, which re-runs it, is what remains.
 
 ### 4. MCP Tool Boundary
 - Per-user MCP server on localhost with random bearer token.

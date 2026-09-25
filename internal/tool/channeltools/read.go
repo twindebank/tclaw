@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"tclaw/internal/channel"
+	"tclaw/internal/claudecli"
 	"tclaw/internal/config"
 	"tclaw/internal/mcp"
 	"tclaw/internal/toolgroup"
@@ -17,8 +19,9 @@ func channelReadDef() mcp.ToolDef {
 	return mcp.ToolDef{
 		Name: ToolChannelRead,
 		Description: "Return the full config for a single channel — every field that's set in tclaw.yaml. " +
-			"Use this to see fields channel_list omits (model, max_turns, claude_session_timeout, " +
-			"ephemeral settings, initial_message, tool groups, links, created_at).",
+			"Use this to see fields channel_list omits (model, max_turns, effort, max_budget_usd, fallback_model, claude_session_timeout, " +
+			"ephemeral settings, initial_message, tool groups, links, created_at), and context_tokens: how large the " +
+			"channel's conversation was after its last turn. To shrink one, send the channel the word \"compact\" with channel_send.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -41,12 +44,13 @@ type channelReadArgs struct {
 // config.Channel directly because its YAML tags would surface as snake_case
 // inconsistently across embedded types.
 type channelReadEntry struct {
-	Name                 string           `json:"name"`
-	Type                 string           `json:"type"`
-	Description          string           `json:"description"`
-	Purpose              string           `json:"purpose,omitempty"`
-	Model                string           `json:"model,omitempty"`
-	MaxTurns             int              `json:"max_turns,omitempty"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+	Purpose     string `json:"purpose,omitempty"`
+	Model       string `json:"model,omitempty"`
+	MaxTurns    int    `json:"max_turns,omitempty"`
+	claudecli.TurnSettings
 	Parent               string           `json:"parent,omitempty"`
 	ToolGroups           []string         `json:"tool_groups,omitempty"`
 	AllowedTools         []string         `json:"allowed_tools,omitempty"`
@@ -61,6 +65,10 @@ type channelReadEntry struct {
 	CreatedAt            string           `json:"created_at,omitempty"`
 	Envs                 []string         `json:"envs,omitempty"`
 	Telegram             *telegramSummary `json:"telegram,omitempty"`
+
+	// ContextTokens is the conversation's size after the channel's last turn; absent until one has run.
+	ContextTokens     int    `json:"context_tokens,omitempty"`
+	ContextMeasuredAt string `json:"context_measured_at,omitempty"`
 }
 
 // telegramSummary surfaces telegram metadata that doesn't leak the bot token —
@@ -95,6 +103,7 @@ func channelReadHandler(deps Deps) mcp.ToolHandler {
 				Purpose:              ch.Purpose,
 				Model:                string(ch.Model),
 				MaxTurns:             ch.MaxTurns,
+				TurnSettings:         ch.TurnSettings,
 				Parent:               ch.Parent,
 				ToolGroups:           toolGroupNames(ch.ToolGroups),
 				AllowedTools:         ch.AllowedTools,
@@ -111,6 +120,14 @@ func channelReadHandler(deps Deps) mcp.ToolHandler {
 			}
 			if ch.Telegram != nil {
 				entry.Telegram = &telegramSummary{HasToken: ch.Telegram.Token != ""}
+			}
+			rs, err := deps.RuntimeState.Get(ctx, ch.Name)
+			if err != nil {
+				return nil, fmt.Errorf("read runtime state for %q: %w", ch.Name, err)
+			}
+			if rs.ContextTokens > 0 {
+				entry.ContextTokens = rs.ContextTokens
+				entry.ContextMeasuredAt = rs.ContextMeasuredAt.Format(time.RFC3339)
 			}
 			return json.Marshal(entry)
 		}

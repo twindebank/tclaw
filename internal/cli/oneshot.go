@@ -172,6 +172,7 @@ func runOneshot() {
 		PermissionMode: userCfg.PermissionMode,
 		Model:          userCfg.Model,
 		MaxTurns:       userCfg.MaxTurns,
+		TurnSettings:   userCfg.TurnSettings,
 		Debug:          debugEnabled,
 		APIKey:         userCfg.APIKey,
 		HomeDir:        homeDir,

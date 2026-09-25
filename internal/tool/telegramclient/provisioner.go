@@ -116,7 +116,7 @@ func (p *Provisioner) Teardown(ctx context.Context, state channel.TeardownState)
 }
 
 // SendTeardownPrompt sends a confirmation prompt to the channel's Telegram chat.
-func (p *Provisioner) SendTeardownPrompt(ctx context.Context, token string, platformState channel.PlatformState) error {
+func (p *Provisioner) SendTeardownPrompt(ctx context.Context, token string, platformState channel.PlatformState, promptID string) error {
 	if platformState.Type != channel.PlatformTelegram {
 		return fmt.Errorf("expected Telegram platform state, got type %q", platformState.Type)
 	}
@@ -128,8 +128,12 @@ func (p *Provisioner) SendTeardownPrompt(ctx context.Context, token string, plat
 		return fmt.Errorf("no chat ID available — cannot send confirmation to user")
 	}
 
+	keyboard, err := telegramchannel.PromptKeyboardJSON(promptID)
+	if err != nil {
+		return fmt.Errorf("build teardown buttons: %w", err)
+	}
 	prompt := "⚠️ <b>This channel is about to be closed.</b>\n\nReply <b>yes</b> to confirm teardown, or anything else to cancel."
-	if _, err := tgsdk.BotSend(token, tgState.ChatID, prompt); err != nil {
+	if _, err := tgsdk.BotSendWithKeyboard(token, tgState.ChatID, prompt, keyboard); err != nil {
 		return fmt.Errorf("send teardown prompt: %w", err)
 	}
 	return nil

@@ -6,7 +6,7 @@
 
 > [Telegram Group](https://t.me/gotelegrambotui)
 
-> Supports Bot API version: [10.1](https://core.telegram.org/bots/api#june-11-2026) from June 11, 2026
+> Supports Bot API version: [10.3](https://core.telegram.org/bots/api#august-24-2026) from August 24, 2026
 
 It's a Go zero-dependencies telegram bot framework
 
@@ -320,6 +320,27 @@ bot.SendMediaGroup(ctx, params)
 ```
 
 [Demo in examples](examples/send_media_group/main.go)
+
+Telegram does not accept a reused file as a thumbnail, so a thumbnail is normally an
+`InputFileUpload`: it is sent as a separate part and referenced by `attach://`, with
+`Filename` as the part name. An `InputFileString` is passed through unchanged, so a
+`file_id` or an URL reaches the API as written.
+
+A part name identifies one file within a request. Referencing the same file from
+several entries under one name is fine — the part is written once and every reference
+resolves to it — but two different files sharing a name are rejected with an error,
+since Telegram would resolve both references to the first of them. A file part and a
+form field cannot share a name either.
+
+```go
+thumbContent, _ := os.ReadFile("/path/to/thumb.jpg")
+
+media := &models.InputMediaVideo{
+	Media:           "attach://video.mp4",
+	MediaAttachment: bytes.NewReader(videoContent),
+	Thumbnail:       &models.InputFileUpload{Filename: "thumb.jpg", Data: bytes.NewReader(thumbContent)},
+}
+```
 
 ## InputSticker
 

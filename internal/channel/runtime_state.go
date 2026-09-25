@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -34,6 +35,13 @@ type RuntimeState struct {
 	// LastMessageSource is who sent the most recent message (e.g. "user", "schedule").
 	// Persisted alongside LastMessageAt for observability.
 	LastMessageSource MessageSource `json:"last_message_source,omitempty"`
+
+	// ContextTokens is the size of the channel's conversation after its last turn, which is
+	// what compacting would shrink. Zero until a turn has measured it.
+	ContextTokens int `json:"context_tokens,omitempty"`
+
+	// ContextMeasuredAt is when ContextTokens was taken.
+	ContextMeasuredAt time.Time `json:"context_measured_at,omitzero"`
 }
 
 // PendingActionKind identifies what a pending confirmation will do.
@@ -69,6 +77,23 @@ type PendingAction struct {
 	// after this is treated as an ordinary message, so a stale prompt answered
 	// hours later cannot silently grant something.
 	ExpiresAt time.Time `json:"expires_at"`
+
+	// PromptID is carried by the prompt's buttons, so only a press on this
+	// prompt's buttons answers it.
+	PromptID string `json:"prompt_id,omitempty"`
+}
+
+// ErrPromptWaiting is returned when a confirmation is asked for while another is still open:
+// replacing it would change the question under the user.
+var ErrPromptWaiting = errors.New("another confirmation is waiting for the user's answer; try again once they have answered it")
+
+// ArmPendingAction sets pending on rs unless an unexpired confirmation is already open.
+func ArmPendingAction(rs *RuntimeState, pending *PendingAction, now time.Time) error {
+	if rs.PendingAction != nil && !rs.PendingAction.Expired(now) {
+		return ErrPromptWaiting
+	}
+	rs.PendingAction = pending
+	return nil
 }
 
 // Expired reports whether the confirmation window has passed.
@@ -89,6 +114,7 @@ func NewPendingAction(kind PendingActionKind, payload json.RawMessage) *PendingA
 		Payload:     payload,
 		RequestedAt: now,
 		ExpiresAt:   now.Add(PendingConfirmationTTL),
+		PromptID:    NewPromptID(),
 	}
 }
 

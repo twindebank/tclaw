@@ -95,6 +95,25 @@ func TestChannelRead(t *testing.T) {
 		require.NotEmpty(t, got["created_at"], "channel_create stamps created_at")
 	})
 
+	t.Run("shows how large the conversation was after the last turn", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "email", "description": "Inbound email", "type": "socket", "initial_message": "Hello",
+		})
+		measured := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+		require.NoError(t, th.runtimeState.Update(context.Background(), "email", func(rs *channel.RuntimeState) {
+			rs.ContextTokens = 48000
+			rs.ContextMeasuredAt = measured
+		}))
+
+		result := callTool(t, th.handler, "channel_read", map[string]any{"name": "email"})
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(result, &got))
+		require.Equal(t, float64(48000), got["context_tokens"])
+		require.Equal(t, "2026-09-01T12:00:00Z", got["context_measured_at"])
+	})
+
 	t.Run("returns error for missing channel", func(t *testing.T) {
 		th := setupHarness(t, config.EnvLocal)
 
@@ -212,6 +231,37 @@ func TestChannelCreate(t *testing.T) {
 		})
 
 		require.Equal(t, 100, readChannelMaxTurns(t, th, "phone"))
+	})
+
+	t.Run("turn settings are persisted to config", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name":            "phone",
+			"description":     "Mobile device",
+			"type":            "socket",
+			"effort":          "low",
+			"max_budget_usd":  0.5,
+			"fallback_model":  "claude-sonnet-5",
+			"initial_message": "Hello",
+		})
+
+		require.Equal(t,
+			claudecli.TurnSettings{Effort: claudecli.EffortLow, MaxBudgetUSD: 0.5, FallbackModel: claudecli.ModelSonnet5},
+			readChannelTurnSettings(t, th, "phone"))
+	})
+
+	t.Run("rejects an unknown effort", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+
+		err := callToolExpectError(t, th.handler, "channel_create", map[string]any{
+			"name":            "phone",
+			"description":     "Mobile device",
+			"type":            "socket",
+			"effort":          "extreme",
+			"initial_message": "Hello",
+		})
+		require.Equal(t, `unknown effort "extreme" (known: [high low max medium ultracode xhigh])`, err.Error())
 	})
 
 	t.Run("rejects negative max_turns", func(t *testing.T) {
@@ -529,6 +579,29 @@ func TestChannelEdit(t *testing.T) {
 			"max_turns": 0,
 		})
 		require.Equal(t, 0, readChannelMaxTurns(t, th, "phone"))
+	})
+
+	t.Run("sets one turn setting, keeps the others, and clears it again", func(t *testing.T) {
+		th := setupHarness(t, config.EnvLocal)
+		callTool(t, th.handler, "channel_create", map[string]any{
+			"name": "phone", "description": "Socket", "type": "socket",
+			"effort": "high", "max_budget_usd": 2,
+			"initial_message": "Hello",
+		})
+		reloadRegistry(t, th)
+
+		callTool(t, th.handler, "channel_edit", map[string]any{
+			"name":   "phone",
+			"effort": "low",
+		})
+		require.Equal(t, claudecli.TurnSettings{Effort: claudecli.EffortLow, MaxBudgetUSD: 2}, readChannelTurnSettings(t, th, "phone"))
+
+		// Empty clears the override so the channel inherits again.
+		callTool(t, th.handler, "channel_edit", map[string]any{
+			"name":   "phone",
+			"effort": "",
+		})
+		require.Equal(t, claudecli.TurnSettings{MaxBudgetUSD: 2}, readChannelTurnSettings(t, th, "phone"))
 	})
 
 	t.Run("rejects negative max_turns", func(t *testing.T) {
@@ -1617,6 +1690,19 @@ func readChannelMaxTurns(t *testing.T, th testHarness, name string) int {
 	return 0
 }
 
+func readChannelTurnSettings(t *testing.T, th testHarness, name string) claudecli.TurnSettings {
+	t.Helper()
+	channels, err := th.configWriter.ReadChannels(testUserID)
+	require.NoError(t, err)
+	for _, ch := range channels {
+		if ch.Name == name {
+			return ch.TurnSettings
+		}
+	}
+	require.Failf(t, "channel not found", "no channel %q in config", name)
+	return claudecli.TurnSettings{}
+}
+
 func readChannelModel(t *testing.T, th testHarness, name string) string {
 	t.Helper()
 	channels, err := th.configWriter.ReadChannels(testUserID)
@@ -1715,7 +1801,7 @@ func (m *mockProvisioner) Teardown(_ context.Context, state channel.TeardownStat
 	return m.teardownErr
 }
 
-func (m *mockProvisioner) SendTeardownPrompt(_ context.Context, _ string, _ channel.PlatformState) error {
+func (m *mockProvisioner) SendTeardownPrompt(_ context.Context, _ string, _ channel.PlatformState, _ string) error {
 	m.sendTeardownPromptCalled = true
 	return m.sendTeardownPromptErr
 }

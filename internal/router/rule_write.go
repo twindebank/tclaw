@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"tclaw/internal/channel"
 	"tclaw/internal/memorylayout"
@@ -109,9 +110,10 @@ func newRuleWriteArmer(params armRuleWriteParams) func(context.Context, ruletool
 		}
 
 		var chID channel.ChannelID
-		for id, ch := range params.Channels() {
-			if ch.Info().Name == chName {
-				chID = id
+		var ch channel.Channel
+		for id, candidate := range params.Channels() {
+			if candidate.Info().Name == chName {
+				chID, ch = id, candidate
 				break
 			}
 		}
@@ -128,13 +130,26 @@ func newRuleWriteArmer(params armRuleWriteParams) func(context.Context, ruletool
 			return fmt.Errorf("encode rule change: %w", err)
 		}
 
+		pending := channel.NewPendingAction(channel.PendingRuleWrite, payload)
+		var armErr error
 		if err := params.RuntimeState.Update(ctx, chName, func(rs *channel.RuntimeState) {
-			rs.PendingAction = channel.NewPendingAction(channel.PendingRuleWrite, payload)
+			armErr = channel.ArmPendingAction(rs, pending, time.Now())
 		}); err != nil {
 			return fmt.Errorf("arm rule confirmation: %w", err)
 		}
+		if armErr != nil {
+			return armErr
+		}
 
-		if _, err := params.Send(ctx, chID, ruleWritePrompt(request), channel.SendOpts{}); err != nil {
+		if err := channel.Ask(ctx, channel.AskParams{
+			Channel:  ch,
+			Text:     ruleWritePrompt(request),
+			PromptID: pending.PromptID,
+			SendText: func(ctx context.Context, text string) error {
+				_, err := params.Send(ctx, chID, text, channel.SendOpts{})
+				return err
+			},
+		}); err != nil {
 			// Roll back so the channel isn't left armed for a change the user
 			// was never actually asked about.
 			if clearErr := params.RuntimeState.Update(ctx, chName, func(rs *channel.RuntimeState) {

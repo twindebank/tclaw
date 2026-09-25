@@ -4,7 +4,11 @@
 // tracking, and EphemeralProvisioner for platform-specific channel lifecycle management.
 package channel
 
-import "context"
+import (
+	"context"
+
+	"tclaw/internal/claudecli"
+)
 
 // MessageID identifies a sent message so it can be edited later.
 // The concrete value is transport-specific (e.g. telegram message ID,
@@ -25,8 +29,10 @@ type Markup string
 const (
 	// MarkupMarkdown is standard markdown (socket, stdio).
 	MarkupMarkdown Markup = "markdown"
-	// MarkupHTML is Telegram-style HTML (<b>, <code>, etc.).
-	MarkupHTML Markup = "html"
+
+	// MarkupTelegram is markdown that Telegram renders as a rich message: tables, headings, code
+	// blocks and maths, plus a few Telegram extras.
+	MarkupTelegram Markup = "telegram"
 )
 
 // FormattingInstructions returns agent-facing guidance for how to format
@@ -34,15 +40,17 @@ const (
 // system prompt so the agent adapts formatting to each channel's transport.
 func FormattingInstructions(m Markup) string {
 	switch m {
-	case MarkupHTML:
-		return "Format responses using Telegram HTML markup — Telegram does NOT support Markdown.\n" +
-			"Supported tags: <b>, <i>, <u>, <s>, <code>, <pre>, " +
-			"<pre><code class=\"language-python\">, <a href=\"url\">, " +
-			"<blockquote>, <blockquote expandable>, <tg-spoiler>.\n" +
-			"Use <b> for headings, <code>/<pre> for code, bullet characters (•, ▸) for lists. " +
-			"Keep messages concise — Telegram is typically mobile. " +
-			"Do NOT use markdown syntax (#, **, -) — it renders as literal text. " +
-			"Escape &, <, > as &amp;, &lt;, &gt;."
+	case MarkupTelegram:
+		return "Write replies in GitHub-flavoured markdown; Telegram renders it natively. " +
+			"Headings, **bold**, *italic*, `code`, fenced code blocks with a language, lists, task lists (- [ ]), " +
+			"> quotes, tables, --- dividers, footnotes and links all work, as do ==highlight==, ||spoiler||, " +
+			"inline $maths$ and $$block maths$$, and <details><summary>Title</summary>…</details> for a collapsible section.\n" +
+			"Use a table when comparing things; keep it to a few columns, since Telegram is usually read on a phone. " +
+			"Keep messages concise.\n" +
+			"To give a date or time, write it as ![22:45 tomorrow](tg://time?unix=1647531900&format=wDT) with the real unix time: " +
+			"Telegram shows it in the reader's own timezone. The format letters are w (weekday), d or D (short or long date), " +
+			"t or T (short or long time), or r on its own (relative, e.g. \"in 2 hours\").\n" +
+			"Write a literal dollar sign as \\$, so \"\\$5\" is a price rather than the start of a formula."
 	case MarkupMarkdown:
 		return ""
 	default:
@@ -67,8 +75,7 @@ type Info struct {
 	Purpose     string // optional behavioral guidance for the agent on this channel
 
 	// Model overrides the user-level model for turns on this channel. Empty
-	// means inherit (runtime override, then user-level model). Uses string
-	// (not claudecli.Model) to avoid a circular dependency.
+	// means inherit (runtime override, then user-level model).
 	Model string
 
 	// MaxTurns caps agentic turns per message on this channel. Zero means
@@ -79,9 +86,11 @@ type Info struct {
 	// "none" turns it off for this channel.
 	OutputStyle string
 
+	// TurnSettings override the user-level ones field by field; an unset field inherits.
+	TurnSettings claudecli.TurnSettings
+
 	// AllowedTools is the resolved set of tools this channel can use.
 	// Populated at creation time from tool_groups, role presets, or explicit lists.
-	// Uses []string (not []claudecli.Tool) to avoid circular dependency.
 	AllowedTools []string
 
 	// DisallowedTools are tools explicitly denied on this channel.
@@ -106,19 +115,23 @@ type Link struct {
 type MessageSource string
 
 const (
-	SourceUser         MessageSource = "user"         // typed by a human on the channel
-	SourceSchedule     MessageSource = "schedule"     // fired by a cron schedule
-	SourceChannel      MessageSource = "channel"      // sent from another channel via channel_send
-	SourceResume       MessageSource = "resume"       // auto-injected to continue interrupted work
-	SourceNotification MessageSource = "notification" // pushed by a notification subscription
-	SourceChild        MessageSource = "child"        // lifecycle event from a child channel
+	SourceUser     MessageSource = "user"     // typed by a human on the channel
+	SourceSchedule MessageSource = "schedule" // fired by a cron schedule
+	SourceChannel  MessageSource = "channel"  // sent from another channel via channel_send
+
+	// SourceInitialMessage is the brief a channel was created with, written by the agent.
+	SourceInitialMessage MessageSource = "initial_message"
+	SourceResume         MessageSource = "resume"       // auto-injected to continue interrupted work
+	SourceNotification   MessageSource = "notification" // pushed by a notification subscription
+	SourceChild          MessageSource = "child"        // lifecycle event from a child channel
 )
 
 // MessageSourceInfo carries attribution details for a message.
 type MessageSourceInfo struct {
 	Source MessageSource `json:"source"`
 
-	// FromChannel is the name of the source channel (set when Source == SourceChannel).
+	// FromChannel is the name of the source channel: the sender for SourceChannel, the creator
+	// for SourceInitialMessage when it had one.
 	FromChannel string `json:"from_channel,omitempty"`
 
 	// ScheduleName is the schedule's human-readable name (set when Source == SourceSchedule).
@@ -161,6 +174,11 @@ type SendOpts struct {
 	// vibration, badge) for this message. Transports without a notion of
 	// notifications ignore it.
 	Notify bool
+
+	// Rich marks the agent's reply, written in the channel's markup, for a
+	// transport that renders it more fully than its other messages. Edits keep
+	// the form the message was sent in.
+	Rich bool
 }
 
 // SendFileParams describes one file being delivered to a channel. The content
@@ -175,6 +193,27 @@ type SendFileParams struct {
 	Caption string
 
 	Opts SendOpts
+}
+
+// RichReplier is implemented by transports that render a reply sent with SendOpts.Rich as one
+// long message, rather than at the length their other messages allow.
+type RichReplier interface {
+	// MaxRichReplyLen is the longest rich reply, in bytes, the transport sends as one message.
+	MaxRichReplyLen() int
+}
+
+// StreamDraftParams is one update to a reply still being written.
+type StreamDraftParams struct {
+	// DraftID identifies the reply; updates with the same one replace each other in place.
+	DraftID int64
+
+	Text string
+}
+
+// DraftStreamer is implemented by transports that can show a reply as a live preview while it is
+// written. A draft is temporary: the finished reply is still sent as a message.
+type DraftStreamer interface {
+	StreamDraft(ctx context.Context, p StreamDraftParams) error
 }
 
 // FileSender is implemented by transports that can carry a file to the user.

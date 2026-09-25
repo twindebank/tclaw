@@ -14,6 +14,13 @@ const (
 	EventContentBlockStop  EventType = "content_block_stop"
 	EventRateLimit         EventType = "rate_limit_event"
 	EventResult            EventType = "result"
+
+	// EventStreamEvent wraps one raw API streaming event, sent only with
+	// --include-partial-messages. The message_* and content_block_* types arrive inside it.
+	EventStreamEvent EventType = "stream_event"
+
+	EventMessageStart EventType = "message_start"
+	EventMessageStop  EventType = "message_stop"
 )
 
 // ContentBlockType identifies the kind of content within a message.
@@ -34,6 +41,15 @@ const (
 	// SystemSubtypeInformational carries a notice for the user, and is how a
 	// hook's systemMessage reaches the stream.
 	SystemSubtypeInformational SystemEventSubtype = "informational"
+
+	// SystemSubtypeCompactBoundary marks a finished compaction, manual or automatic.
+	SystemSubtypeCompactBoundary SystemEventSubtype = "compact_boundary"
+
+	// SystemSubtypeAPIRetry is sent before the CLI retries a failed API request.
+	SystemSubtypeAPIRetry SystemEventSubtype = "api_retry"
+
+	// SystemSubtypePermissionDenied is sent when a tool call is refused.
+	SystemSubtypePermissionDenied SystemEventSubtype = "permission_denied"
 )
 
 // NoticeLevel is how prominently the CLI means an informational notice to be shown.
@@ -53,6 +69,16 @@ type Event struct {
 	Type EventType `json:"type"`
 }
 
+// StreamEvent carries one API streaming event, such as a content_block_delta.
+type StreamEvent struct {
+	Type  EventType       `json:"type"`
+	Event json.RawMessage `json:"event"`
+
+	// ParentToolUseID is set when the event comes from a subagent rather than
+	// the main conversation.
+	ParentToolUseID *string `json:"parent_tool_use_id"`
+}
+
 // SystemEvent is emitted at the start of a session with metadata like session_id.
 type SystemEvent struct {
 	Type      EventType          `json:"type"`
@@ -64,7 +90,64 @@ type SystemEvent struct {
 	Content string `json:"content,omitempty"`
 
 	Level NoticeLevel `json:"level,omitempty"`
+
+	// CompactMetadata is set on a compact_boundary event.
+	CompactMetadata *CompactMetadata `json:"compact_metadata,omitempty"`
+
+	// MCPServers and MCPServerErrors are set on init: every server in the session with
+	// its connection state, and the --mcp-config entries skipped as invalid.
+	MCPServers      []MCPServerState `json:"mcp_servers,omitempty"`
+	MCPServerErrors []MCPServerError `json:"mcp_server_errors,omitempty"`
+
+	// The api_retry fields.
+	Attempt      int           `json:"attempt,omitempty"`
+	MaxRetries   int           `json:"max_retries,omitempty"`
+	RetryDelayMs int           `json:"retry_delay_ms,omitempty"`
+	RetryError   APIErrorClass `json:"error,omitempty"`
+
+	// ToolName is the refused tool, on permission_denied.
+	ToolName string `json:"tool_name,omitempty"`
 }
+
+// MCPServerState is one MCP server's connection state at the start of a turn.
+type MCPServerState struct {
+	Name   string          `json:"name"`
+	Status MCPServerStatus `json:"status"`
+}
+
+// MCPServerStatus is whether an MCP server connected.
+type MCPServerStatus string
+
+const (
+	MCPServerConnected MCPServerStatus = "connected"
+	MCPServerPending   MCPServerStatus = "pending"
+	MCPServerFailed    MCPServerStatus = "failed"
+	MCPServerNeedsAuth MCPServerStatus = "needs-auth"
+)
+
+// MCPServerError is an --mcp-config entry the CLI skipped as invalid.
+type MCPServerError struct {
+	Name    string `json:"name"`
+	Message string `json:"message"`
+}
+
+// APIErrorClass is the kind of error an API request failed with, such as rate_limit or overloaded.
+type APIErrorClass string
+
+// CompactMetadata describes one compaction of a session's context.
+type CompactMetadata struct {
+	Trigger    CompactTrigger `json:"trigger"`
+	PreTokens  int            `json:"pre_tokens"`
+	PostTokens int            `json:"post_tokens"`
+}
+
+// CompactTrigger says whether a person asked for a compaction or the CLI started it.
+type CompactTrigger string
+
+const (
+	CompactTriggerManual CompactTrigger = "manual"
+	CompactTriggerAuto   CompactTrigger = "auto"
+)
 
 // AssistantEvent is the complete assistant message returned by --print mode.
 // When the CLI cannot authenticate, the Error field is set (e.g. "authentication_failed")
@@ -73,6 +156,9 @@ type AssistantEvent struct {
 	Type    EventType        `json:"type"`
 	Message AssistantMessage `json:"message"`
 	Error   string           `json:"error,omitempty"`
+
+	// ParentToolUseID is set when a subagent wrote the message.
+	ParentToolUseID *string `json:"parent_tool_use_id"`
 }
 
 // AssistantErrorAuthFailed is the error string the CLI returns when not logged in.
@@ -112,6 +198,27 @@ type ToolResultMeta struct {
 	Stderr string `json:"stderr,omitempty"`
 }
 
+// MessageStartEvent opens one API response in a stream. Its usage says how much context the
+// request carried, which is the size of the conversation at that point.
+type MessageStartEvent struct {
+	Type    EventType `json:"type"`
+	Message struct {
+		Usage MessageUsage `json:"usage"`
+	} `json:"message"`
+}
+
+// MessageUsage is the token accounting for one API request.
+type MessageUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+}
+
+// ContextTokens is everything the request sent the model: new input plus cached context.
+func (u MessageUsage) ContextTokens() int {
+	return u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+}
+
 // ContentBlockStartEvent marks the beginning of a new content block.
 type ContentBlockStartEvent struct {
 	Type         EventType    `json:"type"`
@@ -137,6 +244,10 @@ type Delta struct {
 	Type     DeltaType `json:"type"`
 	Text     string    `json:"text,omitempty"`
 	Thinking string    `json:"thinking,omitempty"`
+
+	// PartialJSON is a fragment of a tool call's input. The fragments of one
+	// block join into its complete input.
+	PartialJSON string `json:"partial_json,omitempty"`
 }
 
 // RateLimitEvent is emitted when the CLI encounters a rate limit and is waiting to retry.
@@ -151,10 +262,9 @@ type ResultEvent struct {
 	Type    EventType `json:"type"`
 	IsError bool      `json:"is_error"`
 
-	// Subtype categorises the outcome, e.g. "success", "error_max_turns",
-	// "error_during_execution". On error results Result is sometimes empty, so
+	// Subtype categorises the outcome. On error results Result is sometimes empty, so
 	// Subtype is the only signal for what went wrong.
-	Subtype string `json:"subtype"`
+	Subtype ResultSubtype `json:"subtype"`
 
 	Result     string  `json:"result"`
 	DurationMs float64 `json:"duration_ms"`
@@ -162,10 +272,35 @@ type ResultEvent struct {
 	SessionID  string  `json:"session_id"`
 	CostUSD    float64 `json:"total_cost_usd"`
 
+	// PermissionDenials lists every tool call refused during the turn.
+	PermissionDenials []PermissionDenial `json:"permission_denials,omitempty"`
+
 	// ModelUsage is a per-model breakdown of token usage and cost.
 	// Keys are model identifiers (may include context window suffix, e.g. "claude-opus-4-6[1m]").
 	ModelUsage map[string]ModelUsage `json:"modelUsage,omitempty"`
 }
+
+// PermissionDenial is one refused tool call.
+type PermissionDenial struct {
+	ToolName  string `json:"tool_name"`
+	ToolUseID string `json:"tool_use_id"`
+}
+
+// ResultSubtype says how a turn ended.
+type ResultSubtype string
+
+const (
+	ResultSuccess ResultSubtype = "success"
+
+	// ResultErrorMaxTurns means the --max-turns cap stopped the turn.
+	ResultErrorMaxTurns ResultSubtype = "error_max_turns"
+
+	// ResultErrorMaxBudget means the --max-budget-usd cap stopped the turn.
+	ResultErrorMaxBudget ResultSubtype = "error_max_budget_usd"
+
+	// ResultErrorDuringExecution covers any other failure, including an interrupted turn.
+	ResultErrorDuringExecution ResultSubtype = "error_during_execution"
+)
 
 // ModelUsage holds token counts and cost for a single model within a turn.
 type ModelUsage struct {

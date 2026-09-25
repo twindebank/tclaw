@@ -527,6 +527,57 @@ func (s *ServerDispatcher) OnAuthFinishPasskeyLogin(f func(ctx context.Context, 
 	s.handlers[AuthFinishPasskeyLoginRequestTypeID] = handler
 }
 
+func (s *ServerDispatcher) OnAuthInitFirebasePnvLogin(f func(ctx context.Context, request *AuthInitFirebasePnvLoginRequest) (*AuthFirebasePnvIntent, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request AuthInitFirebasePnvLoginRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return response, nil
+	}
+
+	s.handlers[AuthInitFirebasePnvLoginRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnAuthFinishFirebasePnvLogin(f func(ctx context.Context, googletoken string) (AuthAuthorizationClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request AuthFinishFirebasePnvLoginRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, request.GoogleToken)
+		if err != nil {
+			return nil, err
+		}
+		return &AuthAuthorizationBox{Authorization: response}, nil
+	}
+
+	s.handlers[AuthFinishFirebasePnvLoginRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnAuthFirebasePnvSignUp(f func(ctx context.Context, request *AuthFirebasePnvSignUpRequest) (AuthAuthorizationClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request AuthFirebasePnvSignUpRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return &AuthAuthorizationBox{Authorization: response}, nil
+	}
+
+	s.handlers[AuthFirebasePnvSignUpRequestTypeID] = handler
+}
+
 func (s *ServerDispatcher) OnAccountRegisterDevice(f func(ctx context.Context, request *AccountRegisterDeviceRequest) (bool, error)) {
 	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
 		var request AccountRegisterDeviceRequest
@@ -8174,6 +8225,57 @@ func (s *ServerDispatcher) OnMessagesGetRichMessage(f func(ctx context.Context, 
 	s.handlers[MessagesGetRichMessageRequestTypeID] = handler
 }
 
+func (s *ServerDispatcher) OnMessagesTranslateRichMessage(f func(ctx context.Context, request *MessagesTranslateRichMessageRequest) (*MessagesTranslatedRichMessage, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request MessagesTranslateRichMessageRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return response, nil
+	}
+
+	s.handlers[MessagesTranslateRichMessageRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnMessagesComposeRichMessageWithAI(f func(ctx context.Context, request *MessagesComposeRichMessageWithAIRequest) (*MessagesComposedRichMessageWithAI, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request MessagesComposeRichMessageWithAIRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return response, nil
+	}
+
+	s.handlers[MessagesComposeRichMessageWithAIRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnMessagesRequestChatJoinWebView(f func(ctx context.Context, request *MessagesRequestChatJoinWebViewRequest) (*WebViewResultURL, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request MessagesRequestChatJoinWebViewRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return response, nil
+	}
+
+	s.handlers[MessagesRequestChatJoinWebViewRequestTypeID] = handler
+}
+
 func (s *ServerDispatcher) OnUpdatesGetState(f func(ctx context.Context) (*UpdatesState, error)) {
 	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
 		var request UpdatesGetStateRequest
@@ -10587,7 +10689,7 @@ func (s *ServerDispatcher) OnBotsRequestWebViewButton(f func(ctx context.Context
 	s.handlers[BotsRequestWebViewButtonRequestTypeID] = handler
 }
 
-func (s *ServerDispatcher) OnBotsGetRequestedWebViewButton(f func(ctx context.Context, request *BotsGetRequestedWebViewButtonRequest) (KeyboardButtonClass, error)) {
+func (s *ServerDispatcher) OnBotsGetRequestedWebViewButton(f func(ctx context.Context, request *BotsGetRequestedWebViewButtonRequest) (*KeyboardButton, error)) {
 	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
 		var request BotsGetRequestedWebViewButtonRequest
 		if err := request.Decode(b); err != nil {
@@ -10598,7 +10700,7 @@ func (s *ServerDispatcher) OnBotsGetRequestedWebViewButton(f func(ctx context.Co
 		if err != nil {
 			return nil, err
 		}
-		return &KeyboardButtonBox{KeyboardButton: response}, nil
+		return response, nil
 	}
 
 	s.handlers[BotsGetRequestedWebViewButtonRequestTypeID] = handler
@@ -14146,6 +14248,323 @@ func (s *ServerDispatcher) OnAicomposeGetToneExample(f func(ctx context.Context,
 	}
 
 	s.handlers[AicomposeGetToneExampleRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnCommunitiesCreate(f func(ctx context.Context, request *CommunitiesCreateRequest) (UpdatesClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request CommunitiesCreateRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return &UpdatesBox{Updates: response}, nil
+	}
+
+	s.handlers[CommunitiesCreateRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnCommunitiesTogglePeerLink(f func(ctx context.Context, request *CommunitiesTogglePeerLinkRequest) (bool, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request CommunitiesTogglePeerLinkRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		if response {
+			return &BoolBox{Bool: &BoolTrue{}}, nil
+		}
+
+		return &BoolBox{Bool: &BoolFalse{}}, nil
+	}
+
+	s.handlers[CommunitiesTogglePeerLinkRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnCommunitiesGetJoinedCommunities(f func(ctx context.Context) (MessagesChatsClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request CommunitiesGetJoinedCommunitiesRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return &MessagesChatsBox{Chats: response}, nil
+	}
+
+	s.handlers[CommunitiesGetJoinedCommunitiesRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnCommunitiesToggleCommunityCollapsedInDialogs(f func(ctx context.Context, request *CommunitiesToggleCommunityCollapsedInDialogsRequest) (UpdatesClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request CommunitiesToggleCommunityCollapsedInDialogsRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return &UpdatesBox{Updates: response}, nil
+	}
+
+	s.handlers[CommunitiesToggleCommunityCollapsedInDialogsRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnCommunitiesGetPeerLinkRequests(f func(ctx context.Context, request *CommunitiesGetPeerLinkRequestsRequest) (*CommunitiesPeerLinkRequests, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request CommunitiesGetPeerLinkRequestsRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return response, nil
+	}
+
+	s.handlers[CommunitiesGetPeerLinkRequestsRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnCommunitiesTogglePeerLinkRequestApproval(f func(ctx context.Context, request *CommunitiesTogglePeerLinkRequestApprovalRequest) (bool, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request CommunitiesTogglePeerLinkRequestApprovalRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		if response {
+			return &BoolBox{Bool: &BoolTrue{}}, nil
+		}
+
+		return &BoolBox{Bool: &BoolFalse{}}, nil
+	}
+
+	s.handlers[CommunitiesTogglePeerLinkRequestApprovalRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnCommunitiesToggleAllPeerLinkRequestApproval(f func(ctx context.Context, request *CommunitiesToggleAllPeerLinkRequestApprovalRequest) (bool, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request CommunitiesToggleAllPeerLinkRequestApprovalRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		if response {
+			return &BoolBox{Bool: &BoolTrue{}}, nil
+		}
+
+		return &BoolBox{Bool: &BoolFalse{}}, nil
+	}
+
+	s.handlers[CommunitiesToggleAllPeerLinkRequestApprovalRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnCommunitiesToggleParticipantBanned(f func(ctx context.Context, request *CommunitiesToggleParticipantBannedRequest) (bool, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request CommunitiesToggleParticipantBannedRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		if response {
+			return &BoolBox{Bool: &BoolTrue{}}, nil
+		}
+
+		return &BoolBox{Bool: &BoolFalse{}}, nil
+	}
+
+	s.handlers[CommunitiesToggleParticipantBannedRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnCommunitiesGetParticipantJoinedChats(f func(ctx context.Context, request *CommunitiesGetParticipantJoinedChatsRequest) (*CommunitiesParticipantJoinedChats, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request CommunitiesGetParticipantJoinedChatsRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return response, nil
+	}
+
+	s.handlers[CommunitiesGetParticipantJoinedChatsRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnEphemeralSendMessage(f func(ctx context.Context, request *EphemeralSendMessageRequest) (UpdatesClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request EphemeralSendMessageRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return &UpdatesBox{Updates: response}, nil
+	}
+
+	s.handlers[EphemeralSendMessageRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnEphemeralDeleteMessage(f func(ctx context.Context, request *EphemeralDeleteMessageRequest) (bool, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request EphemeralDeleteMessageRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		if response {
+			return &BoolBox{Bool: &BoolTrue{}}, nil
+		}
+
+		return &BoolBox{Bool: &BoolFalse{}}, nil
+	}
+
+	s.handlers[EphemeralDeleteMessageRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnEphemeralReportMessage(f func(ctx context.Context, request *EphemeralReportMessageRequest) (ReportResultClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request EphemeralReportMessageRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return &ReportResultBox{ReportResult: response}, nil
+	}
+
+	s.handlers[EphemeralReportMessageRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnEphemeralGetCallbackAnswer(f func(ctx context.Context, request *EphemeralGetCallbackAnswerRequest) (*MessagesBotCallbackAnswer, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request EphemeralGetCallbackAnswerRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return response, nil
+	}
+
+	s.handlers[EphemeralGetCallbackAnswerRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnEphemeralEditMessage(f func(ctx context.Context, request *EphemeralEditMessageRequest) (UpdatesClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request EphemeralEditMessageRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return &UpdatesBox{Updates: response}, nil
+	}
+
+	s.handlers[EphemeralEditMessageRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnEphemeralDeleteWelcomeMessage(f func(ctx context.Context, request *EphemeralDeleteWelcomeMessageRequest) (bool, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request EphemeralDeleteWelcomeMessageRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		if response {
+			return &BoolBox{Bool: &BoolTrue{}}, nil
+		}
+
+		return &BoolBox{Bool: &BoolFalse{}}, nil
+	}
+
+	s.handlers[EphemeralDeleteWelcomeMessageRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnEphemeralDeleteAllWelcomeMessages(f func(ctx context.Context, peer InputPeerClass) (bool, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request EphemeralDeleteAllWelcomeMessagesRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, request.Peer)
+		if err != nil {
+			return nil, err
+		}
+		if response {
+			return &BoolBox{Bool: &BoolTrue{}}, nil
+		}
+
+		return &BoolBox{Bool: &BoolFalse{}}, nil
+	}
+
+	s.handlers[EphemeralDeleteAllWelcomeMessagesRequestTypeID] = handler
+}
+
+func (s *ServerDispatcher) OnEphemeralGetWelcomeMessages(f func(ctx context.Context, request *EphemeralGetWelcomeMessagesRequest) (EphemeralWelcomeMessagesClass, error)) {
+	handler := func(ctx context.Context, b *bin.Buffer) (bin.Encoder, error) {
+		var request EphemeralGetWelcomeMessagesRequest
+		if err := request.Decode(b); err != nil {
+			return nil, err
+		}
+
+		response, err := f(ctx, &request)
+		if err != nil {
+			return nil, err
+		}
+		return &EphemeralWelcomeMessagesBox{WelcomeMessages: response}, nil
+	}
+
+	s.handlers[EphemeralGetWelcomeMessagesRequestTypeID] = handler
 }
 
 func (s *ServerDispatcher) OnTestUseError(f func(ctx context.Context) (*Error, error)) {

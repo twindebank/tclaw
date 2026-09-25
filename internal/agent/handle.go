@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -41,6 +43,17 @@ func (e *ToolsDeniedError) Error() string {
 	return fmt.Sprintf("tools denied: %s", strings.Join(e.Tools, ", "))
 }
 
+// TurnError is a turn the CLI ended with an error. SessionID is the session the turn ran in, so
+// the next message can carry on in it, even when this was the session's first turn.
+type TurnError struct {
+	Message   string
+	SessionID string
+}
+
+func (e *TurnError) Error() string {
+	return e.Message
+}
+
 // writePhase distinguishes status output (thinking, tools, stats) from
 // the actual response text so they can be rendered in separate messages.
 type writePhase int
@@ -52,8 +65,9 @@ const (
 )
 
 // maxMessageLen is the threshold at which split-mode messages are rotated
-// to a new message. Telegram's hard limit is 4096 chars; we use 3500 for
-// safe headroom (HTML entities, emoji encoding, etc.).
+// to a new message, unless the channel gives a longer one for replies. Telegram's
+// hard limit is 4096 chars; we use 3500 for safe headroom (HTML entities, emoji
+// encoding, etc.).
 const maxMessageLen = 3500
 
 // telegramTruncateLen is the cap applied to status messages before Send/Edit.
@@ -101,6 +115,78 @@ type turnWriter struct {
 	// content before every send/edit so intermediate states render
 	// valid markup.
 	statusWrapOpen bool
+
+	// drafts shows the reply live while it is written, on a channel that can. It is
+	// dropped for the rest of the turn if the channel refuses one.
+	drafts channel.DraftStreamer
+
+	// draftID identifies the reply currently shown as a draft; zero when none is.
+	draftID int64
+
+	// lastDraft is when the draft was last updated, so updates can be spaced out.
+	lastDraft time.Time
+}
+
+// draftInterval spaces out draft updates. Telegram animates each one, and a reply
+// arrives in many more fragments than a reader needs to see.
+const draftInterval = 700 * time.Millisecond
+
+// newTurnWriter builds the writer for one turn on ch.
+func newTurnWriter(ctx context.Context, opts Options, channelID channel.ChannelID, ch channel.Channel) *turnWriter {
+	tw := &turnWriter{ch: ch, opts: opts, channelID: channelID, ctx: ctx, split: ch.SplitStatusMessages(), statusWrap: ch.StatusWrap()}
+	if streamer, ok := ch.(channel.DraftStreamer); ok && tw.split {
+		tw.drafts = streamer
+	}
+	return tw
+}
+
+// replyLimit is the length at which a reply continues in a new message.
+func (tw *turnWriter) replyLimit() int {
+	if rich, ok := tw.ch.(channel.RichReplier); ok {
+		return rich.MaxRichReplyLen()
+	}
+	return maxMessageLen
+}
+
+// flushDraft sends the reply shown as a draft as a real message. A draft is only
+// a temporary preview, so the reply exists only once this has run.
+func (tw *turnWriter) flushDraft() error {
+	if tw.draftID == 0 {
+		return nil
+	}
+	tw.draftID = 0
+	// Sent even after a stop: the turn's context is cancelled by then.
+	id, err := tw.opts.sendReply(context.WithoutCancel(tw.ctx), tw.channelID, tw.respBuf.String())
+	if err != nil {
+		return fmt.Errorf("send response: %w", err)
+	}
+	tw.respID = id
+	return nil
+}
+
+// streamDraft shows the reply so far as a draft. It reports false when the
+// channel refused, and the caller carries on with an ordinary message.
+func (tw *turnWriter) streamDraft(content string) bool {
+	if tw.draftID == 0 {
+		tw.draftID = newDraftID()
+		tw.lastDraft = time.Time{}
+	}
+	if time.Since(tw.lastDraft) < draftInterval {
+		return true
+	}
+	err := tw.drafts.StreamDraft(tw.ctx, channel.StreamDraftParams{DraftID: tw.draftID, Text: content})
+	if err != nil && tw.ctx.Err() != nil {
+		// Stopped mid-update. The draft stays, and the end of the turn sends it.
+		return true
+	}
+	if err != nil {
+		slog.Warn("draft refused, sending the reply as a message instead", "channel", tw.channelID, "err", err)
+		tw.drafts = nil
+		tw.draftID = 0
+		return false
+	}
+	tw.lastDraft = time.Now()
+	return true
 }
 
 func (tw *turnWriter) write(phase writePhase, text string) error {
@@ -159,6 +245,12 @@ func (tw *turnWriter) statusPrefix(content string) string {
 func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 	switch phase {
 	case phaseStatus:
+		// A reply shown as a draft becomes a message before any status goes
+		// below it, keeping the chat in order.
+		if err := tw.flushDraft(); err != nil {
+			return err
+		}
+
 		// Once response text has appeared, start a fresh status message
 		// so subsequent status (later-turn thinking, tools, stats) shows
 		// below the response in chat order.
@@ -239,19 +331,29 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 		if tw.respID == "" {
 			tw.statusSealed = true
 		}
+
+		// Proactive split: rotate to a new message before hitting the limit.
+		if tw.respBuf.Len() > 0 && tw.respBuf.Len()+len(text) > tw.replyLimit() {
+			if err := tw.flushDraft(); err != nil {
+				return err
+			}
+			tw.respBuf.Reset()
+			tw.respID = ""
+		}
 		tw.respBuf.WriteString(text)
 		content := tw.respBuf.String()
 
-		// Proactive split: rotate to a new message before hitting the limit.
-		if tw.respID != "" && len(content) > maxMessageLen {
-			tw.respBuf.Reset()
-			tw.respBuf.WriteString(text)
-			tw.respID = ""
-			content = text
+		if strings.TrimSpace(content) == "" {
+			// Only the separator before a new text block so far; there is nothing
+			// to show yet, and Telegram refuses an empty message.
+			return nil
+		}
+		if tw.drafts != nil && tw.respID == "" && tw.streamDraft(content) {
+			return nil
 		}
 
 		if tw.respID == "" {
-			id, err := tw.opts.sendNotify(tw.ctx, tw.channelID, content)
+			id, err := tw.opts.sendReply(tw.ctx, tw.channelID, content)
 			if err != nil {
 				return fmt.Errorf("send response: %w", err)
 			}
@@ -268,7 +370,7 @@ func (tw *turnWriter) writeSplit(phase writePhase, text string) error {
 			tw.respBuf.Reset()
 			tw.respBuf.WriteString(text)
 			tw.respID = ""
-			id, err := tw.opts.sendNotify(tw.ctx, tw.channelID, text)
+			id, err := tw.opts.sendReply(tw.ctx, tw.channelID, text)
 			if err != nil {
 				return fmt.Errorf("send replacement response: %w", err)
 			}
@@ -313,9 +415,7 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		opts.AddDirs = append(opts.AddDirs, channelDir)
 	}
 
-	split := ch.SplitStatusMessages()
-
-	tw := &turnWriter{ch: ch, opts: opts, channelID: msg.ChannelID, ctx: ctx, split: split, statusWrap: ch.StatusWrap()}
+	tw := newTurnWriter(ctx, opts, msg.ChannelID, ch)
 	thinkingMsg := "🤔 Thinking...\n"
 	if msg.SourceInfo != nil && msg.SourceInfo.Source == channel.SourceResume {
 		thinkingMsg = "🔄 Resuming interrupted turn...\n"
@@ -342,6 +442,12 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		contextSection += fmt.Sprintf("Source: notification subscription (%s)\n", source.SubscriptionLabel)
 	case channel.SourceChild:
 		contextSection += fmt.Sprintf("Source: lifecycle event from child channel **%s**\n", source.ChildChannel)
+	case channel.SourceInitialMessage:
+		contextSection += "Source: the brief this channel was created with"
+		if source.FromChannel != "" {
+			contextSection += fmt.Sprintf(", by **%s**", source.FromChannel)
+		}
+		contextSection += "\n"
 	case channel.SourceResume:
 		contextSection += "Source: auto-resume after interrupted turn\n"
 	default:
@@ -365,17 +471,22 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		promptText = opts.ResumeNotice + promptText
 	}
 
+	unattended := !isUserMessage(msg)
+	promptTool := permissionPromptToolFor(opts, ch, unattended)
 	args := buildArgs(buildArgsParams{
-		Options:       opts,
-		Model:         model,
-		MaxTurns:      resolveMaxTurnsForChannel(opts, msg.ChannelID),
-		OutputStyle:   resolveOutputStyleForChannel(opts, msg.ChannelID),
-		SessionID:     sessionID,
-		SystemPrompt:  systemPrompt,
-		Prompt:        promptText,
-		Allowed:       allowed,
-		Disallowed:    disallowed,
-		MCPConfigPath: mcpConfigPath,
+		Options:              opts,
+		Model:                model,
+		MaxTurns:             resolveMaxTurnsForChannel(opts, msg.ChannelID),
+		OutputStyle:          resolveOutputStyleForChannel(opts, msg.ChannelID),
+		TurnSettings:         resolveTurnSettingsForChannel(opts, msg.ChannelID),
+		Unattended:           unattended,
+		PermissionPromptTool: promptTool,
+		SessionID:            sessionID,
+		SystemPrompt:         systemPrompt,
+		Prompt:               promptText,
+		Allowed:              allowed,
+		Disallowed:           disallowed,
+		MCPConfigPath:        mcpConfigPath,
 	})
 	env := buildEnv(opts, ch.Info().Name)
 
@@ -395,12 +506,6 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 		}
 	} else {
 		cmd := exec.CommandContext(ctx, "claude", args...)
-		// Send SIGTERM on context cancel instead of the default SIGKILL, giving
-		// the CLI and its Node.js child processes a chance to exit cleanly.
-		cmd.Cancel = func() error {
-			return cmd.Process.Signal(syscall.SIGTERM)
-		}
-		cmd.WaitDelay = 3 * time.Second
 		cmd.Env = env
 		cmd.Dir = dir
 
@@ -419,7 +524,28 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 			// creating malicious CLI hooks (SessionStart) via the agent's
 			// file access. The file is pre-seeded during seedUserMemory().
 			settingsPath := filepath.Join(opts.HomeDir, ".claude", "settings.json")
-			readOnlyOverlay := append([]string{settingsPath}, readOnlyDirs...)
+
+			// The rulebooks are read-only too. rules-gate only sees the write
+			// tools, and Bash can write a file just as well; the router writes an
+			// approved rulebook from outside the sandbox. Each directory is created
+			// first, because a bind of a missing path is skipped.
+			if opts.MemoryDir == "" {
+				return "", fmt.Errorf("sandboxed turn has no memory directory")
+			}
+			rulesDir := memorylayout.RulesDir(opts.MemoryDir)
+
+			// The memory dir is the CLI's working directory, so its .claude/ is
+			// where project settings load from; one the agent wrote, this turn or
+			// any earlier one, could turn the hooks off or allow tools the channel
+			// does not. tclaw keeps nothing there, so the sandbox sees it empty and
+			// cannot write to it.
+			projectConfigDir := filepath.Join(opts.MemoryDir, memorylayout.ConfigDirName)
+			for _, dir := range []string{rulesDir, projectConfigDir} {
+				if err := os.MkdirAll(dir, 0o700); err != nil {
+					return "", fmt.Errorf("create %s before sandboxing it: %w", dir, err)
+				}
+			}
+			readOnlyOverlay := append([]string{settingsPath, rulesDir}, readOnlyDirs...)
 
 			readWrite := []string{opts.MemoryDir, opts.HomeDir}
 			readWrite = append(readWrite, opts.AddDirs...)
@@ -429,9 +555,26 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 				ReadOnly:        readOnly,
 				ReadOnlyOverlay: readOnlyOverlay,
 				Masked:          maskedDirs,
+				Sealed:          []string{projectConfigDir},
 			}
 			cmd = wrapWithSandbox(ctx, cmd, paths)
 		}
+
+		// Interrupt rather than kill on context cancel, so the CLI records the end of the turn
+		// and the next --resume doesn't pick up a half-finished one. Set on the command that
+		// actually runs, which the sandbox replaces.
+		sandboxed := sandboxEnabled()
+		cmd.Cancel = func() error {
+			err := interruptCLI(cmd.Process, sandboxed)
+			switch {
+			case err == nil, errors.Is(err, os.ErrProcessDone):
+				return nil
+			default:
+				slog.Warn("could not interrupt the CLI, stopping it outright", "err", err)
+				return cmd.Process.Signal(syscall.SIGTERM)
+			}
+		}
+		cmd.WaitDelay = cliWaitDelay
 
 		var err error
 		stdout, err = cmd.StdoutPipe()
@@ -462,7 +605,17 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	}
 	cliStarted := time.Now()
 
-	newSessionID, err := streamResponse(ctx, opts, tw, stdout, allowed, msg.ChannelID, cliStarted)
+	offerable := allowed
+	if promptTool != "" {
+		// Every refusal this turn was asked about mid-way, or reported in the chat
+		// when it could not be; offering the same tools again would ask twice.
+		offerable = nil
+	}
+	newSessionID, err := streamResponse(ctx, opts, tw, stdout, offerable, msg.ChannelID, cliStarted)
+	// Sent even after a stop, so the reply shown as a draft is not lost.
+	if flushErr := tw.flushDraft(); flushErr != nil {
+		err = errors.Join(err, flushErr)
+	}
 	if err != nil {
 		// Reap the subprocess before bailing — otherwise it lingers as a zombie
 		// until fly's init catches it, and the next turn can race against the
@@ -475,8 +628,8 @@ func handle(ctx context.Context, opts Options, sessionID string, msg channel.Tag
 	switch {
 	case waitErr == nil:
 	case ctx.Err() != nil:
-		// Context was cancelled (user typed "stop", idle timeout, deploy). The
-		// SIGTERM→SIGKILL cleanup chain is expected here, not a real failure.
+		// Context was cancelled (user typed "stop", idle timeout, deploy), so the
+		// CLI was interrupted or, failing that, killed. Not a real failure.
 		slog.Debug("claude exited after context cancel", "err", waitErr)
 	default:
 		slog.Warn("claude exited with error", "err", waitErr)
@@ -592,24 +745,24 @@ func allowedEnvVar(key string) bool {
 }
 
 // streamResponse parses stream-json events and sends them to the channel in
-// real time. Returns the session ID captured from init/result events.
-// allowedTools is the resolved allowed tool list for the channel — when
-// non-empty, tool_use events for tools not in this list are tracked and
-// returned as a ToolsDeniedError after the turn completes.
+// real time. Returns the session ID captured from init/result events. Tools the
+// CLI refused that are missing from allowedTools come back as a ToolsDeniedError.
 func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Reader, allowedTools []claudecli.Tool, channelID channel.ChannelID, cliStarted time.Time) (string, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 256*1024), 10*1024*1024)
 
 	var sessionID string
 	var currentBlockType claudecli.ContentBlockType
-	// Track whether content was streamed for the current assistant
-	// message via content_block events. When true, the assistant event's
-	// thinking/text blocks are redundant and should be skipped.
-	gotStreamedBlocks := false
-	// Track whether tool_use blocks were seen in streaming events.
-	// The CLI may not stream tool_use (or may use a type we don't
-	// recognize), so we extract them from the assistant event if missing.
-	gotStreamedToolUse := false
+	// Set between a streamed message's start and stop. The CLI also sends each
+	// streamed block whole as an assistant event, which must not be written twice;
+	// an assistant event outside a streamed message, such as a command's reply, is
+	// the only copy of its content.
+	streamingMessage := false
+	// The size of the conversation as the last main-thread request carried it.
+	contextTokens := 0
+	// A streamed tool_use block and its input, gathered until the block stops.
+	var pendingToolUse claudecli.ContentBlock
+	var pendingToolInput strings.Builder
 	// Track whether we've already emitted a text block so we can insert
 	// a newline separator before the next one.
 	hadTextBlock := false
@@ -639,6 +792,24 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			slog.Debug("cli event", "type", ev.Type, "json", string(line))
 		}
 
+		if ev.Type == claudecli.EventStreamEvent {
+			var wrapped claudecli.StreamEvent
+			if err := json.Unmarshal(line, &wrapped); err != nil {
+				slog.Warn("failed to parse stream_event", "err", err)
+				continue
+			}
+			if wrapped.ParentToolUseID != nil {
+				// A subagent's tokens would otherwise be written into the
+				// main reply; its tool calls arrive as whole assistant events.
+				continue
+			}
+			line = wrapped.Event
+			if err := json.Unmarshal(line, &ev); err != nil {
+				slog.Warn("failed to parse wrapped stream event", "err", err)
+				continue
+			}
+		}
+
 		switch ev.Type {
 		case claudecli.EventSystem:
 			var sys claudecli.SystemEvent
@@ -653,7 +824,7 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				if sys.SessionID != "" {
 					sessionID = sys.SessionID
 				}
-				if err := tw.write(phaseStatus, "✅ Session ready, generating response...\n"); err != nil {
+				if err := tw.write(phaseStatus, "✅ Session ready, generating response...\n"+formatMCPProblems(sys)); err != nil {
 					return "", err
 				}
 			case claudecli.SystemSubtypeInformational:
@@ -672,9 +843,40 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				if err := tw.write(phaseStatus, notice); err != nil {
 					return "", err
 				}
+			case claudecli.SystemSubtypeAPIRetry:
+				if err := tw.write(phaseStatus, formatAPIRetry(sys)); err != nil {
+					return "", err
+				}
+			case claudecli.SystemSubtypePermissionDenied:
+				if err := tw.write(phaseStatus, fmt.Sprintf("\n🚫 %s call was refused\n", sys.ToolName)); err != nil {
+					return "", err
+				}
+			case claudecli.SystemSubtypeCompactBoundary:
+				if sys.CompactMetadata != nil {
+					contextTokens = sys.CompactMetadata.PostTokens
+				}
+				if err := tw.write(phaseStatus, formatCompactBoundary(sys.CompactMetadata)); err != nil {
+					return "", err
+				}
 			default:
 				slog.Debug("unhandled system event subtype", "subtype", sys.Subtype)
 			}
+
+		case claudecli.EventMessageStart:
+			var start claudecli.MessageStartEvent
+			if err := json.Unmarshal(line, &start); err != nil {
+				slog.Warn("failed to parse message_start", "err", err)
+			} else {
+				contextTokens = start.Message.Usage.ContextTokens()
+			}
+			if streamingMessage {
+				// The previous message's stream broke off before its stop.
+				slog.Warn("message_start arrived before the previous message stopped", "channel", channelID)
+			}
+			streamingMessage = true
+
+		case claudecli.EventMessageStop:
+			streamingMessage = false
 
 		case claudecli.EventContentBlockStart:
 			var start claudecli.ContentBlockStartEvent
@@ -682,7 +884,6 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				slog.Warn("failed to parse content_block_start", "err", err)
 				continue
 			}
-			gotStreamedBlocks = true
 			currentBlockType = start.ContentBlock.Type
 			switch currentBlockType {
 			case claudecli.ContentText:
@@ -697,18 +898,10 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 					return "", err
 				}
 			case claudecli.ContentToolUse:
-				gotStreamedToolUse = true
-				if err := tw.write(phaseStatus, formatToolUse(start.ContentBlock)); err != nil {
-					return "", err
-				}
-				// Track tools the model tried to use that aren't in the allowed list.
-				// Only applies when an allowlist is configured (non-empty).
-				if len(allowedSet) > 0 && start.ContentBlock.Name != "" {
-					toolName := claudecli.Tool(start.ContentBlock.Name)
-					if !allowedSet[toolName] {
-						deniedToolSet[start.ContentBlock.Name] = true
-					}
-				}
+				// The input streams in afterwards as input_json_delta
+				// fragments, so the line is written once the block stops.
+				pendingToolUse = start.ContentBlock
+				pendingToolInput.Reset()
 			default:
 				slog.Debug("unhandled content block type", "type", currentBlockType)
 			}
@@ -728,10 +921,20 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				if err := tw.write(phaseThinking, delta.Delta.Thinking); err != nil {
 					return "", err
 				}
+			case claudecli.DeltaInputJSON:
+				pendingToolInput.WriteString(delta.Delta.PartialJSON)
 			}
 
 		case claudecli.EventContentBlockStop:
 			switch currentBlockType {
+			case claudecli.ContentToolUse:
+				block := pendingToolUse
+				if input := pendingToolInput.String(); input != "" {
+					block.Input = json.RawMessage(input)
+				}
+				if err := tw.write(phaseStatus, formatToolUse(block)); err != nil {
+					return "", err
+				}
 			case claudecli.ContentText:
 				hadTextBlock = true
 			case claudecli.ContentThinking:
@@ -742,9 +945,6 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			currentBlockType = ""
 
 		case claudecli.EventAssistant:
-			// The assistant event carries the complete message. When
-			// streaming worked (gotStreamedBlocks), all content was
-			// already sent via content_block events — skip re-emitting.
 			var msg claudecli.AssistantEvent
 			if err := json.Unmarshal(line, &msg); err != nil {
 				slog.Warn("failed to parse assistant event", "err", err)
@@ -757,55 +957,68 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				return sessionID, ErrAuthRequired
 			}
 
-			if !gotStreamedBlocks {
-				// Fallback: no streaming events received, extract
-				// content from the full assistant message.
-				fallbackHadText := false
+			if msg.ParentToolUseID != nil {
+				// A subagent's message. Its tool calls and what it says show as
+				// progress; none of it is the reply.
 				for _, block := range msg.Message.Content {
-					text := formatBlock(block)
-					if text != "" {
-						phase := phaseStatus
-						switch block.Type {
-						case claudecli.ContentText:
-							// Separate consecutive text blocks with a newline.
-							if fallbackHadText {
-								text = "\n\n" + text
-							}
-							fallbackHadText = true
-							phase = phaseResponse
-						case claudecli.ContentThinking:
-							phase = phaseThinking
-						}
-						if err := tw.write(phase, text); err != nil {
-							return "", err
-						}
+					var line string
+					switch block.Type {
+					case claudecli.ContentToolUse:
+						line = formatToolUse(block)
+					case claudecli.ContentText:
+						line = formatSubagentText(block.Text)
+					}
+					if line == "" {
+						continue
+					}
+					if err := tw.write(phaseStatus, line); err != nil {
+						return "", err
 					}
 				}
-			} else if !gotStreamedToolUse {
-				// Thinking/text were streamed but tool_use wasn't — extract
-				// tool_use from the assistant event as a safety net.
-				for _, block := range msg.Message.Content {
-					if block.Type == claudecli.ContentToolUse {
-						text := formatToolUse(block)
-						if text != "" {
-							if err := tw.write(phaseStatus, text); err != nil {
-								return "", err
-							}
-						}
+				continue
+			}
+
+			if streamingMessage && msg.Error == "" {
+				// Already written from the stream. An error message is the CLI's
+				// own and was never streamed, even when a stream broke off.
+				continue
+			}
+
+			fallbackHadText := false
+			for _, block := range msg.Message.Content {
+				text := formatBlock(block)
+				if text == "" {
+					continue
+				}
+				phase := phaseStatus
+				switch block.Type {
+				case claudecli.ContentText:
+					// Separate consecutive text blocks with a newline.
+					if fallbackHadText || hadTextBlock {
+						text = "\n\n" + text
 					}
+					fallbackHadText = true
+					phase = phaseResponse
+				case claudecli.ContentThinking:
+					phase = phaseThinking
+				}
+				if err := tw.write(phase, text); err != nil {
+					return "", err
 				}
 			}
-			gotStreamedBlocks = false
-			gotStreamedToolUse = false
-			// hadTextBlock intentionally NOT reset — the response buffer
-			// accumulates across assistant events, so the separator logic
-			// must persist to insert \n\n between text blocks from
-			// different events.
+			if fallbackHadText {
+				hadTextBlock = true
+			}
 
 		case claudecli.EventUser:
 			var user claudecli.UserEvent
 			if err := json.Unmarshal(line, &user); err != nil {
 				slog.Warn("failed to parse user event", "err", err)
+				continue
+			}
+			if len(user.ToolUseResult) == 0 || string(user.ToolUseResult) == "null" {
+				// Not a tool result: a command's output or a compaction summary
+				// fed back to the model.
 				continue
 			}
 			if err := tw.write(phaseStatus, formatToolResult(user.ToolUseResult)); err != nil {
@@ -834,6 +1047,10 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 				slog.Warn("failed to parse result event", "err", err)
 				continue
 			}
+			if contextTokens > 0 && opts.OnContextSize != nil {
+				// Recorded for a failed turn too: the measurement stands either way.
+				opts.OnContextSize(tw.ch.Info().Name, contextTokens)
+			}
 			if result.IsError {
 				slog.Error("claude result error", "channel", channelID,
 					"subtype", result.Subtype, "result", result.Result)
@@ -841,10 +1058,23 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 					// Return the session ID so retries can resume the same session.
 					return sessionID, ErrRateLimited
 				}
-				return "", fmt.Errorf("%s", friendlyErrorMessage(result.Result, result.Subtype))
+				if sessionID == "" {
+					sessionID = result.SessionID
+				}
+				return "", &TurnError{Message: friendlyErrorMessage(result.Result, result.Subtype), SessionID: sessionID}
 			}
 			if result.SessionID != "" && sessionID == "" {
 				sessionID = result.SessionID
+			}
+			if len(allowedSet) > 0 {
+				// The CLI's own record of what it refused. It also holds refusals by a
+				// hook or by the user, which re-running with the tool allowed would not
+				// change, so only tools missing from the channel's list are offered.
+				for _, denial := range result.PermissionDenials {
+					if !allowedSet[claudecli.Tool(denial.ToolName)] {
+						deniedToolSet[denial.ToolName] = true
+					}
+				}
 			}
 			stats := fmt.Sprintf("\n📊 %d turns | %.1fs | $%.4f",
 				result.NumTurns,
@@ -895,6 +1125,29 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 	return sessionID, nil
 }
 
+// formatMCPProblems names each MCP server that did not connect and each config entry the
+// CLI skipped, or is empty when there are none.
+func formatMCPProblems(sys claudecli.SystemEvent) string {
+	var b strings.Builder
+	for _, server := range sys.MCPServers {
+		switch server.Status {
+		case claudecli.MCPServerConnected, claudecli.MCPServerPending:
+		default:
+			fmt.Fprintf(&b, "⚠️ MCP server %s is unavailable this turn (%s)\n", server.Name, server.Status)
+		}
+	}
+	for _, skipped := range sys.MCPServerErrors {
+		fmt.Fprintf(&b, "⚠️ MCP server %s was skipped: %s\n", skipped.Name, skipped.Message)
+	}
+	return b.String()
+}
+
+// formatAPIRetry says the CLI is retrying a failed request, so a slow turn is not a silent one.
+func formatAPIRetry(sys claudecli.SystemEvent) string {
+	return fmt.Sprintf("⏳ API error (%s) — retrying in %ds (attempt %d/%d)\n",
+		sys.RetryError, (sys.RetryDelayMs+999)/1000, sys.Attempt, sys.MaxRetries)
+}
+
 // modelSummary builds a parenthesized string of model short names from the
 // usage map, e.g. "(opus-4.6, sonnet-4.6)". Returns empty if no models.
 func modelSummary(usage map[string]claudecli.ModelUsage) string {
@@ -922,9 +1175,11 @@ func isRateLimitError(raw string) bool {
 // and returns a more actionable message. When the CLI reports an error with no
 // message text (raw is empty — seen in production as a bare "claude error:"), it
 // falls back to the result subtype so the user always gets something diagnostic.
-func friendlyErrorMessage(raw, subtype string) string {
+func friendlyErrorMessage(raw string, subtype claudecli.ResultSubtype) string {
 	lower := strings.ToLower(raw)
 	switch {
+	case subtype == claudecli.ResultErrorMaxBudget:
+		return "spend cap reached — the max_budget_usd cap stopped this turn. Send another message to carry on, or raise the cap"
 	case strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit") || strings.Contains(lower, "429"):
 		return "rate limit reached — please wait a moment before sending another message"
 	case strings.Contains(lower, "usage") || strings.Contains(lower, "session limit"):
@@ -939,13 +1194,28 @@ func friendlyErrorMessage(raw, subtype string) string {
 	case strings.TrimSpace(raw) == "":
 		// The CLI signalled an error but gave no message. Report the subtype so
 		// the failure is never silent (e.g. "error_during_execution").
-		if s := strings.TrimSpace(subtype); s != "" {
+		if s := strings.TrimSpace(string(subtype)); s != "" {
 			return "claude ended the turn with an error (" + s + ") but gave no details — check the logs"
 		}
 		return "claude ended the turn with an error but gave no details — check the logs"
 	default:
 		return "claude error: " + raw
 	}
+}
+
+// permissionPromptToolFor is the prompt tool to use for a turn on ch, or "" for none. Only a
+// channel with buttons can be answered mid-turn, and in dontAsk mode the CLI never asks.
+func permissionPromptToolFor(opts Options, ch channel.Channel, unattended bool) claudecli.Tool {
+	if _, ok := ch.(channel.Prompter); !ok || unattended || opts.PermissionMode == claudecli.PermissionDontAsk {
+		return ""
+	}
+	return opts.PermissionPromptTool
+}
+
+// newDraftID returns a random draft identifier. It stays below 2^31 so any client
+// reading it as a 32-bit integer agrees, and is never zero, which Telegram refuses.
+func newDraftID() int64 {
+	return rand.Int64N(math.MaxInt32) + 1
 }
 
 // truncateForTelegram caps s at telegramTruncateLen and appends a truncation

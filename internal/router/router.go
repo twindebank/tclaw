@@ -509,6 +509,19 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		TelegramUserID:   mu.cfg.TelegramUserID,
 	})
 
+	// Tool approvals asked mid-turn: the CLI calls this tool, and a button press
+	// reaches the waiting call through the message bridge below.
+	permPrompts := newPermissionPrompts()
+
+	// Which channels have one of the agent's own prompts open, so a typed yes that
+	// could answer two prompts at once is not given to either.
+	agentPrompts := channel.NewOpenPrompts()
+	registerPermissionPrompt(mcpHandler, permissionPromptParams{
+		Prompts:       permPrompts,
+		ActiveChannel: activeChannelFunc,
+		Channels:      channelSet.Snapshot,
+	})
+
 	regCtx := toolpkg.RegistrationContext{
 		SecretStore:       secretStore,
 		StateStore:        s,
@@ -978,6 +991,9 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 							slog.Error("failed to report confirmation outcome", "channel", chID, "err", sendErr)
 						}
 					}
+					if permPrompts.resolve(msg) {
+						continue
+					}
 					if interceptPendingConfirmation(agentCtx, msg, confirmParams{
 						ChannelsFunc:    channelsFunc,
 						RuntimeState:    runtimeState,
@@ -988,6 +1004,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 						RepoStore:       repoStore,
 						RemoteMCPs:      remoteMCPMgr,
 						Notify:          notifyChannel,
+						AgentPrompts:    agentPrompts,
 						OnChannelChange: onChannelChange,
 						MemoryDir:       memoryDir,
 					}) {
@@ -1025,6 +1042,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 		// inherit the user-level limit).
 		channelMaxTurns := buildChannelMaxTurns(allChMap, registry)
 		channelOutputStyles := buildChannelOutputStyles(allChMap, registry)
+		channelTurnSettings := buildChannelTurnSettings(allChMap, registry)
 
 		// Generate per-channel MCP config files for channels with scoped remote MCPs.
 		mcpConfigPaths := buildMCPConfigPaths(dynamicCtx, allChMap, remoteMCPMgr, remoteMCPProxy, proxyToken, mcpConfigDir, mcpAddr, mcpToken)
@@ -1046,16 +1064,20 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				// per-channel models beneath it. See resolveModelForChannel.
 				return modeltools.LoadOverride(s)
 			},
-			ChannelModels:       channelModels,
-			MaxTurns:            mu.cfg.MaxTurns,
-			ChannelMaxTurns:     channelMaxTurns,
-			OutputStyle:         mu.cfg.OutputStyle,
-			ChannelOutputStyles: channelOutputStyles,
-			Debug:               mu.cfg.Debug,
-			APIKey:              mu.cfg.APIKey,
-			HomeDir:             homeDir,
-			MemoryDir:           memoryDir,
-			AddDirs:             addDirs,
+			ChannelModels:        channelModels,
+			MaxTurns:             mu.cfg.MaxTurns,
+			ChannelMaxTurns:      channelMaxTurns,
+			OutputStyle:          mu.cfg.OutputStyle,
+			ChannelOutputStyles:  channelOutputStyles,
+			TurnSettings:         mu.cfg.TurnSettings,
+			ChannelTurnSettings:  channelTurnSettings,
+			PermissionPromptTool: claudecli.Tool("mcp__tclaw__" + ToolPermissionPrompt),
+			OpenPrompts:          agentPrompts,
+			Debug:                mu.cfg.Debug,
+			APIKey:               mu.cfg.APIKey,
+			HomeDir:              homeDir,
+			MemoryDir:            memoryDir,
+			AddDirs:              addDirs,
 			AddDirsFunc: func(chID channel.ChannelID) []string {
 				// Read from the dev store each turn so worktrees created
 				// mid-session (via dev_start) are immediately accessible.
@@ -1122,8 +1144,17 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			},
 			OnTurnStart: func(channelName string) {
 				activeChannelName.Store(&channelName)
+				permPrompts.newTurn()
 				activityTracker.MessageReceived(channelName)
 				activityTracker.TurnStarted(channelName)
+			},
+			OnContextSize: func(channelName string, tokens int) {
+				if err := runtimeState.Update(ctx, channelName, func(rs *channel.RuntimeState) {
+					rs.ContextTokens = tokens
+					rs.ContextMeasuredAt = time.Now()
+				}); err != nil {
+					slog.Error("failed to record channel context size", "channel", channelName, "err", err)
+				}
 			},
 			OnTurnEnd: func(channelName string) {
 				activityTracker.TurnEnded(channelName)
@@ -1161,6 +1192,11 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 				tools := mcpHandler.ListTools()
 				names := make([]string, 0, len(tools))
 				for _, td := range tools {
+					if td.Name == ToolPermissionPrompt {
+						// The CLI's own; a wildcard allowing tclaw's tools must never
+						// hand it to the model.
+						continue
+					}
 					names = append(names, "mcp__tclaw__"+td.Name)
 				}
 				mcps, err := remoteMCPMgr.ListRemoteMCPs(dynamicCtx)

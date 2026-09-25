@@ -747,7 +747,7 @@ func parseBotUsernames(msg *tg.Message) []string {
 	seen := make(map[string]bool)
 	for _, row := range markup.Rows {
 		for _, button := range row.Buttons {
-			name := strings.TrimPrefix(strings.TrimSpace(buttonText(button)), "@")
+			name := strings.TrimPrefix(strings.TrimSpace(button.Text), "@")
 			// BotFather labels each bot button with its @username, which always
 			// ends in "bot"; anything else is a control button, so skip it.
 			if !strings.HasSuffix(strings.ToLower(name), "bot") || seen[name] {
@@ -785,11 +785,11 @@ func findNextPageButton(msg *tg.Message) ([]byte, bool) {
 	}
 	for _, row := range markup.Rows {
 		for _, button := range row.Buttons {
-			callback, ok := button.(*tg.KeyboardButtonCallback)
+			callback, ok := button.Type.(*tg.InlineButtonTypeCallback)
 			if !ok {
 				continue
 			}
-			text := strings.TrimSpace(callback.Text)
+			text := strings.TrimSpace(button.Text)
 			if strings.Contains(text, "»") && !strings.Contains(text, "«") {
 				return callback.Data, true
 			}
@@ -810,22 +810,9 @@ func keyboardSignature(msg *tg.Message) string {
 	var b strings.Builder
 	for _, row := range markup.Rows {
 		for _, button := range row.Buttons {
-			b.WriteString(buttonText(button))
+			b.WriteString(button.Text)
 			b.WriteByte('\n')
 		}
 	}
 	return b.String()
-}
-
-// buttonText returns the label of an inline keyboard button, or "" for a button
-// type that carries no text.
-func buttonText(button tg.KeyboardButtonClass) string {
-	switch b := button.(type) {
-	case *tg.KeyboardButtonCallback:
-		return b.Text
-	case *tg.KeyboardButton:
-		return b.Text
-	default:
-		return ""
-	}
 }

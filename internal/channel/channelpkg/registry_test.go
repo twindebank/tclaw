@@ -99,7 +99,7 @@ func (s *stubProvisioner) Provision(_ context.Context, _ channel.ProvisionParams
 	return nil, nil
 }
 func (s *stubProvisioner) Teardown(_ context.Context, _ channel.TeardownState) error { return nil }
-func (s *stubProvisioner) SendTeardownPrompt(_ context.Context, _ string, _ channel.PlatformState) error {
+func (s *stubProvisioner) SendTeardownPrompt(_ context.Context, _ string, _ channel.PlatformState, _ string) error {
 	return nil
 }
 func (s *stubProvisioner) SendClosingMessage(_ context.Context, _ string, _ channel.PlatformState) error {

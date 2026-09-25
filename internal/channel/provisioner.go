@@ -33,9 +33,10 @@ type EphemeralProvisioner interface {
 	Teardown(ctx context.Context, state TeardownState) error
 
 	// SendTeardownPrompt sends a confirmation prompt to the channel's user asking
-	// them to confirm teardown by replying "yes". Returns immediately after
-	// sending — does NOT wait for the user's response.
-	SendTeardownPrompt(ctx context.Context, token string, platformState PlatformState) error
+	// them to confirm teardown by replying "yes", with buttons for promptID where the
+	// platform has them. Returns immediately after sending — does NOT wait for the
+	// user's response.
+	SendTeardownPrompt(ctx context.Context, token string, platformState PlatformState, promptID string) error
 
 	// SendClosingMessage sends a brief acknowledgement after the user confirms
 	// teardown, before the bot is deleted. Best-effort.
