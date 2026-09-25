@@ -512,6 +512,10 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 	// Tool approvals asked mid-turn: the CLI calls this tool, and a button press
 	// reaches the waiting call through the message bridge below.
 	permPrompts := newPermissionPrompts()
+
+	// Which channels have one of the agent's own prompts open, so a typed yes that
+	// could answer two prompts at once is not given to either.
+	agentPrompts := channel.NewOpenPrompts()
 	registerPermissionPrompt(mcpHandler, permissionPromptParams{
 		Prompts:       permPrompts,
 		ActiveChannel: activeChannelFunc,
@@ -1000,6 +1004,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 						RepoStore:       repoStore,
 						RemoteMCPs:      remoteMCPMgr,
 						Notify:          notifyChannel,
+						AgentPrompts:    agentPrompts,
 						OnChannelChange: onChannelChange,
 						MemoryDir:       memoryDir,
 					}) {
@@ -1067,6 +1072,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 			TurnSettings:         mu.cfg.TurnSettings,
 			ChannelTurnSettings:  channelTurnSettings,
 			PermissionPromptTool: claudecli.Tool("mcp__tclaw__" + ToolPermissionPrompt),
+			OpenPrompts:          agentPrompts,
 			Debug:                mu.cfg.Debug,
 			APIKey:               mu.cfg.APIKey,
 			HomeDir:              homeDir,

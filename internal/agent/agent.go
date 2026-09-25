@@ -186,6 +186,10 @@ type Options struct {
 	// ChannelTurnSettings override TurnSettings per channel, field by field.
 	ChannelTurnSettings map[channel.ChannelID]claudecli.TurnSettings
 
+	// OpenPrompts is told which channels have a flow open, so the router can tell a typed
+	// "yes" that could answer two prompts at once. Nil in tests that need no router.
+	OpenPrompts *channel.OpenPrompts
+
 	// PermissionPromptTool is the MCP tool the CLI asks when a tool call needs approval, on a
 	// turn the user started on a channel that can show buttons. Empty leaves the CLI to deny.
 	PermissionPromptTool claudecli.Tool
@@ -465,6 +469,7 @@ func RunWithMessages(ctx context.Context, opts Options, msgs <-chan channel.Tagg
 	// FlowManager tracks all per-channel interactive flows (auth, reset,
 	// tool approval) in one place with explicit typed states.
 	fm := NewFlowManager()
+	fm.open = opts.OpenPrompts
 
 	// stoppedChannels tracks channels where the user sent "stop" to cancel
 	// the previous turn. The next message on a stopped channel gets a system

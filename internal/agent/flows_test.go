@@ -124,6 +124,25 @@ func TestHandleToolApprovalFlow(t *testing.T) {
 	})
 }
 
+func TestFlowManager_OpenPrompts(t *testing.T) {
+	t.Run("the shared set follows each flow opening and closing", func(t *testing.T) {
+		fm := NewFlowManager()
+		fm.open = channel.NewOpenPrompts()
+
+		fm.StartToolApproval("ch1", channel.TaggedMessage{ChannelID: "ch1"}, []string{"Bash"}, "s1")
+		require.True(t, fm.open.IsOpen("ch1"))
+
+		fm.Complete("ch1")
+		require.False(t, fm.open.IsOpen("ch1"))
+
+		fm.StartAuth("ch1", channel.TaggedMessage{ChannelID: "ch1"})
+		require.True(t, fm.open.IsOpen("ch1"))
+
+		fm.Cancel("ch1")
+		require.False(t, fm.open.IsOpen("ch1"))
+	})
+}
+
 func TestAnswersOpenApproval(t *testing.T) {
 	fm := NewFlowManager()
 	promptID := fm.StartToolApproval("ch1", channel.TaggedMessage{ChannelID: "ch1"}, []string{"Bash"}, "s1")

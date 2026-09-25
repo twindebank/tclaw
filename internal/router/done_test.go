@@ -216,6 +216,34 @@ func TestInterceptPendingDone(t *testing.T) {
 		require.Nil(t, state.PendingAction)
 	})
 
+	t.Run("a typed yes while the agent also has a prompt open answers neither", func(t *testing.T) {
+		rs, ss, cw := setupDoneTest(t)
+		pending := channel.NewPendingAction(channel.PendingChannelDone, nil)
+		require.NoError(t, rs.Update(context.Background(), "ephemeral", func(s *channel.RuntimeState) {
+			s.PendingAction = pending
+		}))
+		agentPrompts := channel.NewOpenPrompts()
+		agentPrompts.Set("ephemeral-id", true)
+		var notified string
+
+		consumed := interceptPendingConfirmation(context.Background(), doneTaggedMsg("ephemeral-id", "yes"), confirmParams{
+			ChannelsFunc: doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeSocket),
+			RuntimeState: rs,
+			AgentPrompts: agentPrompts,
+			ConfigWriter: cw,
+			UserID:       testUserID,
+			SecretStore:  ss,
+			Provisioners: provLookup(channel.TypeSocket, &mockDoneProvisioner{}),
+			Notify:       func(_ context.Context, _ channel.ChannelID, text string) { notified = text },
+		})
+
+		require.True(t, consumed, "it must not reach the agent's prompt either")
+		require.Contains(t, notified, "Press the button on the one you mean")
+		state, err := rs.Get(context.Background(), "ephemeral")
+		require.NoError(t, err)
+		require.Equal(t, pending.PromptID, state.PendingAction.PromptID, "both prompts stay open")
+	})
+
 	t.Run("accepts y as confirmation", func(t *testing.T) {
 		rs, ss, cw := setupDoneTest(t)
 
@@ -575,6 +603,7 @@ func interceptDone(
 		OnChannelChange: onChannelChange,
 		MemoryDir:       memoryDir,
 		Notify:          func(context.Context, channel.ChannelID, string) {},
+		AgentPrompts:    channel.NewOpenPrompts(),
 	})
 }
 
@@ -602,6 +631,7 @@ func TestConfirmChannelDone(t *testing.T) {
 		consumed := interceptPendingConfirmation(ctx, doneTaggedMsg("ephemeral-id", "yes"), confirmParams{
 			ChannelsFunc: doneChannelsFunc("ephemeral-id", "ephemeral", channel.TypeSocket),
 			RuntimeState: rs,
+			AgentPrompts: channel.NewOpenPrompts(),
 			ConfigWriter: cw,
 			UserID:       testUserID,
 			SecretStore:  ss,

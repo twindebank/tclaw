@@ -30,6 +30,9 @@ type confirmParams struct {
 	RemoteMCPs   *remotemcpstore.Manager
 	Notify       func(ctx context.Context, chID channel.ChannelID, text string)
 
+	// AgentPrompts says which channels also have one of the agent's own prompts open.
+	AgentPrompts *channel.OpenPrompts
+
 	OnChannelChange func()
 	MemoryDir       string
 }
@@ -87,7 +90,8 @@ func interceptPendingConfirmation(ctx context.Context, msg channel.TaggedMessage
 	}
 
 	text := strings.TrimSpace(strings.ToLower(msg.Text))
-	if press := channel.ParseButtonPress(msg.Text); press != nil {
+	press := channel.ParseButtonPress(msg.Text)
+	if press != nil {
 		if press.PromptID != pending.PromptID {
 			// Another prompt's button: not an answer to this one, and not a reason
 			// to drop it. Whatever armed that prompt decides what it means.
@@ -101,6 +105,12 @@ func interceptPendingConfirmation(ctx context.Context, msg channel.TaggedMessage
 			return true
 		}
 		text = string(press.Reply)
+	}
+	if press == nil && (text == "yes" || text == "y") && params.AgentPrompts.IsOpen(msg.ChannelID) {
+		// Two prompts are open here, and a typed yes could be meant for either. A
+		// press names its prompt, so that is how to answer; both stay open.
+		params.Notify(ctx, msg.ChannelID, "❓ Two prompts are waiting here, so a typed yes could answer either. Press the button on the one you mean.")
+		return true
 	}
 	if text != "yes" && text != "y" {
 		// User declined — clear the action and forward to agent.

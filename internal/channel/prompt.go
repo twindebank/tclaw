@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"strings"
+	"sync"
 )
 
 // PromptReply is an answer a confirmation prompt offers as a button.
@@ -56,6 +57,34 @@ func Ask(ctx context.Context, p AskParams) error {
 		return fmt.Errorf("send prompt with buttons: %w", err)
 	}
 	return nil
+}
+
+// OpenPrompts records which channels have one of the agent's own prompts open, such as a tool
+// approval, for the router, which answers its own confirmations before the agent sees a message.
+type OpenPrompts struct {
+	mu   sync.Mutex
+	open map[ChannelID]bool
+}
+
+func NewOpenPrompts() *OpenPrompts {
+	return &OpenPrompts{open: make(map[ChannelID]bool)}
+}
+
+// Set records whether a prompt is open on chID.
+func (o *OpenPrompts) Set(chID ChannelID, open bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if open {
+		o.open[chID] = true
+		return
+	}
+	delete(o.open, chID)
+}
+
+func (o *OpenPrompts) IsOpen(chID ChannelID) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.open[chID]
 }
 
 // NewPromptID returns a random prompt identifier, short enough to fit in a button's data.
