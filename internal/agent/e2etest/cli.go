@@ -33,6 +33,7 @@ type Turn struct {
 type Block struct {
 	Type      claudecli.ContentBlockType
 	Text      string          // text or thinking content
+	Chunks    []string        // thinking only: the deltas Text is streamed as
 	ToolName  string          // tool_use only
 	ToolInput json.RawMessage // tool_use only
 }
@@ -54,9 +55,9 @@ func ToolBlock(name string, input json.RawMessage) Block {
 	return Block{Type: claudecli.ContentToolUse, ToolName: name, ToolInput: input}
 }
 
-// ThinkingBlock creates a thinking content block.
-func ThinkingBlock(text string) Block {
-	return Block{Type: claudecli.ContentThinking, Text: text}
+// ThinkingBlock creates a thinking content block, streamed as one delta per chunk.
+func ThinkingBlock(chunks ...string) Block {
+	return Block{Type: claudecli.ContentThinking, Text: strings.Join(chunks, ""), Chunks: chunks}
 }
 
 // CommandFunc returns an CommandFunc that writes this turn as stream-json.
@@ -151,10 +152,12 @@ func (t Turn) CommandFunc() CommandFunc {
 						"type":          "content_block_start",
 						"content_block": map[string]any{"type": "thinking", "thinking": ""},
 					})
-					encodeStreamEvent(enc, map[string]any{
-						"type":  "content_block_delta",
-						"delta": map[string]any{"type": "thinking_delta", "thinking": block.Text},
-					})
+					for _, chunk := range block.Chunks {
+						encodeStreamEvent(enc, map[string]any{
+							"type":  "content_block_delta",
+							"delta": map[string]any{"type": "thinking_delta", "thinking": chunk},
+						})
+					}
 					encodeAssistantBlock(enc, map[string]any{"type": "thinking", "thinking": block.Text})
 					encodeStreamEvent(enc, map[string]any{"type": "content_block_stop"})
 				}

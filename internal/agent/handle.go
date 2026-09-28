@@ -763,6 +763,11 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 	// A streamed tool_use block and its input, gathered until the block stops.
 	var pendingToolUse claudecli.ContentBlock
 	var pendingToolInput strings.Builder
+	// A thinking block can stream no text at all, so its line starts with the first text rather
+	// than the block. Trailing newlines are held back until more text follows, so a block that
+	// ends in a blank line does not leave one in the status message.
+	thinkingLineStarted := false
+	var heldThinkingNewlines string
 	// Track whether we've already emitted a text block so we can insert
 	// a newline separator before the next one.
 	hadTextBlock := false
@@ -894,9 +899,8 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 					}
 				}
 			case claudecli.ContentThinking:
-				if err := tw.write(phaseThinking, "💭 "); err != nil {
-					return "", err
-				}
+				thinkingLineStarted = false
+				heldThinkingNewlines = ""
 			case claudecli.ContentToolUse:
 				// The input streams in afterwards as input_json_delta
 				// fragments, so the line is written once the block stops.
@@ -918,7 +922,18 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 					return "", err
 				}
 			case claudecli.DeltaThinking:
-				if err := tw.write(phaseThinking, delta.Delta.Thinking); err != nil {
+				text := heldThinkingNewlines + delta.Delta.Thinking
+				visible := strings.TrimRight(text, "\n")
+				heldThinkingNewlines = text[len(visible):]
+				if visible == "" {
+					// Hidden thinking streams deltas with no text, or only newlines so far.
+					continue
+				}
+				if !thinkingLineStarted {
+					visible = "💭 " + visible
+					thinkingLineStarted = true
+				}
+				if err := tw.write(phaseThinking, visible); err != nil {
 					return "", err
 				}
 			case claudecli.DeltaInputJSON:
@@ -938,8 +953,10 @@ func streamResponse(ctx context.Context, opts Options, tw *turnWriter, r io.Read
 			case claudecli.ContentText:
 				hadTextBlock = true
 			case claudecli.ContentThinking:
-				if err := tw.write(phaseStatus, "\n"); err != nil {
-					return "", err
+				if thinkingLineStarted {
+					if err := tw.write(phaseStatus, "\n"); err != nil {
+						return "", err
+					}
 				}
 			}
 			currentBlockType = ""

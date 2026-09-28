@@ -16,10 +16,11 @@ func formatBlock(block claudecli.ContentBlock) string {
 	case claudecli.ContentText:
 		return block.Text
 	case claudecli.ContentThinking:
-		if block.Thinking == "" {
+		thinking := strings.TrimRight(block.Thinking, "\n")
+		if thinking == "" {
 			return ""
 		}
-		return "💭 " + block.Thinking + "\n"
+		return "💭 " + thinking + "\n"
 	case claudecli.ContentToolUse:
 		return formatToolUse(block)
 	}
