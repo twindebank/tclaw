@@ -20,6 +20,15 @@ const (
 	EffortUltracode Effort = "ultracode"
 )
 
+// ThinkingDisplay is how much of the model's thinking the API returns, passed as --thinking-display.
+type ThinkingDisplay string
+
+const (
+	// ThinkingDisplaySummarized returns readable summaries of the thinking, and the notes the model
+	// writes between tool calls. Opus 5.5 and later default to omitting both.
+	ThinkingDisplaySummarized ThinkingDisplay = "summarized"
+)
+
 var validEfforts = map[Effort]bool{
 	EffortLow: true, EffortMedium: true, EffortHigh: true, EffortXHigh: true, EffortMax: true, EffortUltracode: true,
 }
