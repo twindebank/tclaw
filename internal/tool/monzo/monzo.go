@@ -52,9 +52,9 @@ func RegisterTools(handler *mcp.Handler, depsMap map[credential.CredentialSetID]
 		ToolCreateFeedItem:       createFeedItemHandler(depsMap),
 		ToolRegisterAttachment:   registerAttachmentHandler(depsMap),
 		ToolDeregisterAttachment: deregisterAttachmentHandler(depsMap),
-		ToolGetReceipt:           receiptByExternalIDHandler(depsMap, http.MethodGet),
+		ToolGetReceipt:           receiptByExternalIDHandler(depsMap, receiptGet),
 		ToolSetReceipt:           setReceiptHandler(depsMap),
-		ToolDeleteReceipt:        receiptByExternalIDHandler(depsMap, http.MethodDelete),
+		ToolDeleteReceipt:        receiptByExternalIDHandler(depsMap, receiptDelete),
 		ToolListWebhooks:         listWebhooksHandler(depsMap),
 		ToolRegisterWebhook:      registerWebhookHandler(depsMap),
 		ToolDeleteWebhook:        deleteWebhookHandler(depsMap),
@@ -145,8 +145,12 @@ func apiRequest(ctx context.Context, deps Deps, p apiRequestParams) (json.RawMes
 
 	if rsp.StatusCode != http.StatusOK {
 		// Provide an actionable message for SCA verification errors instead of the raw API response.
-		if isVerificationRequired(rspBody) {
+		switch {
+		case !isVerificationRequired(rspBody):
+		case strings.HasPrefix(p.Path, "/transactions"):
 			return nil, fmt.Errorf("Monzo requires in-app verification to access transactions older than 90 days. Open your Monzo app to approve extended access, or use a `since` date within the last 90 days.")
+		default:
+			return nil, fmt.Errorf("Monzo requires in-app verification before this app can continue. Open your Monzo app and approve access, then try again.")
 		}
 		return nil, fmt.Errorf("monzo API %s returned %d: %s", p.Path, rsp.StatusCode, string(rspBody))
 	}

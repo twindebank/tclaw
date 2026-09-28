@@ -20,7 +20,8 @@ func seedTestPackageTools() {
 		GroupRepoMonitoring:    {MCPToolRepoAll},
 		GroupGSuiteRead:        {"mcp__tclaw__google_gmail_list", "mcp__tclaw__google_gmail_read", "mcp__tclaw__google_workspace", "mcp__tclaw__google_workspace_schema"},
 		GroupGSuiteWrite:       {MCPToolGoogleAll},
-		GroupPersonalServices:  {MCPToolTflAll, MCPToolRestaurantAll, "mcp__tclaw__banking_*", MCPToolMonzoAll},
+		GroupPersonalServices:  {MCPToolTflAll, MCPToolRestaurantAll, "mcp__tclaw__banking_*", "mcp__tclaw__monzo_list_pots"},
+		GroupMonzoWrite:        {MCPToolMonzoAll},
 		GroupFitness:           {MCPToolGarminAll},
 		GroupConnections:       {MCPToolCredentialAll, MCPToolRemoteMCPAll},
 		GroupTelegramClient:    {MCPToolTelegramClientAll},
@@ -120,6 +121,15 @@ func TestCredentialToolPatterns(t *testing.T) {
 		ctx := ChannelContext{}
 		tools := CredentialToolPatterns(ctx)
 		require.Empty(t, tools)
+	})
+
+	t.Run("a limited package grants only its listed tools", func(t *testing.T) {
+		SetCredentialTools(map[string][]claudecli.Tool{"acme": {"mcp__tclaw__acme_read"}})
+		t.Cleanup(func() { delete(credentialTools, "acme") })
+
+		tools := CredentialToolPatterns(ChannelContext{PackageNames: []string{"acme", "google"}})
+
+		require.Equal(t, []claudecli.Tool{"mcp__tclaw__acme_read", MCPToolGoogleAll}, tools, "acme limited, google unlimited")
 	})
 }
 

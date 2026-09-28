@@ -14,6 +14,15 @@ import (
 	"tclaw/internal/mcp"
 )
 
+// accountType is a Monzo account type, used to filter the account list.
+type accountType string
+
+const (
+	accountTypeRetail      accountType = "uk_retail"
+	accountTypeRetailJoint accountType = "uk_retail_joint"
+	accountTypeFlex        accountType = "uk_monzo_flex"
+)
+
 type connectionArgs struct {
 	CredentialSet string `json:"credential_set"`
 }
@@ -35,8 +44,8 @@ func whoAmIHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandler 
 func listAccountsHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 		var p struct {
-			CredentialSet string `json:"credential_set"`
-			AccountType   string `json:"account_type"`
+			CredentialSet string      `json:"credential_set"`
+			AccountType   accountType `json:"account_type"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
 			return nil, fmt.Errorf("parse args: %w", err)
@@ -47,7 +56,7 @@ func listAccountsHandler(depsMap map[credential.CredentialSetID]Deps) mcp.ToolHa
 		}
 		query := url.Values{}
 		if p.AccountType != "" {
-			query.Set("account_type", p.AccountType)
+			query.Set("account_type", string(p.AccountType))
 		}
 		return apiRequest(ctx, deps, apiRequestParams{Method: http.MethodGet, Path: "/accounts", Query: query})
 	}
@@ -278,8 +287,16 @@ func deregisterAttachmentHandler(depsMap map[credential.CredentialSetID]Deps) mc
 	}
 }
 
-// receiptByExternalIDHandler fetches or deletes the receipt with the given external ID, depending on method.
-func receiptByExternalIDHandler(depsMap map[credential.CredentialSetID]Deps, method string) mcp.ToolHandler {
+// receiptAction is what receiptByExternalIDHandler does to the receipt, as the HTTP method Monzo expects.
+type receiptAction string
+
+const (
+	receiptGet    receiptAction = http.MethodGet
+	receiptDelete receiptAction = http.MethodDelete
+)
+
+// receiptByExternalIDHandler fetches or deletes the receipt with the given external ID.
+func receiptByExternalIDHandler(depsMap map[credential.CredentialSetID]Deps, action receiptAction) mcp.ToolHandler {
 	return func(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 		var p struct {
 			CredentialSet string `json:"credential_set"`
@@ -296,7 +313,7 @@ func receiptByExternalIDHandler(depsMap map[credential.CredentialSetID]Deps, met
 			return nil, err
 		}
 		return apiRequest(ctx, deps, apiRequestParams{
-			Method: method,
+			Method: string(action),
 			Path:   "/transaction-receipts",
 			Query:  url.Values{"external_id": {p.ExternalID}},
 		})

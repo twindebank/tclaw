@@ -23,6 +23,7 @@ const (
 	GroupGSuiteRead        ToolGroup = "gsuite_read"
 	GroupGSuiteWrite       ToolGroup = "gsuite_write"
 	GroupPersonalServices  ToolGroup = "personal_services"
+	GroupMonzoWrite        ToolGroup = "monzo_write"
 	GroupFitness           ToolGroup = "fitness"
 	GroupConnections       ToolGroup = "connections"
 	GroupTelegramClient    ToolGroup = "telegram_client"
@@ -51,7 +52,8 @@ func AllGroups() []GroupInfo {
 		{GroupRepoMonitoring, "Monitor external git repositories: add, sync, view logs, list, remove. Read-only — for tracking changes, not making them."},
 		{GroupGSuiteRead, "Google Workspace read-only: list and read emails, list calendar events, read workspace data. Cannot send emails or create events."},
 		{GroupGSuiteWrite, "Google Workspace full access: send emails, create/update calendar events, edit docs and sheets. Includes all read capabilities."},
-		{GroupPersonalServices, "Personal service integrations: TfL transport, restaurant reservations, banking (Open Banking), Monzo."},
+		{GroupPersonalServices, "Personal service integrations: TfL transport, restaurant reservations, banking (Open Banking), Monzo (read-only)."},
+		{GroupMonzoWrite, "Monzo changes: move money into and out of pots, annotate transactions, add attachments and receipts, post feed items, and register webhooks that send transactions to a URL. Includes all Monzo read tools."},
 		{GroupFitness, "Fitness devices: read and write Garmin watch and bike computer settings, including activity data screens. Writes reach the device on its next sync."},
 		{GroupConnections, "Manage OAuth connections to external services and remote MCP server connections."},
 		{GroupTelegramClient, "Telegram Client API (MTProto): authenticate, configure bots via BotFather, manage chats, read message history."},

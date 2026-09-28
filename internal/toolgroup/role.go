@@ -24,11 +24,26 @@ func ResolveGroupsWithContext(groups []ToolGroup, ctx ChannelContext) []claudecl
 	return tools
 }
 
-// CredentialToolPatterns returns MCP tool glob patterns for each tool package
+// credentialTools maps a package name to the only tools its credentials grant. A package not listed here grants
+// all of its tools.
+var credentialTools = map[string][]claudecli.Tool{}
+
+// SetCredentialTools records which tools each listed package's credentials grant. Called once at startup.
+func SetCredentialTools(byPackage map[string][]claudecli.Tool) {
+	for name, tools := range byPackage {
+		credentialTools[name] = tools
+	}
+}
+
+// CredentialToolPatterns returns the MCP tools granted by each tool package
 // that has credential sets available on this channel.
 func CredentialToolPatterns(ctx ChannelContext) []claudecli.Tool {
 	var tools []claudecli.Tool
 	for _, name := range ctx.PackageNames {
+		if limited, ok := credentialTools[name]; ok {
+			tools = append(tools, limited...)
+			continue
+		}
 		tools = append(tools, claudecli.Tool("mcp__tclaw__"+name+"_*"))
 	}
 	return tools

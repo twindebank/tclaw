@@ -102,6 +102,17 @@ func (r *Registry) BuildGroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
 	return result
 }
 
+// BuildCredentialTools maps each package that limits what its credentials grant to the tools they do grant.
+func (r *Registry) BuildCredentialTools() map[string][]claudecli.Tool {
+	result := make(map[string][]claudecli.Tool)
+	for _, pkg := range r.packages {
+		if limiter, ok := pkg.(CredentialToolsLimiter); ok {
+			result[pkg.Name()] = limiter.CredentialTools()
+		}
+	}
+	return result
+}
+
 // Packages returns all registered packages.
 func (r *Registry) Packages() []Package {
 	return r.packages

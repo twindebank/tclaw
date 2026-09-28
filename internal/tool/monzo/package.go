@@ -27,8 +27,25 @@ func (p *Package) Group() toolgroup.ToolGroup { return toolgroup.GroupPersonalSe
 
 func (p *Package) GroupTools() map[toolgroup.ToolGroup][]claudecli.Tool {
 	return map[toolgroup.ToolGroup][]claudecli.Tool{
-		p.Group(): {"mcp__tclaw__monzo_*"},
+		p.Group():                 readTools(),
+		toolgroup.GroupMonzoWrite: {toolgroup.MCPToolMonzoAll},
 	}
+}
+
+// CredentialTools implements toolpkg.CredentialToolsLimiter. Holding a Monzo connection only grants reads; moving
+// money or sending data anywhere needs the monzo_write group.
+func (p *Package) CredentialTools() []claudecli.Tool { return readTools() }
+
+func readTools() []claudecli.Tool {
+	names := []string{
+		ToolWhoAmI, ToolListAccounts, ToolGetBalance, ToolListPots,
+		ToolListTransactions, ToolGetTransaction, ToolGetReceipt, ToolListWebhooks,
+	}
+	tools := make([]claudecli.Tool, len(names))
+	for i, name := range names {
+		tools[i] = claudecli.Tool("mcp__tclaw__" + name)
+	}
+	return tools
 }
 
 func (p *Package) RequiredSecrets() []toolpkg.SecretSpec { return nil }

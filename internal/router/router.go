@@ -577,6 +577,7 @@ func (r *Router) waitAndStart(ctx context.Context, mu *managedUser, staticChMap 
 
 	// Populate group tools from packages so channels can resolve tool groups.
 	toolgroup.SetPackageTools(toolRegistry.BuildGroupTools())
+	toolgroup.SetCredentialTools(toolRegistry.BuildCredentialTools())
 
 	// tool_list is registered inside channeltools.Register() — no separate call needed.
 

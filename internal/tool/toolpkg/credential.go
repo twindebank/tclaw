@@ -1,6 +1,7 @@
 package toolpkg
 
 import (
+	"tclaw/internal/claudecli"
 	"tclaw/internal/credential"
 	"tclaw/internal/mcp"
 )
@@ -141,4 +142,10 @@ type CredentialProvider interface {
 	// should register or unregister its tools on the handler based on which
 	// sets are ready.
 	OnCredentialSetChange(handler *mcp.Handler, ctx RegistrationContext, sets []ResolvedCredentialSet) error
+}
+
+// CredentialToolsLimiter is an optional interface for a CredentialProvider whose credentials should grant only
+// some of its tools. The rest reach a channel only through a tool group.
+type CredentialToolsLimiter interface {
+	CredentialTools() []claudecli.Tool
 }

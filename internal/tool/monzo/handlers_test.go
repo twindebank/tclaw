@@ -9,8 +9,10 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"tclaw/internal/claudecli"
 	"tclaw/internal/credential"
 	"tclaw/internal/libraries/store"
 	"tclaw/internal/mcp"
@@ -101,6 +103,23 @@ func TestPotTransferHandler(t *testing.T) {
 		}))
 		require.Error(t, err)
 		require.Equal(t, `monzo API /pots/pot_1/withdraw returned 403: {"id":"pot_1"}`, err.Error())
+	})
+
+	t.Run("asks for in-app approval when Monzo wants verification", func(t *testing.T) {
+		env := setupMonzo(t)
+		env.status = http.StatusForbidden
+		env.rspBody = `{"code":"forbidden.verification_required"}`
+
+		_, err := potTransferHandler(env.depsMap, potDeposit)(context.Background(), mustJSON(t, map[string]any{
+			"credential_set": string(env.setID),
+			"pot_id":         "pot_1",
+			"account_id":     "acc_main",
+			"amount":         100,
+			"dedupe_id":      "transfer-4",
+		}))
+		require.Error(t, err)
+		require.Equal(t, "Monzo requires in-app verification before this app can continue. "+
+			"Open your Monzo app and approve access, then try again.", err.Error())
 	})
 }
 
@@ -211,6 +230,20 @@ func TestSetReceiptHandler(t *testing.T) {
 }
 
 func TestReceiptByExternalIDHandler(t *testing.T) {
+	t.Run("gets by external ID", func(t *testing.T) {
+		env := setupMonzo(t)
+
+		_, err := receiptByExternalIDHandler(env.depsMap, receiptGet)(context.Background(), mustJSON(t, map[string]any{
+			"credential_set": string(env.setID),
+			"external_id":    "r1",
+		}))
+		require.NoError(t, err)
+
+		require.Equal(t, http.MethodGet, env.last.Method, "method")
+		require.Equal(t, "/transaction-receipts", env.last.Path, "path")
+		require.Equal(t, "r1", env.last.Query.Get("external_id"), "external ID sent to Monzo")
+	})
+
 	t.Run("deletes by external ID", func(t *testing.T) {
 		env := setupMonzo(t)
 
@@ -222,6 +255,117 @@ func TestReceiptByExternalIDHandler(t *testing.T) {
 
 		require.Equal(t, http.MethodDelete, env.last.Method, "method")
 		require.Equal(t, "r1", env.last.Query.Get("external_id"), "external ID sent to Monzo")
+	})
+}
+
+func TestWhoAmIHandler(t *testing.T) {
+	t.Run("calls whoami", func(t *testing.T) {
+		env := setupMonzo(t)
+
+		_, err := whoAmIHandler(env.depsMap)(context.Background(), mustJSON(t, map[string]any{
+			"credential_set": string(env.setID),
+		}))
+		require.NoError(t, err)
+
+		require.Equal(t, http.MethodGet, env.last.Method, "method")
+		require.Equal(t, "/ping/whoami", env.last.Path, "path")
+	})
+}
+
+func TestRegisterAttachmentHandler(t *testing.T) {
+	t.Run("sends the transaction as external_id", func(t *testing.T) {
+		env := setupMonzo(t)
+
+		_, err := registerAttachmentHandler(env.depsMap)(context.Background(), mustJSON(t, map[string]any{
+			"credential_set": string(env.setID),
+			"transaction_id": "tx_1",
+			"file_url":       "https://example.com/receipt.png",
+			"file_type":      "image/png",
+		}))
+		require.NoError(t, err)
+
+		require.Equal(t, http.MethodPost, env.last.Method, "method")
+		require.Equal(t, "/attachment/register", env.last.Path, "path")
+		require.Equal(t, url.Values{
+			"external_id": {"tx_1"},
+			"file_url":    {"https://example.com/receipt.png"},
+			"file_type":   {"image/png"},
+		}, env.last.Form, "form body")
+	})
+}
+
+func TestDeregisterAttachmentHandler(t *testing.T) {
+	t.Run("sends the attachment id", func(t *testing.T) {
+		env := setupMonzo(t)
+
+		_, err := deregisterAttachmentHandler(env.depsMap)(context.Background(), mustJSON(t, map[string]any{
+			"credential_set": string(env.setID),
+			"attachment_id":  "attach_1",
+		}))
+		require.NoError(t, err)
+
+		require.Equal(t, http.MethodPost, env.last.Method, "method")
+		require.Equal(t, "/attachment/deregister", env.last.Path, "path")
+		require.Equal(t, url.Values{"id": {"attach_1"}}, env.last.Form, "form body")
+	})
+}
+
+func TestListWebhooksHandler(t *testing.T) {
+	t.Run("lists by account", func(t *testing.T) {
+		env := setupMonzo(t)
+
+		_, err := listWebhooksHandler(env.depsMap)(context.Background(), mustJSON(t, map[string]any{
+			"credential_set": string(env.setID),
+			"account_id":     "acc_main",
+		}))
+		require.NoError(t, err)
+
+		require.Equal(t, http.MethodGet, env.last.Method, "method")
+		require.Equal(t, "/webhooks", env.last.Path, "path")
+		require.Equal(t, "acc_main", env.last.Query.Get("account_id"), "account sent to Monzo")
+	})
+}
+
+func TestRegisterWebhookHandler(t *testing.T) {
+	t.Run("sends the account and url", func(t *testing.T) {
+		env := setupMonzo(t)
+
+		_, err := registerWebhookHandler(env.depsMap)(context.Background(), mustJSON(t, map[string]any{
+			"credential_set": string(env.setID),
+			"account_id":     "acc_main",
+			"url":            "https://example.com/hook",
+		}))
+		require.NoError(t, err)
+
+		require.Equal(t, http.MethodPost, env.last.Method, "method")
+		require.Equal(t, "/webhooks", env.last.Path, "path")
+		require.Equal(t, url.Values{"account_id": {"acc_main"}, "url": {"https://example.com/hook"}}, env.last.Form, "form body")
+	})
+}
+
+func TestDeleteWebhookHandler(t *testing.T) {
+	t.Run("deletes by id", func(t *testing.T) {
+		env := setupMonzo(t)
+
+		_, err := deleteWebhookHandler(env.depsMap)(context.Background(), mustJSON(t, map[string]any{
+			"credential_set": string(env.setID),
+			"webhook_id":     "webhook_1",
+		}))
+		require.NoError(t, err)
+
+		require.Equal(t, http.MethodDelete, env.last.Method, "method")
+		require.Equal(t, "/webhooks/webhook_1", env.last.Path, "path")
+	})
+}
+
+func TestPackage_CredentialTools(t *testing.T) {
+	t.Run("grants reads but not money moves or webhooks", func(t *testing.T) {
+		tools := (&Package{}).CredentialTools()
+
+		require.Contains(t, tools, claudecli.Tool("mcp__tclaw__"+ToolListPots), "reads granted")
+		require.NotContains(t, tools, claudecli.Tool("mcp__tclaw__"+ToolDepositIntoPot), "deposit needs monzo_write")
+		require.NotContains(t, tools, claudecli.Tool("mcp__tclaw__"+ToolWithdrawFromPot), "withdraw needs monzo_write")
+		require.NotContains(t, tools, claudecli.Tool("mcp__tclaw__"+ToolRegisterWebhook), "webhooks need monzo_write")
 	})
 }
 
@@ -238,8 +382,9 @@ type monzoEnv struct {
 	setID   credential.CredentialSetID
 	depsMap map[credential.CredentialSetID]Deps
 
-	// status is what the fake server answers with.
-	status int
+	// status and rspBody are what the fake server answers with.
+	status  int
+	rspBody string
 
 	last capturedRequest
 }
@@ -260,12 +405,14 @@ func setupMonzo(t *testing.T) *monzoEnv {
 		setID:   set.ID,
 		depsMap: map[credential.CredentialSetID]Deps{set.ID: {CredSetID: set.ID, Manager: mgr}},
 		status:  http.StatusOK,
+		rspBody: `{"id":"pot_1"}`,
 	}
 
+	// The handler runs on the server's goroutine, where require cannot stop the test, so it uses assert.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
-		require.Equal(t, "Bearer test-token", r.Header.Get("Authorization"), "auth header")
+		assert.NoError(t, err)
+		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"), "auth header")
 		env.last = capturedRequest{
 			Method:      r.Method,
 			Path:        r.URL.Path,
@@ -275,11 +422,11 @@ func setupMonzo(t *testing.T) *monzoEnv {
 		}
 		if env.last.ContentType == "application/x-www-form-urlencoded" {
 			env.last.Form, err = url.ParseQuery(string(body))
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}
 		w.WriteHeader(env.status)
-		_, err = w.Write([]byte(`{"id":"pot_1"}`))
-		require.NoError(t, err)
+		_, err = w.Write([]byte(env.rspBody))
+		assert.NoError(t, err)
 	}))
 	t.Cleanup(srv.Close)
 

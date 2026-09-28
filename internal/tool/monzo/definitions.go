@@ -67,63 +67,29 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 				"descriptions, and creation dates. " +
 				"Always call this first before using any other Monzo tool — the response contains both the credential_set ID " +
 				"and account IDs required by all other Monzo calls.",
-			InputSchema: json.RawMessage(fmt.Sprintf(`{
-				"type": "object",
-				"properties": {
-					"credential_set": {
-						"type": "string",
-						"description": %q,
-						"enum": %s
-					},
-					"account_type": {
-						"type": "string",
-						"description": "Filter by account type. Omit to list all accounts.",
-						"enum": ["uk_retail", "uk_retail_joint", "uk_monzo_flex"]
-					}
-				},
-				"required": ["credential_set"]
-			}`, connDescription, enumJSON)),
+			InputSchema: connSchema(connDescription, enumJSON, fmt.Sprintf(`
+				"account_type": {
+					"type": "string",
+					"description": "Filter by account type. Omit to list all accounts.",
+					"enum": [%q, %q, %q]
+				}`, accountTypeRetail, accountTypeRetailJoint, accountTypeFlex)),
 		},
 		{
 			Name: ToolGetBalance,
 			Description: "Get the balance for a Monzo account. Returns balance (current), total_balance (including pots), " +
 				"currency, and spend_today. All amounts are in minor units (pence for GBP).",
-			InputSchema: json.RawMessage(fmt.Sprintf(`{
-				"type": "object",
-				"properties": {
-					"credential_set": {
-						"type": "string",
-						"description": %q,
-						"enum": %s
-					},
-					"account_id": {
-						"type": "string",
-						"description": "The account ID from monzo_list_accounts."
-					}
-				},
-				"required": ["credential_set", "account_id"]
-			}`, connDescription, enumJSON)),
+			InputSchema: connSchema(connDescription, enumJSON, `
+				"account_id": {"type": "string", "description": "The account ID from monzo_list_accounts."}`,
+				"account_id"),
 		},
 		{
 			Name: ToolListPots,
 			Description: "List Monzo pots (savings goals) for an account. Returns pot IDs, names, balances, " +
 				"currency, and whether each pot is deleted or locked. Amounts in minor units (pence for GBP). " +
 				"Only the given account's pots are returned: pass the joint account's ID to see joint pots.",
-			InputSchema: json.RawMessage(fmt.Sprintf(`{
-				"type": "object",
-				"properties": {
-					"credential_set": {
-						"type": "string",
-						"description": %q,
-						"enum": %s
-					},
-					"account_id": {
-						"type": "string",
-						"description": "The account ID from monzo_list_accounts."
-					}
-				},
-				"required": ["credential_set", "account_id"]
-			}`, connDescription, enumJSON)),
+			InputSchema: connSchema(connDescription, enumJSON, `
+				"account_id": {"type": "string", "description": "The account ID from monzo_list_accounts."}`,
+				"account_id"),
 		},
 		{
 			Name: ToolListTransactions,
@@ -132,53 +98,23 @@ func ToolDefs(connIDs []credential.CredentialSetID) []mcp.ToolDef {
 				"IMPORTANT: only the last 90 days of transactions are accessible — requests beyond 90 days will fail with an SCA error requiring in-app verification. " +
 				"Always keep `since` within the last 90 days. Default window is 30 days. " +
 				"Max 100 transactions per request.",
-			InputSchema: json.RawMessage(fmt.Sprintf(`{
-				"type": "object",
-				"properties": {
-					"credential_set": {
-						"type": "string",
-						"description": %q,
-						"enum": %s
-					},
-					"account_id": {
-						"type": "string",
-						"description": "The account ID from monzo_list_accounts."
-					},
-					"since": {
-						"type": "string",
-						"description": "Only return transactions after this time. RFC3339 format (e.g. '2025-01-01T00:00:00Z') or a transaction ID to paginate from. Defaults to 30 days ago. Maximum 90 days — older requests require in-app SCA verification."
-					},
-					"before": {
-						"type": "string",
-						"description": "Only return transactions before this time. RFC3339 format."
-					},
-					"limit": {
-						"type": "integer",
-						"description": "Number of transactions to return. Default 25, max 100."
-					}
+			InputSchema: connSchema(connDescription, enumJSON, `
+				"account_id": {"type": "string", "description": "The account ID from monzo_list_accounts."},
+				"since": {
+					"type": "string",
+					"description": "Only return transactions after this time. RFC3339 format (e.g. '2025-01-01T00:00:00Z') or a transaction ID to paginate from. Defaults to 30 days ago. Maximum 90 days — older requests require in-app SCA verification."
 				},
-				"required": ["credential_set", "account_id"]
-			}`, connDescription, enumJSON)),
+				"before": {"type": "string", "description": "Only return transactions before this time. RFC3339 format."},
+				"limit": {"type": "integer", "description": "Number of transactions to return. Default 25, max 100."}`,
+				"account_id"),
 		},
 		{
 			Name: ToolGetTransaction,
 			Description: "Get details of a single Monzo transaction, including expanded merchant information " +
 				"(name, address, logo, category, online status). Amounts in minor units (pence for GBP).",
-			InputSchema: json.RawMessage(fmt.Sprintf(`{
-				"type": "object",
-				"properties": {
-					"credential_set": {
-						"type": "string",
-						"description": %q,
-						"enum": %s
-					},
-					"transaction_id": {
-						"type": "string",
-						"description": "The transaction ID from monzo_list_transactions."
-					}
-				},
-				"required": ["credential_set", "transaction_id"]
-			}`, connDescription, enumJSON)),
+			InputSchema: connSchema(connDescription, enumJSON, `
+				"transaction_id": {"type": "string", "description": "The transaction ID from monzo_list_transactions."}`,
+				"transaction_id"),
 		},
 		{
 			Name: ToolDepositIntoPot,
