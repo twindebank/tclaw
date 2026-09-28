@@ -14,7 +14,7 @@ func TestWriterRemoveChannel(t *testing.T) {
 	t.Run("removes the channel and strips links that pointed at it", func(t *testing.T) {
 		w := newWriter(t, `prod:
   users:
-    - id: theo
+    - id: alice
       channels:
         - type: telegram
           name: alpha
@@ -28,9 +28,9 @@ func TestWriterRemoveChannel(t *testing.T) {
         - type: telegram
           name: gamma
 `)
-		require.NoError(t, w.RemoveChannel("theo", "gamma"))
+		require.NoError(t, w.RemoveChannel("alice", "gamma"))
 
-		channels, err := w.ReadChannels("theo")
+		channels, err := w.ReadChannels("alice")
 		require.NoError(t, err)
 		require.Equal(t, []string{"alpha", "beta"}, channelNames(channels))
 
@@ -43,7 +43,7 @@ func TestWriterRemoveChannel(t *testing.T) {
 	t.Run("leaves channels with no link to the removed one untouched", func(t *testing.T) {
 		w := newWriter(t, `prod:
   users:
-    - id: theo
+    - id: alice
       channels:
         - type: telegram
           name: alpha
@@ -55,9 +55,9 @@ func TestWriterRemoveChannel(t *testing.T) {
         - type: telegram
           name: gamma
 `)
-		require.NoError(t, w.RemoveChannel("theo", "gamma"))
+		require.NoError(t, w.RemoveChannel("alice", "gamma"))
 
-		channels, err := w.ReadChannels("theo")
+		channels, err := w.ReadChannels("alice")
 		require.NoError(t, err)
 		beta := findChannel(t, channels, "beta")
 		require.Len(t, beta.Links, 1)
@@ -67,12 +67,12 @@ func TestWriterRemoveChannel(t *testing.T) {
 	t.Run("returns an error when the channel does not exist", func(t *testing.T) {
 		w := newWriter(t, `prod:
   users:
-    - id: theo
+    - id: alice
       channels:
         - type: telegram
           name: alpha
 `)
-		err := w.RemoveChannel("theo", "missing")
+		err := w.RemoveChannel("alice", "missing")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "not found")
 	})
