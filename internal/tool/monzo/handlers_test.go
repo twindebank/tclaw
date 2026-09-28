@@ -16,6 +16,7 @@ import (
 	"tclaw/internal/credential"
 	"tclaw/internal/libraries/store"
 	"tclaw/internal/mcp"
+	"tclaw/internal/toolgroup"
 )
 
 func TestListPotsHandler(t *testing.T) {
@@ -167,6 +168,20 @@ func TestListTransactionsHandler(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Equal(t, "2026-09-01T00:00:00Z", env.last.Query.Get("before"), "before sent to Monzo")
+	})
+
+	t.Run("explains the 90-day limit when Monzo wants verification", func(t *testing.T) {
+		env := setupMonzo(t)
+		env.status = http.StatusForbidden
+		env.rspBody = `{"code":"forbidden.verification_required"}`
+
+		_, err := listTransactionsHandler(env.depsMap)(context.Background(), mustJSON(t, map[string]any{
+			"credential_set": string(env.setID),
+			"account_id":     "acc_main",
+		}))
+		require.Error(t, err)
+		require.Equal(t, "Monzo requires in-app verification to access transactions older than 90 days. "+
+			"Open your Monzo app to approve extended access, or use a `since` date within the last 90 days.", err.Error())
 	})
 }
 
@@ -359,13 +374,17 @@ func TestDeleteWebhookHandler(t *testing.T) {
 }
 
 func TestPackage_CredentialTools(t *testing.T) {
-	t.Run("grants reads but not money moves or webhooks", func(t *testing.T) {
-		tools := (&Package{}).CredentialTools()
+	t.Run("grants exactly the read tools", func(t *testing.T) {
+		require.ElementsMatch(t, expectedReadTools(), (&Package{}).CredentialTools(), "credential tools")
+	})
+}
 
-		require.Contains(t, tools, claudecli.Tool("mcp__tclaw__"+ToolListPots), "reads granted")
-		require.NotContains(t, tools, claudecli.Tool("mcp__tclaw__"+ToolDepositIntoPot), "deposit needs monzo_write")
-		require.NotContains(t, tools, claudecli.Tool("mcp__tclaw__"+ToolWithdrawFromPot), "withdraw needs monzo_write")
-		require.NotContains(t, tools, claudecli.Tool("mcp__tclaw__"+ToolRegisterWebhook), "webhooks need monzo_write")
+func TestPackage_GroupTools(t *testing.T) {
+	t.Run("personal_services gets reads, monzo_write gets everything", func(t *testing.T) {
+		groups := (&Package{}).GroupTools()
+
+		require.ElementsMatch(t, expectedReadTools(), groups[toolgroup.GroupPersonalServices], "personal_services")
+		require.Equal(t, []claudecli.Tool{toolgroup.MCPToolMonzoAll}, groups[toolgroup.GroupMonzoWrite], "monzo_write")
 	})
 }
 
@@ -435,6 +454,20 @@ func setupMonzo(t *testing.T) *monzoEnv {
 	t.Cleanup(func() { baseURL = oldBaseURL })
 
 	return env
+}
+
+// expectedReadTools is written out by hand so a write tool slipping into the read list fails the tests.
+func expectedReadTools() []claudecli.Tool {
+	return []claudecli.Tool{
+		"mcp__tclaw__monzo_whoami",
+		"mcp__tclaw__monzo_list_accounts",
+		"mcp__tclaw__monzo_get_balance",
+		"mcp__tclaw__monzo_list_pots",
+		"mcp__tclaw__monzo_list_transactions",
+		"mcp__tclaw__monzo_get_transaction",
+		"mcp__tclaw__monzo_get_receipt",
+		"mcp__tclaw__monzo_list_webhooks",
+	}
 }
 
 func mustJSON(t *testing.T, v any) json.RawMessage {

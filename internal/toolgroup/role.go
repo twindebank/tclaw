@@ -1,6 +1,8 @@
 package toolgroup
 
 import (
+	"sync"
+
 	"tclaw/internal/claudecli"
 )
 
@@ -25,11 +27,16 @@ func ResolveGroupsWithContext(groups []ToolGroup, ctx ChannelContext) []claudecl
 }
 
 // credentialTools maps a package name to the only tools its credentials grant. A package not listed here grants
-// all of its tools.
-var credentialTools = map[string][]claudecli.Tool{}
+// all of its tools. Each user's router writes it while other users' channels read it, hence the lock.
+var (
+	credentialToolsMu sync.RWMutex
+	credentialTools   = map[string][]claudecli.Tool{}
+)
 
-// SetCredentialTools records which tools each listed package's credentials grant. Called once at startup.
+// SetCredentialTools records which tools each listed package's credentials grant.
 func SetCredentialTools(byPackage map[string][]claudecli.Tool) {
+	credentialToolsMu.Lock()
+	defer credentialToolsMu.Unlock()
 	for name, tools := range byPackage {
 		credentialTools[name] = tools
 	}
@@ -38,6 +45,8 @@ func SetCredentialTools(byPackage map[string][]claudecli.Tool) {
 // CredentialToolPatterns returns the MCP tools granted by each tool package
 // that has credential sets available on this channel.
 func CredentialToolPatterns(ctx ChannelContext) []claudecli.Tool {
+	credentialToolsMu.RLock()
+	defer credentialToolsMu.RUnlock()
 	var tools []claudecli.Tool
 	for _, name := range ctx.PackageNames {
 		if limited, ok := credentialTools[name]; ok {

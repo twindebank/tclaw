@@ -125,7 +125,11 @@ func TestCredentialToolPatterns(t *testing.T) {
 
 	t.Run("a limited package grants only its listed tools", func(t *testing.T) {
 		SetCredentialTools(map[string][]claudecli.Tool{"acme": {"mcp__tclaw__acme_read"}})
-		t.Cleanup(func() { delete(credentialTools, "acme") })
+		t.Cleanup(func() {
+			credentialToolsMu.Lock()
+			defer credentialToolsMu.Unlock()
+			delete(credentialTools, "acme")
+		})
 
 		tools := CredentialToolPatterns(ChannelContext{PackageNames: []string{"acme", "google"}})
 

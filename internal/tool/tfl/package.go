@@ -45,7 +45,7 @@ func (p *Package) Info(ctx context.Context, secretStore secret.Store) (*toolpkg.
 		Name:        p.Name(),
 		Description: p.Description(),
 		Group:       p.Group(),
-		GroupInfo:   toolgroup.GroupInfo{Group: p.Group(), Description: "Personal service integrations: TfL transport, restaurant reservations, banking, Monzo."},
+		GroupInfo:   toolgroup.GroupInfo{Group: p.Group(), Description: "Personal service integrations: TfL transport, restaurant reservations, banking, Monzo (read-only)."},
 		Credentials: toolpkg.CheckCredentialStatus(ctx, secretStore, p.RequiredSecrets()),
 		Tools:       ToolNames(),
 	}, nil

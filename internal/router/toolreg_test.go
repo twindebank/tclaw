@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"tclaw/internal/claudecli"
 	"tclaw/internal/mcp"
 	"tclaw/internal/tool/bankingtools"
 	"tclaw/internal/tool/channeltools"
@@ -100,6 +101,18 @@ func TestRegistry_RegistersInfoTools(t *testing.T) {
 	// Verify actual tools were registered too.
 	require.True(t, names["model_list"], "model_list should be registered")
 	require.True(t, names["tfl_line_status"], "tfl_line_status should be registered")
+}
+
+func TestRegistry_BuildCredentialTools(t *testing.T) {
+	t.Run("monzo credentials grant only reads, other packages are unlimited", func(t *testing.T) {
+		reg := toolpkg.NewRegistry(allPackages()...)
+
+		byPackage := reg.BuildCredentialTools()
+
+		require.Contains(t, byPackage, "monzo", "monzo limits its credential tools")
+		require.NotContains(t, byPackage["monzo"], claudecli.Tool("mcp__tclaw__"+monzotools.ToolDepositIntoPot), "no money moves from a credential")
+		require.NotContains(t, byPackage, "google", "google is unlimited")
+	})
 }
 
 // --- helpers ---
