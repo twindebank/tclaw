@@ -61,6 +61,39 @@ func TestBasicFlow(t *testing.T) {
 		require.Contains(t, h.Channel("main").ResponseText(), "Here are the results")
 	})
 
+	t.Run("hidden thinking shows no thinking line", func(t *testing.T) {
+		h := NewHarness(t, Config{
+			CommandFunc: Turn{Blocks: []Block{
+				ThinkingBlock(""),
+				TextBlock("The answer"),
+			}}.CommandFunc(),
+		})
+
+		h.Channel("main").Inject("question")
+		h.Channel("main").Close()
+
+		require.NoError(t, RunWithTimeout(t, h, 10*time.Second))
+		require.NotContains(t, h.Channel("main").ResponseText(), "💭", "a thinking block with no text must not leave a bare icon")
+	})
+
+	t.Run("thinking that ends in a blank line leaves none in the status", func(t *testing.T) {
+		h := NewHarness(t, Config{
+			CommandFunc: Turn{Blocks: []Block{
+				ThinkingBlock("I'm going to check the files.\n\n"),
+				ToolBlock("web_search", nil),
+				TextBlock("Done"),
+			}}.CommandFunc(),
+		})
+
+		h.Channel("main").Inject("check the files")
+		h.Channel("main").Close()
+
+		require.NoError(t, RunWithTimeout(t, h, 10*time.Second))
+		text := h.Channel("main").ResponseText()
+		// A tool line brings its own blank line above it, so the thinking adds none.
+		require.Contains(t, text, "💭 I'm going to check the files.\n\n🔧 web_search", "the thinking's own blank line is dropped")
+	})
+
 	t.Run("turn log records channel names", func(t *testing.T) {
 		h := NewHarness(t, Config{
 			CommandFunc: Respond("ok"),

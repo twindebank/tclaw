@@ -1257,6 +1257,9 @@ func buildArgs(p buildArgsParams) []string {
 		// Only the servers tclaw passes, not a .mcp.json the agent could write into
 		// its working directory.
 		"--strict-mcp-config",
+		// Newer models hide their thinking unless asked, which leaves the status message silent
+		// between tool calls. The --settings "thinking" field does not reach the API in print mode.
+		"--thinking-display", string(claudecli.ThinkingDisplaySummarized),
 	}
 	if p.SessionID != "" {
 		args = append(args, "--resume", p.SessionID)
