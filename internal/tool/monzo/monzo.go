@@ -1,12 +1,15 @@
 package monzo
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"tclaw/internal/credential"
@@ -14,7 +17,8 @@ import (
 	"tclaw/internal/tool/providerutil"
 )
 
-const baseURL = "https://api.monzo.com"
+// baseURL is a var so tests can point it at a local server.
+var baseURL = "https://api.monzo.com"
 
 const (
 	// ClientIDStoreKey is the secret store key for the Monzo OAuth client ID.
@@ -35,21 +39,41 @@ func RegisterTools(handler *mcp.Handler, depsMap map[credential.CredentialSetID]
 		setIDs = append(setIDs, id)
 	}
 
-	defs := ToolDefs(setIDs)
-	handler.Register(defs[0], listAccountsHandler(depsMap))
-	handler.Register(defs[1], getBalanceHandler(depsMap))
-	handler.Register(defs[2], listPotsHandler(depsMap))
-	handler.Register(defs[3], listTransactionsHandler(depsMap))
-	handler.Register(defs[4], getTransactionHandler(depsMap))
+	handlers := map[string]mcp.ToolHandler{
+		ToolWhoAmI:               whoAmIHandler(depsMap),
+		ToolListAccounts:         listAccountsHandler(depsMap),
+		ToolGetBalance:           getBalanceHandler(depsMap),
+		ToolListPots:             listPotsHandler(depsMap),
+		ToolDepositIntoPot:       potTransferHandler(depsMap, potDeposit),
+		ToolWithdrawFromPot:      potTransferHandler(depsMap, potWithdraw),
+		ToolListTransactions:     listTransactionsHandler(depsMap),
+		ToolGetTransaction:       getTransactionHandler(depsMap),
+		ToolAnnotateTransaction:  annotateTransactionHandler(depsMap),
+		ToolCreateFeedItem:       createFeedItemHandler(depsMap),
+		ToolRegisterAttachment:   registerAttachmentHandler(depsMap),
+		ToolDeregisterAttachment: deregisterAttachmentHandler(depsMap),
+		ToolGetReceipt:           receiptByExternalIDHandler(depsMap, http.MethodGet),
+		ToolSetReceipt:           setReceiptHandler(depsMap),
+		ToolDeleteReceipt:        receiptByExternalIDHandler(depsMap, http.MethodDelete),
+		ToolListWebhooks:         listWebhooksHandler(depsMap),
+		ToolRegisterWebhook:      registerWebhookHandler(depsMap),
+		ToolDeleteWebhook:        deleteWebhookHandler(depsMap),
+	}
+	for _, def := range ToolDefs(setIDs) {
+		h, ok := handlers[def.Name]
+		if !ok {
+			slog.Error("monzo: tool has no handler, skipping", "tool", def.Name)
+			continue
+		}
+		handler.Register(def, h)
+	}
 }
 
 // UnregisterTools removes the Monzo tools from the handler.
 func UnregisterTools(handler *mcp.Handler) {
-	handler.Unregister(ToolListAccounts)
-	handler.Unregister(ToolGetBalance)
-	handler.Unregister(ToolListPots)
-	handler.Unregister(ToolListTransactions)
-	handler.Unregister(ToolGetTransaction)
+	for _, name := range ToolNames() {
+		handler.Unregister(name)
+	}
 }
 
 // resolveDeps looks up the Deps for a credential set ID from the tool args.
@@ -62,46 +86,72 @@ func accessToken(ctx context.Context, deps Deps) (string, error) {
 	return providerutil.AccessToken(ctx, deps)
 }
 
-// apiGet makes a GET request to the Monzo API.
-func apiGet(ctx context.Context, deps Deps, path string, query url.Values) (json.RawMessage, error) {
+type apiRequestParams struct {
+	Method string
+	Path   string
+	Query  url.Values
+
+	// Form is sent as a URL-encoded body when set. Set at most one of Form and JSON.
+	Form url.Values
+
+	JSON json.RawMessage
+}
+
+// apiRequest makes a request to the Monzo API and returns the raw JSON body.
+func apiRequest(ctx context.Context, deps Deps, p apiRequestParams) (json.RawMessage, error) {
 	token, err := accessToken(ctx, deps)
 	if err != nil {
 		return nil, err
 	}
 
-	reqURL := baseURL + path
-	if len(query) > 0 {
-		reqURL += "?" + query.Encode()
+	reqURL := baseURL + p.Path
+	if len(p.Query) > 0 {
+		reqURL += "?" + p.Query.Encode()
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	var body io.Reader
+	var contentType string
+	switch {
+	case len(p.Form) > 0 && len(p.JSON) > 0:
+		return nil, fmt.Errorf("monzo API %s: request has both a form and a JSON body", p.Path)
+	case len(p.Form) > 0:
+		body = strings.NewReader(p.Form.Encode())
+		contentType = "application/x-www-form-urlencoded"
+	case len(p.JSON) > 0:
+		body = bytes.NewReader(p.JSON)
+		contentType = "application/json"
+	}
+	req, err := http.NewRequestWithContext(ctx, p.Method, reqURL, body)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	rsp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("monzo API %s: %w", path, err)
+		return nil, fmt.Errorf("monzo API %s: %w", p.Path, err)
 	}
-	defer resp.Body.Close()
+	defer rsp.Body.Close()
 
 	// Cap response body to 5 MiB to prevent memory exhaustion from oversized payloads.
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 5<<20))
+	rspBody, err := io.ReadAll(io.LimitReader(rsp.Body, 5<<20))
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if rsp.StatusCode != http.StatusOK {
 		// Provide an actionable message for SCA verification errors instead of the raw API response.
-		if isVerificationRequired(body) {
+		if isVerificationRequired(rspBody) {
 			return nil, fmt.Errorf("Monzo requires in-app verification to access transactions older than 90 days. Open your Monzo app to approve extended access, or use a `since` date within the last 90 days.")
 		}
-		return nil, fmt.Errorf("monzo API %s returned %d: %s", path, resp.StatusCode, string(body))
+		return nil, fmt.Errorf("monzo API %s returned %d: %s", p.Path, rsp.StatusCode, string(rspBody))
 	}
 
-	return json.RawMessage(body), nil
+	return json.RawMessage(rspBody), nil
 }
 
 // isVerificationRequired checks whether a Monzo error response indicates SCA verification is needed.
