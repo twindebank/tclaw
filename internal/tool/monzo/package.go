@@ -20,7 +20,8 @@ type Package struct{}
 
 func (p *Package) Name() string { return "monzo" }
 func (p *Package) Description() string {
-	return "Monzo banking: list accounts, get balances, view pots, and list/get transactions. Requires Monzo API client credentials via credential_add."
+	return "Monzo banking: accounts, balances, pots (including moving money in and out), transactions and their notes, " +
+		"attachments and receipts, feed items, and webhooks. Requires Monzo API client credentials via credential_add."
 }
 func (p *Package) Group() toolgroup.ToolGroup { return toolgroup.GroupPersonalServices }
 
