@@ -46,6 +46,7 @@ local:
         - gsuite_read
         - gsuite_write
         - personal_services
+        - monzo_write # moves money between Monzo pots; leave out for read-only Monzo
         - fitness
         - connections
         - telegram_client
