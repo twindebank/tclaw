@@ -94,6 +94,21 @@ func TestBasicFlow(t *testing.T) {
 		require.Contains(t, text, "💭 I'm going to check the files.\n\n🔧 web_search", "the thinking's own blank line is dropped")
 	})
 
+	t.Run("a blank line between streamed pieces of thinking is kept", func(t *testing.T) {
+		h := NewHarness(t, Config{
+			CommandFunc: Turn{Blocks: []Block{
+				ThinkingBlock("First.\n\n", "Second."),
+				TextBlock("Done"),
+			}}.CommandFunc(),
+		})
+
+		h.Channel("main").Inject("think")
+		h.Channel("main").Close()
+
+		require.NoError(t, RunWithTimeout(t, h, 10*time.Second))
+		require.Contains(t, h.Channel("main").ResponseText(), "💭 First.\n\nSecond.\n", "newlines held back are restored once more text follows")
+	})
+
 	t.Run("turn log records channel names", func(t *testing.T) {
 		h := NewHarness(t, Config{
 			CommandFunc: Respond("ok"),

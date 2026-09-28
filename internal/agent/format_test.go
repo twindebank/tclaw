@@ -40,6 +40,35 @@ func TestFormatCompactBoundary(t *testing.T) {
 	}
 }
 
+func TestFormatBlock(t *testing.T) {
+	tests := []struct {
+		name     string
+		block    claudecli.ContentBlock
+		expected string
+	}{
+		{
+			name:     "thinking is shown on one line under its icon",
+			block:    claudecli.ContentBlock{Type: claudecli.ContentThinking, Thinking: "Checking the files."},
+			expected: "💭 Checking the files.\n",
+		},
+		{
+			name:     "thinking that ends in a blank line leaves none",
+			block:    claudecli.ContentBlock{Type: claudecli.ContentThinking, Thinking: "Checking the files.\n\n"},
+			expected: "💭 Checking the files.\n",
+		},
+		{
+			name:     "hidden thinking shows nothing",
+			block:    claudecli.ContentBlock{Type: claudecli.ContentThinking, Thinking: ""},
+			expected: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.expected, formatBlock(tt.block))
+		})
+	}
+}
+
 func TestFormatToolUse(t *testing.T) {
 	t.Run("skill use is led by the skill name under its own icon", func(t *testing.T) {
 		got := formatToolUse(claudecli.ContentBlock{
